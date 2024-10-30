@@ -547,7 +547,13 @@ impl State {
         }))
     }
 
-    pub fn draw_items(&mut self, msgs: &mut Vec<Message>, ui: &mut Ui, viewport_idx: usize) {
+    pub fn draw_items(
+        &mut self,
+        egui_ctx: &egui::Context,
+        msgs: &mut Vec<Message>,
+        ui: &mut Ui,
+        viewport_idx: usize,
+    ) {
         let (response, mut painter) =
             ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
 
@@ -618,13 +624,16 @@ impl State {
             }
         });
 
+        let modifiers = egui_ctx.input(|i| i.modifiers);
         if response.dragged_by(PointerButton::Primary)
             || response.clicked_by(PointerButton::Primary)
         {
-            if let Some(snap_point) =
-                self.snap_to_edge(pointer_pos_canvas, waves, frame_width, viewport_idx)
-            {
-                msgs.push(Message::CursorSet(snap_point));
+            if !modifiers.command {
+                if let Some(snap_point) =
+                    self.snap_to_edge(pointer_pos_canvas, waves, frame_width, viewport_idx)
+                {
+                    msgs.push(Message::CursorSet(snap_point));
+                }
             }
         }
 
@@ -634,6 +643,12 @@ impl State {
             self.config.theme.canvas_colors.background,
         );
 
+        // Check for mouse gesture starting
+        if modifiers.command {
+            response
+                .drag_started_by(PointerButton::Primary)
+                .then(|| msgs.push(Message::SetDragStart(pointer_pos_canvas)));
+        }
         response
             .drag_started_by(PointerButton::Middle)
             .then(|| msgs.push(Message::SetDragStart(pointer_pos_canvas)));
@@ -1011,6 +1026,7 @@ impl State {
         );
 
         self.draw_mouse_gesture_widget(
+            &egui_ctx,
             waves,
             pointer_pos_canvas,
             &response,
