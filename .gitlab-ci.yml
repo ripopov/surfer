@@ -261,6 +261,28 @@ linux_build:
         expire_in: 1 week
     interruptible: true
 
+musl_build:
+    image: rust:alpine
+    stage: deploy
+    needs: [test]
+    script:
+        - apk update
+        - apk add openssl openssl-dev zip musl-dev git openssl-libs-static
+        - git fetch --tags
+        - rustc -V
+        - cargo -V
+        - cargo build --release --locked --features accesskit --timings --color always
+        - mkdir dist
+        - cp target/release/surfer dist/surfer
+        - cp target/release/surver dist/surver
+        - cd dist
+        - zip ../surfer_musl_linux.zip surfer surver
+    artifacts:
+        paths:
+            - surfer_musl_linux.zip
+            - target/cargo-timings/*.html
+        expire_in: 1 week
+
 rocky_build:
     image: rockylinux:8
     needs: [test]
