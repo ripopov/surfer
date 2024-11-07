@@ -2,7 +2,9 @@ use color_eyre::eyre::Context;
 use ecolor::Color32;
 #[cfg(not(target_arch = "wasm32"))]
 use egui::ViewportCommand;
-use egui::{Frame, Layout, Painter, RichText, ScrollArea, Sense, TextStyle, WidgetText};
+use egui::{
+    FontId, Frame, Layout, Painter, RichText, ScrollArea, Sense, TextFormat, TextStyle, WidgetText,
+};
 use egui_extras::{Column, TableBuilder};
 use egui_remixicon::icons;
 use emath::{Align, Pos2, Rect, RectTransform, Vec2};
@@ -16,7 +18,8 @@ use log::{info, warn};
 
 use num::BigUint;
 use surfer_translation_types::{
-    SubFieldFlatTranslationResult, TranslatedValue, VariableInfo, VariableType,
+    SubFieldFlatTranslationResult, TranslatedValue, Translator, TrueName, VariableInfo,
+    VariableType,
 };
 
 #[cfg(feature = "performance_plot")]
@@ -756,7 +759,13 @@ impl State {
             let index = meta
                 .as_ref()
                 .and_then(|meta| meta.index.clone())
-                .map(|index| format!(" {index}"))
+                .map(|index| {
+                    if self.show_variable_indices() {
+                        format!(" {index}")
+                    } else {
+                        String::new()
+                    }
+                })
                 .unwrap_or_default();
 
             let direction = if self.show_variable_direction() {
@@ -774,7 +783,7 @@ impl State {
                                     icons::MAP_PIN_2_LINE
                                 } else {
                                     // Align other items (can be improved)
-                                    "    "
+                                    "  "
                                 }
                             })
                         )
@@ -797,11 +806,62 @@ impl State {
                 String::new()
             };
 
-            let variable_name = format!("{direction}{}{index}{value}", variable.name.clone());
+            let name = self.sys.translators.all_translators().iter().find_map(|t| {
+                if let Some(meta) = &meta {
+                    t.variable_true_name(meta)
+                } else {
+                    None
+                }
+            });
+
             ui.with_layout(
                 Layout::top_down(Align::LEFT).with_cross_justify(true),
                 |ui| {
-                    let mut response = ui.add(egui::SelectableLabel::new(false, variable_name));
+                    let text_size = self.config.layout.waveforms_text_size;
+                    let font = FontId::new(text_size, egui::FontFamily::Monospace);
+                    let char_width = ui.fonts(|fonts| {
+                        fonts
+                            .layout_no_wrap(
+                                " ".to_string(),
+                                font.clone(),
+                                Color32::from_rgb(0, 0, 0),
+                            )
+                            .size()
+                            .x
+                    });
+
+                    let direction_size = direction.chars().count();
+                    let index_size = index.chars().count();
+                    let value_size = value.chars().count();
+                    let used_space = (direction_size + index_size + value_size) as f32 * char_width;
+
+                    // The button padding is added by egui on selectable labels
+                    let available_space = ui.available_width() - ui.spacing().button_padding.x * 2.;
+                    let space_for_name = available_space - used_space;
+
+                    let mut label = LayoutJob::default();
+                    let text_format = TextFormat {
+                        font_id: font.clone(),
+                        color: self.config.theme.foreground,
+                        ..Default::default()
+                    };
+                    label.append(&direction, 0.0, text_format.clone());
+
+                    match name {
+                        Some(name) => draw_true_name(
+                            &name,
+                            &mut label,
+                            font.clone(),
+                            self.config.theme.foreground,
+                            char_width,
+                            space_for_name,
+                        ),
+                        None => label.append(&variable.name, 0.0, text_format.clone()),
+                    }
+                    label.append(&index, 0.0, text_format.clone());
+                    label.append(&value, 0.0, text_format.clone());
+
+                    let mut response = ui.add(egui::SelectableLabel::new(false, label));
                     let _ = response.interact(egui::Sense::click_and_drag());
 
                     if self.show_tooltip() {
@@ -1856,5 +1916,127 @@ fn scope_tooltip_text(wave: &WaveData, scope: &ScopeRef) -> String {
         format!("{scope}")
     } else {
         format!("{scope}\n{other}")
+    }
+}
+
+fn draw_true_name(
+    true_name: &TrueName,
+    layout_job: &mut LayoutJob,
+    font: FontId,
+    foreground: Color32,
+    char_width: f32,
+    allowed_space: f32,
+) {
+    let char_budget = (allowed_space / char_width) as usize;
+
+    match true_name {
+        TrueName::SourceCode {
+            line_number,
+            before,
+            this,
+            after,
+        } => {
+            let before_chars = before.chars().collect::<Vec<_>>();
+            let this_chars = this.chars().collect::<Vec<_>>();
+            let after_chars = after.chars().collect::<Vec<_>>();
+            let line_num = format!("{line_number} ");
+            let important_chars = line_num.len() + this_chars.len();
+            let required_extra_chars = before_chars.len() + after_chars.len();
+
+            // If everything fits, things are very easy
+            let (line_num, before, this, after) =
+                if char_budget >= important_chars + required_extra_chars {
+                    (line_num, before.clone(), this.clone(), after.clone())
+                } else if char_budget > important_chars {
+                    // How many extra chars we have available
+                    let extra_chars = char_budget - important_chars;
+
+                    let max_from_before = (extra_chars as f32 / 2.).ceil() as usize;
+                    let max_from_after = (extra_chars as f32 / 2.).floor() as usize;
+
+                    let (chars_from_before, chars_from_after) =
+                        if max_from_before > before_chars.len() {
+                            (before_chars.len(), extra_chars - before_chars.len())
+                        } else if max_from_after > after_chars.len() {
+                            (extra_chars - after_chars.len(), before_chars.len())
+                        } else {
+                            (max_from_before, max_from_after)
+                        };
+
+                    let mut before = before_chars
+                        .into_iter()
+                        .rev()
+                        .take(chars_from_before)
+                        .rev()
+                        .collect::<Vec<_>>();
+                    if !before.is_empty() {
+                        before[0] = '…'
+                    }
+                    let mut after = after_chars
+                        .into_iter()
+                        .take(chars_from_after)
+                        .collect::<Vec<_>>();
+                    if !after.is_empty() {
+                        let last_elem = after.len() - 1;
+                        after[last_elem] = '…'
+                    }
+
+                    (
+                        line_num,
+                        before.into_iter().collect(),
+                        this.clone(),
+                        after.into_iter().collect(),
+                    )
+                } else {
+                    // If we can't even fit the whole important part,
+                    // we'll prefer the line number
+                    let from_line_num = line_num.len();
+                    let from_this = char_budget.saturating_sub(from_line_num);
+                    let this = this
+                        .chars()
+                        .take(from_this)
+                        .enumerate()
+                        .map(|(i, c)| if i == from_this - 1 { '…' } else { c })
+                        .collect();
+                    (line_num, "".to_string(), this, "".to_string())
+                };
+
+            layout_job.append(
+                &line_num,
+                0.0,
+                TextFormat {
+                    font_id: font.clone(),
+                    color: foreground.gamma_multiply(0.75),
+                    ..Default::default()
+                },
+            );
+            layout_job.append(
+                &before,
+                0.0,
+                TextFormat {
+                    font_id: font.clone(),
+                    color: foreground.gamma_multiply(0.5),
+                    ..Default::default()
+                },
+            );
+            layout_job.append(
+                &this,
+                0.0,
+                TextFormat {
+                    font_id: font.clone(),
+                    color: foreground,
+                    ..Default::default()
+                },
+            );
+            layout_job.append(
+                &format!("{}", after.trim_end()),
+                0.0,
+                TextFormat {
+                    font_id: font.clone(),
+                    color: foreground.gamma_multiply(0.5),
+                    ..Default::default()
+                },
+            )
+        }
     }
 }

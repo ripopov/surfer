@@ -56,11 +56,13 @@ serde.workspace = true
 serde_json.workspace = true
 serde_stacker = { version = "0.1", optional = true }
 softposit = "0.4.0"
-spade = { git = "https://gitlab.com/spade-lang/spade", rev = "84f6e75016f40d9b3f82d8085e9b08393c56db95", optional = true }
-spade-common = { git = "https://gitlab.com/spade-lang/spade", rev = "84f6e75016f40d9b3f82d8085e9b08393c56db95", optional = true }
-spade-hir-lowering = { git = "https://gitlab.com/spade-lang/spade", rev = "84f6e75016f40d9b3f82d8085e9b08393c56db95", optional = true }
-spade-types = { git = "https://gitlab.com/spade-lang/spade", rev = "84f6e75016f40d9b3f82d8085e9b08393c56db95", optional = true }
+spade = { git = "https://gitlab.com/spade-lang/spade", rev = "16719aaffe5898189043dcd43d6c2b29c924c309", optional = true }
+spade-common = { git = "https://gitlab.com/spade-lang/spade", rev = "16719aaffe5898189043dcd43d6c2b29c924c309", optional = true }
+spade-hir = { git = "https://gitlab.com/spade-lang/spade", rev = "16719aaffe5898189043dcd43d6c2b29c924c309", optional = true }
+spade-hir-lowering = { git = "https://gitlab.com/spade-lang/spade", rev = "16719aaffe5898189043dcd43d6c2b29c924c309", optional = true }
+spade-types = { git = "https://gitlab.com/spade-lang/spade", rev = "16719aaffe5898189043dcd43d6c2b29c924c309", optional = true }
 surfer-translation-types = { path = "../surfer-translation-types" }
+codespan = { git = "https://gitlab.com/spade-lang/codespan.git", branch = "master", features = ["serialization"], optional = true } # Only used by spade transltor
 surver.workspace = true
 sys-locale = "0.3.1"
 toml = "0.8.12"
@@ -73,7 +75,7 @@ accesskit = ["eframe/accesskit", "eframe/web_screen_reader"]
 f128 = ["dep:f128"]
 performance_plot = ["dep:egui_plot"]
 python = ["pyo3", "surfer-translation-types/pyo3"]
-spade = ["dep:spade", "dep:spade-common", "dep:spade-hir-lowering", "dep:spade-types", "dep:serde_stacker"]
+spade = ["dep:spade", "dep:spade-common", "dep:spade-hir-lowering", "dep:spade-types", "dep:serde_stacker", "dep:spade-hir", "dep:codespan"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio.workspace = true
