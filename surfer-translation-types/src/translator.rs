@@ -9,6 +9,45 @@ use crate::{
     TranslationPreference, ValueKind, VariableEncoding, VariableInfo, VariableMeta, VariableValue,
 };
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum TrueName {
+    /// The variable's true name is best represented as part of a line of code
+    /// for example if line 100 is
+    /// let x = a + b;
+    /// and the signal being queried is `a+b` then this would return
+    /// {line: 100, before: "let x = ", this: "a + b", after: ";"}
+    SourceCode {
+        line_number: usize,
+        before: String,
+        this: String,
+        after: String,
+    },
+}
+
+/// Provides a way for translators to "change" the name of variables in the variable list.
+/// Most translators should not produce VariableNameInfo since it is a global thing that
+/// is done on _all_ variables, not just those which have had the translator applied.
+///
+/// An example use case is translators for HDLs which want to translate from automatically
+/// generated subexpression back into names that a human can understand. In this use case,
+/// it is _very_ unlikely that the user wants to see the raw anonymous name that the compiler
+/// emitted, so performing this translation globally makes sense.
+#[derive(Clone)]
+pub struct VariableNameInfo {
+    /// A more human-undesrstandable name for a signal. This should only be used by translators
+    /// which
+    pub true_name: Option<TrueName>,
+    /// Translators can change the order that signals appear in the variable list using this
+    /// parameter. Before rendering, the variable will be sported by this number in descending
+    /// order, so variables that are predicted to be extra important to the
+    /// user should have a number > 0 while unimportant variables should be < 0
+    ///
+    /// Translators should only poke at this variable if they know something about the variable.
+    /// For example, an HDL translator that does not recognise a name should leave it at None
+    /// to give other translators the chance to set the priority
+    pub priority: Option<i32>,
+}
+
 /// The most general translator trait.
 pub trait Translator<VarId, ScopeId, Message>: Send + Sync {
     fn name(&self) -> String;
@@ -23,6 +62,20 @@ pub trait Translator<VarId, ScopeId, Message>: Send + Sync {
 
     /// Return [`TranslationPreference`] based on if the translator can handle this variable.
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference>;
+
+    /// Returns a `VariableNameInfo` about the specified variable which will be applied globally.
+    /// Most translators should simply return `None` here, see the
+    /// documentation `VariableNameInfo` for exceptions to this rule.
+    fn variable_name_info(
+        &self,
+        variable: &VariableMeta<VarId, ScopeId>,
+    ) -> Option<VariableNameInfo> {
+        // We could name this `_variable`, but that means the docs will make it look unused
+        // and LSPs will fill in the definition with that name too, so we'll mark it as unused
+        // like this
+        let _ = variable;
+        None
+    }
 
     /// By default translators are stateless, but if they need to reload, they can
     /// do by defining this method.

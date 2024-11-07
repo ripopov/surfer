@@ -77,7 +77,7 @@ use log::{error, info, trace, warn};
 use num::BigInt;
 use ron::ser::PrettyConfig;
 use serde::{Deserialize, Serialize};
-use surfer_translation_types::Translator;
+use surfer_translation_types::{Translator, VariableNameInfo};
 use time::{TimeStringFormatting, TimeUnit};
 
 #[cfg(feature = "performance_plot")]
@@ -472,6 +472,7 @@ pub struct SystemState {
     // For performance reasons, these need caching so we have them in a RefCell for interior
     // mutability
     draw_data: RefCell<Vec<Option<CachedDrawData>>>,
+    variable_name_info_cache: RefCell<HashMap<VariableRef, Option<VariableNameInfo>>>,
 
     gesture_start_location: Option<Pos2>,
 
@@ -534,6 +535,7 @@ impl SystemState {
             url: RefCell::new(String::new()),
             command_prompt_text: RefCell::new(String::new()),
             draw_data: RefCell::new(vec![None]),
+            variable_name_info_cache: RefCell::new(HashMap::new()),
             last_canvas_rect: RefCell::new(None),
             variable_name_filter: RefCell::new(String::new()),
             item_renaming_string: RefCell::new(String::new()),
@@ -1768,6 +1770,7 @@ impl State {
                 for translator in self.sys.translators.all_translators() {
                     translator.reload(self.sys.channels.msg_sender.clone());
                 }
+                self.sys.variable_name_info_cache.borrow_mut().clear();
             }
             Message::SuggestReloadWaveform => match self.config.autoreload_files {
                 Some(true) => {
