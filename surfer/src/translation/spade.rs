@@ -1,8 +1,9 @@
 #![cfg(feature = "spade")]
-use std::{collections::HashMap, sync::mpsc::Sender};
+use std::{collections::HashMap, ops::Range, sync::mpsc::Sender};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use ecolor::Color32;
+use itertools::Itertools;
 use log::{error, info, warn};
 use num::ToPrimitive;
 use serde::Deserialize;
@@ -13,13 +14,14 @@ use color_eyre::{
     Result,
 };
 use spade_common::{
-    location_info::WithLocation,
+    location_info::{Loc, WithLocation},
     name::{Identifier, NameID, Path},
 };
-use spade_hir_lowering::MirLowerable;
+use spade_hir::{expression::CallKind, query::QueryCache, Expression};
+use spade_hir_lowering::{name_map::NameSource, MirLowerable};
 use spade_types::{ConcreteType, PrimitiveType};
 use surfer_translation_types::{
-    SubFieldTranslationResult, TranslationResult, Translator, ValueRepr,
+    SubFieldTranslationResult, TranslationResult, Translator, TrueName, ValueRepr, VariableNameInfo,
 };
 
 use crate::wave_container::{ScopeId, VarId, VariableRefExt};
@@ -36,6 +38,7 @@ pub struct SpadeTestInfo {
 
 pub struct SpadeTranslator {
     state: CompilerState,
+    query_cache: QueryCache,
     top: NameID,
     top_name: String,
     state_file: Option<Utf8PathBuf>,
@@ -73,8 +76,11 @@ impl SpadeTranslator {
             .lookup_unit(&Path(path.collect()).nowhere())
             .map_err(|_| anyhow!("Did not find a unit {top_name} in Spade state"))?;
 
+        let query_cache = state.build_query_cache();
+
         Ok(Self {
             state,
+            query_cache,
             top,
             top_name: top_name.to_string(),
             state_file,
@@ -225,6 +231,53 @@ impl Translator<VarId, ScopeId, Message> for SpadeTranslator {
         }
     }
 
+    fn variable_name_info(
+        &self,
+        variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Option<VariableNameInfo> {
+        let info = self
+            .state
+            .name_source_of_hierarchical_value(
+                &self.top,
+                &variable.var.full_path()[1..],
+                &self.query_cache,
+            )
+            .ok()?;
+
+        match info {
+            Some(source) => {
+                match source {
+                    NameSource::Name(_) => {
+                        // FIXME: We could consider resolving names with multiple IDs
+                        Some(VariableNameInfo {
+                            true_name: None,
+                            priority: Some(2),
+                        })
+                    }
+                    NameSource::Expr(id) => {
+                        let true_name = self
+                            .query_cache
+                            .id_to_expression(id.inner)
+                            .and_then(|expr| descriptive_loc(expr))
+                            .and_then(|loc| loc.resolve(&self.state.code))
+                            .as_ref()
+                            .map(ResolvedLoc::to_true_name);
+
+                        let priority = match true_name {
+                            Some(_) => Some(1),
+                            None => Some(0),
+                        };
+                        Some(VariableNameInfo {
+                            true_name,
+                            priority,
+                        })
+                    }
+                }
+            }
+            None => None,
+        }
+    }
+
     fn reload(&self, sender: Sender<Message>) {
         // At this point, we have already loaded the spade info on the first load, so can just
         // pass None as the wave source
@@ -234,6 +287,85 @@ impl Translator<VarId, ScopeId, Message> for SpadeTranslator {
             &self.state_file,
             sender,
         );
+    }
+}
+
+struct ResolvedLoc<'a> {
+    /// The line number that the Loc starts at
+    pub line_index: usize,
+    /// The full lines which contain the Loc, for example if a loc points to the `a`s here,
+    /// the lines will be the middle 3 lines, but not the first or last line
+    /// ```
+    /// xxxxx
+    /// xxxxaaa
+    /// aaa
+    /// axxxx
+    /// xxxxx
+    pub lines: &'a str,
+    /// The span inside `lines` that this loc actually contains, as byte offsets
+    pub relevant_span: Range<usize>,
+}
+
+impl<'a> ResolvedLoc<'a> {
+    fn to_true_name(&self) -> TrueName {
+        let before = &self.lines[0..self.relevant_span.start];
+        let during_ = &self.lines[self.relevant_span.start..self.relevant_span.end];
+        let (during, after) =
+            if let Some((idx, _)) = during_.bytes().enumerate().find(|(_, c)| *c == b'\n') {
+                let during = &during_[0..idx];
+                (during, "")
+            } else {
+                (during_, &self.lines[self.relevant_span.end..])
+            };
+
+        TrueName::SourceCode {
+            line_number: self.line_number(),
+            before: before.trim_start().to_string(),
+            this: during.to_string(),
+            after: after.trim_end().to_string(),
+        }
+    }
+
+    fn line_number(&self) -> usize {
+        self.line_index + 1
+    }
+}
+
+trait LocExt {
+    fn resolve<'a>(self, files: &'a [(String, String)]) -> Option<ResolvedLoc<'a>>;
+}
+
+impl<T> LocExt for Loc<T> {
+    fn resolve<'a>(self, files: &'a [(String, String)]) -> Option<ResolvedLoc<'a>> {
+        let span = self.span;
+        let (_, content) = files.get(self.file_id)?;
+
+        let mut lines_before_start = 0;
+        let mut chars_before_start = 0;
+        for c in content.bytes().take(self.span.start().to_usize()) {
+            if c == b'\n' {
+                chars_before_start = 0;
+                lines_before_start += 1;
+            } else {
+                chars_before_start += 1;
+            }
+        }
+
+        let chars_past_end = content
+            .bytes()
+            .skip(self.span.end().to_usize())
+            .enumerate()
+            .find_or_last(|(_, c)| *c == b'\n')
+            .map(|(i, _)| i)
+            .unwrap_or(content.len() - span.end().to_usize());
+
+        Some(ResolvedLoc {
+            line_index: lines_before_start,
+            lines: &content[span.start().to_usize() - chars_before_start
+                ..chars_past_end + span.end().to_usize()],
+            relevant_span: (chars_before_start
+                ..(chars_before_start + (span.end().to_usize() - span.start().to_usize()))),
+        })
     }
 }
 
@@ -561,4 +693,183 @@ fn info_from_concrete(ty: &ConcreteType) -> Result<VariableInfo> {
         ConcreteType::Wire(inner) => info_from_concrete(inner)?,
     };
     Ok(result)
+}
+
+fn descriptive_loc(expr: &Loc<Expression>) -> Option<Loc<()>> {
+    match &expr.inner.kind {
+        spade_hir::ExprKind::Identifier(_) => None,
+        spade_hir::ExprKind::IntLiteral(_, _) => None,
+        spade_hir::ExprKind::BoolLiteral(_) => None,
+        spade_hir::ExprKind::BitLiteral(_) => None,
+        spade_hir::ExprKind::TypeLevelInteger(_) => None,
+        spade_hir::ExprKind::CreatePorts => None,
+        spade_hir::ExprKind::FieldAccess(_, field) => Some(field.loc()),
+        spade_hir::ExprKind::MethodCall {
+            name, call_kind, ..
+        } => Some(match &call_kind {
+            CallKind::Function => name.loc(),
+            CallKind::Entity(kw) => ().between_locs(kw, name),
+            CallKind::Pipeline { inst_loc, .. } => ().between_locs(inst_loc, name),
+        }),
+        spade_hir::ExprKind::Call { kind, callee, .. } => Some(match &kind {
+            CallKind::Function => callee.loc(),
+            CallKind::Entity(kw) => ().between_locs(kw, callee),
+            CallKind::Pipeline { inst_loc, .. } => ().between_locs(inst_loc, callee),
+        }),
+        spade_hir::ExprKind::BinaryOperator(_, op, _) => Some(op.loc()),
+        spade_hir::ExprKind::TupleLiteral(_)
+        | spade_hir::ExprKind::ArrayLiteral(_)
+        | spade_hir::ExprKind::ArrayShorthandLiteral(_, _)
+        | spade_hir::ExprKind::Index(_, _)
+        | spade_hir::ExprKind::RangeIndex { .. }
+        | spade_hir::ExprKind::TupleIndex(_, _)
+        | spade_hir::ExprKind::UnaryOperator(_, _)
+        | spade_hir::ExprKind::Match(_, _)
+        | spade_hir::ExprKind::Block(_)
+        | spade_hir::ExprKind::If(_, _, _)
+        | spade_hir::ExprKind::PipelineRef { .. }
+        | spade_hir::ExprKind::StageValid
+        | spade_hir::ExprKind::StageReady
+        | spade_hir::ExprKind::Null => Some(expr.loc()),
+    }
+}
+
+// NOTE: We need codespan to be a non dev-dependency to make it optional. However,
+// that makes it be reported as unused if it is only used in a `#[cfg(test)]`, so we'll
+// use it here.
+#[allow(unused)]
+use codespan::Span;
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+
+    #[test]
+    fn resolve_loc_works_single_line() {
+        let code = [("file".to_string(), "0123\n45678\n0123\n".to_string())];
+
+        let loc = Loc::new((), Span::new(6, 8), 0);
+
+        let resolved = loc.resolve(&code).unwrap();
+
+        assert_eq!(resolved.line_number(), 2);
+        assert_eq!(resolved.lines, "45678");
+        assert_eq!(resolved.relevant_span, (1..3));
+    }
+
+    #[test]
+    fn resolve_loc_works_multi_single_line() {
+        let code = [("file".to_string(), "0123\n45678\n45678\n0123\n".to_string())];
+
+        let loc = Loc::new((), Span::new(9, 13), 0);
+
+        let resolved = loc.resolve(&code).unwrap();
+
+        assert_eq!(resolved.line_number(), 2);
+        assert_eq!(resolved.lines, "45678\n45678");
+        assert_eq!(resolved.relevant_span, (4..8));
+    }
+
+    #[test]
+    fn resolve_loc_works_span_at_end_of_line() {
+        let code = [("file".to_string(), "0123\n".to_string())];
+
+        let loc = Loc::new((), Span::new(0, 4), 0);
+
+        let resolved = loc.resolve(&code).unwrap();
+
+        assert_eq!(resolved.line_number(), 1);
+        assert_eq!(resolved.lines, "0123");
+        assert_eq!(resolved.relevant_span, (0..4));
+    }
+
+    #[test]
+    fn resolve_loc_works_span_at_end_of_file() {
+        let code = [("file".to_string(), "0123".to_string())];
+
+        let loc = Loc::new((), Span::new(0, 4), 0);
+
+        let resolved = loc.resolve(&code).unwrap();
+
+        assert_eq!(resolved.line_number(), 1);
+        assert_eq!(resolved.lines, "0123");
+        assert_eq!(resolved.relevant_span, (0..4));
+    }
+
+    #[test]
+    fn resolve_loc_to_true_name_works() {
+        let rloc = ResolvedLoc {
+            line_index: 3,
+            lines: "abc123def",
+            relevant_span: 3..6,
+        };
+
+        assert_eq!(
+            rloc.to_true_name(),
+            TrueName::SourceCode {
+                line_number: 4,
+                before: "abc".to_string(),
+                this: "123".to_string(),
+                after: "def".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_loc_to_true_name_works_on_multi_line() {
+        let rloc = ResolvedLoc {
+            line_index: 3,
+            lines: "abc12\n3def",
+            relevant_span: 3..6,
+        };
+
+        assert_eq!(
+            rloc.to_true_name(),
+            TrueName::SourceCode {
+                line_number: 4,
+                before: "abc".to_string(),
+                this: "12".to_string(),
+                after: "".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_loc_to_true_name_trims_whitespace() {
+        let rloc = ResolvedLoc {
+            line_index: 3,
+            lines: " a b c 123 d e f    ",
+            relevant_span: 7..10,
+        };
+
+        assert_eq!(
+            rloc.to_true_name(),
+            TrueName::SourceCode {
+                line_number: 4,
+                before: "a b c ".to_string(),
+                this: "123".to_string(),
+                after: " d e f".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn true_name_works_span_at_end_of_line() {
+        let code = [("file".to_string(), "0123\n".to_string())];
+
+        let loc = Loc::new((), Span::new(0, 4), 0);
+
+        let rloc = loc.resolve(&code).unwrap();
+
+        assert_eq!(
+            rloc.to_true_name(),
+            TrueName::SourceCode {
+                line_number: 1,
+                before: "".to_string(),
+                this: "0123".to_string(),
+                after: "".to_string()
+            }
+        );
+    }
 }
