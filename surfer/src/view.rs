@@ -21,7 +21,6 @@ use surfer_translation_types::{
 
 #[cfg(feature = "performance_plot")]
 use crate::benchmark::NUM_PERF_SAMPLES;
-use crate::data_container::VariableType as VarType;
 use crate::displayed_item::{
     draw_rename_window, DisplayedFieldRef, DisplayedItem, DisplayedItemIndex, DisplayedItemRef,
 };
@@ -43,6 +42,7 @@ use crate::{
     command_prompt::show_command_prompt, config::HierarchyStyle, hierarchy, wave_data::WaveData,
     Message, MoveDir, State,
 };
+use crate::{config::OverviewLocation, data_container::VariableType as VarType};
 use crate::{config::SurferTheme, wave_container::VariableMeta};
 pub struct DrawingContext<'a> {
     pub painter: &'a mut Painter,
@@ -317,6 +317,14 @@ impl State {
             self.add_statusbar_panel(ctx, &self.waves, &mut msgs);
         }
 
+        if let OverviewLocation::Window = self.config.layout.overview_location {
+            if let Some(waves) = self.waves.as_ref() {
+                if self.show_overview() && !waves.displayed_items_order.is_empty() {
+                    self.add_overview_panel(ctx, waves, &mut msgs);
+                }
+            }
+        }
+
         if self.show_hierarchy() {
             egui::SidePanel::left("variable select left panel")
                 .default_width(300.)
@@ -456,9 +464,16 @@ impl State {
                     style.visuals.widgets.noninteractive.bg_stroke = std_stroke;
                 });
 
-                if let Some(waves) = &self.waves {
-                    if self.show_overview() && !waves.displayed_items_order.is_empty() {
-                        self.add_overview_panel(ctx, waves, &mut msgs);
+                if let OverviewLocation::Canvas = self.config.layout.overview_location {
+                    if self.show_overview()
+                        && !self
+                            .waves
+                            .as_ref()
+                            .unwrap()
+                            .displayed_items_order
+                            .is_empty()
+                    {
+                        self.add_overview_panel(ctx, self.waves.as_ref().unwrap(), &mut msgs);
                     }
                 }
             }
