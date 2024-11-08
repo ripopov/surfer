@@ -957,6 +957,9 @@ impl State {
                     }
                 }
             }
+            Message::ToggleTimeline => {
+                self.config.layout.show_default_timeline = !self.config.layout.show_default_timeline
+            }
             Message::UnfocusItem => {
                 if let Some(waves) = self.waves.as_mut() {
                     waves.focused_item = None;
@@ -1557,6 +1560,7 @@ impl State {
                         error!("While getting commands to lazy-load parameters: {err:?}");
                         None
                     });
+
                 // update viewports, now that we have the time table
                 waves.update_viewports();
                 // make sure we redraw
