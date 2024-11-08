@@ -9,6 +9,21 @@ use crate::{
     TranslationPreference, ValueKind, VariableEncoding, VariableInfo, VariableMeta, VariableValue,
 };
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum TrueName {
+    /// The variable's true name is best represented as part of a line of code
+    /// for example if line 100 is
+    /// let x = a + b;
+    /// and the signal being queried is `a+b` then this would return
+    /// {line: 100, before: "let x = ", this: "a + b", after: ";"}
+    SourceCode {
+        line_number: usize,
+        before: String,
+        this: String,
+        after: String,
+    },
+}
+
 /// The most general translator trait.
 pub trait Translator<VarId, ScopeId, Message>: Send + Sync {
     fn name(&self) -> String;
@@ -23,6 +38,11 @@ pub trait Translator<VarId, ScopeId, Message>: Send + Sync {
 
     /// Return [`TranslationPreference`] based on if the translator can handle this variable.
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference>;
+
+    /// Returns a more human readable name of a signal if such a name exists.
+    fn variable_true_name(&self, _variable: &VariableMeta<VarId, ScopeId>) -> Option<TrueName> {
+        None
+    }
 
     /// By default translators are stateless, but if they need to reload, they can
     /// do by defining this method.
