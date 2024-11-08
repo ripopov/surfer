@@ -37,6 +37,22 @@ impl From<String> for HierarchyStyle {
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub enum OverviewLocation {
+    Canvas,
+    Window,
+}
+
+impl From<String> for OverviewLocation {
+    fn from(string: String) -> Self {
+        match string.as_str() {
+            "Canvas" => Self::Canvas,
+            "Window" => Self::Window,
+            _ => Self::Canvas,
+        }
+    }
+}
+
 /// Selects the function of the arrow keys
 #[derive(Debug, Deserialize, Display, PartialEq, Eq, Sequence)]
 pub enum ArrowKeyBindings {
@@ -105,6 +121,8 @@ pub struct SurferLayout {
     show_empty_scopes: bool,
     /// Flag to show parameters in scope view
     show_parameters_in_scopes: bool,
+    /// Flag to show/hide a default timeline
+    pub show_default_timeline: bool,
     /// Initial window height
     pub window_height: usize,
     /// Initial window width
@@ -123,6 +141,8 @@ pub struct SurferLayout {
     pub zoom_factors: Vec<f32>,
     /// Default UI zoom factor
     pub default_zoom_factor: f32,
+    /// Place to render the overview
+    pub overview_location: OverviewLocation,
 }
 
 impl SurferLayout {
@@ -164,6 +184,9 @@ impl SurferLayout {
     }
     pub fn show_parameters_in_scopes(&self) -> bool {
         self.show_parameters_in_scopes
+    }
+    pub fn show_default_timeline(&self) -> bool {
+        self.show_default_timeline
     }
 }
 
