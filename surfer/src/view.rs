@@ -3,7 +3,8 @@ use ecolor::Color32;
 #[cfg(not(target_arch = "wasm32"))]
 use egui::ViewportCommand;
 use egui::{
-    FontId, Frame, Layout, Painter, RichText, ScrollArea, Sense, TextFormat, TextStyle, WidgetText,
+    FontId, FontSelection, Frame, Layout, Painter, RichText, ScrollArea, Sense, TextFormat,
+    TextStyle, WidgetText,
 };
 use egui_extras::{Column, TableBuilder};
 use egui_remixicon::icons;
@@ -19,7 +20,7 @@ use log::{info, warn};
 use num::BigUint;
 use surfer_translation_types::{
     SubFieldFlatTranslationResult, TranslatedValue, Translator, TrueName, VariableInfo,
-    VariableType,
+    VariableNameInfo, VariableType,
 };
 
 #[cfg(feature = "performance_plot")]
@@ -759,23 +760,7 @@ impl State {
             .into_iter()
             .map(|var| {
                 let meta = wave_container.variable_meta(&var).ok();
-
-                let name_info = self
-                    .sys
-                    .variable_name_info_cache
-                    .borrow_mut()
-                    .entry(var.clone())
-                    .or_insert_with(|| {
-                        meta.as_ref().and_then(|meta| {
-                            self.sys
-                                .translators
-                                .all_translators()
-                                .iter()
-                                .find_map(|t| t.variable_name_info(meta))
-                        })
-                    })
-                    .clone();
-
+                let name_info = self.get_variable_name_info(wave_container, &var);
                 (var, meta, name_info)
             })
             .sorted_by_key(|(_, _, name_info)| {
@@ -1340,29 +1325,103 @@ impl State {
         ctx: &egui::Context,
         levels_to_force_expand: Option<usize>,
     ) -> Rect {
+        let wave_container = self.waves.as_ref().unwrap().inner.as_waves().unwrap();
         let mut draw_label = |ui: &mut egui::Ui| {
-            let style = ui.style_mut();
             let text_color: Color32;
-            if self.item_is_focused(vidx) {
-                style.visuals.selection.bg_fill = self.config.theme.accent_info.background;
-                text_color = self.config.theme.accent_info.foreground;
-            } else if self.item_is_selected(displayed_id) {
-                style.visuals.selection.bg_fill =
-                    self.config.theme.selected_elements_colors.background;
-                text_color = self.config.theme.selected_elements_colors.foreground;
-            } else {
-                style.visuals.selection.bg_fill = self.config.theme.primary_ui_color.background;
-                text_color = self.config.theme.primary_ui_color.foreground;
+            {
+                let style = ui.style_mut();
+                if self.item_is_focused(vidx) {
+                    style.visuals.selection.bg_fill = self.config.theme.accent_info.background;
+                    text_color = self.config.theme.accent_info.foreground;
+                } else if self.item_is_selected(displayed_id) {
+                    style.visuals.selection.bg_fill =
+                        self.config.theme.selected_elements_colors.background;
+                    text_color = self.config.theme.selected_elements_colors.foreground;
+                } else {
+                    style.visuals.selection.bg_fill = self.config.theme.primary_ui_color.background;
+                    text_color = self.config.theme.primary_ui_color.foreground;
+                }
             }
+            let style = ui.style();
+
+            // For rendering source code, we want to strategically hide parts of the code,
+            // and to do so we need to compute the width of a monospace character
+            let monospace_font = ui.style().text_styles.get(&TextStyle::Monospace).unwrap();
+            let monospace_width = {
+                ui.fonts(|fonts| {
+                    fonts
+                        .layout_no_wrap(
+                            " ".to_string(),
+                            monospace_font.clone(),
+                            Color32::from_rgb(0, 0, 0),
+                        )
+                        .size()
+                        .x
+                })
+            };
+            let available_space = ui.available_width();
 
             let mut layout_job = LayoutJob::default();
-            displayed_item.add_to_layout_job(
-                &text_color,
-                style,
-                &mut layout_job,
-                Some(&field),
-                &self.config,
-            );
+            match displayed_item {
+                DisplayedItem::Variable(var) => {
+                    if field.field.is_empty() {
+                        let name_info =
+                            self.get_variable_name_info(wave_container, &var.variable_ref);
+
+                        if let Some(true_name) = name_info.and_then(|info| info.true_name) {
+                            draw_true_name(
+                                &true_name,
+                                &mut layout_job,
+                                monospace_font.clone(),
+                                text_color,
+                                monospace_width,
+                                available_space,
+                            )
+                        } else {
+                            RichText::new(displayed_item.name())
+                                .color(text_color)
+                                .line_height(Some(self.config.layout.waveforms_line_height))
+                                .append_to(
+                                    &mut layout_job,
+                                    style,
+                                    FontSelection::Default,
+                                    Align::Center,
+                                );
+                        }
+                    } else {
+                        // NOTE: Safe unwrap, we've checked that the field exists and is non-empty
+                        RichText::new(field.field.last().unwrap().clone())
+                            .color(text_color)
+                            .line_height(Some(self.config.layout.waveforms_line_height))
+                            .append_to(
+                                &mut layout_job,
+                                style,
+                                FontSelection::Default,
+                                Align::Center,
+                            );
+                    };
+                }
+                DisplayedItem::TimeLine(_) | DisplayedItem::Divider(_) => {
+                    RichText::new(displayed_item.name())
+                        .color(text_color)
+                        .italics()
+                        .append_to(
+                            &mut layout_job,
+                            style,
+                            FontSelection::Default,
+                            Align::Center,
+                        );
+                }
+                DisplayedItem::Marker(marker) => {
+                    marker.rich_text(&text_color, style, &mut layout_job);
+                }
+                DisplayedItem::Placeholder(placeholder) => {
+                    placeholder.rich_text(text_color, style, &mut layout_job)
+                }
+                DisplayedItem::Stream(stream) => {
+                    stream.rich_text(text_color, style, &self.config, &mut layout_job)
+                }
+            }
 
             let mut variable_label = ui
                 .selectable_label(
@@ -1871,6 +1930,29 @@ impl State {
         }
     }
 
+    pub fn get_variable_name_info(
+        &self,
+        wave_container: &WaveContainer,
+        var: &VariableRef,
+    ) -> Option<VariableNameInfo> {
+        let meta = wave_container.variable_meta(var).ok();
+
+        self.sys
+            .variable_name_info_cache
+            .borrow_mut()
+            .entry(var.clone())
+            .or_insert_with(|| {
+                meta.as_ref().and_then(|meta| {
+                    self.sys
+                        .translators
+                        .all_translators()
+                        .iter()
+                        .find_map(|t| t.variable_name_info(meta))
+                })
+            })
+            .clone()
+    }
+
     pub fn draw_background(
         &self,
         drawing_info: &ItemDrawingInfo,
@@ -1941,7 +2023,7 @@ fn scope_tooltip_text(wave: &WaveData, scope: &ScopeRef) -> String {
     }
 }
 
-fn draw_true_name(
+pub fn draw_true_name(
     true_name: &TrueName,
     layout_job: &mut LayoutJob,
     font: FontId,
