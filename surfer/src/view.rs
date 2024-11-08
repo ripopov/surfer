@@ -21,9 +21,6 @@ use surfer_translation_types::{
 
 #[cfg(feature = "performance_plot")]
 use crate::benchmark::NUM_PERF_SAMPLES;
-use crate::displayed_item::{
-    draw_rename_window, DisplayedFieldRef, DisplayedItem, DisplayedItemIndex, DisplayedItemRef,
-};
 use crate::help::{
     draw_about_window, draw_control_help_window, draw_license_window, draw_quickstart_help_window,
 };
@@ -44,6 +41,12 @@ use crate::{
 };
 use crate::{config::OverviewLocation, data_container::VariableType as VarType};
 use crate::{config::SurferTheme, wave_container::VariableMeta};
+use crate::{
+    displayed_item::{
+        draw_rename_window, DisplayedFieldRef, DisplayedItem, DisplayedItemIndex, DisplayedItemRef,
+    },
+    time::DEFAULT_TIMELINE_NAME,
+};
 pub struct DrawingContext<'a> {
     pub painter: &'a mut Painter,
     pub cfg: &'a DrawConfig,
@@ -384,6 +387,10 @@ impl State {
                     .show(ctx, |ui| {
                         ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                         self.handle_pointer_in_ui(ui, &mut msgs);
+                        if self.config.layout.show_default_timeline() {
+                            ui.label(RichText::new(DEFAULT_TIMELINE_NAME).italics());
+                        }
+
                         let response = ScrollArea::both()
                             .vertical_scroll_offset(scroll_offset)
                             .show(ui, |ui| {
@@ -477,7 +484,7 @@ impl State {
                     }
                 }
             }
-        };
+        }
 
         if self.waves.is_none()
             || self
