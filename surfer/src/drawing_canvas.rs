@@ -1033,6 +1033,11 @@ impl State {
             &mut ctx,
             viewport_idx,
         );
+
+        if self.config.layout.show_default_timeline() {
+            self.draw_default_timeline(waves, &ctx, viewport_idx, frame_width, &cfg);
+        }
+
         self.handle_canvas_context_menu(response, waves, to_screen, &mut ctx, msgs, viewport_idx);
     }
 

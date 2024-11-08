@@ -21,9 +21,6 @@ use surfer_translation_types::{
 
 #[cfg(feature = "performance_plot")]
 use crate::benchmark::NUM_PERF_SAMPLES;
-use crate::displayed_item::{
-    draw_rename_window, DisplayedFieldRef, DisplayedItem, DisplayedItemIndex, DisplayedItemRef,
-};
 use crate::help::{
     draw_about_window, draw_control_help_window, draw_license_window, draw_quickstart_help_window,
 };
@@ -44,6 +41,12 @@ use crate::{
 };
 use crate::{config::OverviewLocation, data_container::VariableType as VarType};
 use crate::{config::SurferTheme, wave_container::VariableMeta};
+use crate::{
+    displayed_item::{
+        draw_rename_window, DisplayedFieldRef, DisplayedItem, DisplayedItemIndex, DisplayedItemRef,
+    },
+    time::DEFAULT_TIMELINE_NAME,
+};
 pub struct DrawingContext<'a> {
     pub painter: &'a mut Painter,
     pub cfg: &'a DrawConfig,
@@ -477,7 +480,7 @@ impl State {
                     }
                 }
             }
-        };
+        }
 
         if self.waves.is_none()
             || self
@@ -876,6 +879,10 @@ impl State {
 
         let alignment = self.get_name_alignment();
         ui.with_layout(Layout::top_down(alignment).with_cross_justify(true), |ui| {
+            if self.config.layout.show_default_timeline() {
+                ui.label(RichText::new(DEFAULT_TIMELINE_NAME).italics());
+            }
+
             for (vidx, displayed_item_id) in self
                 .waves
                 .as_ref()
