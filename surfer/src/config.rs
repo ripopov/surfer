@@ -121,6 +121,8 @@ pub struct SurferLayout {
     show_empty_scopes: bool,
     /// Flag to show parameters in scope view
     show_parameters_in_scopes: bool,
+    /// Flag to show/hide a default timeline
+    pub show_default_timeline: bool,
     /// Initial window height
     pub window_height: usize,
     /// Initial window width
@@ -182,6 +184,9 @@ impl SurferLayout {
     }
     pub fn show_parameters_in_scopes(&self) -> bool {
         self.show_parameters_in_scopes
+    }
+    pub fn show_default_timeline(&self) -> bool {
+        self.show_default_timeline
     }
 }
 
