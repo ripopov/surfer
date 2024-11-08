@@ -2,7 +2,10 @@ use color_eyre::eyre::Context;
 use ecolor::Color32;
 #[cfg(not(target_arch = "wasm32"))]
 use egui::ViewportCommand;
-use egui::{Frame, Layout, Painter, RichText, ScrollArea, Sense, TextStyle, WidgetText};
+use egui::{
+    FontId, FontSelection, Frame, Layout, Painter, RichText, ScrollArea, Sense, TextFormat,
+    TextStyle, WidgetText,
+};
 use egui_extras::{Column, TableBuilder};
 use egui_remixicon::icons;
 use emath::{Align, Pos2, Rect, RectTransform, Vec2};
@@ -16,7 +19,8 @@ use log::{info, warn};
 
 use num::BigUint;
 use surfer_translation_types::{
-    SubFieldFlatTranslationResult, TranslatedValue, VariableInfo, VariableType,
+    SubFieldFlatTranslationResult, TranslatedValue, Translator, TrueName, VariableInfo,
+    VariableNameInfo, VariableType,
 };
 
 #[cfg(feature = "performance_plot")]
@@ -751,12 +755,32 @@ impl State {
         variables: &[VariableRef],
         filter: &str,
     ) {
-        for variable in self.filtered_variables(variables, filter) {
-            let meta = wave_container.variable_meta(&variable).ok();
+        let variables = self
+            .filtered_variables(variables, filter)
+            .into_iter()
+            .map(|var| {
+                let meta = wave_container.variable_meta(&var).ok();
+                let name_info = self.get_variable_name_info(wave_container, &var);
+                (var, meta, name_info)
+            })
+            .sorted_by_key(|(_, _, name_info)| {
+                -name_info
+                    .as_ref()
+                    .and_then(|info| info.priority)
+                    .unwrap_or_default()
+            });
+
+        for (variable, meta, name_info) in variables {
             let index = meta
                 .as_ref()
                 .and_then(|meta| meta.index.clone())
-                .map(|index| format!(" {index}"))
+                .map(|index| {
+                    if self.show_variable_indices() {
+                        format!(" {index}")
+                    } else {
+                        String::new()
+                    }
+                })
                 .unwrap_or_default();
 
             let direction = if self.show_variable_direction() {
@@ -774,7 +798,7 @@ impl State {
                                     icons::MAP_PIN_2_LINE
                                 } else {
                                     // Align other items (can be improved)
-                                    "    "
+                                    "  "
                                 }
                             })
                         )
@@ -797,11 +821,54 @@ impl State {
                 String::new()
             };
 
-            let variable_name = format!("{direction}{}{index}{value}", variable.name.clone());
             ui.with_layout(
                 Layout::top_down(Align::LEFT).with_cross_justify(true),
                 |ui| {
-                    let mut response = ui.add(egui::SelectableLabel::new(false, variable_name));
+                    // NOTE: Safe unwrap, we know that egui has its own built-in font
+                    let font = ui.style().text_styles.get(&TextStyle::Monospace).unwrap();
+                    let char_width = ui.fonts(|fonts| {
+                        fonts
+                            .layout_no_wrap(
+                                " ".to_string(),
+                                font.clone(),
+                                Color32::from_rgb(0, 0, 0),
+                            )
+                            .size()
+                            .x
+                    });
+
+                    let direction_size = direction.chars().count();
+                    let index_size = index.chars().count();
+                    let value_size = value.chars().count();
+                    let used_space = (direction_size + index_size + value_size) as f32 * char_width;
+
+                    // The button padding is added by egui on selectable labels
+                    let available_space = ui.available_width() - ui.spacing().button_padding.x * 2.;
+                    let space_for_name = available_space - used_space;
+
+                    let mut label = LayoutJob::default();
+                    let text_format = TextFormat {
+                        font_id: font.clone(),
+                        color: self.config.theme.foreground,
+                        ..Default::default()
+                    };
+                    label.append(&direction, 0.0, text_format.clone());
+
+                    match name_info.and_then(|info| info.true_name) {
+                        Some(name) => draw_true_name(
+                            &name,
+                            &mut label,
+                            font.clone(),
+                            self.config.theme.foreground,
+                            char_width,
+                            space_for_name,
+                        ),
+                        None => label.append(&variable.name, 0.0, text_format.clone()),
+                    }
+                    label.append(&index, 0.0, text_format.clone());
+                    label.append(&value, 0.0, text_format.clone());
+
+                    let mut response = ui.add(egui::SelectableLabel::new(false, label));
                     let _ = response.interact(egui::Sense::click_and_drag());
 
                     if self.show_tooltip() {
@@ -1258,29 +1325,103 @@ impl State {
         ctx: &egui::Context,
         levels_to_force_expand: Option<usize>,
     ) -> Rect {
+        let wave_container = self.waves.as_ref().unwrap().inner.as_waves().unwrap();
         let mut draw_label = |ui: &mut egui::Ui| {
-            let style = ui.style_mut();
             let text_color: Color32;
-            if self.item_is_focused(vidx) {
-                style.visuals.selection.bg_fill = self.config.theme.accent_info.background;
-                text_color = self.config.theme.accent_info.foreground;
-            } else if self.item_is_selected(displayed_id) {
-                style.visuals.selection.bg_fill =
-                    self.config.theme.selected_elements_colors.background;
-                text_color = self.config.theme.selected_elements_colors.foreground;
-            } else {
-                style.visuals.selection.bg_fill = self.config.theme.primary_ui_color.background;
-                text_color = self.config.theme.primary_ui_color.foreground;
+            {
+                let style = ui.style_mut();
+                if self.item_is_focused(vidx) {
+                    style.visuals.selection.bg_fill = self.config.theme.accent_info.background;
+                    text_color = self.config.theme.accent_info.foreground;
+                } else if self.item_is_selected(displayed_id) {
+                    style.visuals.selection.bg_fill =
+                        self.config.theme.selected_elements_colors.background;
+                    text_color = self.config.theme.selected_elements_colors.foreground;
+                } else {
+                    style.visuals.selection.bg_fill = self.config.theme.primary_ui_color.background;
+                    text_color = self.config.theme.primary_ui_color.foreground;
+                }
             }
+            let style = ui.style();
+
+            // For rendering source code, we want to strategically hide parts of the code,
+            // and to do so we need to compute the width of a monospace character
+            let monospace_font = ui.style().text_styles.get(&TextStyle::Monospace).unwrap();
+            let monospace_width = {
+                ui.fonts(|fonts| {
+                    fonts
+                        .layout_no_wrap(
+                            " ".to_string(),
+                            monospace_font.clone(),
+                            Color32::from_rgb(0, 0, 0),
+                        )
+                        .size()
+                        .x
+                })
+            };
+            let available_space = ui.available_width();
 
             let mut layout_job = LayoutJob::default();
-            displayed_item.add_to_layout_job(
-                &text_color,
-                style,
-                &mut layout_job,
-                Some(&field),
-                &self.config,
-            );
+            match displayed_item {
+                DisplayedItem::Variable(var) => {
+                    if field.field.is_empty() {
+                        let name_info =
+                            self.get_variable_name_info(wave_container, &var.variable_ref);
+
+                        if let Some(true_name) = name_info.and_then(|info| info.true_name) {
+                            draw_true_name(
+                                &true_name,
+                                &mut layout_job,
+                                monospace_font.clone(),
+                                text_color,
+                                monospace_width,
+                                available_space,
+                            )
+                        } else {
+                            RichText::new(displayed_item.name())
+                                .color(text_color)
+                                .line_height(Some(self.config.layout.waveforms_line_height))
+                                .append_to(
+                                    &mut layout_job,
+                                    style,
+                                    FontSelection::Default,
+                                    Align::Center,
+                                );
+                        }
+                    } else {
+                        // NOTE: Safe unwrap, we've checked that the field exists and is non-empty
+                        RichText::new(field.field.last().unwrap().clone())
+                            .color(text_color)
+                            .line_height(Some(self.config.layout.waveforms_line_height))
+                            .append_to(
+                                &mut layout_job,
+                                style,
+                                FontSelection::Default,
+                                Align::Center,
+                            );
+                    };
+                }
+                DisplayedItem::TimeLine(_) | DisplayedItem::Divider(_) => {
+                    RichText::new(displayed_item.name())
+                        .color(text_color)
+                        .italics()
+                        .append_to(
+                            &mut layout_job,
+                            style,
+                            FontSelection::Default,
+                            Align::Center,
+                        );
+                }
+                DisplayedItem::Marker(marker) => {
+                    marker.rich_text(&text_color, style, &mut layout_job);
+                }
+                DisplayedItem::Placeholder(placeholder) => {
+                    placeholder.rich_text(text_color, style, &mut layout_job)
+                }
+                DisplayedItem::Stream(stream) => {
+                    stream.rich_text(text_color, style, &self.config, &mut layout_job)
+                }
+            }
 
             let mut variable_label = ui
                 .selectable_label(
@@ -1789,6 +1930,29 @@ impl State {
         }
     }
 
+    pub fn get_variable_name_info(
+        &self,
+        wave_container: &WaveContainer,
+        var: &VariableRef,
+    ) -> Option<VariableNameInfo> {
+        let meta = wave_container.variable_meta(var).ok();
+
+        self.sys
+            .variable_name_info_cache
+            .borrow_mut()
+            .entry(var.clone())
+            .or_insert_with(|| {
+                meta.as_ref().and_then(|meta| {
+                    self.sys
+                        .translators
+                        .all_translators()
+                        .iter()
+                        .find_map(|t| t.variable_name_info(meta))
+                })
+            })
+            .clone()
+    }
+
     pub fn draw_background(
         &self,
         drawing_info: &ItemDrawingInfo,
@@ -1856,5 +2020,127 @@ fn scope_tooltip_text(wave: &WaveData, scope: &ScopeRef) -> String {
         format!("{scope}")
     } else {
         format!("{scope}\n{other}")
+    }
+}
+
+pub fn draw_true_name(
+    true_name: &TrueName,
+    layout_job: &mut LayoutJob,
+    font: FontId,
+    foreground: Color32,
+    char_width: f32,
+    allowed_space: f32,
+) {
+    let char_budget = (allowed_space / char_width) as usize;
+
+    match true_name {
+        TrueName::SourceCode {
+            line_number,
+            before,
+            this,
+            after,
+        } => {
+            let before_chars = before.chars().collect::<Vec<_>>();
+            let this_chars = this.chars().collect::<Vec<_>>();
+            let after_chars = after.chars().collect::<Vec<_>>();
+            let line_num = format!("{line_number} ");
+            let important_chars = line_num.len() + this_chars.len();
+            let required_extra_chars = before_chars.len() + after_chars.len();
+
+            // If everything fits, things are very easy
+            let (line_num, before, this, after) =
+                if char_budget >= important_chars + required_extra_chars {
+                    (line_num, before.clone(), this.clone(), after.clone())
+                } else if char_budget > important_chars {
+                    // How many extra chars we have available
+                    let extra_chars = char_budget - important_chars;
+
+                    let max_from_before = (extra_chars as f32 / 2.).ceil() as usize;
+                    let max_from_after = (extra_chars as f32 / 2.).floor() as usize;
+
+                    let (chars_from_before, chars_from_after) =
+                        if max_from_before > before_chars.len() {
+                            (before_chars.len(), extra_chars - before_chars.len())
+                        } else if max_from_after > after_chars.len() {
+                            (extra_chars - after_chars.len(), before_chars.len())
+                        } else {
+                            (max_from_before, max_from_after)
+                        };
+
+                    let mut before = before_chars
+                        .into_iter()
+                        .rev()
+                        .take(chars_from_before)
+                        .rev()
+                        .collect::<Vec<_>>();
+                    if !before.is_empty() {
+                        before[0] = '…'
+                    }
+                    let mut after = after_chars
+                        .into_iter()
+                        .take(chars_from_after)
+                        .collect::<Vec<_>>();
+                    if !after.is_empty() {
+                        let last_elem = after.len() - 1;
+                        after[last_elem] = '…'
+                    }
+
+                    (
+                        line_num,
+                        before.into_iter().collect(),
+                        this.clone(),
+                        after.into_iter().collect(),
+                    )
+                } else {
+                    // If we can't even fit the whole important part,
+                    // we'll prefer the line number
+                    let from_line_num = line_num.len();
+                    let from_this = char_budget.saturating_sub(from_line_num);
+                    let this = this
+                        .chars()
+                        .take(from_this)
+                        .enumerate()
+                        .map(|(i, c)| if i == from_this - 1 { '…' } else { c })
+                        .collect();
+                    (line_num, "".to_string(), this, "".to_string())
+                };
+
+            layout_job.append(
+                &line_num,
+                0.0,
+                TextFormat {
+                    font_id: font.clone(),
+                    color: foreground.gamma_multiply(0.75),
+                    ..Default::default()
+                },
+            );
+            layout_job.append(
+                &before,
+                0.0,
+                TextFormat {
+                    font_id: font.clone(),
+                    color: foreground.gamma_multiply(0.5),
+                    ..Default::default()
+                },
+            );
+            layout_job.append(
+                &this,
+                0.0,
+                TextFormat {
+                    font_id: font.clone(),
+                    color: foreground,
+                    ..Default::default()
+                },
+            );
+            layout_job.append(
+                &format!("{}", after.trim_end()),
+                0.0,
+                TextFormat {
+                    font_id: font.clone(),
+                    color: foreground.gamma_multiply(0.5),
+                    ..Default::default()
+                },
+            )
+        }
     }
 }
