@@ -316,11 +316,6 @@ impl State {
         if self.show_statusbar() {
             self.add_statusbar_panel(ctx, &self.waves, &mut msgs);
         }
-        if let Some(waves) = &self.waves {
-            if self.show_overview() && !waves.displayed_items_order.is_empty() {
-                self.add_overview_panel(ctx, waves, &mut msgs);
-            }
-        }
 
         if self.show_hierarchy() {
             egui::SidePanel::left("variable select left panel")
@@ -460,6 +455,12 @@ impl State {
                 ctx.style_mut(|style| {
                     style.visuals.widgets.noninteractive.bg_stroke = std_stroke;
                 });
+
+                if let Some(waves) = &self.waves {
+                    if self.show_overview() && !waves.displayed_items_order.is_empty() {
+                        self.add_overview_panel(ctx, waves, &mut msgs);
+                    }
+                }
             }
         };
 
