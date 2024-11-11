@@ -5,7 +5,7 @@ use epaint::{FontId, Stroke};
 
 use crate::config::SurferTheme;
 use crate::time::time_string;
-use crate::view::DrawingContext;
+use crate::view::{DrawConfig, DrawingContext};
 use crate::{wave_data::WaveData, Message, State};
 
 /// The supported mouse gesture operations.
@@ -19,6 +19,35 @@ enum GestureKind {
 }
 
 impl State {
+    /// Draw the default timeline at the top of the canvas
+    pub fn draw_default_timeline(
+        &self,
+        waves: &WaveData,
+        ctx: &DrawingContext,
+        viewport_idx: usize,
+        frame_width: f32,
+        cfg: &DrawConfig,
+    ) {
+        let ticks = waves.get_ticks(
+            &waves.viewports[viewport_idx],
+            &waves.inner.metadata().timescale,
+            frame_width,
+            cfg.text_size,
+            &self.wanted_timeunit,
+            &self.get_time_format(),
+            &self.config,
+        );
+
+        waves.draw_ticks(
+            Some(&self.config.theme.foreground),
+            &ticks,
+            ctx,
+            0.0,
+            Align2::CENTER_TOP,
+            &self.config,
+        );
+    }
+
     /// Draw the mouse gesture widget, i.e., the line(s) and text showing which gesture is being drawn.
     pub fn draw_mouse_gesture_widget(
         &self,
