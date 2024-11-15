@@ -226,7 +226,7 @@ fn find_user_decoders_at_path(path: &Path) -> Vec<Box<DynBasicTranslator>> {
     decoders
 }
 
-pub fn all_translators() -> TranslatorList {
+pub fn all_translators(enum_maps: Option<HashMap<String, HashMap<String, String>>>) -> TranslatorList {
     let mut basic_translators: Vec<Box<DynBasicTranslator>> = vec![
         Box::new(BitTranslator {}),
         Box::new(HexTranslator {}),
@@ -269,7 +269,7 @@ pub fn all_translators() -> TranslatorList {
         vec![
             Box::new(ClockTranslator::new()),
             Box::new(StringTranslator {}),
-            Box::new(EnumTranslator {}),
+            Box::new(EnumTranslator::new(enum_maps.unwrap_or_default())),
         ],
     )
 }

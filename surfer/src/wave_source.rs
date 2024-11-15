@@ -28,6 +28,8 @@ use crate::wellen::{LoadSignalPayload, LoadSignalsCmd, LoadSignalsResult};
 use crate::{message::Message, State};
 use surver::{Status, HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, WELLEN_SURFER_DEFAULT_OPTIONS};
 
+use crate::svloader::load_enumerates_from_sv_file;
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum WaveSource {
     File(Utf8PathBuf),
@@ -170,6 +172,8 @@ impl State {
     ) -> Result<()> {
         if let Some("ftr") = filename.extension() {
             self.load_transactions_from_file(filename, load_options)
+        } else if let Some("sv") = filename.extension() {
+            self.load_enumerates_from_sv(filename, load_options)
         } else {
             self.load_wave_from_file(filename, load_options)
         }
@@ -226,6 +230,37 @@ impl State {
         )));
         Ok(())
     }
+
+    pub fn load_enumerates_from_sv(
+        &mut self, 
+        filename: Utf8PathBuf, 
+        load_options: LoadOptions,
+    ) -> Result<()> {
+        info!("Loading enumerates from .sv file: {filename}");
+        let sender = self.sys.channels.msg_sender.clone();
+        let start = web_time::Instant::now();
+        let source = WaveSource::File(filename.clone());
+        let source_copy = source.clone();
+
+        perform_work(move || {
+            let enum_maps = load_enumerates_from_sv_file(filename.as_str())
+                .map_err(|e| anyhow!("{e:?}"))
+                .with_context(|| format!("Failed to parse .sv file: {source}"));
+
+            match enum_maps {
+                Ok(enum_maps) => {
+                    let msg = Message::EnumMapLoaded(start, load_options, enum_maps);
+                    sender.send(msg).unwrap();
+                }
+                Err(e) => sender.send(Message::Error(e)).unwrap(),
+            }
+        });
+
+        self.sys.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::ReadingHeader(
+            source_copy,
+        )));
+        Ok(())
+    }    
 
     pub fn load_from_data(&mut self, data: Vec<u8>, load_options: LoadOptions) -> Result<()> {
         self.load_from_bytes(WaveSource::Data, data, load_options);
@@ -694,12 +729,13 @@ impl State {
 
         self.file_dialog(
             (
-                "Waveform/Transaction-files (*.vcd, *.fst, *.ghw, *.ftr)".to_string(),
+                "Waveform/Transaction-files (*.vcd, *.fst, *.ghw, *.ftr *.sv)".to_string(),
                 vec![
                     "vcd".to_string(),
                     "fst".to_string(),
                     "ghw".to_string(),
                     "ftr".to_string(),
+                    "sv".to_string(),
                 ],
             ),
             message,

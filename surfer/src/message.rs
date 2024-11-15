@@ -8,6 +8,7 @@ use num::BigInt;
 use serde::Deserialize;
 use std::path::PathBuf;
 use surver::Status;
+use std::collections::HashMap;
 
 use crate::graphics::{Graphic, GraphicId};
 use crate::transaction_container::{
@@ -154,6 +155,8 @@ pub enum Message {
         #[derivative(Debug = "ignore")] TransactionContainer,
         LoadOptions,
     ),
+    #[serde(skip)]
+    EnumMapLoaded(web_time::Instant, LoadOptions, #[derivative(Debug = "ignore")] HashMap<String, HashMap<String, String>>),
     #[serde(skip)]
     Error(color_eyre::eyre::Error),
     #[serde(skip)]
