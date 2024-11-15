@@ -21,10 +21,6 @@ use surfer_translation_types::{
 
 #[cfg(feature = "performance_plot")]
 use crate::benchmark::NUM_PERF_SAMPLES;
-use crate::data_container::VariableType as VarType;
-use crate::displayed_item::{
-    draw_rename_window, DisplayedFieldRef, DisplayedItem, DisplayedItemIndex, DisplayedItemRef,
-};
 use crate::help::{
     draw_about_window, draw_control_help_window, draw_license_window, draw_quickstart_help_window,
 };
@@ -43,7 +39,14 @@ use crate::{
     command_prompt::show_command_prompt, config::HierarchyStyle, hierarchy, wave_data::WaveData,
     Message, MoveDir, State,
 };
+use crate::{config::OverviewLocation, data_container::VariableType as VarType};
 use crate::{config::SurferTheme, wave_container::VariableMeta};
+use crate::{
+    displayed_item::{
+        draw_rename_window, DisplayedFieldRef, DisplayedItem, DisplayedItemIndex, DisplayedItemRef,
+    },
+    time::DEFAULT_TIMELINE_NAME,
+};
 pub struct DrawingContext<'a> {
     pub painter: &'a mut Painter,
     pub cfg: &'a DrawConfig,
@@ -316,9 +319,12 @@ impl State {
         if self.show_statusbar() {
             self.add_statusbar_panel(ctx, &self.waves, &mut msgs);
         }
-        if let Some(waves) = &self.waves {
-            if self.show_overview() && !waves.displayed_items_order.is_empty() {
-                self.add_overview_panel(ctx, waves, &mut msgs);
+
+        if let OverviewLocation::Window = self.config.layout.overview_location {
+            if let Some(waves) = self.waves.as_ref() {
+                if self.show_overview() && !waves.displayed_items_order.is_empty() {
+                    self.add_overview_panel(ctx, waves, &mut msgs);
+                }
             }
         }
 
@@ -381,6 +387,10 @@ impl State {
                     .show(ctx, |ui| {
                         ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                         self.handle_pointer_in_ui(ui, &mut msgs);
+                        if self.config.layout.show_default_timeline() {
+                            ui.label(RichText::new(DEFAULT_TIMELINE_NAME).italics());
+                        }
+
                         let response = ScrollArea::both()
                             .vertical_scroll_offset(scroll_offset)
                             .show(ui, |ui| {
@@ -460,8 +470,21 @@ impl State {
                 ctx.style_mut(|style| {
                     style.visuals.widgets.noninteractive.bg_stroke = std_stroke;
                 });
+
+                if let OverviewLocation::Canvas = self.config.layout.overview_location {
+                    if self.show_overview()
+                        && !self
+                            .waves
+                            .as_ref()
+                            .unwrap()
+                            .displayed_items_order
+                            .is_empty()
+                    {
+                        self.add_overview_panel(ctx, self.waves.as_ref().unwrap(), &mut msgs);
+                    }
+                }
             }
-        };
+        }
 
         if self.waves.is_none()
             || self

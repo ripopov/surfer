@@ -161,7 +161,6 @@ pub enum Message {
     /// Take note that the specified translator errored on a `translates` call on the
     /// specified variable
     BlacklistTranslator(VariableRef, String),
-    ToggleSidePanel,
     ShowCommandPrompt(Option<String>),
     FileDropped(DroppedFile),
     #[serde(skip)]
@@ -196,6 +195,7 @@ pub enum Message {
     },
     GoToTime(Option<BigInt>, usize),
     ToggleMenu,
+    ToggleSidePanel,
     ToggleToolbar,
     ToggleOverview,
     ToggleStatusbar,
@@ -203,6 +203,7 @@ pub enum Message {
     ToggleDirection,
     ToggleEmptyScopes,
     ToggleParametersInScopes,
+    ToggleTimeline,
     SetTimeUnit(TimeUnit),
     SetTimeStringFormatting(Option<TimeStringFormatting>),
     CommandPromptClear,

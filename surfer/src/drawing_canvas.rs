@@ -716,6 +716,7 @@ impl State {
                         last_edge = *current_edge;
                     }
                 }
+
                 let zero_y = to_screen.transform_pos(Pos2::ZERO).y;
                 for (idx, drawing_info) in waves.drawing_infos.iter().enumerate() {
                     // We draw in absolute coords, but the variable offset in the y
@@ -1033,6 +1034,23 @@ impl State {
             &mut ctx,
             viewport_idx,
         );
+
+        if self.config.layout.show_default_timeline() {
+            //let row_height = ui.text_style_height(&egui::TextStyle::Button);
+            let row_height = 14.362501;
+
+            let r = Rect {
+                min: Pos2::ZERO,
+                max: Pos2 {
+                    x: response.rect.max.x,
+                    y: row_height,
+                },
+            };
+            ctx.painter
+                .rect_filled(r, 0.0, self.config.theme.canvas_colors.background);
+            self.draw_default_timeline(waves, &ctx, viewport_idx, frame_width, &cfg);
+        }
+
         self.handle_canvas_context_menu(response, waves, to_screen, &mut ctx, msgs, viewport_idx);
     }
 

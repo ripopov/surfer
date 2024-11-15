@@ -14,7 +14,6 @@ use project_root::get_project_root;
 use skia_safe::EncodedImageFormat;
 use test_log::test;
 
-use crate::wave_data::ScopeType;
 use crate::{
     clock_highlighting::ClockHighlightType,
     config::{HierarchyStyle, SurferConfig},
@@ -26,6 +25,7 @@ use crate::{
     wave_source::LoadOptions,
     Message, MoveDir, StartupParams, State, WaveSource,
 };
+use crate::{config::OverviewLocation, wave_data::ScopeType};
 use crate::{
     graphics::Direction,
     wave_container::{ScopeRefExt, VariableRefExt},
@@ -79,6 +79,8 @@ pub(crate) fn render_and_compare_inner(
 
     let mut state = state();
     state.config.layout.show_statusbar = false;
+    // disable the default timeline (except if it was toggled in the test case)
+    state.config.layout.show_default_timeline = !state.config.layout.show_default_timeline;
 
     let size_i = (size.x as i32, size.y as i32);
 
@@ -606,6 +608,33 @@ snapshot_ui! {resizing_the_canvas_redraws, || {
 
     state
 }}
+
+snapshot_ui! {window_wide_overview_works, || {
+    let mut state = State::new_default_config().unwrap().with_params(StartupParams {
+        waves: Some(WaveSource::File(get_project_root().unwrap().join("examples/counter.vcd").try_into().unwrap())),
+        spade_top: None,
+        spade_state: None,
+        startup_commands: vec![]
+    });
+    state.config.layout.overview_location = OverviewLocation::Window;
+
+    loop {
+        state.handle_async_messages();
+        state.handle_batch_commands();
+        if state.waves_fully_loaded() {
+            break;
+        }
+    }
+
+    state.update(Message::AddScope(ScopeRef::from_strs(&["tb"]), false));
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state
+}}
+
+snapshot_ui_with_file_and_msgs! {default_timeline_works, "examples/counter.vcd", [
+    Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
+    Message::ToggleTimeline,
+]}
 
 snapshot_ui_with_file_and_msgs! {clock_pulses_render_line, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
