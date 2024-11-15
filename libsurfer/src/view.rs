@@ -202,7 +202,7 @@ impl eframe::App for State {
         self.handle_async_messages();
         self.handle_batch_commands();
         #[cfg(target_arch = "wasm32")]
-        self.handle_wasm_external_messages();
+        self.handle_wasm_queries();
 
         let viewport_is_moving = if let Some(waves) = &mut self.waves {
             let mut is_moving = false;

@@ -13,14 +13,17 @@ use tokio::{
 
 use color_eyre::{eyre::Context, Result};
 use log::{error, info, trace, warn};
-use num::{bigint::ToBigInt, BigUint};
+use num::{
+    bigint::{ToBigInt, ToBigUint},
+    BigUint,
+};
 use serde::Deserialize;
 use surfer_translation_types::VariableEncoding;
 
 use crate::wave_container::ScopeRefExt;
 use crate::{
     cxxrtl::{
-        command::{CxxrtlCommand, Diagnostic},
+        command::CxxrtlCommand,
         cs_message::CSMessage,
         query_container::QueryContainer,
         sc_message::{
@@ -72,13 +75,15 @@ impl CxxrtlWorker {
                 count = self.stream.read(&mut buf) => {
                     match count {
                         Ok(count) => {
-                            let msg = self.process_stream(count, &mut buf).await.map_err(|e| {
-                                error!("Failed to process cxxrtl message ({e:#?})");
-                            })
-                            .ok()
-                            .flatten();
-                            if let Some(m) = msg {
-                                self.handle_scmessage(m).await;
+                            match self.process_stream(count, &mut buf).await {
+                                Ok(msgs) => {
+                                    for msg in msgs {
+                                        self.handle_scmessage(msg).await;
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to process cxxrtl message ({e:#?})");
+                                }
                             }
                         },
                         Err(e) => {
@@ -122,23 +127,27 @@ impl CxxrtlWorker {
                 trace!("Got event {e:?} from cxxrtl");
                 match e {
                     Event::simulation_paused { time, cause: _ } => {
-                        self.data.write().await.simulation_status =
-                            CachedData::Filled(Arc::new(CxxrtlSimulationStatus {
-                                status: SimulationStatusType::paused,
-                                latest_time: time,
-                            }));
+                        let mut data = self.data.write().await;
+                        data.on_simulation_status_update(CxxrtlSimulationStatus {
+                            status: SimulationStatusType::paused,
+                            latest_time: time,
+                        });
                     }
                     Event::simulation_finished { time } => {
-                        self.data.write().await.simulation_status =
-                            CachedData::Filled(Arc::new(CxxrtlSimulationStatus {
-                                status: SimulationStatusType::finished,
-                                latest_time: time,
-                            }));
+                        let mut data = self.data.write().await;
+                        data.on_simulation_status_update(CxxrtlSimulationStatus {
+                            status: SimulationStatusType::finished,
+                            latest_time: time,
+                        });
                     }
                 }
                 if let Some(ctx) = crate::EGUI_CONTEXT.read().unwrap().as_ref() {
                     ctx.request_repaint();
                 }
+            }
+            SCMessage::error(e) => {
+                trace!("Got error {e:?} from cxxrtl");
+                error!("CXXRTL server reported an error:\n\t{}", e.message)
             }
         }
     }
@@ -147,14 +156,16 @@ impl CxxrtlWorker {
         &mut self,
         count: usize,
         buf: &mut [u8; 1024],
-    ) -> Result<Option<SCMessage>> {
+    ) -> Result<Vec<SCMessage>> {
         if count != 0 {
             self.read_buf
                 .write_all(&buf[0..count])
                 .context("Failed to read from cxxrtl tcp socket")?;
         }
 
-        if let Some(idx) = self
+        let mut new_messages = vec![];
+
+        while let Some(idx) = self
             .read_buf
             .iter()
             .enumerate()
@@ -173,10 +184,10 @@ impl CxxrtlWorker {
 
             trace!("cxxrtl: S>C: {decoded:?}");
 
-            Ok(Some(decoded))
-        } else {
-            Ok(None)
+            new_messages.push(decoded)
         }
+
+        Ok(new_messages)
     }
 }
 
@@ -198,6 +209,17 @@ pub enum CachedData<T> {
 impl<T> CachedData<T> {
     fn empty() -> Self {
         Self::Uncached { prev: None }
+    }
+
+    fn make_uncached(&self) -> Self {
+        // Since the internals here are all Arc, clones are cheap
+        match &self {
+            CachedData::Uncached { prev } => CachedData::Uncached { prev: prev.clone() },
+            CachedData::Waiting { prev } => CachedData::Uncached { prev: prev.clone() },
+            CachedData::Filled(prev) => CachedData::Uncached {
+                prev: Some(prev.clone()),
+            },
+        }
     }
 
     pub fn filled(t: T) -> Self {
@@ -247,12 +269,14 @@ pub struct CxxrtlData {
 impl CxxrtlData {
     fn on_simulation_status_update(&mut self, status: CxxrtlSimulationStatus) {
         self.simulation_status = CachedData::filled(status);
+        let _ = self.msg_channel.send(Message::InvalidateDrawCommands);
         self.invalidate_query_result();
     }
 
     fn invalidate_query_result(&mut self) {
-        self.query_result = CachedData::empty();
-        self.interval_query_cache.invalidate();
+        self.query_result = self.query_result.make_uncached();
+        let _ = self.msg_channel.send(Message::InvalidateDrawCommands);
+        // self.interval_query_cache.invalidate();
     }
 }
 
@@ -331,27 +355,30 @@ impl CxxrtlContainer {
         block_on(self.data.write())
             .scopes_cache
             .fetch_if_needed(|| {
-                self.run_command(CxxrtlCommand::list_scopes, |response, data| {
-                    expect_response!(CommandResponse::list_scopes { scopes }, response);
+                self.run_command(
+                    CxxrtlCommand::list_scopes { scope: None },
+                    |response, data| {
+                        expect_response!(CommandResponse::list_scopes { scopes }, response);
 
-                    let scopes = scopes
-                        .into_iter()
-                        .map(|(name, s)| {
-                            (
-                                ScopeRef {
-                                    strs: name
-                                        .split(' ')
-                                        .map(std::string::ToString::to_string)
-                                        .collect(),
-                                    id: ScopeId::None,
-                                },
-                                s,
-                            )
-                        })
-                        .collect();
+                        let scopes = scopes
+                            .into_iter()
+                            .map(|(name, s)| {
+                                (
+                                    ScopeRef {
+                                        strs: name
+                                            .split(' ')
+                                            .map(std::string::ToString::to_string)
+                                            .collect(),
+                                        id: ScopeId::None,
+                                    },
+                                    s,
+                                )
+                            })
+                            .collect();
 
-                    data.scopes_cache = CachedData::filled(scopes);
-                });
+                        data.scopes_cache = CachedData::filled(scopes);
+                    },
+                );
             })
             .unwrap_or_else(|| Arc::new(HashMap::new()))
     }
@@ -636,9 +663,20 @@ impl CxxrtlContainer {
     }
 
     pub fn unpause(&self) {
+        let duration = self
+            .raw_simulation_status()
+            .map(|s| {
+                CxxrtlTimestamp::from_femtoseconds(
+                    s.latest_time.as_femtoseconds() + 100_000_000u32.to_biguint().unwrap(),
+                )
+            })
+            .unwrap_or_else(|| {
+                CxxrtlTimestamp::from_femtoseconds(100_000_000u32.to_biguint().unwrap())
+            });
+
         let cmd = CxxrtlCommand::run_simulation {
-            until_time: None,
-            until_diagnostics: vec![Diagnostic::print],
+            until_time: Some(duration),
+            until_diagnostics: vec![],
             sample_item_values: true,
         };
 
