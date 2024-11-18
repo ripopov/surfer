@@ -225,6 +225,14 @@ impl<T> CachedData<T> {
     pub fn filled(t: T) -> Self {
         Self::Filled(Arc::new(t))
     }
+
+    fn get(&self) -> Option<Arc<T>> {
+        match self {
+            CachedData::Uncached { prev } => prev.clone(),
+            CachedData::Waiting { prev } => prev.clone(),
+            CachedData::Filled(val) => Some(val.clone()),
+        }
+    }
 }
 
 impl<T> CachedData<T>
@@ -254,8 +262,11 @@ pub struct CxxrtlData {
     all_items_cache: CachedData<HashMap<VariableRef, CxxrtlItem>>,
 
     /// We use the CachedData system to keep track of if we have sent a query request,
-    /// but the actual data is stored in the interval_query_cache
-    query_result: CachedData<()>,
+    /// but the actual data is stored in the interval_query_cache.
+    ///
+    /// The held value in the query result is the end timestamp of the current current
+    /// interval_query_cache
+    query_result: CachedData<CxxrtlTimestamp>,
     interval_query_cache: QueryContainer,
 
     loaded_signals: Vec<VariableRef>,
@@ -559,6 +570,13 @@ impl CxxrtlContainer {
             }))
     }
 
+    pub fn max_displayed_timestamp(&self) -> Option<CxxrtlTimestamp> {
+        block_on(self.data.read())
+            .query_result
+            .get()
+            .map(|t| (*t).clone())
+    }
+
     pub fn max_timestamp(&mut self) -> Option<CxxrtlTimestamp> {
         self.raw_simulation_status().map(|s| s.latest_time)
     }
@@ -584,7 +602,7 @@ impl CxxrtlContainer {
 
                 s.run_command(
                     CxxrtlCommand::query_interval {
-                        interval: (CxxrtlTimestamp::zero(), max_timestamp),
+                        interval: (CxxrtlTimestamp::zero(), max_timestamp.clone()),
                         collapse: true,
                         items: Some(DEFAULT_REFERENCE.to_string()),
                         item_values_encoding: "base64(u32)",
@@ -593,7 +611,7 @@ impl CxxrtlContainer {
                     move |response, data| {
                         expect_response!(CommandResponse::query_interval { samples }, response);
 
-                        data.query_result = CachedData::filled(());
+                        data.query_result = CachedData::filled(max_timestamp);
                         data.interval_query_cache.populate(
                             loaded_signals,
                             info,
