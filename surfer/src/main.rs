@@ -27,6 +27,7 @@ mod overview;
 mod remote;
 mod state_util;
 mod statusbar;
+mod svloader;
 #[cfg(test)]
 mod tests;
 mod time;
@@ -48,7 +49,6 @@ mod wave_container;
 mod wave_data;
 mod wave_source;
 mod wellen;
-mod svloader;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -554,7 +554,7 @@ impl SystemState {
             timing: RefCell::new(Timing::new()),
             undo_stack: vec![],
             redo_stack: vec![],
-            translator_enums, 
+            translator_enums,
         }
     }
 }
@@ -2173,11 +2173,13 @@ impl State {
             Message::EnumMapLoaded(time, _options, enum_map) => {
                 info!("Loaded enum map in {:?}", time.elapsed());
                 for (name, key_value_pair) in enum_map.iter() {
-                    let mut cur_hash_map:HashMap<String, String> = HashMap::new();
+                    let mut cur_hash_map: HashMap<String, String> = HashMap::new();
                     for (k, v) in key_value_pair.iter() {
                         cur_hash_map.insert(k.clone(), v.clone());
                     }
-                    self.sys.translator_enums.insert(name.clone(), cur_hash_map.clone());
+                    self.sys
+                        .translator_enums
+                        .insert(name.clone(), cur_hash_map.clone());
                 }
                 // Send message to reload config
                 self.update(Message::ReloadConfig);

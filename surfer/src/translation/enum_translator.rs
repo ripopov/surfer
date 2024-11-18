@@ -3,8 +3,8 @@ use crate::translation::{TranslationPreference, ValueKind, VariableInfo};
 use crate::wave_container::{ScopeId, VarId, VariableMeta};
 use color_eyre::Result;
 use std::borrow::Cow;
-use surfer_translation_types::{TranslationResult, Translator, ValueRepr, VariableValue};
 use std::collections::HashMap;
+use surfer_translation_types::{TranslationResult, Translator, ValueRepr, VariableValue};
 
 pub struct EnumTranslator {
     enum_maps: HashMap<String, HashMap<String, String>>,
@@ -52,10 +52,10 @@ impl Translator<VarId, ScopeId, Message> for EnumTranslator {
                 VariableValue::String(s) => Cow::Borrowed(s),
             };
             let (kind, name) = meta
-            .enum_map
-            .get(str_value.as_str())
-            .map(|s| (ValueKind::Normal, s.to_string()))
-            .unwrap_or_else(|| (ValueKind::Warn, format!("ERROR ({})", str_value)));
+                .enum_map
+                .get(str_value.as_str())
+                .map(|s| (ValueKind::Normal, s.to_string()))
+                .unwrap_or_else(|| (ValueKind::Warn, format!("ERROR ({})", str_value)));
 
             Ok(TranslationResult {
                 val: ValueRepr::String(name),
@@ -63,7 +63,6 @@ impl Translator<VarId, ScopeId, Message> for EnumTranslator {
                 subfields: vec![],
             })
         }
-
     }
 
     fn variable_info(&self, _variable: &VariableMeta) -> color_eyre::Result<VariableInfo> {

@@ -230,8 +230,8 @@ impl State {
     }
 
     pub fn load_enumerates_from_sv(
-        &mut self, 
-        filename: Utf8PathBuf, 
+        &mut self,
+        filename: Utf8PathBuf,
         load_options: LoadOptions,
     ) -> Result<()> {
         info!("Loading enumerates from .sv file: {filename}");
@@ -258,7 +258,7 @@ impl State {
             source_copy,
         )));
         Ok(())
-    }    
+    }
 
     pub fn load_from_data(&mut self, data: Vec<u8>, load_options: LoadOptions) -> Result<()> {
         self.load_from_bytes(WaveSource::Data, data, load_options);

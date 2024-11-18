@@ -6,9 +6,9 @@ use emath::{Pos2, Vec2};
 use ftr_parser::types::Transaction;
 use num::BigInt;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use surver::Status;
-use std::collections::HashMap;
 
 use crate::graphics::{Graphic, GraphicId};
 use crate::transaction_container::{
@@ -154,7 +154,11 @@ pub enum Message {
         LoadOptions,
     ),
     #[serde(skip)]
-    EnumMapLoaded(web_time::Instant, LoadOptions, #[derivative(Debug = "ignore")] HashMap<String, HashMap<String, String>>),
+    EnumMapLoaded(
+        web_time::Instant,
+        LoadOptions,
+        #[derivative(Debug = "ignore")] HashMap<String, HashMap<String, String>>,
+    ),
     #[serde(skip)]
     Error(color_eyre::eyre::Error),
     #[serde(skip)]
