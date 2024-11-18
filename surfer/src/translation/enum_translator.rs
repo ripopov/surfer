@@ -12,9 +12,7 @@ pub struct EnumTranslator {
 
 impl EnumTranslator {
     pub fn new(enum_maps: HashMap<String, HashMap<String, String>>) -> Self {
-        EnumTranslator {
-            enum_maps: enum_maps,
-        }
+        EnumTranslator { enum_maps }
     }
 }
 
