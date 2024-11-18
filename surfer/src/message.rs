@@ -6,6 +6,7 @@ use emath::{Pos2, Vec2};
 use ftr_parser::types::Transaction;
 use num::BigInt;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use surver::Status;
 
@@ -153,6 +154,12 @@ pub enum Message {
         WaveFormat,
         #[derivative(Debug = "ignore")] TransactionContainer,
         LoadOptions,
+    ),
+    #[serde(skip)]
+    EnumMapLoaded(
+        web_time::Instant,
+        LoadOptions,
+        #[derivative(Debug = "ignore")] HashMap<String, HashMap<String, String>>,
     ),
     #[serde(skip)]
     Error(color_eyre::eyre::Error),
