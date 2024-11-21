@@ -20,10 +20,10 @@ use crate::{clock_highlighting::ClockHighlightType, variable_name_type::Variable
 
 #[derive(Debug, Deserialize, Display, PartialEq, Eq, Sequence)]
 pub enum HierarchyStyle {
-    #[display(fmt = "Separate")]
+    #[display("Separate")]
     Separate,
 
-    #[display(fmt = "Tree")]
+    #[display("Tree")]
     Tree,
 }
 
@@ -41,11 +41,11 @@ impl From<String> for HierarchyStyle {
 #[derive(Debug, Deserialize, Display, PartialEq, Eq, Sequence)]
 pub enum ArrowKeyBindings {
     /// The left/right arrow keys step to the next edge
-    #[display(fmt = "Edge")]
+    #[display("Edge")]
     Edge,
 
     /// The left/right arrow keys scroll the viewport left/right
-    #[display(fmt = "Scroll")]
+    #[display("Scroll")]
     Scroll,
 }
 
@@ -383,7 +383,7 @@ impl SurferTheme {
     pub fn new(theme_name: Option<String>) -> Result<Self> {
         use color_eyre::eyre::anyhow;
 
-        let (mut theme, theme_names) = Self::generate_defaults(&theme_name);
+        let (theme, _) = Self::generate_defaults(&theme_name);
 
         let theme = theme.set_override("theme_names", all_theme_names())?;
 
