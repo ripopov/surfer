@@ -6,7 +6,6 @@ use std::{
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
     sync::mpsc,
     sync::RwLock,
 };
@@ -20,7 +19,7 @@ use num::{
 use serde::Deserialize;
 use surfer_translation_types::VariableEncoding;
 
-use crate::wave_container::ScopeRefExt;
+use crate::{cxxrtl::io_worker::CxxrtlWorker, wave_container::ScopeRefExt};
 use crate::{
     cxxrtl::{
         command::CxxrtlCommand,
@@ -40,6 +39,8 @@ use crate::{
 
 const DEFAULT_REFERENCE: &str = "ALL_VARIABLES";
 
+pub type Callback = Box<dyn FnOnce(CommandResponse, &mut CxxrtlData) + Sync + Send>;
+
 #[derive(Deserialize, Debug, Clone)]
 pub(crate) struct CxxrtlScope {}
 
@@ -47,151 +48,6 @@ pub(crate) struct CxxrtlScope {}
 pub struct CxxrtlItem {
     pub width: u32,
 }
-
-pub struct CxxrtlWorker {
-    stream: TcpStream,
-    read_buf: VecDeque<u8>,
-
-    command_channel: mpsc::Receiver<(CxxrtlCommand, Callback)>,
-    callback_queue: VecDeque<Callback>,
-    data: Arc<RwLock<CxxrtlData>>,
-}
-
-impl CxxrtlWorker {
-    async fn start(mut self) {
-        info!("cxxrtl worker is up-and-running");
-        let mut buf = [0; 1024];
-        loop {
-            tokio::select! {
-                rx = self.command_channel.recv() => {
-                    if let Some((command, callback)) = rx {
-                        if let Err(e) =  self.send_message(CSMessage::command(command)).await {
-                                error!("Failed to send message {e:#?}");
-                            } else {
-                                self.callback_queue.push_back(callback);
-                            }
-                    }
-                }
-                count = self.stream.read(&mut buf) => {
-                    match count {
-                        Ok(count) => {
-                            match self.process_stream(count, &mut buf).await {
-                                Ok(msgs) => {
-                                    for msg in msgs {
-                                        self.handle_scmessage(msg).await;
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Failed to process cxxrtl message ({e:#?})");
-                                }
-                            }
-                        },
-                        Err(e) => {
-                            error!("Failed to read bytes from cxxrtl {e:#?}. Shutting down client");
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    async fn send_message(&mut self, message: CSMessage) -> Result<()> {
-        let encoded = serde_json::to_string(&message)
-            .with_context(|| "Failed to encode greeting message".to_string())?;
-        self.stream.write_all(encoded.as_bytes()).await?;
-        self.stream.write_all(&[b'\0']).await?;
-
-        trace!("cxxrtl: C>S: {encoded}");
-
-        Ok(())
-    }
-
-    async fn handle_scmessage(&mut self, message: SCMessage) {
-        match message {
-            SCMessage::response(r) => {
-                if let Some(cb) = self.callback_queue.pop_front() {
-                    let mut w = self.data.write().await;
-                    cb(r, &mut w);
-                    if let Some(ctx) = crate::EGUI_CONTEXT.read().unwrap().as_ref() {
-                        ctx.request_repaint();
-                    }
-                } else {
-                    warn!("Received a response ({r:?}) without a corresponding callback");
-                }
-            }
-            SCMessage::greeting { .. } => {
-                info!("Received greting from cxxrtl");
-            }
-            SCMessage::event(e) => {
-                trace!("Got event {e:?} from cxxrtl");
-                match e {
-                    Event::simulation_paused { time, cause: _ } => {
-                        let mut data = self.data.write().await;
-                        data.on_simulation_status_update(CxxrtlSimulationStatus {
-                            status: SimulationStatusType::paused,
-                            latest_time: time,
-                        });
-                    }
-                    Event::simulation_finished { time } => {
-                        let mut data = self.data.write().await;
-                        data.on_simulation_status_update(CxxrtlSimulationStatus {
-                            status: SimulationStatusType::finished,
-                            latest_time: time,
-                        });
-                    }
-                }
-                if let Some(ctx) = crate::EGUI_CONTEXT.read().unwrap().as_ref() {
-                    ctx.request_repaint();
-                }
-            }
-            SCMessage::error(e) => {
-                trace!("Got error {e:?} from cxxrtl");
-                error!("CXXRTL server reported an error:\n\t{}", e.message)
-            }
-        }
-    }
-
-    async fn process_stream(
-        &mut self,
-        count: usize,
-        buf: &mut [u8; 1024],
-    ) -> Result<Vec<SCMessage>> {
-        if count != 0 {
-            self.read_buf
-                .write_all(&buf[0..count])
-                .context("Failed to read from cxxrtl tcp socket")?;
-        }
-
-        let mut new_messages = vec![];
-
-        while let Some(idx) = self
-            .read_buf
-            .iter()
-            .enumerate()
-            .find(|(_i, c)| **c == b'\0')
-        {
-            let message = self.read_buf.drain(0..idx.0).collect::<Vec<_>>();
-            // The newline should not be part of this or the next message message
-            self.read_buf.pop_front();
-
-            let decoded = serde_json::from_slice(&message).with_context(|| {
-                format!(
-                    "Failed to decode message from cxxrtl. Message: '{}'",
-                    String::from_utf8_lossy(&message)
-                )
-            })?;
-
-            trace!("cxxrtl: S>C: {decoded:?}");
-
-            new_messages.push(decoded)
-        }
-
-        Ok(new_messages)
-    }
-}
-
-type Callback = Box<dyn FnOnce(CommandResponse, &mut CxxrtlData) + Sync + Send>;
 
 /// A piece of data which we cache from Cxxrtl
 pub enum CachedData<T> {
@@ -278,13 +134,13 @@ pub struct CxxrtlData {
 }
 
 impl CxxrtlData {
-    fn on_simulation_status_update(&mut self, status: CxxrtlSimulationStatus) {
+    pub fn on_simulation_status_update(&mut self, status: CxxrtlSimulationStatus) {
         self.simulation_status = CachedData::filled(status);
         let _ = self.msg_channel.send(Message::InvalidateDrawCommands);
         self.invalidate_query_result();
     }
 
-    fn invalidate_query_result(&mut self) {
+    pub fn invalidate_query_result(&mut self) {
         self.query_result = self.query_result.make_uncached();
         let _ = self.msg_channel.send(Message::InvalidateDrawCommands);
         // self.interval_query_cache.invalidate();
@@ -310,18 +166,18 @@ pub struct CxxrtlContainer {
 }
 
 impl CxxrtlContainer {
-    pub fn new(addr: &str, msg_channel: std::sync::mpsc::Sender<Message>) -> Result<Self> {
-        info!("Setting up TCP stream to {addr}");
-        let mut stream = std::net::TcpStream::connect(addr)
-            .with_context(|| format!("Failed to connect to {addr}"))?;
-        info!("Done setting up TCP stream");
-
+    async fn new(
+        read: impl AsyncReadExt + Unpin + Send + 'static,
+        mut write: impl AsyncWriteExt + Unpin + Send + 'static,
+        msg_channel: std::sync::mpsc::Sender<Message>,
+    ) -> Result<Self> {
         let greeting = serde_json::to_string(&CSMessage::greeting { version: 0 })
             .with_context(|| "Failed to encode greeting message".to_string())?;
-        stream.write_all(greeting.as_bytes())?;
-        stream.write_all(&[b'\0'])?;
 
-        trace!("C>S: {greeting}");
+        trace!("Sending greeting {greeting}");
+        write.write_all(greeting.as_bytes()).await?;
+        write.write_all(&[b'\0']).await?;
+        write.flush().await?;
 
         let data = Arc::new(RwLock::new(CxxrtlData {
             scopes_cache: CachedData::empty(),
@@ -338,11 +194,10 @@ impl CxxrtlContainer {
         let (tx, rx) = mpsc::channel(100);
 
         let data_ = data.clone();
-        let stream = TcpStream::from_std(stream)
-            .with_context(|| "Failed to turn std stream into tokio stream")?;
         tokio::spawn(async move {
             CxxrtlWorker {
-                stream,
+                read,
+                write,
                 read_buf: VecDeque::new(),
                 command_channel: rx,
                 data: data_,
@@ -360,6 +215,40 @@ impl CxxrtlContainer {
         info!("cxxrtl connected");
 
         Ok(result)
+    }
+
+    pub async fn new_tcp(
+        addr: &str,
+        msg_channel: std::sync::mpsc::Sender<Message>,
+    ) -> Result<Self> {
+        let stream = tokio::net::TcpStream::connect(addr)
+            .await
+            .with_context(|| format!("Failed to connect to {addr}"))?;
+
+        let (read, write) = tokio::io::split(stream);
+
+        let result = Self::new(read, write, msg_channel).await;
+
+        result
+    }
+
+    // TODO: Replace the channel with a tokio channel
+    pub async fn new_stdio(
+        binary: &str,
+        msg_channel: std::sync::mpsc::Sender<Message>,
+    ) -> Result<Self> {
+        let mut child = tokio::process::Command::new(binary)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .context("Failed to spawn {binary}")?;
+
+        Self::new(
+            child.stdout.take().unwrap(),
+            child.stdin.take().unwrap(),
+            msg_channel,
+        )
+        .await
     }
 
     fn get_scopes(&mut self) -> Arc<HashMap<ScopeRef, CxxrtlScope>> {

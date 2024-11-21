@@ -14,6 +14,7 @@ pub(crate) enum Diagnostic {
 #[serde(tag = "command")]
 #[allow(non_camel_case_types)]
 pub(crate) enum CxxrtlCommand {
+    greet,
     list_scopes {
         scope: Option<String>,
     },
