@@ -11,7 +11,6 @@ use std::time::Duration;
 
 /// Watches a provided file for changes.
 /// Currently, this only works for Unix-like systems (tested on linux and macOS).
-#[cfg(all(not(windows), not(target_arch = "wasm32")))]
 pub struct FileWatcher {
     #[cfg(all(not(windows), not(target_arch = "wasm32")))]
     _inner: notify::RecommendedWatcher,
