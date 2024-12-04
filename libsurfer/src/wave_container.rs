@@ -230,6 +230,15 @@ impl WaveContainer {
         WaveContainer::Empty
     }
 
+    // Perform tasks that are done on the main thread each frame
+    pub fn tick(&self) {
+        match self {
+            WaveContainer::Wellen(_) => {}
+            WaveContainer::Empty => {}
+            WaveContainer::Cxxrtl(c) => c.lock().unwrap().tick(),
+        }
+    }
+
     pub fn wants_anti_aliasing(&self) -> bool {
         match self {
             WaveContainer::Wellen(_) => true,

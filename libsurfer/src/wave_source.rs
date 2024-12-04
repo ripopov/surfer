@@ -31,13 +31,11 @@ use surver::{Status, HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, WELLEN_SURFER_DE
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum CxxrtlKind {
     Tcp { url: String },
-    Stdio { binary: String },
 }
 impl std::fmt::Display for CxxrtlKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             CxxrtlKind::Tcp { url } => write!(f, "cxxrtl+tcp://{url}"),
-            CxxrtlKind::Stdio { binary } => write!(f, "cxxrtl+file://{binary}"),
         }
     }
 }
@@ -65,19 +63,6 @@ pub fn url_to_wavesource(url: &str) -> Option<WaveSource> {
     if url.starts_with("https://") || url.starts_with("http://") {
         info!("Wave source is url");
         Some(WaveSource::Url(url.to_string()))
-    } else if url.starts_with("cxxrtl+file://") {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            info!("Wave source is cxxrtl stdio");
-            Some(WaveSource::Cxxrtl(CxxrtlKind::Stdio {
-                binary: url.replace("cxxrtl+file://", ""),
-            }))
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            log::warn!("Loading waves from cxxrtl is unsupported in WASM builds.");
-            None
-        }
     } else if url.starts_with("cxxrtl+tcp://") {
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -114,7 +99,6 @@ impl Display for WaveSource {
             WaveSource::DragAndDrop(Some(filename)) => write!(f, "Dropped file ({filename})"),
             WaveSource::Url(url) => write!(f, "{url}"),
             WaveSource::Cxxrtl(CxxrtlKind::Tcp { url }) => write!(f, "cxxrtl+tcp://{url}"),
-            WaveSource::Cxxrtl(CxxrtlKind::Stdio { binary }) => write!(f, "cxxrtl+file://{binary}"),
         }
     }
 }
@@ -499,10 +483,7 @@ impl State {
 
         let task = async move {
             let container = match &kind {
-                CxxrtlKind::Tcp { url } => CxxrtlContainer::new_tcp(&url, msg_sender).await,
-                CxxrtlKind::Stdio { binary } => {
-                    CxxrtlContainer::new_stdio(&binary, msg_sender).await
-                }
+                CxxrtlKind::Tcp { url } => CxxrtlContainer::new_tcp(url, msg_sender).await,
             };
 
             match container {
