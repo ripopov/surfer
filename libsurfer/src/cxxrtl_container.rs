@@ -158,7 +158,7 @@ macro_rules! expect_response {
 }
 
 struct CSSender {
-    cs_messages: mpsc::Sender<CSMessage>,
+    cs_messages: mpsc::Sender<String>,
     callback_queue: VecDeque<Callback>,
 }
 
@@ -168,14 +168,16 @@ impl CSSender {
         F: 'static + FnOnce(CommandResponse, &mut CxxrtlData) + Sync + Send,
     {
         self.callback_queue.push_back(Box::new(f));
-        block_on(self.cs_messages.send(CSMessage::command(command))).unwrap();
+        let json = serde_json::to_string(&CSMessage::command(command))
+            .expect("Failed to encode cxxrtl command");
+        block_on(self.cs_messages.send(json)).unwrap();
     }
 }
 
 pub struct CxxrtlContainer {
     data: CxxrtlData,
     sending: CSSender,
-    sc_messages: mpsc::Receiver<SCMessage>,
+    sc_messages: mpsc::Receiver<String>,
     disconnected_reported: bool,
 }
 
@@ -183,12 +185,12 @@ impl CxxrtlContainer {
     async fn new(
         msg_channel: std::sync::mpsc::Sender<Message>,
         sending: CSSender,
-        sc_messages: mpsc::Receiver<SCMessage>,
+        sc_messages: mpsc::Receiver<String>,
     ) -> Result<Self> {
         info!("Sending cxxrtl greeting");
         sending
             .cs_messages
-            .send(CSMessage::greeting { version: 0 })
+            .send(serde_json::to_string(&CSMessage::greeting { version: 0 }).unwrap())
             .await
             .unwrap();
 
@@ -246,46 +248,79 @@ impl CxxrtlContainer {
         result
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub async fn new_wasm_mailbox(msg_channel: std::sync::mpsc::Sender<Message>) -> Result<Self> {
+        use color_eyre::eyre::anyhow;
+
+        use crate::wasm_api::{CXXRTL_CS_HANDLER, CXXRTL_SC_HANDLER};
+
+        let result = Self::new(
+            msg_channel,
+            CSSender {
+                cs_messages: CXXRTL_CS_HANDLER.tx.clone(),
+                callback_queue: VecDeque::new(),
+            },
+            CXXRTL_SC_HANDLER
+                .rx
+                .write()
+                .await
+                .take()
+                .ok_or_else(|| anyhow!("The wasm mailbox has already been consumed."))?,
+        )
+        .await;
+
+        result
+    }
+
     pub fn tick(&mut self) {
         loop {
             match self.sc_messages.try_recv() {
-                Ok(msg) => match msg {
-                    SCMessage::greeting { .. } => {
-                        info!("Received cxxrtl greeting")
-                    }
-                    SCMessage::response(response) => {
-                        if let Some(cb) = self.sending.callback_queue.pop_front() {
-                            cb(response, &mut self.data)
-                        } else {
-                            error!("Got a CXXRTL message with no corresponding callback")
-                        };
-                    }
-                    SCMessage::error(e) => {
-                        error!("CXXRTL error: '{}'", e.message);
-                        self.sending.callback_queue.pop_front();
-                    }
-                    SCMessage::event(event) => {
-                        match event {
-                            Event::simulation_paused { time, cause: _ } => {
-                                self.data
-                                    .on_simulation_status_update(CxxrtlSimulationStatus {
-                                        status: SimulationStatusType::paused,
-                                        latest_time: time,
-                                    });
+                Ok(s) => {
+                    let msg = match serde_json::from_str::<SCMessage>(&s) {
+                        Ok(msg) => msg,
+                        Err(e) => {
+                            error!("Got an unrecognised message from the cxxrtl server {e}");
+                            continue;
+                        }
+                    };
+                    match msg {
+                        SCMessage::greeting { .. } => {
+                            info!("Received cxxrtl greeting")
+                        }
+                        SCMessage::response(response) => {
+                            if let Some(cb) = self.sending.callback_queue.pop_front() {
+                                cb(response, &mut self.data)
+                            } else {
+                                error!("Got a CXXRTL message with no corresponding callback")
+                            };
+                        }
+                        SCMessage::error(e) => {
+                            error!("CXXRTL error: '{}'", e.message);
+                            self.sending.callback_queue.pop_front();
+                        }
+                        SCMessage::event(event) => {
+                            match event {
+                                Event::simulation_paused { time, cause: _ } => {
+                                    self.data
+                                        .on_simulation_status_update(CxxrtlSimulationStatus {
+                                            status: SimulationStatusType::paused,
+                                            latest_time: time,
+                                        });
+                                }
+                                Event::simulation_finished { time } => {
+                                    self.data
+                                        .on_simulation_status_update(CxxrtlSimulationStatus {
+                                            status: SimulationStatusType::finished,
+                                            latest_time: time,
+                                        });
+                                }
                             }
-                            Event::simulation_finished { time } => {
-                                self.data
-                                    .on_simulation_status_update(CxxrtlSimulationStatus {
-                                        status: SimulationStatusType::finished,
-                                        latest_time: time,
-                                    });
+                            if let Some(ctx) = crate::EGUI_CONTEXT.read().unwrap().as_ref() {
+                                ctx.request_repaint();
                             }
                         }
-                        if let Some(ctx) = crate::EGUI_CONTEXT.read().unwrap().as_ref() {
-                            ctx.request_repaint();
-                        }
                     }
-                },
+                }
                 Err(mpsc::error::TryRecvError::Empty) => {
                     break;
                 }
