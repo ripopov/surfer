@@ -5,9 +5,7 @@ pub mod benchmark;
 pub mod clock_highlighting;
 pub mod command_prompt;
 pub mod config;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod cxxrtl;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod cxxrtl_container;
 pub mod data_container;
 pub mod dialog;
@@ -974,8 +972,7 @@ impl State {
                     );
                 }
             }
-            #[cfg(not(target_arch = "wasm32"))]
-            Message::ConnectToCxxrtl(url) => self.connect_to_cxxrtl(url, false),
+            Message::SetupCxxrtl(kind) => self.connect_to_cxxrtl(kind, false),
             Message::SurferServerStatus(_start, server, status) => {
                 self.server_status_to_progress(server, status);
             }
@@ -1260,9 +1257,8 @@ impl State {
                         )
                         .ok();
                     }
-                    WaveSource::Data => {} // can't reload
-                    #[cfg(not(target_arch = "wasm32"))]
-                    WaveSource::CxxrtlTcp(..) => {} // can't reload
+                    WaveSource::Data => {}       // can't reload
+                    WaveSource::Cxxrtl(..) => {} // can't reload
                     WaveSource::DragAndDrop(filename) => {
                         filename.clone().and_then(|filename| {
                             self.load_from_file(
