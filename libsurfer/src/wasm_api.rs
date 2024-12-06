@@ -320,7 +320,7 @@ pub async fn cxxrtl_cs_message() -> Option<String> {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub async fn on_cxxrtl_sc_message(message: String) {
-    CXXRTL_SC_HANDLER.tx.send(message);
+    CXXRTL_SC_HANDLER.tx.send(message).await.unwrap();
 }
 
 impl State {

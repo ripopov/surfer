@@ -276,6 +276,7 @@ impl CxxrtlContainer {
         loop {
             match self.sc_messages.try_recv() {
                 Ok(s) => {
+                    info!("CXXRTL S>C: {s}");
                     let msg = match serde_json::from_str::<SCMessage>(&s) {
                         Ok(msg) => msg,
                         Err(e) => {
@@ -579,6 +580,8 @@ impl CxxrtlContainer {
                     },
                     move |response, data| {
                         expect_response!(CommandResponse::query_interval { samples }, response);
+
+                        info!("Got query_interval response");
 
                         data.query_result = CachedData::filled(max_timestamp);
                         data.interval_query_cache.populate(
