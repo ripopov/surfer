@@ -189,8 +189,6 @@ pub struct CxxrtlContainer {
     sending: CSSender,
     sc_messages: SCReceiver,
     disconnected_reported: bool,
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    msg_channel: std::sync::mpsc::Sender<Message>,
 }
 
 impl CxxrtlContainer {
@@ -223,7 +221,6 @@ impl CxxrtlContainer {
             sc_messages: SCReceiver::new(sc_messages),
             sending,
             disconnected_reported: false,
-            msg_channel,
         };
 
         info!("cxxrtl connected");
