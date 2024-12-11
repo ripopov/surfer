@@ -16,6 +16,7 @@ use tokio::sync::RwLock;
 use wasm_bindgen::prelude::*;
 use web_sys::js_sys;
 
+use crate::cxxrtl::channels::SCSender;
 use crate::cxxrtl::cs_message::CSMessage;
 use crate::displayed_item::DisplayedItemRef;
 use crate::graphics::Anchor;
@@ -45,21 +46,20 @@ lazy_static! {
     pub(crate) static ref CXXRTL_CS_HANDLER: CSHandler = CSHandler::new();
 }
 
-
 struct Callback {
     function: Box<dyn FnOnce(&State) + Send + Sync>,
     executed: tokio::sync::oneshot::Sender<()>,
 }
 
 pub(crate) struct SCHandler {
-    pub tx: mpsc::Sender<String>,
+    pub tx: SCSender,
     pub rx: RwLock<Option<mpsc::Receiver<String>>>,
 }
 impl SCHandler {
     fn new() -> Self {
         let (tx, rx) = mpsc::channel(100);
         Self {
-            tx,
+            tx: SCSender::new(tx),
             rx: RwLock::new(Some(rx)),
         }
     }
@@ -330,7 +330,6 @@ pub async fn on_cxxrtl_sc_message(message: String) {
         OUTSTANDING_TRANSACTIONS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         ctx.request_repaint();
     }
-
 }
 
 impl State {

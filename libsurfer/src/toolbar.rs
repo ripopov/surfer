@@ -69,10 +69,7 @@ impl State {
         // TODO: Remove this debug thing
         let transactions = OUTSTANDING_TRANSACTIONS.load(std::sync::atomic::Ordering::SeqCst);
         if transactions != 0 {
-            ui.label(format!(
-                "Outstanding transactions: {}",
-                transactions
-            ));
+            ui.label(format!("Outstanding transactions: {}", transactions));
         }
     }
 

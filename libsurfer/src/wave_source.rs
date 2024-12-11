@@ -513,7 +513,10 @@ impl State {
             }
             .unwrap()
         };
-        spawn!(task);
+        #[cfg(not(target_arch = "wasm32"))]
+        futures::executor::block_on(task);
+        #[cfg(target_arch = "wasm32")]
+        wasm_bindgen_futures::spawn_local(task);
     }
 
     pub fn load_wave_from_bytes(
