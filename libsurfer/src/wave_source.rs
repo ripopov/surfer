@@ -4,10 +4,8 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Mutex;
 
-#[cfg(not(target_arch = "wasm32"))]
 use crate::cxxrtl_container::CxxrtlContainer;
 use crate::wasm_util::{perform_async_work, perform_work, sleep_ms};
 use camino::{Utf8Path, Utf8PathBuf};
@@ -22,11 +20,24 @@ use web_time::Instant;
 
 use crate::message::{AsyncJob, BodyResult, HeaderResult};
 use crate::transaction_container::TransactionContainer;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::wave_container::WaveContainer;
 use crate::wellen::{LoadSignalPayload, LoadSignalsCmd, LoadSignalsResult};
 use crate::{message::Message, State};
 use surver::{Status, HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, WELLEN_SURFER_DEFAULT_OPTIONS};
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub enum CxxrtlKind {
+    Tcp { url: String },
+    Mailbox,
+}
+impl std::fmt::Display for CxxrtlKind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CxxrtlKind::Tcp { url } => write!(f, "cxxrtl+tcp://{url}"),
+            CxxrtlKind::Mailbox => write!(f, "cxxrtl mailbox"),
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum WaveSource {
@@ -34,8 +45,7 @@ pub enum WaveSource {
     Data,
     DragAndDrop(Option<Utf8PathBuf>),
     Url(String),
-    #[cfg(not(target_arch = "wasm32"))]
-    CxxrtlTcp(String),
+    Cxxrtl(CxxrtlKind),
 }
 
 impl WaveSource {
@@ -54,12 +64,14 @@ pub fn url_to_wavesource(url: &str) -> Option<WaveSource> {
     } else if url.starts_with("cxxrtl+tcp://") {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            info!("Wave source is cxxrtl");
-            Some(WaveSource::CxxrtlTcp(url.replace("cxxrtl+tcp://", "")))
+            info!("Wave source is cxxrtl tcp");
+            Some(WaveSource::Cxxrtl(CxxrtlKind::Tcp {
+                url: url.replace("cxxrtl+tcp://", ""),
+            }))
         }
         #[cfg(target_arch = "wasm32")]
         {
-            log::warn!("Loading waves from cxxrtl is unsupported in WASM builds.");
+            log::warn!("Loading waves from cxxrtl via tcp is unsupported in WASM builds.");
             None
         }
     } else {
@@ -84,8 +96,8 @@ impl Display for WaveSource {
             WaveSource::DragAndDrop(None) => write!(f, "Dropped file"),
             WaveSource::DragAndDrop(Some(filename)) => write!(f, "Dropped file ({filename})"),
             WaveSource::Url(url) => write!(f, "{url}"),
-            #[cfg(not(target_arch = "wasm32"))]
-            WaveSource::CxxrtlTcp(url) => write!(f, "{url}"),
+            WaveSource::Cxxrtl(CxxrtlKind::Tcp { url }) => write!(f, "cxxrtl+tcp://{url}"),
+            WaveSource::Cxxrtl(CxxrtlKind::Mailbox) => write!(f, "cxxrtl mailbox"),
         }
     }
 }
@@ -148,6 +160,7 @@ impl LoadProgress {
 
 pub enum LoadProgressStatus {
     Downloading(String),
+    Connecting(String),
     ReadingHeader(WaveSource),
     ReadingBody(WaveSource, u64, Arc<AtomicU64>),
     LoadingVariables(u64),
@@ -262,8 +275,8 @@ impl State {
             // We want to support opening cxxrtl urls using open url and friends,
             // so we'll special case
             #[cfg(not(target_arch = "wasm32"))]
-            Some(WaveSource::CxxrtlTcp(url)) => {
-                self.connect_to_cxxrtl(url, load_options.keep_variables);
+            Some(WaveSource::Cxxrtl(kind)) => {
+                self.connect_to_cxxrtl(kind, load_options.keep_variables);
             }
             // However, if we don't get a cxxrtl url, we want to continue loading this as
             // a url even if it isn't auto detected as a url.
@@ -458,17 +471,37 @@ impl State {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn connect_to_cxxrtl(&mut self, url: String, keep_variables: bool) {
+    pub fn connect_to_cxxrtl(&mut self, kind: CxxrtlKind, keep_variables: bool) {
         let sender = self.sys.channels.msg_sender.clone();
-        let url_ = url.clone();
-        let msg_sender = self.sys.channels.msg_sender.clone();
+
+        self.sys.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::Connecting(
+            format!("{kind}"),
+        )));
+
+        // TODO: This should probably be block_on!
         let task = async move {
-            let container = CxxrtlContainer::new(&url, msg_sender);
+            let container = match &kind {
+                #[cfg(not(target_arch = "wasm32"))]
+                CxxrtlKind::Tcp { url } => {
+                    CxxrtlContainer::new_tcp(url, self.sys.channels.msg_sender.clone()).await
+                }
+                #[cfg(target_arch = "wasm32")]
+                CxxrtlKind::Tcp { .. } => {
+                    error!("Cxxrtl tcp is not supported om wasm");
+                    return;
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                CxxrtlKind::Mailbox => {
+                    error!("CXXRTL mailboxes are only supported on wasm for now");
+                    return;
+                }
+                #[cfg(target_arch = "wasm32")]
+                CxxrtlKind::Mailbox => CxxrtlContainer::new_wasm_mailbox(sender.clone()).await,
+            };
 
             match container {
                 Ok(c) => sender.send(Message::WavesLoaded(
-                    WaveSource::CxxrtlTcp(url),
+                    WaveSource::Cxxrtl(kind),
                     WaveFormat::CxxRtl,
                     Box::new(WaveContainer::Cxxrtl(Mutex::new(c))),
                     LoadOptions {
@@ -478,10 +511,12 @@ impl State {
                 )),
                 Err(e) => sender.send(Message::Error(e)),
             }
+            .unwrap()
         };
-        spawn!(task);
-
-        self.sys.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::Downloading(url_)));
+        #[cfg(not(target_arch = "wasm32"))]
+        futures::executor::block_on(task);
+        #[cfg(target_arch = "wasm32")]
+        wasm_bindgen_futures::spawn_local(task);
     }
 
     pub fn load_wave_from_bytes(
@@ -798,6 +833,12 @@ impl State {
 
 pub fn draw_progress_information(ui: &mut egui::Ui, progress_data: &LoadProgress) {
     match &progress_data.progress {
+        LoadProgressStatus::Connecting(url) => {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.monospace(format!("Connecting {url}"));
+            });
+        }
         LoadProgressStatus::Downloading(url) => {
             ui.horizontal(|ui| {
                 ui.spinner();
