@@ -28,6 +28,7 @@ use crate::wasm_panic;
 use crate::wasm_util;
 use crate::wave_container::VariableRefExt;
 use crate::wave_source::CxxrtlKind;
+use crate::wcp::wcp_handler::WcpMessage;
 use crate::DisplayedItem;
 use crate::Message;
 use crate::StartupParams;
@@ -39,7 +40,9 @@ lazy_static! {
     static ref QUERY_QUEUE: tokio::sync::Mutex<VecDeque<Callback>> =
         tokio::sync::Mutex::new(VecDeque::new());
     pub(crate) static ref CXXRTL_SC_HANDLER: SCHandler = SCHandler::new();
-    pub(crate) static ref CXXRTL_CS_HANDLER: CSHandler = CSHandler::new();
+    pub(crate) static ref CXXRTL_CS_HANDLER: WasmTx<String> = WasmTx::new();
+    pub(crate) static ref WCP_SC_HANDLER: WasmRx<WcpMessage> = WasmRx::new();
+    pub(crate) static ref WCP_CS_HANDLER: WasmTx<WcpMessage> = WasmTx::new();
 }
 
 struct Callback {
@@ -61,16 +64,30 @@ impl SCHandler {
     }
 }
 
-pub(crate) struct CSHandler {
-    pub tx: mpsc::Sender<String>,
-    pub rx: RwLock<mpsc::Receiver<String>>,
+pub(crate) struct WasmTx<T> {
+    pub tx: mpsc::Sender<T>,
+    pub rx: RwLock<mpsc::Receiver<T>>,
 }
-impl CSHandler {
+impl<T> WasmTx<T> {
     fn new() -> Self {
         let (tx, rx) = mpsc::channel(100);
         Self {
             tx,
             rx: RwLock::new(rx),
+        }
+    }
+}
+
+pub(crate) struct WasmRx<T> {
+    pub tx: mpsc::Sender<T>,
+    pub rx: RwLock<Option<mpsc::Receiver<T>>>,
+}
+impl<T> WasmRx<T> {
+    fn new() -> Self {
+        let (tx, rx) = mpsc::channel(100);
+        Self {
+            tx,
+            rx: RwLock::new(Some(rx)),
         }
     }
 }
@@ -289,14 +306,6 @@ pub async fn waves_loaded() -> bool {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub async fn start_cxxrtl() {
-    MESSAGE_QUEUE
-        .lock()
-        .await
-        .push(Message::SetupCxxrtl(CxxrtlKind::Mailbox));
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub async fn spade_loaded() -> bool {
     perform_query(Box::new(move |state| {
         Some(
@@ -313,6 +322,14 @@ pub async fn spade_loaded() -> bool {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub async fn start_cxxrtl() {
+    MESSAGE_QUEUE
+        .lock()
+        .await
+        .push(Message::SetupCxxrtl(CxxrtlKind::Mailbox));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub async fn cxxrtl_cs_message() -> Option<String> {
     CXXRTL_CS_HANDLER.rx.write().await.recv().await
 }
@@ -320,6 +337,32 @@ pub async fn cxxrtl_cs_message() -> Option<String> {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub async fn on_cxxrtl_sc_message(message: String) {
     CXXRTL_SC_HANDLER.tx.send(message).await.unwrap();
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub async fn start_wcp() {
+    MESSAGE_QUEUE.lock().await.push(Message::SetupWasmWCP);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub async fn recv_wcp_cs_message() -> Result<Option<String>, JsError> {
+    WCP_CS_HANDLER
+        .rx
+        .write()
+        .await
+        .recv()
+        .await
+        .map(|msg| serde_json::to_string(&msg))
+        .transpose()
+        .map_err(|e| JsError::new(&format!("{e}")))
+}
+
+// TODO: Unify the names with cxxrtl here
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub async fn send_wcp_sc_message(message: String) -> Result<(), JsError> {
+    let encoded = serde_json::from_str(&message).map_err(|e| JsError::new(&format!("{e}")))?;
+    WCP_SC_HANDLER.tx.send(encoded).await?;
+    Ok(())
 }
 
 impl State {
