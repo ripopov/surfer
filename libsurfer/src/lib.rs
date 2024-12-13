@@ -5,9 +5,7 @@ pub mod benchmark;
 pub mod clock_highlighting;
 pub mod command_prompt;
 pub mod config;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod cxxrtl;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod cxxrtl_container;
 pub mod data_container;
 pub mod dialog;
@@ -54,6 +52,7 @@ pub mod wcp;
 pub mod wellen;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::AtomicU32;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
 
@@ -96,6 +95,14 @@ use crate::wellen::convert_format;
 
 lazy_static! {
     pub static ref EGUI_CONTEXT: RwLock<Option<Arc<egui::Context>>> = RwLock::new(None);
+    /// A number that is non-zero if there are asynchronously triggered operations that
+    /// have been triggered but not successfully completed yet. In practice, if this is
+    /// non-zero, we will re-run the egui update function in order to ensure that we deal
+    /// with the outstanding transactions eventually.
+    /// When incrementing this, it is important to make sure that it gets decremented
+    /// whenever the asynchronous transaction is completed, otherwise we will re-render
+    /// things until program exit
+    pub(crate) static ref OUTSTANDING_TRANSACTIONS: AtomicU32 = AtomicU32::new(0);
 }
 
 pub struct StartupParams {
@@ -985,8 +992,7 @@ impl State {
                     );
                 }
             }
-            #[cfg(not(target_arch = "wasm32"))]
-            Message::ConnectToCxxrtl(url) => self.connect_to_cxxrtl(url, false),
+            Message::SetupCxxrtl(kind) => self.connect_to_cxxrtl(kind, false),
             Message::SurferServerStatus(_start, server, status) => {
                 self.server_status_to_progress(server, status);
             }
@@ -1271,9 +1277,8 @@ impl State {
                         )
                         .ok();
                     }
-                    WaveSource::Data => {} // can't reload
-                    #[cfg(not(target_arch = "wasm32"))]
-                    WaveSource::CxxrtlTcp(..) => {} // can't reload
+                    WaveSource::Data => {}       // can't reload
+                    WaveSource::Cxxrtl(..) => {} // can't reload
                     WaveSource::DragAndDrop(filename) => {
                         filename.clone().and_then(|filename| {
                             self.load_from_file(

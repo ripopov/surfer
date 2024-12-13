@@ -21,7 +21,6 @@ use surfer_translation_types::{
 
 #[cfg(feature = "performance_plot")]
 use crate::benchmark::NUM_PERF_SAMPLES;
-use crate::data_container::VariableType as VarType;
 use crate::displayed_item::{
     draw_rename_window, DisplayedFieldRef, DisplayedItem, DisplayedItemIndex, DisplayedItemRef,
 };
@@ -44,6 +43,7 @@ use crate::{
     Message, MoveDir, State,
 };
 use crate::{config::SurferTheme, wave_container::VariableMeta};
+use crate::{data_container::VariableType as VarType, OUTSTANDING_TRANSACTIONS};
 pub struct DrawingContext<'a> {
     pub painter: &'a mut Painter,
     pub cfg: &'a DrawConfig,
@@ -217,6 +217,10 @@ impl eframe::App for State {
             false
         };
 
+        if let Some(waves) = self.waves.as_ref().and_then(|w| w.inner.as_waves()) {
+            waves.tick()
+        }
+
         if viewport_is_moving {
             self.invalidate_draw_commands();
             ctx.request_repaint();
@@ -236,6 +240,7 @@ impl eframe::App for State {
         if self.sys.continuous_redraw
             || self.sys.progress_tracker.is_some()
             || self.show_performance
+            || OUTSTANDING_TRANSACTIONS.load(std::sync::atomic::Ordering::SeqCst) != 0
         {
             ctx.request_repaint();
         }
