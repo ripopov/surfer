@@ -64,6 +64,7 @@ use displayed_item::DisplayedVariable;
 use eframe::{App, CreationContext};
 use egui::{FontData, FontDefinitions, FontFamily};
 use ftr_parser::types::Transaction;
+use futures::executor::block_on;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use log::{error, info, warn};
@@ -71,6 +72,7 @@ use num::BigInt;
 use serde::Deserialize;
 pub use state::State;
 use surfer_translation_types::Translator;
+use wasm_api::{WCP_CS_HANDLER, WCP_SC_HANDLER};
 use wcp::wcp_handler::{Vecs, WcpMessage};
 
 #[cfg(feature = "performance_plot")]
@@ -202,8 +204,8 @@ struct CachedTransactionDrawData {
 pub struct Channels {
     pub msg_sender: Sender<Message>,
     pub msg_receiver: Receiver<Message>,
-    wcp_s2c_receiver: Option<Receiver<WcpMessage>>,
-    wcp_c2s_sender: Option<Sender<WcpMessage>>,
+    wcp_s2c_receiver: Option<tokio::sync::mpsc::Receiver<WcpMessage>>,
+    wcp_c2s_sender: Option<tokio::sync::mpsc::Sender<WcpMessage>>,
 }
 impl Channels {
     fn new() -> Self {
@@ -1086,7 +1088,7 @@ impl State {
                 if self.sys.wcp_server_load_outstanding {
                     self.sys.wcp_server_load_outstanding = false;
                     self.sys.channels.wcp_c2s_sender.as_ref().map(|ch| {
-                        ch.send(WcpMessage::create_response(
+                        ch.blocking_send(WcpMessage::create_response(
                             "load".to_string(),
                             Vecs::Int(vec![]),
                         ))
@@ -1678,6 +1680,13 @@ impl State {
             #[cfg(not(target_arch = "wasm32"))]
             Message::StopWcpServer => {
                 self.stop_wcp_server();
+            }
+            Message::SetupWasmWCP => {
+                self.sys.channels.wcp_s2c_receiver = block_on(WCP_SC_HANDLER.rx.write()).take();
+                if self.sys.channels.wcp_s2c_receiver.is_none() {
+                    error!("Failed to claim wasm tx, was SetupWasmWCP executed twice?");
+                }
+                self.sys.channels.wcp_c2s_sender = Some(WCP_CS_HANDLER.tx.clone());
             }
             Message::Exit | Message::ToggleFullscreen => {} // Handled in eframe::update
             Message::AddViewport => {
