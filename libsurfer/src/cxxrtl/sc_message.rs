@@ -71,6 +71,12 @@ pub(crate) enum Event {
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(non_camel_case_types)]
+pub(crate) struct Error {
+    pub message: String,
+}
+
+#[derive(Deserialize, Debug)]
 #[serde(tag = "type")]
 #[allow(non_camel_case_types, unused)]
 pub(crate) enum SCMessage {
@@ -81,5 +87,6 @@ pub(crate) enum SCMessage {
         features: Features,
     },
     response(CommandResponse),
+    error(Error),
     event(Event),
 }
