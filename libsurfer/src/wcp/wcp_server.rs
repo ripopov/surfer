@@ -9,8 +9,7 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
-    },
-    time::Duration,
+    }, time::Duration,
 };
 
 use log::{error, info, warn};

@@ -34,6 +34,7 @@ pub struct ItemInfo {
     id: usize,
 }
 
+
 impl State {
     pub fn handle_wcp_commands(&mut self) {
         let Some(receiver) = &mut self.sys.channels.wcp_c2s_receiver else {
