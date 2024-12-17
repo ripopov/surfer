@@ -1,6 +1,6 @@
 use crate::message::Message;
 use crate::tests::snapshot::render_and_compare;
-use crate::wcp::wcp_handler::{WcpCSMessage, WcpCommand};
+use crate::wcp::proto::{WcpCSMessage, WcpCommand};
 use crate::wcp::WcpSCMessage;
 use crate::State;
 
@@ -82,7 +82,7 @@ async fn run_test_client(port: usize, msgs: Vec<WcpCSMessage>, test_done: Arc<At
 
     // FIXME check response content
     // clear screen
-    let _ = serde_json::to_writer(&client, &WcpCSMessage::Command(WcpCommand::Clear));
+    let _ = serde_json::to_writer(&client, &WcpCSMessage::Command(WcpCommand::clear));
     let _ = client.write(b"\0");
     let _ = client.flush();
     for message in msgs.into_iter() {
@@ -167,8 +167,8 @@ macro_rules! wcp_snapshot_with_commands {
 }
 
 wcp_snapshot_with_commands! {add_variables, vec![
-    WcpCommand::Load{source:  "../examples/counter.vcd".to_string()},
-    WcpCommand::AddVariables{names: vec![
+    WcpCommand::load{source:  "../examples/counter.vcd".to_string()},
+    WcpCommand::add_variables{names: vec![
         "tb._tmp",
         "tb.clk",
         "tb.overflow",
@@ -176,38 +176,38 @@ wcp_snapshot_with_commands! {add_variables, vec![
 ]}
 
 wcp_snapshot_with_commands! {add_scope, vec![
-    WcpCommand::Load{source: "../examples/counter.vcd".to_string()},
-    WcpCommand::AddScope{scope: "tb".to_string()}
+    WcpCommand::load{source: "../examples/counter.vcd".to_string()},
+    WcpCommand::add_scope{scope: "tb".to_string()}
 ]}
 
 wcp_snapshot_with_commands! {color_variables, vec![
-    WcpCommand::Load{source:  "../examples/counter.vcd".to_string()},
-    WcpCommand::AddScope{scope: "tb".to_string()},
-    WcpCommand::SetItemColor{id:"3".to_string(), color:"GRAY".to_string()},
-    WcpCommand::SetItemColor{id:"1".to_string(), color:"BLUE".to_string()},
-    WcpCommand::SetItemColor{id:"2".to_string(), color:"YELLOW".to_string()}
+    WcpCommand::load{source:  "../examples/counter.vcd".to_string()},
+    WcpCommand::add_scope{scope: "tb".to_string()},
+    WcpCommand::set_item_color{id:"3".to_string(), color:"GRAY".to_string()},
+    WcpCommand::set_item_color{id:"1".to_string(), color:"BLUE".to_string()},
+    WcpCommand::set_item_color{id:"2".to_string(), color:"YELLOW".to_string()}
 ]}
 
 wcp_snapshot_with_commands! {remove_2_variables, vec![
-    WcpCommand::Load{source: "../examples/counter.vcd".to_string()},
-    WcpCommand::AddScope{scope: "tb".to_string()},
-    WcpCommand::RemoveItems{ids: vec!["1".to_string(), "2".to_string()]},
+    WcpCommand::load{source: "../examples/counter.vcd".to_string()},
+    WcpCommand::add_scope{scope: "tb".to_string()},
+    WcpCommand::remove_items{ids: vec!["1".to_string(), "2".to_string()]},
 ]}
 
 wcp_snapshot_with_commands! {focus_item, vec![
-    WcpCommand::Load{source: "../examples/counter.vcd".to_string()},
-    WcpCommand::AddScope{scope: "tb".to_string()},
-    WcpCommand::FocusItem{id: "2".to_string()}
+    WcpCommand::load{source: "../examples/counter.vcd".to_string()},
+    WcpCommand::add_scope{scope: "tb".to_string()},
+    WcpCommand::focus_item{id: "2".to_string()}
 ]}
 
 wcp_snapshot_with_commands! {clear, vec![
-    WcpCommand::Load{source: "../examples/counter.vcd".to_string()},
-    WcpCommand::AddScope{scope: "tb".to_string()},
-    WcpCommand::Clear
+    WcpCommand::load{source: "../examples/counter.vcd".to_string()},
+    WcpCommand::add_scope{scope: "tb".to_string()},
+    WcpCommand::clear
 ]}
 
 wcp_snapshot_with_commands! {set_viewport_to, vec![
-    WcpCommand::Load{source: "../examples/counter.vcd".to_string()},
-    WcpCommand::AddScope{scope: "tb".to_string()},
-    WcpCommand::SetViewportTo { timestamp: BigInt::from(710) },
+    WcpCommand::load{source: "../examples/counter.vcd".to_string()},
+    WcpCommand::add_scope{scope: "tb".to_string()},
+    WcpCommand::set_viewport_to { timestamp: BigInt::from(710) },
 ]}
