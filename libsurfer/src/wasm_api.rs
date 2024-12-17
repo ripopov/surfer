@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use futures::executor::block_on;
 use lazy_static::lazy_static;
+use log::info;
 use log::{error, warn};
 use num::BigInt;
 use tokio::sync::mpsc;
@@ -14,7 +15,7 @@ use tokio::sync::RwLock;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-use crate::cxxrtl::channels::SCSender;
+use crate::cxxrtl::channels::SCHandler;
 use crate::displayed_item::DisplayedItemRef;
 use crate::graphics::Anchor;
 use crate::graphics::Direction;
@@ -28,7 +29,7 @@ use crate::wasm_panic;
 use crate::wasm_util;
 use crate::wave_container::VariableRefExt;
 use crate::wave_source::CxxrtlKind;
-use crate::wcp::wcp_handler::WcpMessage;
+use crate::wcp::{WcpCSMessage, WcpSCMessage};
 use crate::DisplayedItem;
 use crate::Message;
 use crate::StartupParams;
@@ -39,29 +40,10 @@ lazy_static! {
     pub(crate) static ref MESSAGE_QUEUE: Mutex<Vec<Message>> = Mutex::new(vec![]);
     static ref QUERY_QUEUE: tokio::sync::Mutex<VecDeque<Callback>> =
         tokio::sync::Mutex::new(VecDeque::new());
+    pub(crate) static ref WCP_CS_HANDLER: WasmRx<WcpCSMessage> = WasmRx::new();
+    pub(crate) static ref WCP_SC_HANDLER: WasmTx<WcpSCMessage> = WasmTx::new();
     pub(crate) static ref CXXRTL_SC_HANDLER: SCHandler = SCHandler::new();
     pub(crate) static ref CXXRTL_CS_HANDLER: WasmTx<String> = WasmTx::new();
-    pub(crate) static ref WCP_SC_HANDLER: WasmRx<WcpMessage> = WasmRx::new();
-    pub(crate) static ref WCP_CS_HANDLER: WasmTx<WcpMessage> = WasmTx::new();
-}
-
-struct Callback {
-    function: Box<dyn FnOnce(&State) + Send + Sync>,
-    executed: tokio::sync::oneshot::Sender<()>,
-}
-
-pub(crate) struct SCHandler {
-    pub tx: SCSender,
-    pub rx: RwLock<Option<mpsc::Receiver<String>>>,
-}
-impl SCHandler {
-    fn new() -> Self {
-        let (tx, rx) = mpsc::channel(100);
-        Self {
-            tx: SCSender::new(tx),
-            rx: RwLock::new(Some(rx)),
-        }
-    }
 }
 
 pub(crate) struct WasmTx<T> {
@@ -69,7 +51,7 @@ pub(crate) struct WasmTx<T> {
     pub rx: RwLock<mpsc::Receiver<T>>,
 }
 impl<T> WasmTx<T> {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let (tx, rx) = mpsc::channel(100);
         Self {
             tx,
@@ -83,13 +65,18 @@ pub(crate) struct WasmRx<T> {
     pub rx: RwLock<Option<mpsc::Receiver<T>>>,
 }
 impl<T> WasmRx<T> {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let (tx, rx) = mpsc::channel(100);
         Self {
             tx,
             rx: RwLock::new(Some(rx)),
         }
     }
+}
+
+struct Callback {
+    function: Box<dyn FnOnce(&State) + Send + Sync>,
+    executed: tokio::sync::oneshot::Sender<()>,
 }
 
 pub fn try_repaint() {
@@ -345,8 +332,8 @@ pub async fn start_wcp() {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub async fn recv_wcp_cs_message() -> Result<Option<String>, JsError> {
-    WCP_CS_HANDLER
+pub async fn next_wcp_sc_message() -> Result<Option<String>, JsError> {
+    WCP_SC_HANDLER
         .rx
         .write()
         .await
@@ -359,9 +346,10 @@ pub async fn recv_wcp_cs_message() -> Result<Option<String>, JsError> {
 
 // TODO: Unify the names with cxxrtl here
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub async fn send_wcp_sc_message(message: String) -> Result<(), JsError> {
+pub async fn handle_wcp_cs_message(message: String) -> Result<(), JsError> {
+    info!("[WCP] Received wcp cs message from WASM");
     let encoded = serde_json::from_str(&message).map_err(|e| JsError::new(&format!("{e}")))?;
-    WCP_SC_HANDLER.tx.send(encoded).await?;
+    WCP_CS_HANDLER.tx.send(encoded).await?;
     Ok(())
 }
 

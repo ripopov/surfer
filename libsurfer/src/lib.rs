@@ -64,7 +64,6 @@ use displayed_item::DisplayedVariable;
 use eframe::{App, CreationContext};
 use egui::{FontData, FontDefinitions, FontFamily};
 use ftr_parser::types::Transaction;
-use futures::executor::block_on;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use log::{error, info, warn};
@@ -72,8 +71,8 @@ use num::BigInt;
 use serde::Deserialize;
 pub use state::State;
 use surfer_translation_types::Translator;
-use wasm_api::{WCP_CS_HANDLER, WCP_SC_HANDLER};
-use wcp::wcp_handler::{Vecs, WcpMessage};
+use wcp::wcp_handler::Vecs;
+use wcp::{WcpCSMessage, WcpSCMessage};
 
 #[cfg(feature = "performance_plot")]
 use crate::config::{SurferConfig, SurferTheme};
@@ -105,6 +104,7 @@ lazy_static! {
     /// whenever the asynchronous transaction is completed, otherwise we will re-render
     /// things until program exit
     pub(crate) static ref OUTSTANDING_TRANSACTIONS: AtomicU32 = AtomicU32::new(0);
+
 }
 
 pub struct StartupParams {
@@ -204,8 +204,8 @@ struct CachedTransactionDrawData {
 pub struct Channels {
     pub msg_sender: Sender<Message>,
     pub msg_receiver: Receiver<Message>,
-    wcp_s2c_receiver: Option<tokio::sync::mpsc::Receiver<WcpMessage>>,
-    wcp_c2s_sender: Option<tokio::sync::mpsc::Sender<WcpMessage>>,
+    wcp_c2s_receiver: Option<tokio::sync::mpsc::Receiver<WcpCSMessage>>,
+    wcp_s2c_sender: Option<tokio::sync::mpsc::Sender<WcpSCMessage>>,
 }
 impl Channels {
     fn new() -> Self {
@@ -213,8 +213,8 @@ impl Channels {
         Self {
             msg_sender,
             msg_receiver,
-            wcp_s2c_receiver: None,
-            wcp_c2s_sender: None,
+            wcp_c2s_receiver: None,
+            wcp_s2c_sender: None,
         }
     }
 }
@@ -1089,8 +1089,8 @@ impl State {
 
                 if self.sys.wcp_server_load_outstanding {
                     self.sys.wcp_server_load_outstanding = false;
-                    self.sys.channels.wcp_c2s_sender.as_ref().map(|ch| {
-                        ch.blocking_send(WcpMessage::create_response(
+                    self.sys.channels.wcp_s2c_sender.as_ref().map(|ch| {
+                        ch.blocking_send(WcpSCMessage::create_response(
                             "load".to_string(),
                             Vecs::Int(vec![]),
                         ))
@@ -1685,12 +1685,15 @@ impl State {
             Message::StopWcpServer => {
                 self.stop_wcp_server();
             }
+            #[cfg(target_arch = "wasm32")]
             Message::SetupWasmWCP => {
-                self.sys.channels.wcp_s2c_receiver = block_on(WCP_SC_HANDLER.rx.write()).take();
-                if self.sys.channels.wcp_s2c_receiver.is_none() {
+                use futures::executor::block_on;
+                self.sys.channels.wcp_c2s_receiver =
+                    block_on(wasm_api::WCP_CS_HANDLER.rx.write()).take();
+                if self.sys.channels.wcp_c2s_receiver.is_none() {
                     error!("Failed to claim wasm tx, was SetupWasmWCP executed twice?");
                 }
-                self.sys.channels.wcp_c2s_sender = Some(WCP_CS_HANDLER.tx.clone());
+                self.sys.channels.wcp_s2c_sender = Some(wasm_api::WCP_SC_HANDLER.tx.clone());
             }
             Message::Exit | Message::ToggleFullscreen => {} // Handled in eframe::update
             Message::AddViewport => {
