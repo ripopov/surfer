@@ -139,7 +139,7 @@ fn setup_custom_font(ctx: &egui::Context) {
 
     fonts.font_data.insert(
         "remix_icons".to_owned(),
-        FontData::from_static(egui_remixicon::FONT),
+        FontData::from_static(egui_remixicon::FONT).into(),
     );
 
     fonts
