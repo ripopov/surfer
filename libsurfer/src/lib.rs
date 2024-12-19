@@ -52,7 +52,6 @@ pub mod wave_source;
 pub mod wcp;
 pub mod wellen;
 
-use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -67,6 +66,7 @@ use displayed_item::DisplayedVariable;
 use eframe::{App, CreationContext};
 use egui::{FontData, FontDefinitions, FontFamily};
 use ftr_parser::types::Transaction;
+use futures::executor::block_on;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use log::{error, info, warn};
@@ -1091,11 +1091,10 @@ impl State {
                         None
                     });
 
-                // TODO: Change this to emit an event
                 if self.sys.wcp_server_load_outstanding {
                     self.sys.wcp_server_load_outstanding = false;
                     self.sys.channels.wcp_s2c_sender.as_ref().map(|ch| {
-                        ch.blocking_send(WcpSCMessage::event(WcpEvent::waveforms_loaded))
+                        block_on(ch.send(WcpSCMessage::event(WcpEvent::waveforms_loaded)))
                     });
                 }
 

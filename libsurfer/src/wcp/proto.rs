@@ -1,7 +1,7 @@
 use num::BigInt;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(transparent)]
 pub struct DisplayedItemRef(pub usize);
 
@@ -81,7 +81,7 @@ pub enum WcpCommand {
     // TODO: Use DisplayedItemRef here
     get_item_info { ids: Vec<String> },
     /// Changes the color of the specified item to the specified color.
-    /// Responds with [WcpResonse::ack]
+    /// Responds with [WcpResponse::ack]
     /// Responds with an error if the `id` does not exist in the currently loaded waveform.
     set_item_color { id: DisplayedItemRef, color: String },
     /// Adds the specified variables to the view.
