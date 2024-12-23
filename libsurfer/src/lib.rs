@@ -167,7 +167,7 @@ pub fn run_egui(cc: &CreationContext, mut state: State) -> Result<Box<dyn App>> 
         .set_visuals_of(egui::Theme::Light, state.get_visuals());
     #[cfg(not(target_arch = "wasm32"))]
     if state.config.wcp.autostart {
-        state.start_wcp_server(Some(state.config.wcp.address.clone()));
+        state.start_wcp_server(Some(state.config.wcp.address.clone()), false);
     }
     setup_custom_font(&cc.egui_ctx);
     Ok(Box::new(state))
@@ -1689,7 +1689,7 @@ impl State {
                 }
             }
             #[cfg(target_arch = "wasm32")]
-            Message::StartWcpServer(_) => {
+            Message::StartWcpServer { .. } => {
                 error!("Wcp is not supported on wasm")
             }
             #[cfg(target_arch = "wasm32")]
@@ -1697,8 +1697,8 @@ impl State {
                 error!("Wcp is not supported on wasm")
             }
             #[cfg(not(target_arch = "wasm32"))]
-            Message::StartWcpServer(address) => {
-                self.start_wcp_server(address);
+            Message::StartWcpServer { address, initiate } => {
+                self.start_wcp_server(address, initiate);
             }
             #[cfg(not(target_arch = "wasm32"))]
             Message::StopWcpServer => {

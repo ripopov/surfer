@@ -300,7 +300,10 @@ pub enum Message {
     /// Redo the last n changes
     Redo(usize),
     /// WCP Server
-    StartWcpServer(Option<String>),
+    StartWcpServer {
+        address: Option<String>,
+        initiate: bool,
+    },
     StopWcpServer,
     /// Configures the WCP system to listen for messages over internal channels.
     /// This is used to start WCP on wasm
