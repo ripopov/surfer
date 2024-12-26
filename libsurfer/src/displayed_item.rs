@@ -16,6 +16,7 @@ use crate::{
 
 const DEFAULT_DIVIDER_NAME: &str = "";
 
+/// Index into the [`WaveData::displayed_items`] vector
 #[derive(Serialize, Deserialize, Debug, Copy, Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct DisplayedItemRef(pub usize);
@@ -67,6 +68,7 @@ pub enum DisplayedItem {
     TimeLine(DisplayedTimeLine),
     Placeholder(DisplayedPlaceholder),
     Stream(DisplayedStream),
+    Group(DisplayedGroup),
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -225,6 +227,15 @@ pub struct DisplayedStream {
     pub rows: usize,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct DisplayedGroup {
+    pub name: String,
+    pub color: Option<String>,
+    pub background_color: Option<String>,
+    pub content: Vec<DisplayedItemRef>,
+    pub is_open: bool,
+}
+
 impl DisplayedItem {
     pub fn color(&self) -> Option<String> {
         match self {
@@ -234,6 +245,7 @@ impl DisplayedItem {
             DisplayedItem::TimeLine(timeline) => timeline.color.clone(),
             DisplayedItem::Placeholder(_) => None,
             DisplayedItem::Stream(stream) => stream.color.clone(),
+            DisplayedItem::Group(group) => group.color.clone(),
         }
     }
 
@@ -245,6 +257,7 @@ impl DisplayedItem {
             DisplayedItem::TimeLine(timeline) => timeline.color.clone_from(&color_name),
             DisplayedItem::Placeholder(placeholder) => placeholder.color.clone_from(&color_name),
             DisplayedItem::Stream(stream) => stream.color.clone_from(&color_name),
+            DisplayedItem::Group(group) => group.color.clone_from(&color_name),
         }
     }
 
@@ -276,6 +289,7 @@ impl DisplayedItem {
                 .as_ref()
                 .unwrap_or(&stream.display_name)
                 .clone(),
+            DisplayedItem::Group(group) => group.name.clone(),
         }
     }
 
@@ -326,6 +340,14 @@ impl DisplayedItem {
                     .line_height(Some(config.layout.transactions_line_height))
                     .append_to(layout_job, style, FontSelection::Default, Align::Center);
             }
+            DisplayedItem::Group(group) => {
+                RichText::new(group.name.clone()).color(*color).append_to(
+                    layout_job,
+                    style,
+                    FontSelection::Default,
+                    Align::Center,
+                );
+            }
         }
     }
 
@@ -349,6 +371,9 @@ impl DisplayedItem {
             DisplayedItem::Stream(stream) => {
                 stream.manual_name = name;
             }
+            DisplayedItem::Group(group) => {
+                group.name = name.unwrap_or_default();
+            }
         }
     }
 
@@ -360,6 +385,7 @@ impl DisplayedItem {
             DisplayedItem::TimeLine(timeline) => &timeline.background_color,
             DisplayedItem::Placeholder(_) => &None,
             DisplayedItem::Stream(stream) => &stream.background_color,
+            DisplayedItem::Group(group) => &group.background_color,
         };
         background_color.clone()
     }
@@ -383,6 +409,9 @@ impl DisplayedItem {
             }
             DisplayedItem::Stream(stream) => {
                 stream.background_color.clone_from(&color_name);
+            }
+            DisplayedItem::Group(group) => {
+                group.background_color.clone_from(&color_name);
             }
         }
     }

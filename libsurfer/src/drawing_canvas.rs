@@ -915,6 +915,7 @@ impl State {
                     );
                 }
                 ItemDrawingInfo::Stream(_) => {}
+                ItemDrawingInfo::Group(_) => {}
             }
         }
     }
@@ -1087,6 +1088,7 @@ impl State {
                 ItemDrawingInfo::Variable(_) => {}
                 ItemDrawingInfo::Divider(_) => {}
                 ItemDrawingInfo::Marker(_) => {}
+                ItemDrawingInfo::Group(_) => {}
             }
         }
 

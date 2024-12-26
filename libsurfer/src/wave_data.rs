@@ -305,7 +305,8 @@ impl WaveData {
                     DisplayedItem::Divider(_)
                     | DisplayedItem::Marker(_)
                     | DisplayedItem::TimeLine(_)
-                    | DisplayedItem::Stream(_) => Some((*id, i.clone())),
+                    | DisplayedItem::Stream(_)
+                    | DisplayedItem::Group(_) => Some((*id, i.clone())),
                     DisplayedItem::Variable(s) => {
                         s.update(waves, keep_unavailable).map(|r| (*id, r))
                     }

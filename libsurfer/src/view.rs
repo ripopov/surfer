@@ -109,12 +109,20 @@ pub struct StreamDrawingInfo {
     pub bottom: f32,
 }
 
+#[derive(Debug)]
+pub struct GroupDrawingInfo {
+    pub item_list_idx: DisplayedItemIndex,
+    pub top: f32,
+    pub bottom: f32,
+}
+
 pub enum ItemDrawingInfo {
     Variable(VariableDrawingInfo),
     Divider(DividerDrawingInfo),
     Marker(MarkerDrawingInfo),
     TimeLine(TimeLineDrawingInfo),
     Stream(StreamDrawingInfo),
+    Group(GroupDrawingInfo),
 }
 
 impl ItemDrawingInfo {
@@ -125,6 +133,7 @@ impl ItemDrawingInfo {
             ItemDrawingInfo::Marker(drawing_info) => drawing_info.top,
             ItemDrawingInfo::TimeLine(drawing_info) => drawing_info.top,
             ItemDrawingInfo::Stream(drawing_info) => drawing_info.top,
+            ItemDrawingInfo::Group(drawing_info) => drawing_info.top,
         }
     }
     pub fn bottom(&self) -> f32 {
@@ -134,6 +143,7 @@ impl ItemDrawingInfo {
             ItemDrawingInfo::Marker(drawing_info) => drawing_info.bottom,
             ItemDrawingInfo::TimeLine(drawing_info) => drawing_info.bottom,
             ItemDrawingInfo::Stream(drawing_info) => drawing_info.bottom,
+            ItemDrawingInfo::Group(drawing_info) => drawing_info.bottom,
         }
     }
     pub fn item_list_idx(&self) -> usize {
@@ -143,6 +153,7 @@ impl ItemDrawingInfo {
             ItemDrawingInfo::Marker(drawing_info) => drawing_info.item_list_idx.0,
             ItemDrawingInfo::TimeLine(drawing_info) => drawing_info.item_list_idx.0,
             ItemDrawingInfo::Stream(drawing_info) => drawing_info.item_list_idx.0,
+            ItemDrawingInfo::Group(drawing_info) => drawing_info.item_list_idx.0,
         }
     }
 }
@@ -959,6 +970,14 @@ impl State {
                             &mut item_offsets,
                             ui,
                         ),
+                        DisplayedItem::Group(_) => self.draw_plain_item(
+                            msgs,
+                            vidx,
+                            *displayed_item_id,
+                            displayed_item,
+                            &mut item_offsets,
+                            ui,
+                        ),
                     };
                     self.draw_drag_target(
                         msgs,
@@ -1592,6 +1611,13 @@ impl State {
                     bottom: label.rect.bottom(),
                 }));
             }
+            DisplayedItem::Group(_) => {
+                drawing_infos.push(ItemDrawingInfo::Group(GroupDrawingInfo {
+                    item_list_idx: vidx,
+                    top: label.rect.top(),
+                    bottom: label.rect.bottom(),
+                }));
+            }
             &DisplayedItem::Variable(_) => {}
             &DisplayedItem::Placeholder(_) => {}
         }
@@ -1720,9 +1746,6 @@ impl State {
                         }
                     }
 
-                    ItemDrawingInfo::Divider(_) => {
-                        ui.label("");
-                    }
                     ItemDrawingInfo::Marker(numbered_cursor) => {
                         if let Some(cursor) = &waves.cursor {
                             let delta = time_string(
@@ -1743,10 +1766,10 @@ impl State {
                             ui.label("");
                         }
                     }
-                    ItemDrawingInfo::TimeLine(_) => {
-                        ui.label("");
-                    }
-                    ItemDrawingInfo::Stream(_) => {
+                    ItemDrawingInfo::Divider(_)
+                    | ItemDrawingInfo::TimeLine(_)
+                    | ItemDrawingInfo::Stream(_)
+                    | ItemDrawingInfo::Group(_) => {
                         ui.label("");
                     }
                 }

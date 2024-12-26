@@ -91,6 +91,9 @@ impl State {
                                             .unwrap_or(item.display_name.clone()),
                                         "Stream".to_string(),
                                     ),
+                                    DisplayedItem::Group(item) => {
+                                        (item.name.clone(), "Group".to_string())
+                                    }
                                 };
                                 items.push(ItemInfo {
                                     name,
