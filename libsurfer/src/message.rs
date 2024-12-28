@@ -6,7 +6,7 @@ use emath::{Pos2, Vec2};
 use ftr_parser::types::Transaction;
 use num::BigInt;
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Display, PathBuf};
 use surver::Status;
 
 use crate::graphics::{Graphic, GraphicId};
@@ -299,6 +299,18 @@ pub enum Message {
     Undo(usize),
     /// Redo the last n changes
     Redo(usize),
+    GroupNew {
+        name: Option<String>,
+        anchor: Option<DisplayedItemIndex>,
+        items: Option<Vec<DisplayedItemRef>>,
+    },
+    GroupDissolve(Option<DisplayedItemRef>),
+    GroupFold(Option<DisplayedItemRef>),
+    GroupUnfold(Option<DisplayedItemRef>),
+    GroupFoldRecursive(Option<DisplayedItemRef>),
+    GroupUnfoldRecursive(Option<DisplayedItemRef>),
+    GroupFoldAll,
+    GroupUnfoldAll,
     /// WCP Server
     StartWcpServer(Option<String>),
     StopWcpServer,

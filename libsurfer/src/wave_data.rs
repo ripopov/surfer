@@ -9,8 +9,8 @@ use surfer_translation_types::{TranslationPreference, Translator, VariableValue}
 
 use crate::data_container::DataContainer;
 use crate::displayed_item::{
-    DisplayedDivider, DisplayedFieldRef, DisplayedItem, DisplayedItemIndex, DisplayedItemRef,
-    DisplayedStream, DisplayedTimeLine, DisplayedVariable,
+    DisplayedDivider, DisplayedFieldRef, DisplayedGroup, DisplayedItem, DisplayedItemIndex,
+    DisplayedItemRef, DisplayedStream, DisplayedTimeLine, DisplayedVariable,
 };
 use crate::graphics::{Graphic, GraphicId};
 use crate::transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef};
@@ -487,6 +487,19 @@ impl WaveData {
                 color: None,
                 background_color: None,
                 name: None,
+            }),
+            vidx,
+        );
+    }
+
+    pub fn add_group(&mut self, name: String, vidx: Option<DisplayedItemIndex>) {
+        self.insert_item(
+            DisplayedItem::Group(DisplayedGroup {
+                name,
+                color: None,
+                background_color: None,
+                content: vec![],
+                is_open: false,
             }),
             vidx,
         );

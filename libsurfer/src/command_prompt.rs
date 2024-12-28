@@ -269,6 +269,8 @@ pub fn get_parser(state: &State) -> Command<Message> {
             "preference_set_arrow_key_bindings",
             "goto_cursor",
             "goto_marker",
+            "group_marked",
+            "group_dissolve",
             "save_state",
             "save_state_as",
             "timeline_add",
@@ -646,6 +648,17 @@ pub fn get_parser(state: &State) -> Command<Message> {
                             .map(|idx| Command::Terminal(Message::GoToMarkerPosition(idx, 0)))
                     }),
                 ),
+                "group_marked" => single_word(
+                    vec![],
+                    Box::new(|_| {
+                        Some(Command::Terminal(Message::GroupNew {
+                            name: None,
+                            anchor: None,
+                            items: None,
+                        }))
+                    }),
+                ),
+                "group_dissolve" => Some(Command::Terminal(Message::GroupDissolve(None))),
                 "show_controls" => Some(Command::Terminal(Message::SetKeyHelpVisible(true))),
                 "show_mouse_gestures" => {
                     Some(Command::Terminal(Message::SetGestureHelpVisible(true)))

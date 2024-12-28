@@ -235,6 +235,11 @@ struct CanvasState {
 
 impl State {
     pub fn update(&mut self, message: Message) {
+        if log::log_enabled!(log::Level::Info) {
+            let mut s = format!("{message:?}");
+            s.shrink_to(100);
+            log::info!("processing: {}", &s);
+        }
         match message {
             Message::SetActiveScope(scope) => {
                 let Some(waves) = self.waves.as_mut() else {
@@ -1687,6 +1692,39 @@ impl State {
                     self.invalidate_draw_commands();
                 }
             }
+            Message::GroupNew {
+                name,
+                anchor,
+                items,
+            } => {
+                let Some(waves) = self.waves.as_mut() else {
+                    return;
+                };
+                let Some(anchor) = anchor.or(waves.focused_item) else {
+                    return;
+                };
+                let Some(anchor_item) = waves.displayed_items_order.get(anchor.0).cloned() else {
+                    return;
+                };
+                let mut items = items
+                    .unwrap_or_else(|| waves.selected_items.iter().cloned().collect::<Vec<_>>());
+                items.retain(|x| x != &anchor_item);
+                // TODO use set to filter displayed_items_order vec - might be faster?
+                items.sort_by_cached_key(|x| {
+                    waves.displayed_items_order.iter().position(|y| y == x)
+                });
+
+                waves.add_group(name.unwrap(), Some(anchor)); // FIXME: consider whether name should be optional
+                waves.displayed_items_order.retain(|x| !items.contains(x));
+            }
+
+            Message::GroupDissolve(index) => {}
+            Message::GroupFold(index) => {}
+            Message::GroupUnfold(index) => {}
+            Message::GroupFoldRecursive(index) => {}
+            Message::GroupUnfoldRecursive(index) => {}
+            Message::GroupFoldAll => {}
+            Message::GroupUnfoldAll => {}
             #[cfg(target_arch = "wasm32")]
             Message::StartWcpServer(_) => {
                 error!("Wcp is not supported on wasm")

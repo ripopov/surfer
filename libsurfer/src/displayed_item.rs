@@ -51,6 +51,7 @@ impl From<DisplayedItemRef> for DisplayedFieldRef {
     }
 }
 
+/// Index into [`WaveData::displayed_items_order`] vector
 #[derive(Serialize, Deserialize, Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct DisplayedItemIndex(pub usize);
 
