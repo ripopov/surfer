@@ -193,13 +193,22 @@ pre-commit:
         - ${PRE_COMMIT_HOME}
     before_script:
         - apt update -y
-        - apt install python3 pre-commit -y
+        - apt install python3 -y
+        - python3 -m venv pc
+        - source ./pc/bin/activate
+        - python3 -m pip install pre-commit
         - pre-commit install
         - rustup component add rustfmt
         - rustup component add clippy
         - git fetch origin ${CI_DEFAULT_BRANCH}
     script:
         - SKIP=cargo-test,cargo-check pre-commit run --from-ref origin/${CI_DEFAULT_BRANCH} --to-ref HEAD
+    artifacts:
+        paths:
+           - .cache/pre-commit/pre-commit.log
+        expire_in: 1 week
+        when: always
+
 
 typos-and-todos:
     stage: test
