@@ -616,9 +616,11 @@ impl State {
         ));
         let _ = response.interact(egui::Sense::click_and_drag());
         response.drag_started().then(|| {
-            msgs.push(Message::VariableDragStarted(
-                self.waves.as_ref().unwrap().display_item_ref_counter.into(),
-            ))
+            msgs.push(Message::VariableDragStarted {
+                item: self.waves.as_ref().unwrap().display_item_ref_counter.into(),
+                select: false,
+                reset_selection: false,
+            })
         });
 
         response.drag_stopped().then(|| {
@@ -827,9 +829,11 @@ impl State {
                         response = response.on_hover_text(variable_tooltip_text(&meta, &variable));
                     }
                     response.drag_started().then(|| {
-                        msgs.push(Message::VariableDragStarted(
-                            self.waves.as_ref().unwrap().display_item_ref_counter.into(),
-                        ))
+                        msgs.push(Message::VariableDragStarted {
+                            item: self.waves.as_ref().unwrap().display_item_ref_counter.into(),
+                            select: false,
+                            reset_selection: false,
+                        })
                     });
                     response.drag_stopped().then(|| {
                         if ui.input(|i| i.pointer.hover_pos().unwrap_or_default().x)
@@ -1244,19 +1248,24 @@ impl State {
     fn draw_drag_source(
         &self,
         msgs: &mut Vec<Message>,
-        vidx: DisplayedItemIndex,
+        item: DisplayedItemIndex,
         item_response: &egui::Response,
+        keep_selection: bool,
     ) {
         if item_response.dragged_by(egui::PointerButton::Primary)
             && item_response.drag_delta().length() > self.config.theme.drag_threshold
         {
-            msgs.push(Message::VariableDragStarted(vidx));
+            msgs.push(Message::VariableDragStarted {
+                item,
+                select: true,
+                reset_selection: !keep_selection,
+            });
         }
 
         if item_response.drag_stopped()
             && self
                 .drag_source_idx
-                .is_some_and(|source_idx| source_idx == vidx)
+                .is_some_and(|source_idx| source_idx == item)
         {
             msgs.push(Message::VariableDragFinished);
         }
@@ -1411,7 +1420,8 @@ impl State {
             | VariableInfo::String
             | VariableInfo::Real => {
                 let label = draw_label(ui);
-                self.draw_drag_source(msgs, vidx, &label);
+                let modifiers = ctx.input(|i| i.modifiers);
+                self.draw_drag_source(msgs, vidx, &label, modifiers.ctrl);
                 drawing_infos.push(ItemDrawingInfo::Variable(VariableDrawingInfo {
                     displayed_field_ref,
                     field_ref: field.clone(),
@@ -1560,7 +1570,7 @@ impl State {
         };
 
         let label = draw_label(ui);
-        self.draw_drag_source(msgs, vidx, &label);
+        self.draw_drag_source(msgs, vidx, &label, ui.ctx().input(|i| i.modifiers.ctrl));
         match displayed_item {
             DisplayedItem::Divider(_) => {
                 drawing_infos.push(ItemDrawingInfo::Divider(DividerDrawingInfo {

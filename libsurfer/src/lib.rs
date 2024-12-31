@@ -1555,17 +1555,33 @@ impl State {
                 self.drag_source_idx = None;
                 self.drag_target_idx = None;
             }
-            Message::VariableDragStarted(vidx) => {
-                self.drag_started = true;
-                self.drag_source_idx = Some(vidx);
-                self.drag_target_idx = None;
+            Message::VariableDragStarted {
+                item,
+                select,
+                reset_selection,
+            } => {
+                if let Some(waves) = self.waves.as_mut() {
+                    self.drag_started = true;
+                    self.drag_source_idx = Some(item);
+                    self.drag_target_idx = None;
+
+                    if reset_selection {
+                        waves.selected_items.clear();
+                        waves.focused_item = None;
+                    }
+                    if select {
+                        waves
+                            .selected_items
+                            .insert(waves.displayed_items_order[item.0]);
+                    }
+                }
             }
             Message::VariableDragTargetChanged(vidx) => {
                 self.drag_target_idx = Some(vidx);
             }
             Message::VariableDragFinished => {
                 self.drag_started = false;
-                let (Some(DisplayedItemIndex(source)), Some(DisplayedItemIndex(target))) =
+                let (Some(DisplayedItemIndex(_source)), Some(DisplayedItemIndex(target))) =
                     (self.drag_source_idx, self.drag_target_idx)
                 else {
                     return;
@@ -1577,9 +1593,6 @@ impl State {
                     return;
                 };
 
-                waves
-                    .selected_items
-                    .insert(waves.displayed_items_order[source]);
                 let focused_ref = waves.focused_item.map(|f| waves.displayed_items_order[f.0]);
                 let mut pre_indices = vec![];
                 let mut post_indices = vec![];

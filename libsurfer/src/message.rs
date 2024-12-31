@@ -262,7 +262,11 @@ pub enum Message {
     RemoveGraphic(GraphicId),
 
     /// Variable dragging messages
-    VariableDragStarted(DisplayedItemIndex),
+    VariableDragStarted {
+        item: DisplayedItemIndex,
+        select: bool,
+        reset_selection: bool,
+    },
     VariableDragTargetChanged(DisplayedItemIndex),
     VariableDragFinished,
     AddDraggedVariables(Vec<VariableRef>),
