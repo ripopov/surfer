@@ -955,9 +955,9 @@ impl State {
                     self.invalidate_draw_commands();
                 }
             }
-            Message::CursorSet(new) => {
+            Message::CursorSet(time) => {
                 if let Some(waves) = self.waves.as_mut() {
-                    waves.cursor = Some(new);
+                    waves.cursor = Some(time);
                 }
             }
             Message::LoadFile(filename, load_options) => {
@@ -1338,17 +1338,39 @@ impl State {
             Message::SetClockHighlightType(new_type) => {
                 self.config.default_clock_highlight_type = new_type;
             }
+            Message::AddMarker { time, name } => {
+                if let Some(name) = &name {
+                    self.save_current_canvas(format!("Add marker {name} at {time}"));
+                } else {
+                    self.save_current_canvas(format!("Add marker at {time}"));
+                }
+                if let Some(waves) = self.waves.as_mut() {
+                    waves.add_marker(&time, name);
+                }
+            }
             Message::SetMarker { id, time } => {
-                self.save_current_canvas(format!("Set marker to {time}"));
+                self.save_current_canvas(format!("Set marker {id} to {time}"));
                 if let Some(waves) = self.waves.as_mut() {
                     waves.set_marker_position(id, &time);
                 };
+            }
+            Message::RemoveMarker(id) => {
+                if let Some(waves) = self.waves.as_mut() {
+                    waves.remove_marker(id);
+                }
             }
             Message::MoveMarkerToCursor(idx) => {
                 self.save_current_canvas("Move marker".into());
                 if let Some(waves) = self.waves.as_mut() {
                     waves.move_marker_to_cursor(idx);
                 };
+            }
+            Message::GoToCursorIfNotInView => {
+                if let Some(waves) = self.waves.as_mut() {
+                    if waves.go_to_cursor_if_not_in_view() {
+                        self.invalidate_draw_commands();
+                    }
+                }
             }
             Message::GoToMarkerPosition(idx, viewport_idx) => {
                 if let Some(waves) = self.waves.as_mut() {

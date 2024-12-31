@@ -1,10 +1,10 @@
 //! Command prompt handling.
-use std::collections::BTreeMap;
 use std::iter::zip;
 use std::{fs, str::FromStr};
 
 use crate::config::{ArrowKeyBindings, HierarchyStyle};
 use crate::displayed_item::DisplayedItemIndex;
+use crate::lazy_static;
 use crate::transaction_container::StreamScopeRef;
 use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, VariableRefExt};
 use crate::wave_data::ScopeType;
@@ -27,6 +27,26 @@ use itertools::Itertools;
 use log::warn;
 
 type RestCommand = Box<dyn Fn(&str) -> Option<Command<Message>>>;
+
+/// Split part of a query at whitespace
+///
+/// fzcmd splits at regex "words" which does not include special characters
+/// like '#'. This function can be used instead via `ParamGreed::Custom(&separate_at_space)`
+fn separate_at_space(query: &str) -> (String, String, String, String) {
+    use regex::Regex;
+    lazy_static! {
+        static ref RE: Regex = Regex::new(r#"(\s*)(\S*)(\s?)(.*)"#).unwrap();
+    }
+
+    let captures = RE.captures_iter(query).next().unwrap();
+
+    (
+        captures[1].into(),
+        captures[2].into(),
+        captures[3].into(),
+        captures[4].into(),
+    )
+}
 
 pub fn get_parser(state: &State) -> Command<Message> {
     fn single_word(
@@ -143,15 +163,44 @@ pub fn get_parser(state: &State) -> Command<Message> {
         waves
             .displayed_items_order
             .iter()
-            .map(|id| waves.displayed_items.get(id))
+            .map(|id| {
+                let x = waves.displayed_items.get(id);
+                x
+            })
             .filter_map(|item| match item {
-                Some(DisplayedItem::Marker(marker)) => Some((item.unwrap().name(), marker.idx)),
+                Some(DisplayedItem::Marker(marker)) => Some((marker.name.clone(), marker.idx)),
                 _ => None,
             })
-            .collect::<BTreeMap<_, _>>()
+            .collect::<Vec<_>>()
     } else {
-        BTreeMap::new()
+        Vec::new()
     };
+
+    fn parse_marker(query: &str, markers: &[(Option<String>, u8)]) -> Option<u8> {
+        if let Some(id_str) = query.strip_prefix("#") {
+            let id = id_str.parse::<u8>().ok()?;
+            Some(id)
+        } else {
+            markers.iter().find_map(|(name, idx)| {
+                if name.is_some() && name.as_ref().unwrap() == query {
+                    Some(*idx)
+                } else {
+                    None
+                }
+            })
+        }
+    }
+
+    fn marker_suggestions(markers: &[(Option<String>, u8)]) -> Vec<String> {
+        markers
+            .iter()
+            .flat_map(|(name, idx)| {
+                [name.clone(), Some(format!("#{idx}"))]
+                    .into_iter()
+                    .flatten()
+            })
+            .collect()
+    }
 
     let wcp_start_or_stop = if state
         .sys
@@ -214,10 +263,14 @@ pub fn get_parser(state: &State) -> Command<Message> {
             "preference_set_clock_highlight",
             "preference_set_hierarchy_style",
             "preference_set_arrow_key_bindings",
+            "goto_cursor",
             "goto_marker",
             "save_state",
             "save_state_as",
             "timeline_add",
+            "cursor_set",
+            "marker_set",
+            "marker_remove",
             "show_marker_window",
             "viewport_add",
             "viewport_remove",
@@ -579,12 +632,12 @@ pub fn get_parser(state: &State) -> Command<Message> {
                     }),
                 ),
                 "timeline_add" => Some(Command::Terminal(Message::AddTimeLine(None))),
+                "goto_cursor" => Some(Command::Terminal(Message::GoToCursorIfNotInView)),
                 "goto_marker" => single_word(
-                    markers.keys().cloned().collect(),
+                    marker_suggestions(&markers),
                     Box::new(move |name| {
-                        markers
-                            .get(name)
-                            .map(|idx| Command::Terminal(Message::GoToMarkerPosition(*idx, 0)))
+                        parse_marker(name, &markers)
+                            .map(|idx| Command::Terminal(Message::GoToMarkerPosition(idx, 0)))
                     }),
                 ),
                 "show_controls" => Some(Command::Terminal(Message::SetKeyHelpVisible(true))),
@@ -606,6 +659,51 @@ pub fn get_parser(state: &State) -> Command<Message> {
                         }
                     }),
                 ),
+                "cursor_set" => single_word(
+                    vec![],
+                    Box::new(|time_str| match time_str.parse() {
+                        Ok(time) => Some(Command::Terminal(Message::Batch(vec![
+                            Message::CursorSet(time),
+                            Message::GoToCursorIfNotInView,
+                        ]))),
+                        _ => None,
+                    }),
+                ),
+                "marker_set" => Some(Command::NonTerminal(
+                    ParamGreed::Custom(&separate_at_space),
+                    // FIXME use once fzcmd does not enforce suggestion match, as of now we couldn't add a marker (except the first)
+                    // marker_suggestions(&markers),
+                    vec![],
+                    Box::new(move |name, _| {
+                        let marker_id = parse_marker(name, &markers);
+                        let name = name.to_owned();
+
+                        Some(Command::NonTerminal(
+                            ParamGreed::Word,
+                            vec![],
+                            Box::new(move |time_str, _| {
+                                let time = time_str.parse().ok()?;
+                                match marker_id {
+                                    Some(id) => {
+                                        Some(Command::Terminal(Message::SetMarker { id, time }))
+                                    }
+                                    None => Some(Command::Terminal(Message::AddMarker {
+                                        time,
+                                        name: Some(name.clone()),
+                                    })),
+                                }
+                            }),
+                        ))
+                    }),
+                )),
+                "marker_remove" => Some(Command::NonTerminal(
+                    ParamGreed::Rest,
+                    marker_suggestions(&markers),
+                    Box::new(move |name, _| {
+                        let marker_id = parse_marker(name, &markers)?;
+                        Some(Command::Terminal(Message::RemoveMarker(marker_id)))
+                    }),
+                )),
                 "show_marker_window" => {
                     Some(Command::Terminal(Message::SetCursorWindowVisible(true)))
                 }
