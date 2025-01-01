@@ -42,7 +42,7 @@ pub(crate) struct CxxrtlScope {}
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct CxxrtlItem {
-    pub width: u32,
+    pub width: u64,
 }
 
 /// A piece of data which we cache from Cxxrtl

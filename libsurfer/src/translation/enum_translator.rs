@@ -3,24 +3,25 @@ use crate::translation::{TranslationPreference, ValueKind, VariableInfo};
 use crate::wave_container::{ScopeId, VarId, VariableMeta};
 use color_eyre::Result;
 use std::borrow::Cow;
-use surfer_translation_types::{TranslationResult, Translator, ValueRepr, VariableValue};
+use surfer_translation_types::{
+    TranslationResult, Translator, TranslatorInfo, ValueRepr, VariableValue,
+};
 
-pub struct EnumTranslator {}
+pub struct EnumTranslator {
+    variable: VariableMeta,
+}
 
 impl Translator<VarId, ScopeId, Message> for EnumTranslator {
-    fn name(&self) -> String {
-        "Enum".to_string()
-    }
-
-    fn translate(&self, meta: &VariableMeta, value: &VariableValue) -> Result<TranslationResult> {
+    fn translate(&self, value: &VariableValue) -> Result<TranslationResult> {
         let str_value = match value {
             VariableValue::BigUint(v) => Cow::Owned(format!(
                 "{v:0width$b}",
-                width = meta.num_bits.unwrap() as usize
+                width = self.variable.num_bits.unwrap() as usize
             )),
             VariableValue::String(s) => Cow::Borrowed(s),
         };
-        let (kind, name) = meta
+        let (kind, name) = self
+            .variable
             .enum_map
             .get(str_value.as_str())
             .map(|s| (ValueKind::Normal, s.to_string()))
@@ -32,8 +33,16 @@ impl Translator<VarId, ScopeId, Message> for EnumTranslator {
         })
     }
 
-    fn variable_info(&self, _variable: &VariableMeta) -> color_eyre::Result<VariableInfo> {
+    fn variable_info(&self) -> color_eyre::Result<VariableInfo> {
         Ok(VariableInfo::Bits)
+    }
+}
+
+pub struct EnumTranslatorInfo {}
+
+impl TranslatorInfo<VarId, ScopeId, Message> for EnumTranslatorInfo {
+    fn name(&self) -> String {
+        "Enum".to_string()
     }
 
     fn translates(&self, variable: &VariableMeta) -> Result<TranslationPreference> {
@@ -41,6 +50,17 @@ impl Translator<VarId, ScopeId, Message> for EnumTranslator {
             Ok(TranslationPreference::No)
         } else {
             Ok(TranslationPreference::Prefer)
+        }
+    }
+
+    type Translator = EnumTranslator;
+
+    fn create_instance(
+        &self,
+        variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        EnumTranslator {
+            variable: variable.clone(),
         }
     }
 }

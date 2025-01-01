@@ -4,7 +4,7 @@ use crate::wave_container::{ScopeId, VarId, VariableMeta};
 use color_eyre::Result;
 use itertools::Itertools;
 use num::Zero;
-use surfer_translation_types::{BasicTranslator, VariableValue};
+use surfer_translation_types::{BasicTranslator, BasicTranslatorInfo, VariableValue};
 
 // Forms groups of n chars from from a string. If the string size is
 // not divisible by n, the first group will be smaller than n
@@ -154,8 +154,8 @@ fn map_to_radix(s: &str, radix: usize, num_bits: u64) -> (String, ValueKind) {
 }
 
 fn check_wordlength(
-    num_bits: Option<u32>,
-    required: impl FnOnce(u32) -> bool,
+    num_bits: Option<u64>,
+    required: impl FnOnce(u64) -> bool,
 ) -> Result<TranslationPreference> {
     if let Some(num_bits) = num_bits {
         if required(num_bits) {
@@ -168,20 +168,37 @@ fn check_wordlength(
     }
 }
 
-pub struct HexTranslator {}
+pub struct HexTranslatorInfo {}
 
-impl BasicTranslator<VarId, ScopeId> for HexTranslator {
+impl BasicTranslatorInfo<VarId, ScopeId> for HexTranslatorInfo {
     fn name(&self) -> String {
         String::from("Hexadecimal")
     }
 
-    fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    type Translator = HexTranslator;
+
+    fn create_instance(
+        &self,
+        variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        HexTranslator {
+            num_bits: variable.num_bits.unwrap_or_default(),
+        }
+    }
+}
+
+pub struct HexTranslator {
+    num_bits: u64,
+}
+
+impl BasicTranslator<VarId, ScopeId> for HexTranslator {
+    fn basic_translate(&self, value: &VariableValue) -> (String, ValueKind) {
         match value {
             VariableValue::BigUint(v) => (
-                format!("{v:0width$x}", width = no_of_digits(num_bits, 4)),
+                format!("{v:0width$x}", width = no_of_digits(self.num_bits, 4)),
                 ValueKind::Normal,
             ),
-            VariableValue::String(s) => map_to_radix(s, 4, num_bits),
+            VariableValue::String(s) => map_to_radix(s, 4, self.num_bits),
         }
     }
 }
@@ -189,11 +206,7 @@ impl BasicTranslator<VarId, ScopeId> for HexTranslator {
 pub struct BitTranslator {}
 
 impl BasicTranslator<VarId, ScopeId> for BitTranslator {
-    fn name(&self) -> String {
-        String::from("Bit")
-    }
-
-    fn basic_translate(&self, _num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    fn basic_translate(&self, value: &VariableValue) -> (String, ValueKind) {
         match value {
             VariableValue::BigUint(v) => (
                 if (*v).is_zero() {
@@ -209,9 +222,19 @@ impl BasicTranslator<VarId, ScopeId> for BitTranslator {
         }
     }
 
+    fn variable_info(&self) -> Result<VariableInfo> {
+        Ok(VariableInfo::Bool)
+    }
+}
+
+impl BasicTranslatorInfo<VarId, ScopeId> for BitTranslator {
+    fn name(&self) -> String {
+        String::from("Bit")
+    }
+
     fn translates(&self, variable: &VariableMeta) -> Result<TranslationPreference> {
         if let Some(num_bits) = variable.num_bits {
-            if num_bits == 1u32 {
+            if num_bits == 1u64 {
                 Ok(TranslationPreference::Prefer)
             } else {
                 Ok(TranslationPreference::No)
@@ -221,44 +244,67 @@ impl BasicTranslator<VarId, ScopeId> for BitTranslator {
         }
     }
 
-    fn variable_info(&self, _variable: &VariableMeta) -> Result<VariableInfo> {
-        Ok(VariableInfo::Bool)
+    type Translator = BitTranslator;
+
+    fn create_instance(
+        &self,
+        _variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        BitTranslator {}
     }
 }
 
-pub struct OctalTranslator {}
+pub struct OctalTranslator {
+    num_bits: u64,
+}
 
 impl BasicTranslator<VarId, ScopeId> for OctalTranslator {
-    fn name(&self) -> String {
-        String::from("Octal")
-    }
-
-    fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    fn basic_translate(&self, value: &VariableValue) -> (String, ValueKind) {
         match value {
             VariableValue::BigUint(v) => (
-                format!("{v:0width$o}", width = no_of_digits(num_bits, 3)),
+                format!("{v:0width$o}", width = no_of_digits(self.num_bits, 3)),
                 ValueKind::Normal,
             ),
-            VariableValue::String(s) => map_to_radix(s, 3, num_bits),
+            VariableValue::String(s) => map_to_radix(s, 3, self.num_bits),
         }
     }
 }
 
-pub struct GroupingBinaryTranslator {}
+pub struct OctalTranslatorInfo {}
 
-impl BasicTranslator<VarId, ScopeId> for GroupingBinaryTranslator {
+impl BasicTranslatorInfo<VarId, ScopeId> for OctalTranslatorInfo {
     fn name(&self) -> String {
-        String::from("Binary (with groups)")
+        String::from("Octal")
     }
 
-    fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    type Translator = OctalTranslator;
+
+    fn create_instance(
+        &self,
+        variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        OctalTranslator {
+            num_bits: variable.num_bits.unwrap_or_default(),
+        }
+    }
+}
+
+pub struct GroupingBinaryTranslator {
+    num_bits: u64,
+}
+
+impl BasicTranslator<VarId, ScopeId> for GroupingBinaryTranslator {
+    fn basic_translate(&self, value: &VariableValue) -> (String, ValueKind) {
         let (val, color) = match value {
             VariableValue::BigUint(v) => (
-                format!("{v:0width$b}", width = num_bits as usize),
+                format!("{v:0width$b}", width = self.num_bits as usize),
                 ValueKind::Normal,
             ),
             VariableValue::String(s) => (
-                format!("{extra_bits}{s}", extra_bits = extend_string(s, num_bits)),
+                format!(
+                    "{extra_bits}{s}",
+                    extra_bits = extend_string(s, self.num_bits)
+                ),
                 color_for_binary_representation(s),
             ),
         };
@@ -267,23 +313,62 @@ impl BasicTranslator<VarId, ScopeId> for GroupingBinaryTranslator {
     }
 }
 
-pub struct BinaryTranslator {}
+pub struct GroupingBinaryTranslatorInfo {}
+
+impl BasicTranslatorInfo<VarId, ScopeId> for GroupingBinaryTranslatorInfo {
+    fn name(&self) -> String {
+        String::from("Binary (with groups)")
+    }
+
+    type Translator = GroupingBinaryTranslator;
+
+    fn create_instance(
+        &self,
+        variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        GroupingBinaryTranslator {
+            num_bits: variable.num_bits.unwrap_or_default(),
+        }
+    }
+}
+
+pub struct BinaryTranslator {
+    num_bits: u64,
+}
 
 impl BasicTranslator<VarId, ScopeId> for BinaryTranslator {
+    fn basic_translate(&self, value: &VariableValue) -> (String, ValueKind) {
+        match value {
+            VariableValue::BigUint(v) => (
+                format!("{v:0width$b}", width = self.num_bits as usize),
+                ValueKind::Normal,
+            ),
+            VariableValue::String(s) => (
+                format!(
+                    "{extra_bits}{s}",
+                    extra_bits = extend_string(s, self.num_bits)
+                ),
+                color_for_binary_representation(s),
+            ),
+        }
+    }
+}
+
+pub struct BinaryTranslatorInfo {}
+
+impl BasicTranslatorInfo<VarId, ScopeId> for BinaryTranslatorInfo {
     fn name(&self) -> String {
         String::from("Binary")
     }
 
-    fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
-        match value {
-            VariableValue::BigUint(v) => (
-                format!("{v:0width$b}", width = num_bits as usize),
-                ValueKind::Normal,
-            ),
-            VariableValue::String(s) => (
-                format!("{extra_bits}{s}", extra_bits = extend_string(s, num_bits)),
-                color_for_binary_representation(s),
-            ),
+    type Translator = BinaryTranslator;
+
+    fn create_instance(
+        &self,
+        variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        BinaryTranslator {
+            num_bits: variable.num_bits.unwrap_or_default(),
         }
     }
 }
@@ -291,11 +376,7 @@ impl BasicTranslator<VarId, ScopeId> for BinaryTranslator {
 pub struct ASCIITranslator {}
 
 impl BasicTranslator<VarId, ScopeId> for ASCIITranslator {
-    fn name(&self) -> String {
-        String::from("ASCII")
-    }
-
-    fn basic_translate(&self, _num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    fn basic_translate(&self, value: &VariableValue) -> (String, ValueKind) {
         match value {
             VariableValue::BigUint(v) => (
                 v.to_bytes_be()
@@ -325,6 +406,21 @@ impl BasicTranslator<VarId, ScopeId> for ASCIITranslator {
     }
 }
 
+impl BasicTranslatorInfo<VarId, ScopeId> for ASCIITranslator {
+    fn name(&self) -> String {
+        String::from("ASCII")
+    }
+
+    type Translator = ASCIITranslator;
+
+    fn create_instance(
+        &self,
+        variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        ASCIITranslator {}
+    }
+}
+
 fn decode_lebxxx(value: &num::BigUint) -> Result<num::BigUint, &'static str> {
     let bytes = value.to_bytes_be();
     match bytes.first() {
@@ -342,14 +438,12 @@ fn decode_lebxxx(value: &num::BigUint) -> Result<num::BigUint, &'static str> {
     })
 }
 
-pub struct LebTranslator {}
+pub struct LebTranslator {
+    num_bits: u64,
+}
 
 impl BasicTranslator<VarId, ScopeId> for LebTranslator {
-    fn name(&self) -> String {
-        "LEBxxx".to_string()
-    }
-
-    fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    fn basic_translate(&self, value: &VariableValue) -> (String, ValueKind) {
         let decoded = match value {
             VariableValue::BigUint(v) => decode_lebxxx(v),
             VariableValue::String(s) => match check_vector_variable(s) {
@@ -366,27 +460,44 @@ impl BasicTranslator<VarId, ScopeId> for LebTranslator {
             Err(s) => (
                 s.to_owned()
                     + ": "
-                    + &GroupingBinaryTranslator {}
-                        .basic_translate(num_bits, value)
-                        .0,
+                    + &GroupingBinaryTranslator {
+                        num_bits: self.num_bits,
+                    }
+                    .basic_translate(value)
+                    .0,
                 ValueKind::Warn,
             ),
         }
     }
+}
+
+pub struct LebTranslatorInfo {}
+
+impl BasicTranslatorInfo<VarId, ScopeId> for LebTranslatorInfo {
+    fn name(&self) -> String {
+        "LEBxxx".to_string()
+    }
 
     fn translates(&self, variable: &VariableMeta) -> Result<TranslationPreference> {
         check_wordlength(variable.num_bits, |n| (n % 8 == 0) && n > 0)
+    }
+
+    type Translator = LebTranslator;
+
+    fn create_instance(
+        &self,
+        variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        LebTranslator {
+            num_bits: variable.num_bits.unwrap_or_default(),
+        }
     }
 }
 
 pub struct NumberOfOnesTranslator {}
 
 impl BasicTranslator<VarId, ScopeId> for NumberOfOnesTranslator {
-    fn name(&self) -> String {
-        String::from("Number of ones")
-    }
-
-    fn basic_translate(&self, _num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    fn basic_translate(&self, value: &VariableValue) -> (String, ValueKind) {
         match value {
             VariableValue::BigUint(v) => {
                 (format!("{ones}", ones = v.count_ones()), ValueKind::Normal)
@@ -399,14 +510,25 @@ impl BasicTranslator<VarId, ScopeId> for NumberOfOnesTranslator {
     }
 }
 
+impl BasicTranslatorInfo<VarId, ScopeId> for NumberOfOnesTranslator {
+    fn name(&self) -> String {
+        String::from("Number of ones")
+    }
+
+    type Translator = NumberOfOnesTranslator;
+
+    fn create_instance(
+        &self,
+        _variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        NumberOfOnesTranslator {}
+    }
+}
+
 pub struct TrailingOnesTranslator {}
 
 impl BasicTranslator<VarId, ScopeId> for TrailingOnesTranslator {
-    fn name(&self) -> String {
-        String::from("Trailing ones")
-    }
-
-    fn basic_translate(&self, _num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    fn basic_translate(&self, value: &VariableValue) -> (String, ValueKind) {
         match value {
             VariableValue::BigUint(v) => (
                 format!("{ones}", ones = v.trailing_ones()),
@@ -423,23 +545,36 @@ impl BasicTranslator<VarId, ScopeId> for TrailingOnesTranslator {
     }
 }
 
-pub struct TrailingZerosTranslator {}
-
-impl BasicTranslator<VarId, ScopeId> for TrailingZerosTranslator {
+impl BasicTranslatorInfo<VarId, ScopeId> for TrailingOnesTranslator {
     fn name(&self) -> String {
-        String::from("Trailing zeros")
+        String::from("Trailing ones")
     }
 
-    fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    type Translator = TrailingOnesTranslator;
+
+    fn create_instance(
+        &self,
+        _variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        TrailingOnesTranslator {}
+    }
+}
+
+pub struct TrailingZerosTranslator {
+    num_bits: u64,
+}
+
+impl BasicTranslator<VarId, ScopeId> for TrailingZerosTranslator {
+    fn basic_translate(&self, value: &VariableValue) -> (String, ValueKind) {
         match value {
             VariableValue::BigUint(v) => (
-                format!("{ones}", ones = v.trailing_zeros().unwrap_or(num_bits)),
+                format!("{ones}", ones = v.trailing_zeros().unwrap_or(self.num_bits)),
                 ValueKind::Normal,
             ),
             VariableValue::String(s) => (
                 format!(
                     "{zeros}",
-                    zeros = (extend_string(s, num_bits) + s)
+                    zeros = (extend_string(s, self.num_bits) + s)
                         .bytes()
                         .rev()
                         .take_while(|b| *b == b'0')
@@ -451,21 +586,38 @@ impl BasicTranslator<VarId, ScopeId> for TrailingZerosTranslator {
     }
 }
 
-pub struct LeadingOnesTranslator {}
+pub struct TrailingZerosTranslatorInfo {}
 
-impl BasicTranslator<VarId, ScopeId> for LeadingOnesTranslator {
+impl BasicTranslatorInfo<VarId, ScopeId> for TrailingZerosTranslatorInfo {
     fn name(&self) -> String {
-        String::from("Leading ones")
+        String::from("Trailing zeros")
     }
 
-    fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    type Translator = TrailingZerosTranslator;
+
+    fn create_instance(
+        &self,
+        variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        TrailingZerosTranslator {
+            num_bits: variable.num_bits.unwrap_or_default(),
+        }
+    }
+}
+
+pub struct LeadingOnesTranslator {
+    num_bits: u64,
+}
+
+impl BasicTranslator<VarId, ScopeId> for LeadingOnesTranslator {
+    fn basic_translate(&self, value: &VariableValue) -> (String, ValueKind) {
         match value {
             VariableValue::BigUint(v) => {
-                let s = format!("{v:0width$b}", width = num_bits as usize);
-                self.basic_translate(num_bits, &VariableValue::String(s))
+                let s = format!("{v:0width$b}", width = self.num_bits as usize);
+                self.basic_translate(&VariableValue::String(s))
             }
             VariableValue::String(s) => (
-                if s.bytes().len() == (num_bits as usize) {
+                if s.bytes().len() == (self.num_bits as usize) {
                     format!(
                         "{ones}",
                         ones = s.bytes().take_while(|b| *b == b'1').count()
@@ -479,23 +631,40 @@ impl BasicTranslator<VarId, ScopeId> for LeadingOnesTranslator {
     }
 }
 
-pub struct LeadingZerosTranslator {}
+pub struct LeadingOnesTranslatorInfo {}
 
-impl BasicTranslator<VarId, ScopeId> for LeadingZerosTranslator {
+impl BasicTranslatorInfo<VarId, ScopeId> for LeadingOnesTranslatorInfo {
     fn name(&self) -> String {
-        String::from("Leading zeros")
+        String::from("Leading ones")
     }
 
-    fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    type Translator = LeadingOnesTranslator;
+
+    fn create_instance(
+        &self,
+        variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        LeadingOnesTranslator {
+            num_bits: variable.num_bits.unwrap_or_default(),
+        }
+    }
+}
+
+pub struct LeadingZerosTranslator {
+    num_bits: u64,
+}
+
+impl BasicTranslator<VarId, ScopeId> for LeadingZerosTranslator {
+    fn basic_translate(&self, value: &VariableValue) -> (String, ValueKind) {
         match value {
             VariableValue::BigUint(v) => {
-                let s = format!("{v:0width$b}", width = num_bits as usize);
-                self.basic_translate(num_bits, &VariableValue::String(s))
+                let s = format!("{v:0width$b}", width = self.num_bits as usize);
+                self.basic_translate(&VariableValue::String(s))
             }
             VariableValue::String(s) => (
                 format!(
                     "{zeros}",
-                    zeros = (extend_string(s, num_bits) + s)
+                    zeros = (extend_string(s, self.num_bits) + s)
                         .bytes()
                         .take_while(|b| *b == b'0')
                         .count()
@@ -506,26 +675,62 @@ impl BasicTranslator<VarId, ScopeId> for LeadingZerosTranslator {
     }
 }
 
-pub struct IdenticalMSBsTranslator {}
+pub struct LeadingZerosTranslatorInfo {}
 
-impl BasicTranslator<VarId, ScopeId> for IdenticalMSBsTranslator {
+impl BasicTranslatorInfo<VarId, ScopeId> for LeadingZerosTranslatorInfo {
     fn name(&self) -> String {
-        String::from("Identical MSBs")
+        String::from("Leading zeros")
     }
 
-    fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    type Translator = LeadingZerosTranslator;
+
+    fn create_instance(
+        &self,
+        variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        LeadingZerosTranslator {
+            num_bits: variable.num_bits.unwrap_or_default(),
+        }
+    }
+}
+
+pub struct IdenticalMSBsTranslator {
+    num_bits: u64,
+}
+
+impl BasicTranslator<VarId, ScopeId> for IdenticalMSBsTranslator {
+    fn basic_translate(&self, value: &VariableValue) -> (String, ValueKind) {
         match value {
             VariableValue::BigUint(v) => {
-                let s = format!("{v:0width$b}", width = num_bits as usize);
-                self.basic_translate(num_bits, &VariableValue::String(s))
+                let s = format!("{v:0width$b}", width = self.num_bits as usize);
+                self.basic_translate(&VariableValue::String(s))
             }
             VariableValue::String(s) => {
-                let extended_string = extend_string(s, num_bits) + s;
+                let extended_string = extend_string(s, self.num_bits) + s;
                 let zeros = extended_string.bytes().take_while(|b| *b == b'0').count();
                 let ones = extended_string.bytes().take_while(|b| *b == b'1').count();
                 let count = ones.max(zeros);
                 (count.to_string(), color_for_binary_representation(s))
             }
+        }
+    }
+}
+
+pub struct IdenticalMSBsTranslatorInfo {}
+
+impl BasicTranslatorInfo<VarId, ScopeId> for IdenticalMSBsTranslatorInfo {
+    fn name(&self) -> String {
+        String::from("Identical MSBs")
+    }
+
+    type Translator = IdenticalMSBsTranslator;
+
+    fn create_instance(
+        &self,
+        variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        IdenticalMSBsTranslator {
+            num_bits: variable.num_bits.unwrap_or_default(),
         }
     }
 }
@@ -540,40 +745,40 @@ mod test {
     #[test]
     fn hexadecimal_translation_groups_digits_correctly_string() {
         assert_eq!(
-            HexTranslator {}
-                .basic_translate(5, &VariableValue::String("10000".to_string()))
+            HexTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("10000".to_string()))
                 .0,
             "10"
         );
 
         assert_eq!(
-            HexTranslator {}
-                .basic_translate(5, &VariableValue::String("1000".to_string()))
+            HexTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("1000".to_string()))
                 .0,
             "08"
         );
 
         assert_eq!(
-            HexTranslator {}
-                .basic_translate(5, &VariableValue::String("100000".to_string()))
+            HexTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("100000".to_string()))
                 .0,
             "20"
         );
         assert_eq!(
-            HexTranslator {}
-                .basic_translate(10, &VariableValue::String("1z00x0".to_string()))
+            HexTranslator { num_bits: 10 }
+                .basic_translate(&VariableValue::String("1z00x0".to_string()))
                 .0,
             "0zx"
         );
         assert_eq!(
-            HexTranslator {}
-                .basic_translate(10, &VariableValue::String("z0110".to_string()))
+            HexTranslator { num_bits: 10 }
+                .basic_translate(&VariableValue::String("z0110".to_string()))
                 .0,
             "zz6"
         );
         assert_eq!(
-            HexTranslator {}
-                .basic_translate(24, &VariableValue::String("xz0110".to_string()))
+            HexTranslator { num_bits: 24 }
+                .basic_translate(&VariableValue::String("xz0110".to_string()))
                 .0,
             "xxxxx6"
         );
@@ -582,20 +787,20 @@ mod test {
     #[test]
     fn hexadecimal_translation_groups_digits_correctly_bigint() {
         assert_eq!(
-            HexTranslator {}
-                .basic_translate(5, &VariableValue::BigUint(BigUint::from(0b10000u32)))
+            HexTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b10000u32)))
                 .0,
             "10"
         );
         assert_eq!(
-            HexTranslator {}
-                .basic_translate(5, &VariableValue::BigUint(BigUint::from(0b1000u32)))
+            HexTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b1000u32)))
                 .0,
             "08"
         );
         assert_eq!(
-            HexTranslator {}
-                .basic_translate(5, &VariableValue::BigUint(BigUint::from(0u32)))
+            HexTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0u32)))
                 .0,
             "00"
         );
@@ -604,20 +809,20 @@ mod test {
     #[test]
     fn octal_translation_groups_digits_correctly_string() {
         assert_eq!(
-            OctalTranslator {}
-                .basic_translate(5, &VariableValue::String("10000".to_string()))
+            OctalTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("10000".to_string()))
                 .0,
             "20"
         );
         assert_eq!(
-            OctalTranslator {}
-                .basic_translate(5, &VariableValue::String("100".to_string()))
+            OctalTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("100".to_string()))
                 .0,
             "04"
         );
         assert_eq!(
-            OctalTranslator {}
-                .basic_translate(9, &VariableValue::String("x100".to_string()))
+            OctalTranslator { num_bits: 9 }
+                .basic_translate(&VariableValue::String("x100".to_string()))
                 .0,
             "xx4"
         );
@@ -626,14 +831,14 @@ mod test {
     #[test]
     fn octal_translation_groups_digits_correctly_bigint() {
         assert_eq!(
-            OctalTranslator {}
-                .basic_translate(5, &VariableValue::BigUint(BigUint::from(0b10000u32)))
+            OctalTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b10000u32)))
                 .0,
             "20"
         );
         assert_eq!(
-            OctalTranslator {}
-                .basic_translate(5, &VariableValue::BigUint(BigUint::from(0b00100u32)))
+            OctalTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b00100u32)))
                 .0,
             "04"
         );
@@ -642,26 +847,26 @@ mod test {
     #[test]
     fn grouping_binary_translation_groups_digits_correctly_string() {
         assert_eq!(
-            GroupingBinaryTranslator {}
-                .basic_translate(5, &VariableValue::String("1000w".to_string()))
+            GroupingBinaryTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("1000w".to_string()))
                 .0,
             "1 000w"
         );
         assert_eq!(
-            GroupingBinaryTranslator {}
-                .basic_translate(8, &VariableValue::String("100l00".to_string()))
+            GroupingBinaryTranslator { num_bits: 8 }
+                .basic_translate(&VariableValue::String("100l00".to_string()))
                 .0,
             "0010 0l00"
         );
         assert_eq!(
-            GroupingBinaryTranslator {}
-                .basic_translate(7, &VariableValue::String("10x00".to_string()))
+            GroupingBinaryTranslator { num_bits: 7 }
+                .basic_translate(&VariableValue::String("10x00".to_string()))
                 .0,
             "001 0x00"
         );
         assert_eq!(
-            GroupingBinaryTranslator {}
-                .basic_translate(7, &VariableValue::String("z10x00".to_string()))
+            GroupingBinaryTranslator { num_bits: 7 }
+                .basic_translate(&VariableValue::String("z10x00".to_string()))
                 .0,
             "zz1 0x00"
         );
@@ -670,8 +875,8 @@ mod test {
     #[test]
     fn grouping_binary_translation_groups_digits_correctly_bigint() {
         assert_eq!(
-            GroupingBinaryTranslator {}
-                .basic_translate(7, &VariableValue::BigUint(BigUint::from(0b100000u32)))
+            GroupingBinaryTranslator { num_bits: 7 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b100000u32)))
                 .0,
             "010 0000"
         );
@@ -680,26 +885,26 @@ mod test {
     #[test]
     fn binary_translation_groups_digits_correctly_string() {
         assert_eq!(
-            BinaryTranslator {}
-                .basic_translate(5, &VariableValue::String("10000".to_string()))
+            BinaryTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("10000".to_string()))
                 .0,
             "10000"
         );
         assert_eq!(
-            BinaryTranslator {}
-                .basic_translate(8, &VariableValue::String("100h00".to_string()))
+            BinaryTranslator { num_bits: 8 }
+                .basic_translate(&VariableValue::String("100h00".to_string()))
                 .0,
             "00100h00"
         );
         assert_eq!(
-            BinaryTranslator {}
-                .basic_translate(7, &VariableValue::String("10x0-".to_string()))
+            BinaryTranslator { num_bits: 7 }
+                .basic_translate(&VariableValue::String("10x0-".to_string()))
                 .0,
             "0010x0-"
         );
         assert_eq!(
-            BinaryTranslator {}
-                .basic_translate(7, &VariableValue::String("z10x00".to_string()))
+            BinaryTranslator { num_bits: 7 }
+                .basic_translate(&VariableValue::String("z10x00".to_string()))
                 .0,
             "zz10x00"
         );
@@ -708,8 +913,8 @@ mod test {
     #[test]
     fn binary_translation_groups_digits_correctly_bigint() {
         assert_eq!(
-            BinaryTranslator {}
-                .basic_translate(7, &VariableValue::BigUint(BigUint::from(0b100000u32)))
+            BinaryTranslator { num_bits: 7 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b100000u32)))
                 .0,
             "0100000"
         );
@@ -719,16 +924,15 @@ mod test {
     fn ascii_translation_from_biguint() {
         assert_eq!(
             ASCIITranslator {}
-                .basic_translate(
-                    15,
-                    &VariableValue::BigUint(BigUint::from(0b100111101001011u32))
-                )
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b100111101001011u32)))
                 .0,
             "OK"
         );
         assert_eq!(
             ASCIITranslator {}
-                .basic_translate(72, &VariableValue::BigUint(BigUint::from(0b010011000110111101101110011001110010000001110100011001010111001101110100u128)))
+                .basic_translate(&VariableValue::BigUint(BigUint::from(
+                    0b010011000110111101101110011001110010000001110100011001010111001101110100u128
+                )))
                 .0,
             "Long test"
         );
@@ -738,32 +942,29 @@ mod test {
     fn ascii_translation_from_string() {
         assert_eq!(
             ASCIITranslator {}
-                .basic_translate(15, &VariableValue::String("100111101001011".to_string()))
+                .basic_translate(&VariableValue::String("100111101001011".to_string()))
                 .0,
             "OK"
         );
         assert_eq!(
             ASCIITranslator {}
-                .basic_translate(
-                    72,
-                    &VariableValue::String(
-                        "010011000110111101101110011001110010000001110100011001010111001101110100"
-                            .to_string()
-                    )
-                )
+                .basic_translate(&VariableValue::String(
+                    "010011000110111101101110011001110010000001110100011001010111001101110100"
+                        .to_string()
+                ))
                 .0,
             "Long test"
         );
         assert_eq!(
             ASCIITranslator {}
-                .basic_translate(16, &VariableValue::String("010x111101001011".to_string()))
+                .basic_translate(&VariableValue::String("010x111101001011".to_string()))
                 .0,
             "UNDEF"
         );
         // string too short for 2 characters, pads with 0
         assert_eq!(
             ASCIITranslator {}
-                .basic_translate(15, &VariableValue::String("11000001001011".to_string()))
+                .basic_translate(&VariableValue::String("11000001001011".to_string()))
                 .0,
             "0K"
         );
@@ -773,13 +974,13 @@ mod test {
     fn bit_translation_from_biguint() {
         assert_eq!(
             BitTranslator {}
-                .basic_translate(1, &VariableValue::BigUint(BigUint::from(0b1u8)))
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b1u8)))
                 .0,
             "1"
         );
         assert_eq!(
             BitTranslator {}
-                .basic_translate(1, &VariableValue::BigUint(BigUint::from(0b0u8)))
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b0u8)))
                 .0,
             "0"
         );
@@ -789,19 +990,19 @@ mod test {
     fn bit_translation_from_string() {
         assert_eq!(
             BitTranslator {}
-                .basic_translate(1, &VariableValue::String("1".to_string()))
+                .basic_translate(&VariableValue::String("1".to_string()))
                 .0,
             "1"
         );
         assert_eq!(
             BitTranslator {}
-                .basic_translate(1, &VariableValue::String("0".to_string()))
+                .basic_translate(&VariableValue::String("0".to_string()))
                 .0,
             "0"
         );
         assert_eq!(
             BitTranslator {}
-                .basic_translate(1, &VariableValue::String("x".to_string()))
+                .basic_translate(&VariableValue::String("x".to_string()))
                 .0,
             "x"
         );
@@ -811,7 +1012,7 @@ mod test {
     fn bit_translator_with_invalid_data() {
         assert_eq!(
             BitTranslator {}
-                .basic_translate(2, &VariableValue::BigUint(BigUint::from(3u8)))
+                .basic_translate(&VariableValue::BigUint(BigUint::from(3u8)))
                 .0,
             "-"
         );
@@ -820,26 +1021,32 @@ mod test {
     #[test]
     fn leb_translation_from_biguint() {
         assert_eq!(
-            LebTranslator {}
-                .basic_translate(16, &VariableValue::BigUint(0b01011010_11101111u16.into()))
+            LebTranslator { num_bits: 16 }
+                .basic_translate(&VariableValue::BigUint(0b01011010_11101111u16.into()))
                 .0,
             "11631"
         );
         assert_eq!(
-            LebTranslator {}
-                .basic_translate(16, &VariableValue::BigUint(0b00000000_00000001u16.into()))
+            LebTranslator { num_bits: 16 }
+                .basic_translate(&VariableValue::BigUint(0b00000000_00000001u16.into()))
                 .0,
             "1"
         );
         assert_eq!(
-            LebTranslator{}.basic_translate(64, &VariableValue::BigUint(0b01001010_11110111_11101000_10100000_10111010_11110110_11100001_10011001u64.into())).0, "42185246214303897"
+            LebTranslator { num_bits: 64 }
+                .basic_translate(&VariableValue::BigUint(
+                    0b01001010_11110111_11101000_10100000_10111010_11110110_11100001_10011001u64
+                        .into()
+                ))
+                .0,
+            "42185246214303897"
         );
     }
     #[test]
     fn leb_translation_from_string() {
         assert_eq!(
-            LebTranslator {}
-                .basic_translate(16, &VariableValue::String("0111110011100010".to_owned()))
+            LebTranslator { num_bits: 16 }
+                .basic_translate(&VariableValue::String("0111110011100010".to_owned()))
                 .0,
             "15970"
         );
@@ -847,8 +1054,8 @@ mod test {
     #[test]
     fn leb_translation_invalid_msb() {
         assert_eq!(
-            LebTranslator {}
-                .basic_translate(16, &VariableValue::BigUint(0b1000000010000000u16.into()))
+            LebTranslator { num_bits: 16 }
+                .basic_translate(&VariableValue::BigUint(0b1000000010000000u16.into()))
                 .0,
             "invalid MSB: 1000 0000 1000 0000"
         );
@@ -856,8 +1063,8 @@ mod test {
     #[test]
     fn leb_translation_invalid_continuation() {
         assert_eq!(
-            LebTranslator {}
-                .basic_translate(16, &VariableValue::BigUint(0b0111111101111111u16.into()))
+            LebTranslator { num_bits: 16 }
+                .basic_translate(&VariableValue::BigUint(0b0111111101111111u16.into()))
                 .0,
             "invalid flag: 0111 1111 0111 1111"
         );
@@ -867,8 +1074,8 @@ mod test {
     fn leb_tranlator_input_not_multiple_of_8() {
         // act as if padded with 0s
         assert_eq!(
-            LebTranslator {}
-                .basic_translate(16, &VariableValue::BigUint(0b00001111111u16.into()))
+            LebTranslator { num_bits: 16 }
+                .basic_translate(&VariableValue::BigUint(0b00001111111u16.into()))
                 .0,
             "127"
         );
@@ -878,19 +1085,19 @@ mod test {
     fn number_of_ones_translation_string() {
         assert_eq!(
             NumberOfOnesTranslator {}
-                .basic_translate(5, &VariableValue::String("10000".to_string()))
+                .basic_translate(&VariableValue::String("10000".to_string()))
                 .0,
             "1"
         );
         assert_eq!(
             NumberOfOnesTranslator {}
-                .basic_translate(5, &VariableValue::String("101".to_string()))
+                .basic_translate(&VariableValue::String("101".to_string()))
                 .0,
             "2"
         );
         assert_eq!(
             NumberOfOnesTranslator {}
-                .basic_translate(9, &VariableValue::String("1x100".to_string()))
+                .basic_translate(&VariableValue::String("1x100".to_string()))
                 .0,
             "2"
         );
@@ -900,13 +1107,13 @@ mod test {
     fn number_of_ones_translation_bigint() {
         assert_eq!(
             NumberOfOnesTranslator {}
-                .basic_translate(17, &VariableValue::BigUint(BigUint::from(0b101110000u32)))
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b101110000u32)))
                 .0,
             "4"
         );
         assert_eq!(
             NumberOfOnesTranslator {}
-                .basic_translate(40, &VariableValue::BigUint(BigUint::from(0b00100u32)))
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b00100u32)))
                 .0,
             "1"
         );
@@ -916,19 +1123,19 @@ mod test {
     fn trailing_ones_translation_string() {
         assert_eq!(
             TrailingOnesTranslator {}
-                .basic_translate(5, &VariableValue::String("10111".to_string()))
+                .basic_translate(&VariableValue::String("10111".to_string()))
                 .0,
             "3"
         );
         assert_eq!(
             TrailingOnesTranslator {}
-                .basic_translate(5, &VariableValue::String("101".to_string()))
+                .basic_translate(&VariableValue::String("101".to_string()))
                 .0,
             "1"
         );
         assert_eq!(
             TrailingOnesTranslator {}
-                .basic_translate(9, &VariableValue::String("x100".to_string()))
+                .basic_translate(&VariableValue::String("x100".to_string()))
                 .0,
             "0"
         );
@@ -938,19 +1145,19 @@ mod test {
     fn trailing_ones_translation_bigint() {
         assert_eq!(
             TrailingOnesTranslator {}
-                .basic_translate(17, &VariableValue::BigUint(BigUint::from(0b101111111u32)))
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b101111111u32)))
                 .0,
             "7"
         );
         assert_eq!(
             TrailingOnesTranslator {}
-                .basic_translate(40, &VariableValue::BigUint(BigUint::from(0b00100u32)))
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b00100u32)))
                 .0,
             "0"
         );
         assert_eq!(
             TrailingOnesTranslator {}
-                .basic_translate(5, &VariableValue::BigUint(BigUint::from(0b11111u32)))
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b11111u32)))
                 .0,
             "5"
         );
@@ -959,20 +1166,20 @@ mod test {
     #[test]
     fn trailing_zeros_translation_string() {
         assert_eq!(
-            TrailingZerosTranslator {}
-                .basic_translate(5, &VariableValue::String("10000".to_string()))
+            TrailingZerosTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("10000".to_string()))
                 .0,
             "4"
         );
         assert_eq!(
-            TrailingZerosTranslator {}
-                .basic_translate(5, &VariableValue::String("101".to_string()))
+            TrailingZerosTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("101".to_string()))
                 .0,
             "0"
         );
         assert_eq!(
-            TrailingZerosTranslator {}
-                .basic_translate(9, &VariableValue::String("x100".to_string()))
+            TrailingZerosTranslator { num_bits: 9 }
+                .basic_translate(&VariableValue::String("x100".to_string()))
                 .0,
             "2"
         );
@@ -981,20 +1188,20 @@ mod test {
     #[test]
     fn trailing_zeros_translation_bigint() {
         assert_eq!(
-            TrailingZerosTranslator {}
-                .basic_translate(17, &VariableValue::BigUint(BigUint::from(0b101111111u32)))
+            TrailingZerosTranslator { num_bits: 17 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b101111111u32)))
                 .0,
             "0"
         );
         assert_eq!(
-            TrailingZerosTranslator {}
-                .basic_translate(40, &VariableValue::BigUint(BigUint::from(0b00100u32)))
+            TrailingZerosTranslator { num_bits: 40 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b00100u32)))
                 .0,
             "2"
         );
         assert_eq!(
-            TrailingZerosTranslator {}
-                .basic_translate(16, &VariableValue::BigUint(BigUint::from(0b0u32)))
+            TrailingZerosTranslator { num_bits: 16 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b0u32)))
                 .0,
             "16"
         );
@@ -1003,20 +1210,20 @@ mod test {
     #[test]
     fn leading_ones_translation_string() {
         assert_eq!(
-            LeadingOnesTranslator {}
-                .basic_translate(5, &VariableValue::String("11101".to_string()))
+            LeadingOnesTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("11101".to_string()))
                 .0,
             "3"
         );
         assert_eq!(
-            LeadingOnesTranslator {}
-                .basic_translate(5, &VariableValue::String("101".to_string()))
+            LeadingOnesTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("101".to_string()))
                 .0,
             "0"
         );
         assert_eq!(
-            LeadingOnesTranslator {}
-                .basic_translate(9, &VariableValue::String("x100".to_string()))
+            LeadingOnesTranslator { num_bits: 9 }
+                .basic_translate(&VariableValue::String("x100".to_string()))
                 .0,
             "0"
         );
@@ -1025,20 +1232,20 @@ mod test {
     #[test]
     fn leading_ones_translation_bigint() {
         assert_eq!(
-            LeadingOnesTranslator {}
-                .basic_translate(11, &VariableValue::BigUint(BigUint::from(0b11111111100u32)))
+            LeadingOnesTranslator { num_bits: 11 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b11111111100u32)))
                 .0,
             "9"
         );
         assert_eq!(
-            LeadingOnesTranslator {}
-                .basic_translate(40, &VariableValue::BigUint(BigUint::from(0b00100u32)))
+            LeadingOnesTranslator { num_bits: 40 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b00100u32)))
                 .0,
             "0"
         );
         assert_eq!(
-            LeadingOnesTranslator {}
-                .basic_translate(5, &VariableValue::BigUint(BigUint::from(0b11111u32)))
+            LeadingOnesTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b11111u32)))
                 .0,
             "5"
         );
@@ -1047,20 +1254,20 @@ mod test {
     #[test]
     fn leading_zeros_translation_string() {
         assert_eq!(
-            LeadingZerosTranslator {}
-                .basic_translate(5, &VariableValue::String("10000".to_string()))
+            LeadingZerosTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("10000".to_string()))
                 .0,
             "0"
         );
         assert_eq!(
-            LeadingZerosTranslator {}
-                .basic_translate(5, &VariableValue::String("101".to_string()))
+            LeadingZerosTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("101".to_string()))
                 .0,
             "2"
         );
         assert_eq!(
-            LeadingZerosTranslator {}
-                .basic_translate(9, &VariableValue::String("x100".to_string()))
+            LeadingZerosTranslator { num_bits: 9 }
+                .basic_translate(&VariableValue::String("x100".to_string()))
                 .0,
             "0"
         );
@@ -1069,20 +1276,20 @@ mod test {
     #[test]
     fn leading_zeros_translation_bigint() {
         assert_eq!(
-            LeadingZerosTranslator {}
-                .basic_translate(17, &VariableValue::BigUint(BigUint::from(0b101111111u32)))
+            LeadingZerosTranslator { num_bits: 17 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b101111111u32)))
                 .0,
             "8"
         );
         assert_eq!(
-            LeadingZerosTranslator {}
-                .basic_translate(40, &VariableValue::BigUint(BigUint::from(0b00100u32)))
+            LeadingZerosTranslator { num_bits: 40 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b00100u32)))
                 .0,
             "37"
         );
         assert_eq!(
-            LeadingZerosTranslator {}
-                .basic_translate(16, &VariableValue::BigUint(BigUint::from(0b0u32)))
+            LeadingZerosTranslator { num_bits: 16 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b0u32)))
                 .0,
             "16"
         );
@@ -1091,32 +1298,32 @@ mod test {
     #[test]
     fn signbits_translation_string() {
         assert_eq!(
-            IdenticalMSBsTranslator {}
-                .basic_translate(5, &VariableValue::String("10000".to_string()))
+            IdenticalMSBsTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("10000".to_string()))
                 .0,
             "1"
         );
         assert_eq!(
-            IdenticalMSBsTranslator {}
-                .basic_translate(7, &VariableValue::String("0".to_string()))
+            IdenticalMSBsTranslator { num_bits: 7 }
+                .basic_translate(&VariableValue::String("0".to_string()))
                 .0,
             "7"
         );
         assert_eq!(
-            IdenticalMSBsTranslator {}
-                .basic_translate(5, &VariableValue::String("101".to_string()))
+            IdenticalMSBsTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("101".to_string()))
                 .0,
             "2"
         );
         assert_eq!(
-            IdenticalMSBsTranslator {}
-                .basic_translate(9, &VariableValue::String("x100".to_string()))
+            IdenticalMSBsTranslator { num_bits: 9 }
+                .basic_translate(&VariableValue::String("x100".to_string()))
                 .0,
             "0"
         );
         assert_eq!(
-            IdenticalMSBsTranslator {}
-                .basic_translate(5, &VariableValue::String("11101".to_string()))
+            IdenticalMSBsTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("11101".to_string()))
                 .0,
             "3"
         );
@@ -1125,32 +1332,32 @@ mod test {
     #[test]
     fn signbits_translation_bigint() {
         assert_eq!(
-            IdenticalMSBsTranslator {}
-                .basic_translate(17, &VariableValue::BigUint(BigUint::from(0b101111111u32)))
+            IdenticalMSBsTranslator { num_bits: 17 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b101111111u32)))
                 .0,
             "8"
         );
         assert_eq!(
-            IdenticalMSBsTranslator {}
-                .basic_translate(40, &VariableValue::BigUint(BigUint::from(0b00100u32)))
+            IdenticalMSBsTranslator { num_bits: 40 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b00100u32)))
                 .0,
             "37"
         );
         assert_eq!(
-            IdenticalMSBsTranslator {}
-                .basic_translate(16, &VariableValue::BigUint(BigUint::from(0b0u32)))
+            IdenticalMSBsTranslator { num_bits: 16 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b0u32)))
                 .0,
             "16"
         );
         assert_eq!(
-            IdenticalMSBsTranslator {}
-                .basic_translate(11, &VariableValue::BigUint(BigUint::from(0b11111111100u32)))
+            IdenticalMSBsTranslator { num_bits: 11 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b11111111100u32)))
                 .0,
             "9"
         );
         assert_eq!(
-            IdenticalMSBsTranslator {}
-                .basic_translate(5, &VariableValue::BigUint(BigUint::from(0b11111u32)))
+            IdenticalMSBsTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b11111u32)))
                 .0,
             "5"
         );

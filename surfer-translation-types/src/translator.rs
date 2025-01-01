@@ -11,18 +11,9 @@ use crate::{
 
 /// The most general translator trait.
 pub trait Translator<VarId, ScopeId, Message>: Send + Sync {
-    fn name(&self) -> String;
+    fn translate(&self, value: &VariableValue) -> Result<TranslationResult>;
 
-    fn translate(
-        &self,
-        variable: &VariableMeta<VarId, ScopeId>,
-        value: &VariableValue,
-    ) -> Result<TranslationResult>;
-
-    fn variable_info(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<VariableInfo>;
-
-    /// Return [`TranslationPreference`] based on if the translator can handle this variable.
-    fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference>;
+    fn variable_info(&self) -> Result<VariableInfo>;
 
     /// By default translators are stateless, but if they need to reload, they can
     /// do by defining this method.
@@ -30,19 +21,36 @@ pub trait Translator<VarId, ScopeId, Message>: Send + Sync {
     fn reload(&self, _sender: Sender<Message>) {}
 }
 
-/// A translator that only produces non-hierarchical values
-pub trait BasicTranslator<VarId, ScopeId>: Send + Sync {
+pub trait TranslatorInfo<VarId, ScopeId, Message>: Send + Sync {
+    type Translator;
+
     fn name(&self) -> String;
 
-    fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind);
+    /// Return [`TranslationPreference`] based on if the translator can handle this variable.
+    fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference>;
+
+    fn create_instance(&self, variable: &VariableMeta<VarId, ScopeId>) -> Self::Translator;
+}
+
+/// A translator that only produces non-hierarchical values
+pub trait BasicTranslator<VarId, ScopeId>: Send + Sync {
+    fn basic_translate(&self, value: &VariableValue) -> (String, ValueKind);
+
+    fn variable_info(&self) -> Result<VariableInfo> {
+        Ok(VariableInfo::Bits)
+    }
+}
+
+pub trait BasicTranslatorInfo<VarId, ScopeId>: Send + Sync {
+    type Translator;
+
+    fn name(&self) -> String;
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         translates_all_bit_types(variable)
     }
 
-    fn variable_info(&self, _variable: &VariableMeta<VarId, ScopeId>) -> Result<VariableInfo> {
-        Ok(VariableInfo::Bits)
-    }
+    fn create_instance(&self, variable: &VariableMeta<VarId, ScopeId>) -> Self::Translator;
 }
 
 enum NumberParseResult {

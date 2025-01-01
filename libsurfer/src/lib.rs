@@ -727,8 +727,7 @@ impl State {
                             else {
                                 return;
                             };
-                            let translator = self.sys.translators.get_translator(&format);
-                            let new_info = translator.variable_info(&meta).unwrap();
+                            let new_info = variable.translator.variable_info().unwrap();
 
                             variable.format = Some(format.clone());
                             variable.info = new_info;

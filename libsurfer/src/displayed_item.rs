@@ -4,10 +4,11 @@ use egui::{Context, FontSelection, Key, RichText, Style, WidgetText, Window};
 use emath::Align;
 use epaint::text::LayoutJob;
 use serde::{Deserialize, Serialize};
-use surfer_translation_types::VariableInfo;
+use surfer_translation_types::{Translator, VariableInfo};
 
 use crate::config::SurferConfig;
 use crate::transaction_container::TransactionStreamRef;
+use crate::translation::AnyTranslator;
 use crate::wave_container::{FieldRef, VariableRef, VariableRefExt, WaveContainer};
 use crate::{
     marker::DEFAULT_MARKER_NAME, message::Message, time::DEFAULT_TIMELINE_NAME,
@@ -73,6 +74,8 @@ pub enum DisplayedItem {
 pub struct FieldFormat {
     pub field: Vec<String>,
     pub format: String,
+    #[serde(skip)]
+    pub translator: DynTranslator,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -86,6 +89,8 @@ pub struct DisplayedVariable {
     pub display_name_type: VariableNameType,
     pub manual_name: Option<String>,
     pub format: Option<String>,
+    #[serde(skip)]
+    pub translator: DynTranslator,
     pub field_formats: Vec<FieldFormat>,
 }
 

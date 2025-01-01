@@ -29,9 +29,9 @@ pub use instruction_translators::*;
 use itertools::Itertools;
 pub use numeric_translators::*;
 use surfer_translation_types::{
-    BasicTranslator, HierFormatResult, SubFieldFlatTranslationResult, TranslatedValue,
-    TranslationPreference, TranslationResult, Translator, ValueKind, ValueRepr, VariableEncoding,
-    VariableInfo, VariableValue,
+    BasicTranslator, BasicTranslatorInfo, HierFormatResult, SubFieldFlatTranslationResult,
+    TranslatedValue, TranslationPreference, TranslationResult, Translator, TranslatorInfo,
+    ValueKind, ValueRepr, VariableEncoding, VariableInfo, VariableValue,
 };
 
 use crate::config::SurferTheme;
@@ -40,14 +40,15 @@ use crate::wave_container::{ScopeId, VarId};
 use crate::{message::Message, wave_container::VariableMeta};
 
 pub type DynTranslator = dyn Translator<VarId, ScopeId, Message>;
+pub type DynTranslatorInfo = dyn TranslatorInfo<VarId, ScopeId, Message, Translator = DynTranslator>;
 pub type DynBasicTranslator = dyn BasicTranslator<VarId, ScopeId>;
+pub type DynBasicTranslatorInfo = dyn BasicTranslatorInfo<VarId, ScopeId, Translator = DynBasicTranslator>;
 
 fn translate_with_basic(
     t: &DynBasicTranslator,
-    variable: &VariableMeta,
     value: &VariableValue,
 ) -> Result<TranslationResult> {
-    let (val, kind) = t.basic_translate(variable.num_bits.unwrap_or(0) as u64, value);
+    let (val, kind) = t.basic_translate(value);
     Ok(TranslationResult {
         val: ValueRepr::String(val),
         kind,
@@ -69,44 +70,22 @@ impl AnyTranslator {
 }
 
 impl Translator<VarId, ScopeId, Message> for AnyTranslator {
-    fn name(&self) -> String {
+    fn translate(&self, value: &VariableValue) -> Result<TranslationResult> {
         match self {
-            AnyTranslator::Full(t) => t.name(),
-            AnyTranslator::Basic(t) => t.name(),
-            #[cfg(feature = "python")]
-            AnyTranslator::Python(t) => t.name(),
-        }
-    }
-
-    fn translate(
-        &self,
-        variable: &VariableMeta,
-        value: &VariableValue,
-    ) -> Result<TranslationResult> {
-        match self {
-            AnyTranslator::Full(t) => t.translate(variable, value),
-            AnyTranslator::Basic(t) => translate_with_basic(&**t, variable, value),
+            AnyTranslator::Full(t) => t.translate(value),
+            AnyTranslator::Basic(t) => translate_with_basic(&**t, value),
             #[cfg(feature = "python")]
             AnyTranslator::Python(t) => translate_with_basic(t, variable, value),
         }
     }
 
-    fn variable_info(&self, variable: &VariableMeta) -> Result<VariableInfo> {
+    fn variable_info(&self) -> Result<VariableInfo> {
         match self {
-            AnyTranslator::Full(t) => t.variable_info(variable),
-            AnyTranslator::Basic(t) => t.variable_info(variable),
+            AnyTranslator::Full(t) => t.variable_info(),
+            AnyTranslator::Basic(t) => t.variable_info(),
             #[cfg(feature = "python")]
             #[cfg(target_family = "unix")]
             AnyTranslator::Python(t) => t.variable_info(variable),
-        }
-    }
-
-    fn translates(&self, variable: &VariableMeta) -> Result<TranslationPreference> {
-        match self {
-            AnyTranslator::Full(t) => t.translates(variable),
-            AnyTranslator::Basic(t) => t.translates(variable),
-            #[cfg(feature = "python")]
-            AnyTranslator::Python(t) => t.translates(variable),
         }
     }
 
@@ -116,6 +95,53 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
             AnyTranslator::Basic(_) => (),
             #[cfg(feature = "python")]
             AnyTranslator::Python(_) => (),
+        }
+    }
+}
+
+pub enum AnyTranslatorInfo {
+    Full(Box<DynTranslatorInfo>),
+    Basic(Box<DynBasicTranslatorInfo>),
+    #[cfg(feature = "python")]
+    Python(python_translators::PythonTranslator),
+}
+
+impl AnyTranslatorInfo {
+    pub fn is_basic(&self) -> bool {
+        matches!(self, AnyTranslatorInfo::Basic(_))
+    }
+}
+
+impl TranslatorInfo<VarId, ScopeId, Message> for AnyTranslatorInfo {
+    fn name(&self) -> String {
+        match self {
+            AnyTranslatorInfo::Full(t) => t.name(),
+            AnyTranslatorInfo::Basic(t) => t.name(),
+            #[cfg(feature = "python")]
+            AnyTranslator::Python(t) => t.name(),
+        }
+    }
+
+    fn translates(&self, variable: &VariableMeta) -> Result<TranslationPreference> {
+        match self {
+            AnyTranslatorInfo::Full(t) => t.translates(variable),
+            AnyTranslatorInfo::Basic(t) => t.translates(variable),
+            #[cfg(feature = "python")]
+            AnyTranslator::Python(t) => t.translates(variable),
+        }
+    }
+
+    type Translator = AnyTranslator;
+
+    fn create_instance(
+        &self,
+        variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        match self {
+            AnyTranslatorInfo::Full(t) => AnyTranslator::Full(Box::new(t.create_instance(variable))),
+            AnyTranslatorInfo::Basic(t) => AnyTranslator::Basic(Box::new(t.create_instance(variable))),
+            #[cfg(feature = "python")]
+            AnyTranslator::Python(t) => t.translates(variable),
         }
     }
 }
@@ -230,19 +256,19 @@ fn find_user_decoders_at_path(path: &Path) -> Vec<Box<DynBasicTranslator>> {
 pub fn all_translators() -> TranslatorList {
     // WASM does not need mut, non-wasm does so we'll allow it
     #[allow(unused_mut)]
-    let mut basic_translators: Vec<Box<DynBasicTranslator>> = vec![
+    let mut basic_translators: Vec<Box<dyn BasicTranslatorInfo<VarId, ScopeId>> = vec![
         Box::new(BitTranslator {}),
-        Box::new(HexTranslator {}),
-        Box::new(OctalTranslator {}),
-        Box::new(GroupingBinaryTranslator {}),
-        Box::new(BinaryTranslator {}),
+        Box::new(HexTranslatorInfo {}),
+        Box::new(OctalTranslatorInfo {}),
+        Box::new(GroupingBinaryTranslatorInfo {}),
+        Box::new(BinaryTranslatorInfo {}),
         Box::new(ASCIITranslator {}),
         Box::new(new_rv32_translator()),
         Box::new(new_rv64_translator()),
         Box::new(new_mips_translator()),
-        Box::new(LebTranslator {}),
+        Box::new(LebTranslatorInfo {}),
         Box::new(UnsignedTranslator {}),
-        Box::new(SignedTranslator {}),
+        Box::new(SignedTranslatorInfo {}),
         Box::new(SinglePrecisionTranslator {}),
         Box::new(DoublePrecisionTranslator {}),
         Box::new(HalfPrecisionTranslator {}),
@@ -255,11 +281,11 @@ pub fn all_translators() -> TranslatorList {
         Box::new(E5M2Translator {}),
         Box::new(E4M3Translator {}),
         Box::new(NumberOfOnesTranslator {}),
-        Box::new(LeadingOnesTranslator {}),
+        Box::new(LeadingOnesTranslatorInfo {}),
         Box::new(TrailingOnesTranslator {}),
-        Box::new(LeadingZerosTranslator {}),
-        Box::new(TrailingZerosTranslator {}),
-        Box::new(IdenticalMSBsTranslator {}),
+        Box::new(LeadingZerosTranslatorInfo {}),
+        Box::new(TrailingZerosTranslatorInfo {}),
+        Box::new(IdenticalMSBsTranslatorInfo {}),
         #[cfg(feature = "f128")]
         Box::new(QuadPrecisionTranslator {}),
     ];
@@ -272,30 +298,30 @@ pub fn all_translators() -> TranslatorList {
         vec![
             Box::new(ClockTranslator::new()),
             Box::new(StringTranslator {}),
-            Box::new(EnumTranslator {}),
+            Box::new(EnumTranslatorInfo {}),
         ],
     )
 }
 
 #[derive(Default)]
 pub struct TranslatorList {
-    inner: HashMap<String, AnyTranslator>,
+    inner: HashMap<String, AnyTranslatorInfo>,
     #[cfg(feature = "python")]
     python_translator: Option<(camino::Utf8PathBuf, String, AnyTranslator)>,
     pub default: String,
 }
 
 impl TranslatorList {
-    pub fn new(basic: Vec<Box<DynBasicTranslator>>, translators: Vec<Box<DynTranslator>>) -> Self {
+    pub fn new(basic: Vec<Box<DynBasicTranslatorInfo>>, translators: Vec<Box<DynTranslatorInfo>>) -> Self {
         Self {
             default: "Hexadecimal".to_string(),
             inner: basic
                 .into_iter()
-                .map(|t| (t.name(), AnyTranslator::Basic(t)))
+                .map(|t| (t.name(), AnyTranslatorInfo::Basic(t)))
                 .chain(
                     translators
                         .into_iter()
-                        .map(|t| (t.name(), AnyTranslator::Full(t))),
+                        .map(|t| (t.name(), AnyTranslatorInfo::Full(t))),
                 )
                 .collect(),
             #[cfg(feature = "python")]
@@ -318,7 +344,7 @@ impl TranslatorList {
             .collect()
     }
 
-    pub fn all_translators(&self) -> Vec<&AnyTranslator> {
+    pub fn all_translators(&self) -> Vec<&AnyTranslatorInfo> {
         #[cfg(feature = "python")]
         let python_translator = self.python_translator.as_ref().map(|(_, _, t)| t);
         #[cfg(not(feature = "python"))]
@@ -333,7 +359,7 @@ impl TranslatorList {
             .collect()
     }
 
-    pub fn get_translator(&self, name: &str) -> &AnyTranslator {
+    pub fn get_translator(&self, name: &str) -> &AnyTranslatorInfo {
         #[cfg(feature = "python")]
         let python_translator = || {
             self.python_translator
@@ -349,7 +375,7 @@ impl TranslatorList {
             .unwrap_or_else(|| panic!("No translator called {name}"))
     }
 
-    pub fn add_or_replace(&mut self, t: AnyTranslator) {
+    pub fn add_or_replace(&mut self, t: AnyTranslatorInfo) {
         self.inner.insert(t.name(), t);
     }
 
@@ -400,25 +426,25 @@ fn format(
 ) -> Option<TranslatedValue> {
     match val {
         ValueRepr::Bit(val) => {
-            let AnyTranslator::Basic(subtranslator) =
+            let AnyTranslatorInfo::Basic(subtranslator) =
                 translators.get_translator(subtranslator_name)
             else {
                 panic!("Subtranslator '{subtranslator_name}' was not a basic translator");
             };
 
             Some(TranslatedValue::from_basic_translate(
-                subtranslator.basic_translate(1, &VariableValue::String(val.to_string())),
+                subtranslator.create_instance(variable).basic_translate(&VariableValue::String(val.to_string())),
             ))
         }
         ValueRepr::Bits(bit_count, bits) => {
-            let AnyTranslator::Basic(subtranslator) =
+            let AnyTranslatorInfo::Basic(subtranslator) =
                 translators.get_translator(subtranslator_name)
             else {
                 panic!("Subtranslator '{subtranslator_name}' was not a basic translator");
             };
 
             Some(TranslatedValue::from_basic_translate(
-                subtranslator.basic_translate(*bit_count, &VariableValue::String(bits.clone())),
+                subtranslator.basic_translate(&VariableValue::String(bits.clone())),
             ))
         }
         ValueRepr::String(sval) => Some(TranslatedValue {
@@ -496,7 +522,7 @@ impl TranslationResultExt for TranslationResult {
                 let translator_name = formats
                     .iter()
                     .find(|e| e.field == sub_path)
-                    .map(|e| e.format.clone())
+                    .map(|e| e.translator)
                     .unwrap_or(translators.default.clone());
                 let formatted = format(
                     &res.result.val,
@@ -599,15 +625,7 @@ impl ValueKindExt for ValueKind {
 pub struct StringTranslator {}
 
 impl Translator<VarId, ScopeId, Message> for StringTranslator {
-    fn name(&self) -> String {
-        "String".to_string()
-    }
-
-    fn translate(
-        &self,
-        _variable: &VariableMeta,
-        value: &VariableValue,
-    ) -> Result<TranslationResult> {
+    fn translate(&self, value: &VariableValue) -> Result<TranslationResult> {
         match value {
             VariableValue::BigUint(b) => Ok(TranslationResult {
                 val: ValueRepr::String(format!("ERROR (0x{b:x})")),
@@ -622,8 +640,14 @@ impl Translator<VarId, ScopeId, Message> for StringTranslator {
         }
     }
 
-    fn variable_info(&self, _variable: &VariableMeta) -> Result<VariableInfo> {
+    fn variable_info(&self) -> Result<VariableInfo> {
         Ok(VariableInfo::String)
+    }
+}
+
+impl TranslatorInfo<VarId, ScopeId, Message> for StringTranslator {
+    fn name(&self) -> String {
+        "String".to_string()
     }
 
     fn translates(&self, variable: &VariableMeta) -> Result<TranslationPreference> {
@@ -636,9 +660,18 @@ impl Translator<VarId, ScopeId, Message> for StringTranslator {
             Ok(TranslationPreference::No)
         }
     }
+
+    type Translator = StringTranslator;
+
+    fn create_instance(
+        &self,
+        _variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        StringTranslator {}
+    }
 }
 
-fn check_single_wordlength(num_bits: Option<u32>, required: u32) -> Result<TranslationPreference> {
+fn check_single_wordlength(num_bits: Option<u64>, required: u64) -> Result<TranslationPreference> {
     if let Some(num_bits) = num_bits {
         if num_bits == required {
             Ok(TranslationPreference::Yes)

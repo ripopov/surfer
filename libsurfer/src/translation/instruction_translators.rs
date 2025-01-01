@@ -5,7 +5,7 @@ use crate::wave_container::{ScopeId, VarId, VariableMeta};
 
 use color_eyre::Result;
 use instruction_decoder::Decoder;
-use surfer_translation_types::{BasicTranslator, VariableValue};
+use surfer_translation_types::{BasicTranslator, BasicTranslatorInfo, VariableValue};
 
 pub struct InstructionTranslator {
     pub name: String,
@@ -14,11 +14,7 @@ pub struct InstructionTranslator {
 }
 
 impl BasicTranslator<VarId, ScopeId> for InstructionTranslator {
-    fn name(&self) -> String {
-        self.name.clone()
-    }
-
-    fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    fn basic_translate(&self, value: &VariableValue) -> (String, ValueKind) {
         let u64_value = match value {
             VariableValue::BigUint(v) => v.to_u64_digits().last().cloned(),
             VariableValue::String(s) => match check_vector_variable(s) {
@@ -30,22 +26,41 @@ impl BasicTranslator<VarId, ScopeId> for InstructionTranslator {
 
         match self
             .decoder
-            .decode_from_i64(u64_value as i64, num_bits as usize)
+            .decode_from_i64(u64_value as i64, self.num_bits as usize)
         {
             Ok(iform) => (iform, ValueKind::Normal),
             _ => (
                 format!(
                     "UNKNOWN INSN ({:#0width$x})",
                     u64_value,
-                    width = no_of_digits(num_bits, 4) + 2
+                    width = no_of_digits(self.num_bits, 4) + 2
                 ),
                 ValueKind::Warn,
             ),
         }
     }
+}
+
+impl BasicTranslatorInfo<VarId, ScopeId> for InstructionTranslator {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
 
     fn translates(&self, variable: &VariableMeta) -> Result<TranslationPreference> {
-        check_single_wordlength(variable.num_bits, self.num_bits as u32)
+        check_single_wordlength(variable.num_bits, self.num_bits)
+    }
+
+    type Translator = InstructionTranslator;
+
+    fn create_instance(
+        &self,
+        _variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        InstructionTranslator {
+            name: self.name.clone(),
+            decoder: self.decoder,
+            num_bits: self.num_bits,
+        }
     }
 }
 
@@ -163,43 +178,41 @@ mod test {
         let rv64_translator = new_rv64_translator();
         assert_eq!(
             rv32_translator
-                .basic_translate(32, &VariableValue::BigUint(1u32.into()))
+                .basic_translate(&VariableValue::BigUint(1u32.into()))
                 .0,
             "c.nop"
         );
         assert_eq!(
             rv32_translator
-                .basic_translate(32, &VariableValue::BigUint(0b1000000010011111u32.into()))
+                .basic_translate(&VariableValue::BigUint(0b1000000010011111u32.into()))
                 .0,
             "UNKNOWN INSN (0x0000809f)"
         );
         assert_eq!(
             rv32_translator
-                .basic_translate(
-                    32,
-                    &VariableValue::BigUint(0b1000_0001_0011_0101_0000_0101_1001_0011_u32.into())
-                )
+                .basic_translate(&VariableValue::BigUint(
+                    0b1000_0001_0011_0101_0000_0101_1001_0011_u32.into()
+                ))
                 .0,
             "addi a1, a0, -2029"
         );
         assert_eq!(
             rv64_translator
-                .basic_translate(32, &VariableValue::BigUint(1u32.into()))
+                .basic_translate(&VariableValue::BigUint(1u32.into()))
                 .0,
             "c.nop"
         );
         assert_eq!(
             rv64_translator
-                .basic_translate(32, &VariableValue::BigUint(0b1000000010011111u32.into()))
+                .basic_translate(&VariableValue::BigUint(0b1000000010011111u32.into()))
                 .0,
             "UNKNOWN INSN (0x0000809f)"
         );
         assert_eq!(
             rv64_translator
-                .basic_translate(
-                    32,
-                    &VariableValue::BigUint(0b1000_0001_0011_0101_0000_0101_1001_0011_u32.into())
-                )
+                .basic_translate(&VariableValue::BigUint(
+                    0b1000_0001_0011_0101_0000_0101_1001_0011_u32.into()
+                ))
                 .0,
             "addi a1, a0, -2029"
         );
@@ -209,43 +222,39 @@ mod test {
         let rv32_translator = new_rv32_translator();
         assert_eq!(
             rv32_translator
-                .basic_translate(32, &VariableValue::String("1".to_owned()))
+                .basic_translate(&VariableValue::String("1".to_owned()))
                 .0,
             "c.nop"
         );
         assert_eq!(
             rv32_translator
-                .basic_translate(
-                    32,
-                    &VariableValue::String("01001000100010001000100011111111".to_owned())
-                )
+                .basic_translate(&VariableValue::String(
+                    "01001000100010001000100011111111".to_owned()
+                ))
                 .0,
             "UNKNOWN INSN (0x488888ff)"
         );
         assert_eq!(
             rv32_translator
-                .basic_translate(
-                    32,
-                    &VariableValue::String("01xzz-hlw0010001000100010001000".to_owned())
-                )
+                .basic_translate(&VariableValue::String(
+                    "01xzz-hlw0010001000100010001000".to_owned()
+                ))
                 .0,
             "UNDEF"
         );
         assert_eq!(
             rv32_translator
-                .basic_translate(
-                    32,
-                    &VariableValue::String("010zz-hlw0010001000100010001000".to_owned())
-                )
+                .basic_translate(&VariableValue::String(
+                    "010zz-hlw0010001000100010001000".to_owned()
+                ))
                 .0,
             "HIGHIMP"
         );
         assert_eq!(
             rv32_translator
-                .basic_translate(
-                    32,
-                    &VariableValue::String("01011-hlw0010001000100010001000".to_owned())
-                )
+                .basic_translate(&VariableValue::String(
+                    "01011-hlw0010001000100010001000".to_owned()
+                ))
                 .0,
             "DON'T CARE"
         );
@@ -256,13 +265,13 @@ mod test {
         let mips_translator = new_mips_translator();
         assert_eq!(
             mips_translator
-                .basic_translate(32, &VariableValue::BigUint(0x3a873u32.into()))
+                .basic_translate(&VariableValue::BigUint(0x3a873u32.into()))
                 .0,
             "UNKNOWN INSN (0x0003a873)"
         );
         assert_eq!(
             mips_translator
-                .basic_translate(32, &VariableValue::BigUint(0x24210000u32.into()))
+                .basic_translate(&VariableValue::BigUint(0x24210000u32.into()))
                 .0,
             "addiu $at, $at, 0"
         );
@@ -273,37 +282,33 @@ mod test {
         let mips_translator = new_mips_translator();
         assert_eq!(
             mips_translator
-                .basic_translate(
-                    32,
-                    &VariableValue::String("10101111110000010000000000000000".to_owned())
-                )
+                .basic_translate(&VariableValue::String(
+                    "10101111110000010000000000000000".to_owned()
+                ))
                 .0,
             "sw $at, 0($fp)"
         );
         assert_eq!(
             mips_translator
-                .basic_translate(
-                    32,
-                    &VariableValue::String("01xzz-hlw0010001000100010001000".to_owned())
-                )
+                .basic_translate(&VariableValue::String(
+                    "01xzz-hlw0010001000100010001000".to_owned()
+                ))
                 .0,
             "UNDEF"
         );
         assert_eq!(
             mips_translator
-                .basic_translate(
-                    32,
-                    &VariableValue::String("010zz-hlw0010001000100010001000".to_owned())
-                )
+                .basic_translate(&VariableValue::String(
+                    "010zz-hlw0010001000100010001000".to_owned()
+                ))
                 .0,
             "HIGHIMP"
         );
         assert_eq!(
             mips_translator
-                .basic_translate(
-                    32,
-                    &VariableValue::String("01011-hlw0010001000100010001000".to_owned())
-                )
+                .basic_translate(&VariableValue::String(
+                    "01011-hlw0010001000100010001000".to_owned()
+                ))
                 .0,
             "DON'T CARE"
         );

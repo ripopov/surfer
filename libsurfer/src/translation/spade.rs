@@ -167,11 +167,7 @@ impl Translator<VarId, ScopeId, Message> for SpadeTranslator {
         "spade".to_string()
     }
 
-    fn translate(
-        &self,
-        variable: &VariableMeta,
-        value: &VariableValue,
-    ) -> Result<TranslationResult> {
+    fn translate(&self, value: &VariableValue) -> Result<TranslationResult> {
         let ty = self
             .state
             .type_of_hierarchical_value(&self.top, &variable.var.full_path()[1..])?;
@@ -202,7 +198,7 @@ impl Translator<VarId, ScopeId, Message> for SpadeTranslator {
         translate_concrete(&val_vcd, &ty, &mut false)
     }
 
-    fn variable_info(&self, variable: &VariableMeta) -> Result<VariableInfo> {
+    fn variable_info(&self) -> Result<VariableInfo> {
         let ty = self
             .state
             .type_of_hierarchical_value(&self.top, &variable.var.full_path()[1..])?;
