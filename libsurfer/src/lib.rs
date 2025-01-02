@@ -2,6 +2,7 @@
 
 #[cfg(feature = "performance_plot")]
 pub mod benchmark;
+mod channels;
 pub mod clock_highlighting;
 pub mod command_prompt;
 pub mod config;
@@ -57,6 +58,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
 
 use camino::Utf8PathBuf;
+use channels::{GlobalChannelRx, GlobalChannelTx};
 use color_eyre::eyre::Context;
 use color_eyre::Result;
 use derive_more::Display;
@@ -64,6 +66,7 @@ use displayed_item::DisplayedVariable;
 use eframe::{App, CreationContext};
 use egui::{FontData, FontDefinitions, FontFamily};
 use ftr_parser::types::Transaction;
+use futures::executor::block_on;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use log::{error, info, warn};
@@ -71,8 +74,7 @@ use num::BigInt;
 use serde::Deserialize;
 pub use state::State;
 use surfer_translation_types::Translator;
-use wcp::wcp_handler::Vecs;
-use wcp::{WcpCSMessage, WcpSCMessage};
+use wcp::{proto::WcpCSMessage, proto::WcpEvent, proto::WcpSCMessage};
 
 #[cfg(feature = "performance_plot")]
 use crate::config::{SurferConfig, SurferTheme};
@@ -105,6 +107,8 @@ lazy_static! {
     /// things until program exit
     pub(crate) static ref OUTSTANDING_TRANSACTIONS: AtomicU32 = AtomicU32::new(0);
 
+    pub(crate) static ref WCP_CS_HANDLER: GlobalChannelRx<WcpCSMessage> = GlobalChannelRx::new();
+    pub(crate) static ref WCP_SC_HANDLER: GlobalChannelTx<WcpSCMessage> = GlobalChannelTx::new();
 }
 
 pub struct StartupParams {
@@ -1088,10 +1092,7 @@ impl State {
                 if self.sys.wcp_server_load_outstanding {
                     self.sys.wcp_server_load_outstanding = false;
                     self.sys.channels.wcp_s2c_sender.as_ref().map(|ch| {
-                        ch.blocking_send(WcpSCMessage::create_response(
-                            "load".to_string(),
-                            Vecs::Int(vec![]),
-                        ))
+                        block_on(ch.send(WcpSCMessage::event(WcpEvent::waveforms_loaded)))
                     });
                 }
 
@@ -1703,15 +1704,13 @@ impl State {
             Message::StopWcpServer => {
                 self.stop_wcp_server();
             }
-            #[cfg(target_arch = "wasm32")]
-            Message::SetupWasmWCP => {
+            Message::SetupChannelWCP => {
                 use futures::executor::block_on;
-                self.sys.channels.wcp_c2s_receiver =
-                    block_on(wasm_api::WCP_CS_HANDLER.rx.write()).take();
+                self.sys.channels.wcp_c2s_receiver = block_on(WCP_CS_HANDLER.rx.write()).take();
                 if self.sys.channels.wcp_c2s_receiver.is_none() {
                     error!("Failed to claim wasm tx, was SetupWasmWCP executed twice?");
                 }
-                self.sys.channels.wcp_s2c_sender = Some(wasm_api::WCP_SC_HANDLER.tx.clone());
+                self.sys.channels.wcp_s2c_sender = Some(WCP_SC_HANDLER.tx.clone());
             }
             Message::Exit | Message::ToggleFullscreen => {} // Handled in eframe::update
             Message::AddViewport => {
