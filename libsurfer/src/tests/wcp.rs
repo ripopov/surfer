@@ -1,267 +1,406 @@
+use std::path::PathBuf;
+
 use crate::message::Message;
 use crate::tests::snapshot::render_and_compare;
-use crate::wcp::wcp_handler::{WcpCSMessage, WcpCommand};
-use crate::wcp::WcpSCMessage;
+use crate::wcp::proto::{self, WcpCSMessage, WcpCommand, WcpEvent, WcpResponse, WcpSCMessage};
 use crate::State;
 
-use itertools::Itertools;
+use color_eyre::eyre::bail;
+use color_eyre::Result;
+use futures::Future;
 use num::BigInt;
-use serde::Deserialize;
-use serde_json::Error as serde_Error;
-use test_log::test;
+use tokio::sync::mpsc::{Receiver, Sender};
 
-use lazy_static::lazy_static;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::{
-    io::{Read, Write},
-    net::{Shutdown, TcpStream},
-    thread,
-    time::{Duration, Instant},
-    vec,
-};
+macro_rules! expect_response {
+    ($rx:expr, $expected:pat$(,)?) => {
+        let received = tokio::select! {
+            result = $rx.recv() => {
+                result
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {
+                bail!("Timeout waiting for {}", stringify!($expected))
+            }
+        };
 
-struct DebugReader<R: std::io::Read> {
-    r: R,
+        let Some($expected) = received else {
+            bail!(
+                "Got unexpected response {received:?} expected {}",
+                stringify!(expected)
+            )
+        };
+    };
 }
 
-impl<R: std::io::Read> std::io::Read for DebugReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let count = self.r.read(buf)?;
-        println!(
-            "Read {} ({:?})",
-            String::from_utf8_lossy(&buf[0..count]),
-            &buf[0..count]
-        );
-        Ok(count)
+async fn expect_ack(rx: &mut tokio::sync::mpsc::Receiver<WcpSCMessage>) -> Result<()> {
+    expect_response! {
+        rx, WcpSCMessage::response(WcpResponse::ack)
     }
+    Ok(())
 }
 
-struct SkipNullReader<R: std::io::Read> {
-    r: R,
-}
+fn run_wcp_test<C, F>(test_name: String, client: C)
+where
+    C: Fn(Sender<WcpCSMessage>, Receiver<WcpSCMessage>) -> F + Sync + Send + Clone + 'static,
+    F: Future<Output = Result<()>> + Send + Sync,
+{
+    let test_name = format!("wcp/{test_name}");
 
-impl<R: std::io::Read> std::io::Read for SkipNullReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let count = self.r.read(&mut buf[0..1])?;
-        if count == 1 && buf[0] == b'\0' {
-            self.r.read(buf)
-        } else {
-            Ok(count)
-        }
-    }
-}
-
-fn get_test_port() -> usize {
-    lazy_static! {
-        static ref PORT_NUM: Arc<Mutex<usize>> = Arc::new(Mutex::new(54321));
-    }
-    let mut port = PORT_NUM.lock().unwrap();
-    *port += 1;
-    *port
-}
-
-fn get_json_response(mut stream: &TcpStream) -> Result<WcpSCMessage, serde_Error> {
-    let mut de = serde_json::Deserializer::from_reader(DebugReader {
-        r: SkipNullReader { r: &mut stream },
-    });
-    WcpSCMessage::deserialize(&mut de)
-}
-
-fn connect(port: usize) -> TcpStream {
-    let timeout = Duration::from_secs(2);
-    let now = Instant::now();
-    loop {
-        assert!(now.elapsed() <= timeout);
-        if let Ok(c) = TcpStream::connect(format!("127.0.0.1:{port}")) {
-            return c;
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-}
-
-fn expect_disconnect(mut stream: &TcpStream) {
-    loop {
-        let mut buf = [0; 1024];
-        let size = stream.read(&mut buf).unwrap();
-        if size == 0 {
-            break;
-        }
-    }
-}
-
-async fn run_test_client(port: usize, msgs: Vec<WcpCSMessage>, test_done: Arc<AtomicBool>) {
-    let mut client = connect(port);
-
-    // read greeting message
-    get_json_response(&mut client).expect("Could not read greeting message");
-
-    // FIXME check response content
-    // clear screen
-    let _ = serde_json::to_writer(&client, &WcpCSMessage::Command(WcpCommand::Clear));
-    let _ = client.write(b"\0");
-    let _ = client.flush();
-    for message in msgs.into_iter() {
-        println!("Writing {message:?}");
-        // send message to Surfer
-        let _ = serde_json::to_writer(&client, &message);
-        let _ = client.write(b"\0");
-        let _ = client.flush();
-        // read response from Surfer
-        let response = get_json_response(&mut client).unwrap();
-        println!("{response:?}");
-        // sleep so that signals get sent in correct order
-        thread::sleep(Duration::from_millis(100));
-    }
-
-    let _ = client.shutdown(std::net::Shutdown::Both);
-    test_done.store(true, Ordering::SeqCst);
-}
-
-fn start_test_client(port: usize, msgs: Vec<WcpCSMessage>, test_done: Arc<AtomicBool>) {
-    std::thread::spawn(move || {
+    render_and_compare(&PathBuf::from(test_name), move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
-            .worker_threads(1)
+            .worker_threads(2)
             .enable_all()
             .build()
             .unwrap();
-        let _res = runtime.block_on(run_test_client(port, msgs, test_done));
+
+        // create state and add messages as batch commands
+        let mut state = State::new_default_config().unwrap();
+
+        let setup_msgs = vec![
+            // hide GUI elements
+            Message::ToggleMenu,
+            Message::ToggleToolbar,
+            Message::ToggleOverview,
+        ];
+
+        for msg in setup_msgs {
+            state.update(msg);
+        }
+
+        let (runner_tx, mut runner_rx) = tokio::sync::oneshot::channel();
+
+        let (sc_tx, sc_rx) = tokio::sync::mpsc::channel(100);
+        state.sys.channels.wcp_s2c_sender = Some(sc_tx);
+        let (cs_tx, cs_rx) = tokio::sync::mpsc::channel(100);
+        state.sys.channels.wcp_c2s_receiver = Some(cs_rx);
+
+        {
+            let client = client.clone();
+            runtime.spawn(async move {
+                let result: Result<()> = async { client(cs_tx, sc_rx).await }.await;
+                runner_tx.send(result).unwrap();
+            });
+        }
+
+        runtime.block_on(async {
+            // update state until all batch commands have been processed
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {
+                        state.handle_async_messages();
+                        state.handle_wcp_commands();
+                    }
+                    exit = &mut runner_rx => {
+                        match exit {
+                            Ok(Ok(())) => {
+                                state.handle_async_messages();
+                                state.handle_wcp_commands();
+                                break;
+                            }
+                            Ok(Err(e)) => {
+                                panic!("Runner exited with\n{e:#}")
+                            }
+                            Err(e) => {
+                                panic!("Runner disconnected with\n{e:#}")
+                            }
+                        }
+                    }
+
+                }
+            }
+
+            state
+        })
     });
 }
 
-fn run_with_wcp(port: usize, test_done: Arc<AtomicBool>) -> State {
-    // create state and add messages as batch commands
-    let mut state = State::new_default_config().unwrap();
-
-    let setup_msgs = vec![
-        // hide GUI elements
-        Message::StartWcpServer(Some(format!("127.0.0.1:{port}").to_string())),
-        Message::ToggleMenu,
-        Message::ToggleToolbar,
-        Message::ToggleOverview,
-    ];
-
-    for msg in setup_msgs {
-        state.update(msg);
-    }
-
-    // update state until all batch commands have been processed
-    while !test_done.load(Ordering::SeqCst) {
-        state.handle_async_messages();
-        state.handle_wcp_commands();
-    }
-
-    state.stop_wcp_server();
-
-    state
-}
-
-macro_rules! wcp_snapshot_with_commands {
-    ($name:ident, $msgs:expr) => {
+macro_rules! wcp_test {
+    ($test_name:ident, ($tx:ident, $rx:ident) $body:tt) => {
         #[test]
-        fn $name() {
-            let msgs: Vec<WcpCSMessage> = $msgs
-                .into_iter()
-                .map(|message| WcpCSMessage::Command(message))
-                .collect();
+        fn $test_name() {
+            async fn client($tx: Sender<WcpCSMessage>, mut $rx: Receiver<WcpSCMessage>) -> color_eyre::Result<()> $body
 
-            let port = get_test_port();
-            let test_done = Arc::new(AtomicBool::new(false));
-            let test_done_copy = test_done.clone();
-            let test_client_thread =
-                thread::spawn(move || start_test_client(port, msgs, test_done));
-            let mut test_name = "wcp/".to_string();
-            test_name.push_str(stringify!($name));
-
-            render_and_compare(&PathBuf::from(&test_name), || {
-                run_with_wcp(port, test_done_copy.clone())
-            });
-
-            let _ = test_client_thread.join();
+            run_wcp_test(stringify!($test_name).to_string(), client)
         }
     };
 }
 
-wcp_snapshot_with_commands! {add_variables, vec![
-    WcpCommand::Load{source:  "../examples/counter.vcd".to_string()},
-    WcpCommand::AddVariables{names: vec![
-        "tb._tmp",
-        "tb.clk",
-        "tb.overflow",
-        "tb.reset"].into_iter().map(str::to_string).collect_vec()}
-]}
+async fn send_commands(tx: &Sender<WcpCSMessage>, cmds: Vec<WcpCommand>) -> Result<()> {
+    for cmd in cmds {
+        tx.send(WcpCSMessage::command(cmd)).await?
+    }
+    Ok(())
+}
 
-wcp_snapshot_with_commands! {add_scope, vec![
-    WcpCommand::Load{source: "../examples/counter.vcd".to_string()},
-    WcpCommand::AddScope{scope: "tb".to_string()}
-]}
+async fn greet(tx: &Sender<WcpCSMessage>, rx: &mut Receiver<WcpSCMessage>) -> Result<()> {
+    tx.send(WcpCSMessage::greeting {
+        version: "0".to_string(),
+        commands: vec![],
+    })
+    .await?;
 
-wcp_snapshot_with_commands! {color_variables, vec![
-    WcpCommand::Load{source:  "../examples/counter.vcd".to_string()},
-    WcpCommand::AddScope{scope: "tb".to_string()},
-    WcpCommand::SetItemColor{id:"3".to_string(), color:"Gray".to_string()},
-    WcpCommand::SetItemColor{id:"1".to_string(), color:"Blue".to_string()},
-    WcpCommand::SetItemColor{id:"2".to_string(), color:"Yellow".to_string()}
-]}
+    expect_response!(
+        rx,
+        WcpSCMessage::greeting {
+            version: v,
+            commands
+        },
+    );
+    assert_eq!(v, "0");
+    let e_commands = vec![
+        "add_variables",
+        "set_viewport_to",
+        "cursor_set",
+        "reload",
+        "add_scopes",
+        "get_item_list",
+        "set_item_color",
+        "get_item_info",
+        "clear_item",
+        "focus_item",
+        "clear",
+        "load",
+        "zoom_to_fit",
+    ];
+    assert_eq!(commands, e_commands);
 
-wcp_snapshot_with_commands! {remove_2_variables, vec![
-    WcpCommand::Load{source: "../examples/counter.vcd".to_string()},
-    WcpCommand::AddScope{scope: "tb".to_string()},
-    WcpCommand::RemoveItems{ids: vec!["1".to_string(), "2".to_string()]},
-]}
+    Ok(())
+}
 
-wcp_snapshot_with_commands! {focus_item, vec![
-    WcpCommand::Load{source: "../examples/counter.vcd".to_string()},
-    WcpCommand::AddScope{scope: "tb".to_string()},
-    WcpCommand::FocusItem{id: "2".to_string()}
-]}
+async fn load_file(
+    tx: &Sender<WcpCSMessage>,
+    rx: &mut Receiver<WcpSCMessage>,
+    file: &str,
+) -> Result<()> {
+    greet(tx, rx).await?;
 
-wcp_snapshot_with_commands! {clear, vec![
-    WcpCommand::Load{source: "../examples/counter.vcd".to_string()},
-    WcpCommand::AddScope{scope: "tb".to_string()},
-    WcpCommand::Clear
-]}
+    tx.send(WcpCSMessage::command(proto::WcpCommand::load {
+        source: file.to_string(),
+    }))
+    .await?;
+    expect_ack(rx).await?;
 
-wcp_snapshot_with_commands! {set_viewport_to, vec![
-    WcpCommand::Load{source: "../examples/counter.vcd".to_string()},
-    WcpCommand::AddScope{scope: "tb".to_string()},
-    WcpCommand::SetViewportTo { timestamp: BigInt::from(710) },
-]}
+    expect_response!(rx, WcpSCMessage::event(WcpEvent::waveforms_loaded));
 
-#[test]
-fn stop_and_reconnect() {
-    let mut state = State::new_default_config().unwrap();
-    let port = get_test_port();
-    for _ in 0..2 {
-        state.update(Message::StartWcpServer(Some(
-            format!("127.0.0.1:{port}").to_string(),
-        )));
-        let stream = connect(port);
-        get_json_response(&stream).expect("failed to get WCP greeting");
-        state.update(Message::StopWcpServer);
-        expect_disconnect(&stream);
-        loop {
-            if !state.sys.wcp_running_signal.load(Ordering::Relaxed) {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
+    Ok(())
+}
+
+wcp_test! {greeting_works, (tx, rx) {
+    greet(&tx, &mut rx).await?;
+
+    Ok(())
+}}
+
+wcp_test! {
+    loading_waveforms_works,
+    (tx, rx) {
+        load_file(&tx, &mut rx, "../examples/counter.vcd").await?;
+
+        tx.send(WcpCSMessage::command(
+            proto::WcpCommand::add_variables { names: vec![
+                "tb._tmp",
+                "tb.clk",
+                "tb.overflow",
+                "tb.reset"
+            ].into_iter().map(str::to_string).collect()
+        })).await?;
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_variables(indices)));
+
+        assert_eq!(indices.len(), 4);
+
+        Ok(())
     }
 }
 
-#[test]
-fn reconnect() {
-    let mut state = State::new_default_config().unwrap();
-    let port = get_test_port();
-    state.update(Message::StartWcpServer(Some(
-        format!("127.0.0.1:{port}").to_string(),
-    )));
-    for _ in 0..2 {
-        let stream = connect(port);
-        get_json_response(&stream).expect("failed to get WCP greeting");
-        stream
-            .shutdown(Shutdown::Both)
-            .expect("failed to shutdown TCP session");
+wcp_test! {
+    add_scope,
+    (tx, rx) {
+        greet(&tx, &mut rx).await?;
+
+        tx.send(WcpCSMessage::command(proto::WcpCommand::load {
+            source: "../examples/counter.vcd".to_string()
+        })).await?;
+        expect_ack(&mut rx).await?;
+
+        expect_response!(rx, WcpSCMessage::event(WcpEvent::waveforms_loaded));
+
+        tx.send(WcpCSMessage::command(
+            proto::WcpCommand::add_scope {scope: "tb".to_string()})).await?;
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope(indices)));
+
+        assert_eq!(indices.len(), 4);
+
+        Ok(())
+    }
+}
+
+wcp_test! {
+    color_variables,
+    (tx, rx) {
+        load_file(&tx, &mut rx, "../examples/counter.vcd").await?;
+
+        tx.send(WcpCSMessage::command(
+            proto::WcpCommand::add_variables { names: vec![
+                "tb._tmp",
+                "tb.clk",
+                "tb.overflow",
+                "tb.reset"
+            ].into_iter().map(str::to_string).collect()
+        })).await?;
+
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_variables(refs)));
+
+        for (i, c) in [(1, "Gray"), (2, "Yellow"), (3, "Blue")] {
+            tx.send(WcpCSMessage::command(
+                proto::WcpCommand::set_item_color { id: refs[i], color: c.to_string() }
+            )).await?;
+            expect_ack(&mut rx).await?;
+        }
+
+        Ok(())
+    }
+}
+
+wcp_test! {
+    remove_2_variables,
+    (tx, rx) {
+        load_file(&tx, &mut rx, "../examples/counter.vcd").await?;
+
+        send_commands(&tx, vec![
+            WcpCommand::add_scope {scope: "tb".to_string()},
+        ]).await?;
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope(refs)));
+
+        send_commands(&tx, vec![
+            WcpCommand::remove_items { ids: vec![refs[1], refs[2]] }
+        ]).await?;
+
+        expect_ack(&mut rx).await?;
+
+        Ok(())
+    }
+}
+
+wcp_test! {
+    focus_item,
+    (tx, rx) {
+        load_file(&tx, &mut rx, "../examples/counter.vcd").await?;
+
+        send_commands(&tx, vec![
+            WcpCommand::add_scope {scope: "tb".to_string()},
+        ]).await?;
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope(refs)));
+
+        send_commands(&tx, vec![
+            WcpCommand::focus_item { id: refs[1] }
+        ]).await?;
+        expect_ack(&mut rx).await
+    }
+}
+
+wcp_test! {
+    clear,
+    (tx, rx) {
+        load_file(&tx, &mut rx, "../examples/counter.vcd").await?;
+
+        send_commands(&tx, vec![
+            WcpCommand::add_scope {scope: "tb".to_string()},
+            WcpCommand::clear,
+        ]).await?;
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope(_)));
+        expect_ack(&mut rx).await
+    }
+}
+
+wcp_test! {
+    set_viewport_to,
+    (tx, rx) {
+        load_file(&tx, &mut rx, "../examples/counter.vcd").await?;
+
+        send_commands(&tx, vec![
+            WcpCommand::add_scope {scope: "tb".to_string()},
+            WcpCommand::set_viewport_to { timestamp: BigInt::from(70) },
+        ]).await?;
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope(_)));
+        expect_ack(&mut rx).await?;
+        Ok(())
+    }
+}
+
+wcp_test! {
+    zoom_to_fit,
+    (tx, rx) {
+        load_file(&tx, &mut rx, "../examples/counter.vcd").await?;
+
+        send_commands(&tx, vec![
+            WcpCommand::add_scope {scope: "tb".to_string()},
+            WcpCommand::set_viewport_to { timestamp: BigInt::from(70) },
+            WcpCommand::zoom_to_fit { viewport_idx: 0 }
+        ]).await?;
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope(_)));
+        expect_ack(&mut rx).await?;
+        expect_ack(&mut rx).await?;
+
+        Ok(())
+    }
+}
+
+wcp_test! {
+    get_item_info,
+    (tx, rx) {
+        load_file(&tx, &mut rx, "../examples/counter.vcd").await?;
+
+        send_commands(&tx, vec![
+            WcpCommand::add_scope {scope: "tb".to_string()},
+        ]).await?;
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope(items)));
+
+        send_commands(&tx, vec![
+            WcpCommand::get_item_info { ids: items }
+        ]).await?;
+
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::get_item_info(info)));
+        let expected = vec![
+            proto::ItemInfo { name: "overflow".to_string(),
+                 t: "Variable".to_string(),
+                 id: proto::DisplayedItemRef(1)
+             },
+             proto::ItemInfo { name: "clk".to_string(),
+                 t: "Variable".to_string(),
+                 id: proto::DisplayedItemRef(2)
+             },
+             proto::ItemInfo { name: "reset".to_string(),
+                 t: "Variable".to_string(),
+                 id: proto::DisplayedItemRef(3)
+             },
+             proto::ItemInfo { name: "_tmp".to_string(),
+                 t: "Variable".to_string(),
+                 id: proto::DisplayedItemRef(4)
+             }
+        ];
+        assert_eq!(info, expected);
+
+        Ok(())
+    }
+}
+
+wcp_test! {
+    get_item_info_invalid_id,
+    (tx, rx) {
+        load_file(&tx, &mut rx, "../examples/counter.vcd").await?;
+
+        send_commands(&tx, vec![
+            WcpCommand::add_scope {scope: "tb".to_string()},
+        ]).await?;
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope(_)));
+
+        send_commands(&tx, vec![
+            WcpCommand::get_item_info { ids: vec![proto::DisplayedItemRef(usize::MAX)] }
+        ]).await?;
+
+        expect_response!(rx, WcpSCMessage::error{error, arguments: _, message});
+        assert_eq!(error, "get_item_info");
+        assert_eq!(message, "No item with id DisplayedItemRef(18446744073709551615)");
+
+        Ok(())
     }
 }
