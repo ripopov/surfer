@@ -4,6 +4,7 @@ use emath::Vec2;
 
 use crate::config::ArrowKeyBindings;
 use crate::displayed_item::DisplayedItemIndex;
+use crate::search::TransitionType;
 use crate::{
     message::Message,
     wave_data::{PER_SCROLL_EVENT, SCROLL_EVENTS_PER_PAGE},
@@ -127,12 +128,24 @@ impl State {
                     (Key::H, true, false, false) => msgs.push(Message::MoveCursorToTransition {
                         next: false,
                         variable: None,
-                        skip_zero: modifiers.shift,
+                        transition_type: {
+                            if modifiers.shift {
+                                TransitionType::NotEqualTo(0u8.into())
+                            } else {
+                                TransitionType::Any
+                            }
+                        },
                     }),
                     (Key::L, true, false, false) => msgs.push(Message::MoveCursorToTransition {
                         next: true,
                         variable: None,
-                        skip_zero: modifiers.shift,
+                        transition_type: {
+                            if modifiers.shift {
+                                TransitionType::NotEqualTo(0u8.into())
+                            } else {
+                                TransitionType::Any
+                            }
+                        },
                     }),
                     (Key::Minus, true, false, false) => msgs.push(Message::CanvasZoom {
                         mouse_ptr: None,
@@ -165,7 +178,13 @@ impl State {
                             ArrowKeyBindings::Edge => Message::MoveCursorToTransition {
                                 next: true,
                                 variable: None,
-                                skip_zero: modifiers.shift,
+                                transition_type: {
+                                    if modifiers.shift {
+                                        TransitionType::NotEqualTo(0u8.into())
+                                    } else {
+                                        TransitionType::Any
+                                    }
+                                },
                             },
                             ArrowKeyBindings::Scroll => Message::CanvasScroll {
                                 delta: Vec2 {
@@ -181,7 +200,13 @@ impl State {
                             ArrowKeyBindings::Edge => Message::MoveCursorToTransition {
                                 next: false,
                                 variable: None,
-                                skip_zero: modifiers.shift,
+                                transition_type: {
+                                    if modifiers.shift {
+                                        TransitionType::NotEqualTo(0u8.into())
+                                    } else {
+                                        TransitionType::Any
+                                    }
+                                },
                             },
                             ArrowKeyBindings::Scroll => Message::CanvasScroll {
                                 delta: Vec2 {
