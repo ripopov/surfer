@@ -112,7 +112,9 @@ lazy_static! {
 }
 
 pub struct StartupParams {
+    #[cfg(feature = "spade")]
     pub spade_state: Option<Utf8PathBuf>,
+    #[cfg(feature = "spade")]
     pub spade_top: Option<String>,
     pub waves: Option<WaveSource>,
     pub startup_commands: Vec<String>,
@@ -122,7 +124,9 @@ impl StartupParams {
     #[allow(dead_code)] // NOTE: Only used in wasm version
     pub fn empty() -> Self {
         Self {
+            #[cfg(feature = "spade")]
             spade_state: None,
+            #[cfg(feature = "spade")]
             spade_top: None,
             waves: None,
             startup_commands: vec![],
@@ -132,7 +136,9 @@ impl StartupParams {
     #[allow(dead_code)] // NOTE: Only used in wasm version
     pub fn from_url(url: UrlArgs) -> Self {
         Self {
+            #[cfg(feature = "spade")]
             spade_state: None,
+            #[cfg(feature = "spade")]
             spade_top: None,
             waves: url.load_url.map(WaveSource::Url),
             startup_commands: url.startup_commands.map(|c| vec![c]).unwrap_or_default(),
