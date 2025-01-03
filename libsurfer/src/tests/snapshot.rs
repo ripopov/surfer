@@ -20,6 +20,7 @@ use crate::{
     config::{HierarchyStyle, SurferConfig},
     displayed_item::{DisplayedFieldRef, DisplayedItemIndex, DisplayedItemRef},
     message::AsyncJob,
+    search::TransitionType,
     setup_custom_font, transaction_container,
     variable_name_filter::VariableNameFilterType,
     wave_container::{ScopeRef, VariableRef},
@@ -308,7 +309,7 @@ macro_rules! snapshot_ui_with_theme {
             Message::AddScope(ScopeRef::from_strs(&["theme_demo"]), false),
             Message::AddTimeLine(None),
             Message::FocusItem(DisplayedItemIndex(0)),
-            Message::MoveCursorToTransition { next: true, variable: None, skip_zero: true },
+            Message::MoveCursorToTransition { next: true, variable: None, transition_type: TransitionType::FromZero },
             Message::SelectTheme(Some($theme.to_string()))
         ]}
     };
@@ -1502,68 +1503,68 @@ snapshot_ui_with_file_and_msgs! {next_transition, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::CursorSet(BigInt::from(500)),
     Message::FocusItem(DisplayedItemIndex(0)),
-    Message::MoveCursorToTransition { next: true, variable: None, skip_zero: false }
+    Message::MoveCursorToTransition { next: true, variable: None, transition_type: TransitionType::Any }
 ]}
 
 snapshot_ui_with_file_and_msgs! {next_transition_numbered, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::CursorSet(BigInt::from(500)),
-    Message::MoveCursorToTransition { next: true, variable: Some(DisplayedItemIndex(0)), skip_zero: false }
+    Message::MoveCursorToTransition { next: true, variable: Some(DisplayedItemIndex(0)),transition_type: TransitionType::Any }
 ]}
 
 snapshot_ui_with_file_and_msgs! {next_transition_do_not_get_stuck, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::CursorSet(BigInt::from(500)),
     Message::FocusItem(DisplayedItemIndex(0)),
-    Message::MoveCursorToTransition { next: true, variable: None, skip_zero: false },
-    Message::MoveCursorToTransition { next: true, variable: None, skip_zero: false }
+    Message::MoveCursorToTransition { next: true, variable: None, transition_type: TransitionType::Any },
+    Message::MoveCursorToTransition { next: true, variable: None, transition_type: TransitionType::Any }
 ]}
 
 snapshot_ui_with_file_and_msgs! {previous_transition, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::CursorSet(BigInt::from(500)),
     Message::FocusItem(DisplayedItemIndex(0)),
-    Message::MoveCursorToTransition { next: false, variable: None, skip_zero: false}
+    Message::MoveCursorToTransition { next: false, variable: None, transition_type: TransitionType::Any}
 ]}
 
 snapshot_ui_with_file_and_msgs! {previous_transition_numbered, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::CursorSet(BigInt::from(500)),
-    Message::MoveCursorToTransition { next: false, variable: Some(DisplayedItemIndex(0)), skip_zero: false }
+    Message::MoveCursorToTransition { next: false, variable: Some(DisplayedItemIndex(0)), transition_type: TransitionType::Any }
 ]}
 
 snapshot_ui_with_file_and_msgs! {previous_transition_do_not_get_stuck, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::CursorSet(BigInt::from(500)),
     Message::FocusItem(DisplayedItemIndex(0)),
-    Message::MoveCursorToTransition { next: false, variable: None, skip_zero: false },
-    Message::MoveCursorToTransition { next: false, variable: None, skip_zero: false }
+    Message::MoveCursorToTransition { next: false, variable: None, transition_type: TransitionType::Any },
+    Message::MoveCursorToTransition { next: false, variable: None, transition_type: TransitionType::Any }
 ]}
 
 snapshot_ui_with_file_and_msgs! {next_transition_no_cursor, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::FocusItem(DisplayedItemIndex(0)),
-    Message::MoveCursorToTransition { next: true, variable: None, skip_zero: false },
+    Message::MoveCursorToTransition { next: true, variable: None, transition_type: TransitionType::Any },
 ]}
 
 snapshot_ui_with_file_and_msgs! {previous_transition_no_cursor, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::FocusItem(DisplayedItemIndex(0)),
-    Message::MoveCursorToTransition { next: false, variable: None, skip_zero: false },
+    Message::MoveCursorToTransition { next: false, variable: None, transition_type: TransitionType::Any },
 ]}
 
 snapshot_ui_with_file_and_msgs! {next_transition_skip_zero, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::FocusItem(DisplayedItemIndex(1)),
-    Message::MoveCursorToTransition { next: true, variable: None, skip_zero: true },
-    Message::MoveCursorToTransition { next: true, variable: None, skip_zero: true }
+    Message::MoveCursorToTransition { next: true, variable: None, transition_type: TransitionType::FromZero },
+    Message::MoveCursorToTransition { next: true, variable: None, transition_type: TransitionType::FromZero }
 ]}
 
 snapshot_ui_with_file_and_msgs! {previous_transition_skip_zero, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::FocusItem(DisplayedItemIndex(1)),
-    Message::MoveCursorToTransition { next: false, variable: None, skip_zero: true },
-    Message::MoveCursorToTransition { next: false, variable: None, skip_zero: true }
+    Message::MoveCursorToTransition { next: false, variable: None, transition_type: TransitionType::FromZero },
+    Message::MoveCursorToTransition { next: false, variable: None, transition_type: TransitionType::FromZero }
 ]}
 
 snapshot_ui_with_file_and_msgs! {toggle_variable_indices, "examples/counter.vcd", [

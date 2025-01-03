@@ -3,6 +3,7 @@ use egui::{Button, Context, Layout, RichText, TopBottomPanel, Ui};
 use egui_remixicon::icons;
 use emath::{Align, Vec2};
 
+use crate::search::TransitionType;
 use crate::wave_container::SimulationStatus;
 use crate::{
     message::Message,
@@ -238,7 +239,7 @@ impl State {
                 Message::MoveCursorToTransition {
                     next: false,
                     variable: None,
-                    skip_zero: false,
+                    transition_type: TransitionType::Any,
                 },
                 item_selected && cursor_set,
             );
@@ -250,7 +251,7 @@ impl State {
                 Message::MoveCursorToTransition {
                     next: true,
                     variable: None,
-                    skip_zero: false,
+                    transition_type: TransitionType::Any,
                 },
                 item_selected && cursor_set,
             );

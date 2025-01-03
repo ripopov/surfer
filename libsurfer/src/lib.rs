@@ -24,6 +24,7 @@ pub mod message;
 pub mod mousegestures;
 pub mod overview;
 pub mod remote;
+pub mod search;
 pub mod state;
 pub mod state_util;
 pub mod statusbar;
@@ -853,7 +854,7 @@ impl State {
             Message::MoveCursorToTransition {
                 next,
                 variable,
-                skip_zero,
+                transition_type,
             } => {
                 if let Some(waves) = &mut self.waves {
                     // if no cursor is set, move it to
@@ -871,7 +872,7 @@ impl State {
                             };
                         }
                     }
-                    waves.set_cursor_at_transition(next, variable, skip_zero);
+                    waves.set_cursor_at_transition(next, variable, transition_type);
                     let moved = waves.go_to_cursor_if_not_in_view();
                     if moved {
                         self.invalidate_draw_commands();
