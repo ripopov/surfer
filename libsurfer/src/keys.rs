@@ -130,7 +130,7 @@ impl State {
                         variable: None,
                         transition_type: {
                             if modifiers.shift {
-                                TransitionType::FromZero
+                                TransitionType::NotEqualTo(0u8.into())
                             } else {
                                 TransitionType::Any
                             }
@@ -141,7 +141,7 @@ impl State {
                         variable: None,
                         transition_type: {
                             if modifiers.shift {
-                                TransitionType::FromZero
+                                TransitionType::NotEqualTo(0u8.into())
                             } else {
                                 TransitionType::Any
                             }
@@ -180,7 +180,7 @@ impl State {
                                 variable: None,
                                 transition_type: {
                                     if modifiers.shift {
-                                        TransitionType::FromZero
+                                        TransitionType::NotEqualTo(0u8.into())
                                     } else {
                                         TransitionType::Any
                                     }
@@ -202,7 +202,7 @@ impl State {
                                 variable: None,
                                 transition_type: {
                                     if modifiers.shift {
-                                        TransitionType::FromZero
+                                        TransitionType::NotEqualTo(0u8.into())
                                     } else {
                                         TransitionType::Any
                                     }

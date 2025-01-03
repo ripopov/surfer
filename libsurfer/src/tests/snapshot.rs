@@ -309,7 +309,7 @@ macro_rules! snapshot_ui_with_theme {
             Message::AddScope(ScopeRef::from_strs(&["theme_demo"]), false),
             Message::AddTimeLine(None),
             Message::FocusItem(DisplayedItemIndex(0)),
-            Message::MoveCursorToTransition { next: true, variable: None, transition_type: TransitionType::FromZero },
+            Message::MoveCursorToTransition { next: true, variable: None, transition_type: TransitionType::NotEqualTo(0u8.into()) },
             Message::SelectTheme(Some($theme.to_string()))
         ]}
     };
@@ -1556,15 +1556,15 @@ snapshot_ui_with_file_and_msgs! {previous_transition_no_cursor, "examples/counte
 snapshot_ui_with_file_and_msgs! {next_transition_skip_zero, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::FocusItem(DisplayedItemIndex(1)),
-    Message::MoveCursorToTransition { next: true, variable: None, transition_type: TransitionType::FromZero },
-    Message::MoveCursorToTransition { next: true, variable: None, transition_type: TransitionType::FromZero }
+    Message::MoveCursorToTransition { next: true, variable: None, transition_type: TransitionType::NotEqualTo(0u8.into()) },
+    Message::MoveCursorToTransition { next: true, variable: None, transition_type: TransitionType::NotEqualTo(0u8.into()) }
 ]}
 
 snapshot_ui_with_file_and_msgs! {previous_transition_skip_zero, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::FocusItem(DisplayedItemIndex(1)),
-    Message::MoveCursorToTransition { next: false, variable: None, transition_type: TransitionType::FromZero },
-    Message::MoveCursorToTransition { next: false, variable: None, transition_type: TransitionType::FromZero }
+    Message::MoveCursorToTransition { next: false, variable: None, transition_type: TransitionType::NotEqualTo(0u8.into()) },
+    Message::MoveCursorToTransition { next: false, variable: None, transition_type: TransitionType::NotEqualTo(0u8.into()) }
 ]}
 
 snapshot_ui_with_file_and_msgs! {toggle_variable_indices, "examples/counter.vcd", [

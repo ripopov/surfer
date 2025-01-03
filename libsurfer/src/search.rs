@@ -10,8 +10,8 @@ use crate::{
 #[derive(Debug, Deserialize, PartialEq)]
 pub enum TransitionType {
     Any,
-    FromZero,
-    ToZero,
+    NotEqualTo(BigUint),
+    EqualTo(BigUint),
 }
 
 impl WaveData {
@@ -92,31 +92,64 @@ fn find_transition_time(
             }
         }
 
-        // if zero edges should be skipped
-        if transition_type == TransitionType::FromZero {
-            // check if the next transition is 0, if so and requested, go to
-            // next positive transition
-            let next_value = waves.query_variable(
-                &variable.variable_ref,
-                &new_cursor.to_biguint().unwrap_or_default(),
-            );
-            if next_value.is_ok_and(|r| {
-                r.is_some_and(|r| {
-                    r.current.is_some_and(|v| match v.1 {
-                        VariableValue::BigUint(v) => v == BigUint::from(0u8),
-                        _ => false,
-                    })
-                })
-            }) {
-                new_cursor = find_transition_time(
-                    next,
-                    TransitionType::Any,
-                    waves,
-                    variable,
-                    &new_cursor,
-                    num_timestamps,
+        match transition_type {
+            TransitionType::NotEqualTo(n) => {
+                // check if the next transition is 0, if so and requested, go to
+                // next positive transition
+                let next_value = waves.query_variable(
+                    &variable.variable_ref,
+                    &new_cursor.to_biguint().unwrap_or_default(),
                 );
+                if next_value.is_ok_and(|r| {
+                    r.is_some_and(|r| {
+                        r.current.is_some_and(|v| match v.1 {
+                            VariableValue::BigUint(v) => v == n,
+                            _ => false,
+                        })
+                    })
+                }) {
+                    new_cursor = find_transition_time(
+                        next,
+                        TransitionType::Any,
+                        waves,
+                        variable,
+                        &new_cursor,
+                        num_timestamps,
+                    );
+                }
             }
+            TransitionType::EqualTo(n) => {
+                // find transition where value is zero
+                let next_value = waves.query_variable(
+                    &variable.variable_ref,
+                    &new_cursor.to_biguint().unwrap_or_default(),
+                );
+                if next_value.is_ok_and(|r| {
+                    r.is_some_and(|r| {
+                        r.current.is_some_and(|v| match v.1 {
+                            VariableValue::BigUint(val) => {
+                                if val == n {
+                                    new_cursor = v.0.into();
+                                    false
+                                } else {
+                                    true
+                                }
+                            }
+                            _ => true,
+                        })
+                    })
+                }) {
+                    new_cursor = find_transition_time(
+                        next,
+                        TransitionType::EqualTo(n),
+                        waves,
+                        variable,
+                        &new_cursor,
+                        num_timestamps,
+                    );
+                }
+            }
+            TransitionType::Any => {}
         }
     }
     new_cursor
