@@ -108,7 +108,7 @@ impl WcpServer {
         }
     }
 
-    fn handle_connection(&mut self, stream: TcpStream) -> () {
+    fn handle_connection(&mut self, stream: TcpStream) {
         info!("WCP New connection: {}", stream.peer_addr().unwrap());
         if let Err(error) = stream.set_read_timeout(Some(Duration::from_secs(2))) {
             error!("Failed to set timeout: {error:#?}")
