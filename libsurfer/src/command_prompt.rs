@@ -5,6 +5,7 @@ use std::{fs, str::FromStr};
 use crate::config::{ArrowKeyBindings, HierarchyStyle};
 use crate::displayed_item::DisplayedItemIndex;
 use crate::lazy_static;
+use crate::search::TransitionType;
 use crate::transaction_container::StreamScopeRef;
 use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, VariableRefExt};
 use crate::wave_data::ScopeType;
@@ -561,7 +562,7 @@ pub fn get_parser(state: &State) -> Command<Message> {
                             Command::Terminal(Message::MoveCursorToTransition {
                                 next: true,
                                 variable: Some(idx),
-                                skip_zero: false,
+                                transition_type: TransitionType::Any,
                             })
                         })
                     }),
@@ -575,7 +576,7 @@ pub fn get_parser(state: &State) -> Command<Message> {
                             Command::Terminal(Message::MoveCursorToTransition {
                                 next: false,
                                 variable: Some(idx),
-                                skip_zero: false,
+                                transition_type: TransitionType::Any,
                             })
                         })
                     }),

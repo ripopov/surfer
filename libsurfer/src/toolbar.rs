@@ -1,10 +1,13 @@
 //! Toolbar handling.
-use egui::{Button, Context, Layout, RichText, TopBottomPanel, Ui};
-use egui_remixicon::icons;
+use egui::{Button, Context, Layout, RichText, TextEdit, TopBottomPanel, Ui};
+use egui_remixicon::icons as remix_icons;
 use emath::{Align, Vec2};
+use num::{BigUint, Num as _};
 
+use crate::search::TransitionType;
 use crate::wave_container::SimulationStatus;
 use crate::{
+    icons,
     message::Message,
     wave_data::{PER_SCROLL_EVENT, SCROLL_EVENTS_PER_PAGE},
     wave_source::OpenMode,
@@ -48,7 +51,7 @@ impl State {
             SimulationStatus::Paused => add_toolbar_button(
                 ui,
                 msgs,
-                icons::PLAY_CIRCLE_FILL,
+                remix_icons::PLAY_CIRCLE_FILL,
                 "Run simulation",
                 Message::UnpauseSimulation,
                 true,
@@ -56,7 +59,7 @@ impl State {
             SimulationStatus::Running => add_toolbar_button(
                 ui,
                 msgs,
-                icons::PAUSE_CIRCLE_FILL,
+                remix_icons::PAUSE_CIRCLE_FILL,
                 "Pause simulation",
                 Message::PauseSimulation,
                 true,
@@ -77,7 +80,7 @@ impl State {
         ui.with_layout(Layout::left_to_right(Align::LEFT), |ui| {
             if !self.show_menu() {
                 // Menu
-                ui.menu_button(RichText::new(icons::MENU_FILL).heading(), |ui| {
+                ui.menu_button(RichText::new(remix_icons::MENU_FILL).heading(), |ui| {
                     self.menu_contents(ui, msgs);
                 });
                 ui.separator();
@@ -86,7 +89,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::FOLDER_OPEN_FILL,
+                remix_icons::FOLDER_OPEN_FILL,
                 "Open file...",
                 Message::OpenFileDialog(OpenMode::Open),
                 true,
@@ -94,7 +97,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::DOWNLOAD_CLOUD_FILL,
+                remix_icons::DOWNLOAD_CLOUD_FILL,
                 "Open URL...",
                 Message::SetUrlEntryVisible(true),
                 true,
@@ -103,7 +106,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::REFRESH_LINE,
+                remix_icons::REFRESH_LINE,
                 "Reload",
                 Message::ReloadWaveform(self.config.behavior.keep_during_reload),
                 wave_loaded,
@@ -112,7 +115,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::FILE_COPY_FILL,
+                remix_icons::FILE_COPY_FILL,
                 "Copy variable value",
                 Message::VariableValueToClipbord(None),
                 item_selected && cursor_set,
@@ -123,7 +126,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::ZOOM_IN_FILL,
+                remix_icons::ZOOM_IN_FILL,
                 "Zoom in",
                 Message::CanvasZoom {
                     mouse_ptr: None,
@@ -135,7 +138,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::ZOOM_OUT_FILL,
+                remix_icons::ZOOM_OUT_FILL,
                 "Zoom out",
                 Message::CanvasZoom {
                     mouse_ptr: None,
@@ -147,7 +150,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::ASPECT_RATIO_FILL,
+                remix_icons::ASPECT_RATIO_FILL,
                 "Zoom to fit",
                 Message::ZoomToFit { viewport_idx: 0 },
                 wave_loaded,
@@ -158,7 +161,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::REWIND_START_FILL,
+                remix_icons::REWIND_START_FILL,
                 "Go to start",
                 Message::GoToStart { viewport_idx: 0 },
                 wave_loaded,
@@ -166,7 +169,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::REWIND_FILL,
+                remix_icons::REWIND_FILL,
                 "Go one page left",
                 Message::CanvasScroll {
                     delta: Vec2 {
@@ -180,7 +183,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::PLAY_REVERSE_FILL,
+                remix_icons::PLAY_REVERSE_FILL,
                 "Go left",
                 Message::CanvasScroll {
                     delta: Vec2 {
@@ -194,7 +197,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::PLAY_FILL,
+                remix_icons::PLAY_FILL,
                 "Go right",
                 Message::CanvasScroll {
                     delta: Vec2 {
@@ -208,7 +211,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::SPEED_FILL,
+                remix_icons::SPEED_FILL,
                 "Go one page right",
                 Message::CanvasScroll {
                     delta: Vec2 {
@@ -222,7 +225,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::FORWARD_END_FILL,
+                remix_icons::FORWARD_END_FILL,
                 "Go to end",
                 Message::GoToEnd { viewport_idx: 0 },
                 wave_loaded,
@@ -233,34 +236,156 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::CONTRACT_LEFT_FILL,
+                icons::PREVIOUS_RISING_EDGE,
+                "Set cursor on previous transition from zero of focused variable",
+                Message::MoveCursorToTransition {
+                    next: false,
+                    variable: None,
+                    transition_type: TransitionType::NotEqualTo(0u8.into()),
+                },
+                item_selected && cursor_set,
+            );
+            add_toolbar_button(
+                ui,
+                msgs,
+                icons::PREVIOUS_FALLING_EDGE,
+                "Set cursor on previous transition to zero of focused variable",
+                Message::MoveCursorToTransition {
+                    next: false,
+                    variable: None,
+                    transition_type: TransitionType::EqualTo(0u8.into()),
+                },
+                item_selected && cursor_set,
+            );
+            add_toolbar_button(
+                ui,
+                msgs,
+                icons::NEXT_RISING_EDGE,
+                "Set cursor on next transition from zero of focused variable",
+                Message::MoveCursorToTransition {
+                    next: true,
+                    variable: None,
+                    transition_type: TransitionType::NotEqualTo(0u8.into()),
+                },
+                item_selected && cursor_set,
+            );
+            add_toolbar_button(
+                ui,
+                msgs,
+                icons::NEXT_FALLING_EDGE,
+                "Set cursor on next transition to zero of focused variable",
+                Message::MoveCursorToTransition {
+                    next: true,
+                    variable: None,
+                    transition_type: TransitionType::EqualTo(0u8.into()),
+                },
+                item_selected && cursor_set,
+            );
+            add_toolbar_button(
+                ui,
+                msgs,
+                icons::PREVIOUS_TRANSITION,
                 "Set cursor on previous transition of focused variable",
                 Message::MoveCursorToTransition {
                     next: false,
                     variable: None,
-                    skip_zero: false,
+                    transition_type: TransitionType::Any,
                 },
                 item_selected && cursor_set,
             );
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::CONTRACT_RIGHT_FILL,
+                icons::NEXT_TRANSITION,
                 "Set cursor on next transition of focused variable",
                 Message::MoveCursorToTransition {
                     next: true,
                     variable: None,
-                    skip_zero: false,
+                    transition_type: TransitionType::Any,
                 },
                 item_selected && cursor_set,
             );
-            ui.separator();
+            // Create text edit
+            let response = ui.add(
+                TextEdit::singleline(&mut *self.sys.transition_value.borrow_mut())
+                    .desired_width(100.0)
+                    .hint_text("value"),
+            );
+            // Handle focus
+            if response.gained_focus() {
+                msgs.push(Message::SetTransitionValueFocused(true));
+            }
+            if response.lost_focus() {
+                msgs.push(Message::SetTransitionValueFocused(false));
+            }
+            ui.menu_button(
+                if self.find_transition_equal {
+                    "="
+                } else {
+                    "≠"
+                },
+                |ui| {
+                    ui.radio(self.find_transition_equal, "=")
+                        .clicked()
+                        .then(|| {
+                            ui.close_menu();
+                            msgs.push(Message::SetFindTransitionEqual(true));
+                        });
+                    ui.radio(!self.find_transition_equal, "≠")
+                        .clicked()
+                        .then(|| {
+                            ui.close_menu();
+                            msgs.push(Message::SetFindTransitionEqual(false));
+                        });
+                },
+            );
+            let button =
+                Button::new(RichText::new(remix_icons::CONTRACT_LEFT_FILL).heading()).frame(false);
+            ui.add_enabled(item_selected && cursor_set, button)
+                .on_hover_text("Go to previous time with value")
+                .clicked()
+                .then(|| {
+                    if let Ok(val) =
+                        BigUint::from_str_radix((*self.sys.transition_value.borrow()).as_str(), 10)
+                    {
+                        msgs.push(Message::MoveCursorToTransition {
+                            next: false,
+                            variable: None,
+                            transition_type: if self.find_transition_equal {
+                                TransitionType::EqualTo(val)
+                            } else {
+                                TransitionType::NotEqualTo(val)
+                            },
+                        })
+                    }
+                });
 
+            let button =
+                Button::new(RichText::new(remix_icons::CONTRACT_RIGHT_FILL).heading()).frame(false);
+            ui.add_enabled(item_selected && cursor_set, button)
+                .on_hover_text("Go to next time with value")
+                .clicked()
+                .then(|| {
+                    if let Ok(val) =
+                        BigUint::from_str_radix((*self.sys.transition_value.borrow()).as_str(), 10)
+                    {
+                        msgs.push(Message::MoveCursorToTransition {
+                            next: true,
+                            variable: None,
+                            transition_type: if self.find_transition_equal {
+                                TransitionType::EqualTo(val)
+                            } else {
+                                TransitionType::NotEqualTo(val)
+                            },
+                        })
+                    }
+                });
+            ui.separator();
             // Add items
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::SPACE,
+                remix_icons::SPACE,
                 "Add divider",
                 Message::AddDivider(None, None),
                 wave_loaded,
@@ -268,7 +393,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::TIME_FILL,
+                remix_icons::TIME_FILL,
                 "Add timeline",
                 Message::AddTimeLine(None),
                 wave_loaded,
@@ -279,7 +404,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::ADD_BOX_FILL,
+                remix_icons::ADD_BOX_FILL,
                 "Add viewport",
                 Message::AddViewport,
                 wave_loaded,
@@ -287,7 +412,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::CHECKBOX_INDETERMINATE_FILL,
+                remix_icons::CHECKBOX_INDETERMINATE_FILL,
                 "Remove viewport",
                 Message::RemoveViewport,
                 wave_loaded && multiple_viewports,
@@ -306,7 +431,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::ARROW_GO_BACK_FILL,
+                remix_icons::ARROW_GO_BACK_FILL,
                 &undo_tooltip,
                 Message::Undo(1),
                 undo_available,
@@ -314,7 +439,7 @@ impl State {
             add_toolbar_button(
                 ui,
                 msgs,
-                icons::ARROW_GO_FORWARD_FILL,
+                remix_icons::ARROW_GO_FORWARD_FILL,
                 &redo_tooltip,
                 Message::Redo(1),
                 redo_available,
