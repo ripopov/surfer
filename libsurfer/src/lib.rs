@@ -16,6 +16,7 @@ pub mod file_watcher;
 pub mod graphics;
 pub mod help;
 pub mod hierarchy;
+pub mod icons;
 pub mod keys;
 pub mod logs;
 pub mod marker;
@@ -153,6 +154,17 @@ fn setup_custom_font(ctx: &egui::Context) {
         .get_mut(&FontFamily::Proportional)
         .unwrap()
         .push("remix_icons".to_owned());
+
+    fonts.font_data.insert(
+        "surferfont".to_owned(),
+        FontData::from_static(include_bytes!("../assets/surferfont.ttf")).into(),
+    );
+
+    fonts
+        .families
+        .get_mut(&FontFamily::Proportional)
+        .unwrap()
+        .push("surferfont".to_owned());
 
     ctx.set_fonts(fonts);
 }
