@@ -225,6 +225,8 @@ pub enum Message {
     SetLogsVisible(bool),
     SetDragStart(Option<Pos2>),
     SetFilterFocused(bool),
+    SetTransitionValueFocused(bool),
+    SetFindTransitionEqual(bool),
     SetVariableNameFilterType(VariableNameFilterType),
     SetVariableNameFilterCaseInsensitive(bool),
     SetUIZoomFactor(f32),

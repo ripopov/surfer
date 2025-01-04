@@ -25,7 +25,7 @@ impl State {
                     key,
                     pressed,
                     self.sys.command_prompt.visible,
-                    self.variable_name_filter_focused,
+                    self.variable_name_filter_focused | self.find_transition_value_focused,
                 ) {
                     (Key::Num0, true, false, false) => {
                         handle_digit(0, modifiers, msgs);
@@ -78,7 +78,10 @@ impl State {
                         msgs.push(Message::InvalidateCount);
                         msgs.push(Message::ItemSelectionClear);
                     }
-                    (Key::Escape, true, _, true) => msgs.push(Message::SetFilterFocused(false)),
+                    (Key::Escape, true, _, true) => {
+                        msgs.push(Message::SetFilterFocused(false));
+                        msgs.push(Message::SetTransitionValueFocused(false));
+                    }
                     (Key::B, true, false, false) => msgs.push(Message::ToggleSidePanel),
                     (Key::M, true, false, false) => msgs.push(Message::ToggleMenu),
                     (Key::T, true, false, false) => msgs.push(Message::ToggleToolbar),

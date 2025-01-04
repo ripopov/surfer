@@ -64,9 +64,8 @@ fn find_transition_time(
     ) {
         if next {
             if let Some(ref time) = res.next {
-                let stime = time.to_bigint();
-                if stime.is_some() {
-                    new_cursor.clone_from(&stime.unwrap());
+                if let Some(stime) = &time.to_bigint() {
+                    new_cursor.clone_from(stime);
                 }
             } else {
                 // No next transition, go to end
