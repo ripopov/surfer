@@ -1,10 +1,14 @@
-use num::{bigint::ToBigInt, BigInt, BigUint};
+use egui::{Button, RichText, TextEdit, Ui};
+use egui_remixicon::icons as remix_icons;
+use num::{bigint::ToBigInt, BigInt, BigUint, Num as _};
 use serde::Deserialize;
 use surfer_translation_types::VariableValue;
 
 use crate::{
     displayed_item::{DisplayedItem, DisplayedItemIndex},
+    message::Message,
     wave_data::WaveData,
+    State,
 };
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -64,9 +68,8 @@ fn find_transition_time(
     ) {
         if next {
             if let Some(ref time) = res.next {
-                let stime = time.to_bigint();
-                if stime.is_some() {
-                    new_cursor.clone_from(&stime.unwrap());
+                if let Some(stime) = &time.to_bigint() {
+                    new_cursor.clone_from(stime);
                 }
             } else {
                 // No next transition, go to end
@@ -153,4 +156,81 @@ fn find_transition_time(
         }
     }
     new_cursor
+}
+
+impl State {
+    pub fn draw_find_widget(
+        &self,
+        msgs: &mut Vec<Message>,
+        item_selected: bool,
+        cursor_set: bool,
+        ui: &mut Ui,
+    ) {
+        // Create text edit
+        let response = ui.add(
+            TextEdit::singleline(&mut *self.sys.transition_value.borrow_mut())
+                .desired_width(100.0)
+                .hint_text("value"),
+        );
+        // Handle focus of text edit
+        if response.gained_focus() {
+            msgs.push(Message::SetTransitionValueFocused(true));
+        }
+        if response.lost_focus() {
+            msgs.push(Message::SetTransitionValueFocused(false));
+        }
+        ui.menu_button(
+            if self.find_transition_equal {
+                "="
+            } else {
+                "≠"
+            },
+            |ui| {
+                ui.radio(self.find_transition_equal, "=")
+                    .clicked()
+                    .then(|| {
+                        ui.close_menu();
+                        msgs.push(Message::SetFindTransitionEqual(true));
+                    });
+                ui.radio(!self.find_transition_equal, "≠")
+                    .clicked()
+                    .then(|| {
+                        ui.close_menu();
+                        msgs.push(Message::SetFindTransitionEqual(false));
+                    });
+            },
+        );
+        let button =
+            Button::new(RichText::new(remix_icons::CONTRACT_LEFT_FILL).heading()).frame(false);
+        ui.add_enabled(item_selected && cursor_set, button)
+            .on_hover_text("Go to previous time with value on focused variable")
+            .clicked()
+            .then(|| {
+                self.find_next_transition(msgs, false);
+            });
+
+        let button =
+            Button::new(RichText::new(remix_icons::CONTRACT_RIGHT_FILL).heading()).frame(false);
+        ui.add_enabled(item_selected && cursor_set, button)
+            .on_hover_text("Go to next time with value on focused variable")
+            .clicked()
+            .then(|| {
+                self.find_next_transition(msgs, true);
+            });
+    }
+
+    fn find_next_transition(&self, msgs: &mut Vec<Message>, next: bool) {
+        if let Ok(val) = BigUint::from_str_radix((*self.sys.transition_value.borrow()).as_str(), 10)
+        {
+            msgs.push(Message::MoveCursorToTransition {
+                next,
+                variable: None,
+                transition_type: if self.find_transition_equal {
+                    TransitionType::EqualTo(val)
+                } else {
+                    TransitionType::NotEqualTo(val)
+                },
+            })
+        }
+    }
 }

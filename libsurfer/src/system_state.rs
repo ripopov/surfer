@@ -62,6 +62,7 @@ pub struct SystemState {
     pub(crate) command_prompt_text: RefCell<String>,
     pub(crate) last_canvas_rect: RefCell<Option<Rect>>,
     pub(crate) variable_name_filter: RefCell<String>,
+    pub(crate) transition_value: RefCell<String>,
     pub(crate) item_renaming_string: RefCell<String>,
 
     /// These items should be expanded into subfields in the next frame. Cleared after each
@@ -123,6 +124,7 @@ impl SystemState {
             draw_data: RefCell::new(vec![None]),
             last_canvas_rect: RefCell::new(None),
             variable_name_filter: RefCell::new(String::new()),
+            transition_value: RefCell::new(String::new()),
             item_renaming_string: RefCell::new(String::new()),
 
             items_to_expand: RefCell::new(vec![]),
