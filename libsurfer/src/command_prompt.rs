@@ -5,6 +5,7 @@ use std::{fs, str::FromStr};
 use crate::config::{ArrowKeyBindings, HierarchyStyle};
 use crate::displayed_item::DisplayedItemIndex;
 use crate::lazy_static;
+use crate::search::TransitionType;
 use crate::transaction_container::StreamScopeRef;
 use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, VariableRefExt};
 use crate::wave_data::ScopeType;
@@ -280,6 +281,10 @@ pub fn get_parser(state: &State) -> Command<Message> {
             "viewport_remove",
             "transition_next",
             "transition_previous",
+            "transition_rising_next",
+            "transition_rising_previous",
+            "transition_falling_next",
+            "transition_falling_previous",
             "transaction_next",
             "transaction_prev",
             "copy_value",
@@ -561,7 +566,7 @@ pub fn get_parser(state: &State) -> Command<Message> {
                             Command::Terminal(Message::MoveCursorToTransition {
                                 next: true,
                                 variable: Some(idx),
-                                skip_zero: false,
+                                transition_type: TransitionType::Any,
                             })
                         })
                     }),
@@ -575,7 +580,63 @@ pub fn get_parser(state: &State) -> Command<Message> {
                             Command::Terminal(Message::MoveCursorToTransition {
                                 next: false,
                                 variable: Some(idx),
-                                skip_zero: false,
+                                transition_type: TransitionType::Any,
+                            })
+                        })
+                    }),
+                ),
+                "transition_rising_next" => single_word(
+                    displayed_items.clone(),
+                    Box::new(|word| {
+                        // split off the idx which is always followed by an underscore
+                        let alpha_idx: String = word.chars().take_while(|c| *c != '_').collect();
+                        alpha_idx_to_uint_idx(alpha_idx).map(|idx| {
+                            Command::Terminal(Message::MoveCursorToTransition {
+                                next: true,
+                                variable: Some(idx),
+                                transition_type: TransitionType::NotEqualTo(0u8.into()),
+                            })
+                        })
+                    }),
+                ),
+                "transition_rising_previous" => single_word(
+                    displayed_items.clone(),
+                    Box::new(|word| {
+                        // split off the idx which is always followed by an underscore
+                        let alpha_idx: String = word.chars().take_while(|c| *c != '_').collect();
+                        alpha_idx_to_uint_idx(alpha_idx).map(|idx| {
+                            Command::Terminal(Message::MoveCursorToTransition {
+                                next: false,
+                                variable: Some(idx),
+                                transition_type: TransitionType::NotEqualTo(0u8.into()),
+                            })
+                        })
+                    }),
+                ),
+                "transition_falling_next" => single_word(
+                    displayed_items.clone(),
+                    Box::new(|word| {
+                        // split off the idx which is always followed by an underscore
+                        let alpha_idx: String = word.chars().take_while(|c| *c != '_').collect();
+                        alpha_idx_to_uint_idx(alpha_idx).map(|idx| {
+                            Command::Terminal(Message::MoveCursorToTransition {
+                                next: true,
+                                variable: Some(idx),
+                                transition_type: TransitionType::EqualTo(0u8.into()),
+                            })
+                        })
+                    }),
+                ),
+                "transition_falling_previous" => single_word(
+                    displayed_items.clone(),
+                    Box::new(|word| {
+                        // split off the idx which is always followed by an underscore
+                        let alpha_idx: String = word.chars().take_while(|c| *c != '_').collect();
+                        alpha_idx_to_uint_idx(alpha_idx).map(|idx| {
+                            Command::Terminal(Message::MoveCursorToTransition {
+                                next: false,
+                                variable: Some(idx),
+                                transition_type: TransitionType::EqualTo(0u8.into()),
                             })
                         })
                     }),
