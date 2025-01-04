@@ -38,14 +38,16 @@ impl WaveData {
                         let num_timestamps = &self
                             .num_timestamps()
                             .expect("No timestamp count even though waveforms should be loaded");
-                        self.cursor = Some(find_transition_time(
+                        if let Some(cursor) = find_transition_time(
                             next,
                             transition_type,
                             waves,
                             variable,
                             cursor,
                             num_timestamps,
-                        ));
+                        ) {
+                            self.cursor = Some(cursor);
+                        }
                     }
                 }
             }
@@ -60,7 +62,7 @@ fn find_transition_time(
     variable: &crate::displayed_item::DisplayedVariable,
     cursor: &BigInt,
     num_timestamps: &BigInt,
-) -> BigInt {
+) -> Option<BigInt> {
     let mut new_cursor = cursor.clone();
     if let Ok(Some(res)) = waves.query_variable(
         &variable.variable_ref,
@@ -74,6 +76,7 @@ fn find_transition_time(
             } else {
                 // No next transition, go to end
                 new_cursor.clone_from(num_timestamps);
+                return Some(new_cursor);
             }
         } else if let Some(stime) = &res.current.unwrap().0.to_bigint() {
             let bigone = &BigInt::from(1);
@@ -92,6 +95,7 @@ fn find_transition_time(
                 }
             } else {
                 new_cursor.clone_from(stime);
+                return Some(new_cursor);
             }
         }
 
@@ -111,14 +115,16 @@ fn find_transition_time(
                         })
                     })
                 }) {
-                    new_cursor = find_transition_time(
+                    if let Some(cursor) = find_transition_time(
                         next,
                         TransitionType::Any,
                         waves,
                         variable,
                         &new_cursor,
                         num_timestamps,
-                    );
+                    ) {
+                        new_cursor.clone_from(&cursor);
+                    };
                 }
             }
             TransitionType::EqualTo(n) => {
@@ -142,20 +148,22 @@ fn find_transition_time(
                         })
                     })
                 }) {
-                    new_cursor = find_transition_time(
+                    if let Some(cursor) = find_transition_time(
                         next,
                         TransitionType::EqualTo(n),
                         waves,
                         variable,
                         &new_cursor,
                         num_timestamps,
-                    );
+                    ) {
+                        new_cursor.clone_from(&cursor);
+                    }
                 }
             }
             TransitionType::Any => {}
         }
     }
-    new_cursor
+    Some(new_cursor)
 }
 
 impl State {

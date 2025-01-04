@@ -236,7 +236,7 @@ impl State {
                 ui,
                 msgs,
                 icons::PREVIOUS_RISING_EDGE,
-                "Set cursor on previous transition from zero of focused variable",
+                "Set cursor on previous transition to non-zero values of focused variable",
                 Message::MoveCursorToTransition {
                     next: false,
                     variable: None,
@@ -260,7 +260,7 @@ impl State {
                 ui,
                 msgs,
                 icons::NEXT_RISING_EDGE,
-                "Set cursor on next transition from zero of focused variable",
+                "Set cursor on next transition to non-zero value of focused variable",
                 Message::MoveCursorToTransition {
                     next: true,
                     variable: None,
