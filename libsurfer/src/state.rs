@@ -85,6 +85,8 @@ pub struct State {
     pub(crate) variable_name_filter_focused: bool,
     pub(crate) variable_name_filter_type: VariableNameFilterType,
     pub(crate) variable_name_filter_case_insensitive: bool,
+    pub(crate) find_transition_equal: bool,
+    pub(crate) find_transition_value_focused: bool,
     pub(crate) rename_target: Option<DisplayedItemIndex>,
     //Sidepanel width
     pub(crate) sidepanel_width: Option<f32>,
@@ -140,6 +142,8 @@ impl State {
             variable_name_filter_focused: false,
             variable_name_filter_type: VariableNameFilterType::Fuzzy,
             variable_name_filter_case_insensitive: true,
+            find_transition_equal: true,
+            find_transition_value_focused: false,
             ui_zoom_factor: None,
             show_hierarchy: None,
             show_menu: None,
