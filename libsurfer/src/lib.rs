@@ -16,6 +16,7 @@ pub mod file_watcher;
 pub mod graphics;
 pub mod help;
 pub mod hierarchy;
+pub mod icons;
 pub mod keys;
 pub mod logs;
 pub mod marker;
@@ -24,6 +25,7 @@ pub mod message;
 pub mod mousegestures;
 pub mod overview;
 pub mod remote;
+pub mod search;
 pub mod state;
 pub mod state_util;
 pub mod statusbar;
@@ -152,6 +154,17 @@ fn setup_custom_font(ctx: &egui::Context) {
         .get_mut(&FontFamily::Proportional)
         .unwrap()
         .push("remix_icons".to_owned());
+
+    fonts.font_data.insert(
+        "surferfont".to_owned(),
+        FontData::from_static(include_bytes!("../assets/surferfont.ttf")).into(),
+    );
+
+    fonts
+        .families
+        .get_mut(&FontFamily::Proportional)
+        .unwrap()
+        .push("surferfont".to_owned());
 
     ctx.set_fonts(fonts);
 }
@@ -853,7 +866,7 @@ impl State {
             Message::MoveCursorToTransition {
                 next,
                 variable,
-                skip_zero,
+                search_query,
             } => {
                 if let Some(waves) = &mut self.waves {
                     // if no cursor is set, move it to
@@ -871,7 +884,7 @@ impl State {
                             };
                         }
                     }
-                    waves.set_cursor_at_transition(next, variable, skip_zero);
+                    waves.set_cursor_at_transition(next, variable, search_query);
                     let moved = waves.go_to_cursor_if_not_in_view();
                     if moved {
                         self.invalidate_draw_commands();
@@ -1487,6 +1500,8 @@ impl State {
             Message::SetContinuousRedraw(s) => self.sys.continuous_redraw = s,
             Message::SetDragStart(pos) => self.sys.gesture_start_location = pos,
             Message::SetFilterFocused(s) => self.variable_name_filter_focused = s,
+            Message::SetSearchType(s) => self.search_type = s,
+            Message::SetSearchValueFocused(s) => self.search_value_focused = s,
             Message::SetVariableNameFilterType(variable_name_filter_type) => {
                 self.variable_name_filter_type = variable_name_filter_type;
             }
