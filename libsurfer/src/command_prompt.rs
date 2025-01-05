@@ -5,7 +5,7 @@ use std::{fs, str::FromStr};
 use crate::config::{ArrowKeyBindings, HierarchyStyle};
 use crate::displayed_item::DisplayedItemIndex;
 use crate::lazy_static;
-use crate::search::TransitionType;
+use crate::search::{SearchQuery, SearchType};
 use crate::transaction_container::StreamScopeRef;
 use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, VariableRefExt};
 use crate::wave_data::ScopeType;
@@ -566,7 +566,7 @@ pub fn get_parser(state: &State) -> Command<Message> {
                             Command::Terminal(Message::MoveCursorToTransition {
                                 next: true,
                                 variable: Some(idx),
-                                transition_type: TransitionType::Any,
+                                search_query: None,
                             })
                         })
                     }),
@@ -580,7 +580,7 @@ pub fn get_parser(state: &State) -> Command<Message> {
                             Command::Terminal(Message::MoveCursorToTransition {
                                 next: false,
                                 variable: Some(idx),
-                                transition_type: TransitionType::Any,
+                                search_query: None,
                             })
                         })
                     }),
@@ -594,7 +594,10 @@ pub fn get_parser(state: &State) -> Command<Message> {
                             Command::Terminal(Message::MoveCursorToTransition {
                                 next: true,
                                 variable: Some(idx),
-                                transition_type: TransitionType::NotEqualTo(0u8.into()),
+                                search_query: Some(SearchQuery {
+                                    search_type: SearchType::NotEqualTo,
+                                    search_value: 0u8.into(),
+                                }),
                             })
                         })
                     }),
@@ -608,7 +611,10 @@ pub fn get_parser(state: &State) -> Command<Message> {
                             Command::Terminal(Message::MoveCursorToTransition {
                                 next: false,
                                 variable: Some(idx),
-                                transition_type: TransitionType::NotEqualTo(0u8.into()),
+                                search_query: Some(SearchQuery {
+                                    search_type: SearchType::NotEqualTo,
+                                    search_value: 0u8.into(),
+                                }),
                             })
                         })
                     }),
@@ -622,7 +628,10 @@ pub fn get_parser(state: &State) -> Command<Message> {
                             Command::Terminal(Message::MoveCursorToTransition {
                                 next: true,
                                 variable: Some(idx),
-                                transition_type: TransitionType::EqualTo(0u8.into()),
+                                search_query: Some(SearchQuery {
+                                    search_type: SearchType::EqualTo,
+                                    search_value: 0u8.into(),
+                                }),
                             })
                         })
                     }),
@@ -636,7 +645,10 @@ pub fn get_parser(state: &State) -> Command<Message> {
                             Command::Terminal(Message::MoveCursorToTransition {
                                 next: false,
                                 variable: Some(idx),
-                                transition_type: TransitionType::EqualTo(0u8.into()),
+                                search_query: Some(SearchQuery {
+                                    search_type: SearchType::EqualTo,
+                                    search_value: 0u8.into(),
+                                }),
                             })
                         })
                     }),

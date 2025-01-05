@@ -866,7 +866,7 @@ impl State {
             Message::MoveCursorToTransition {
                 next,
                 variable,
-                transition_type,
+                search_query,
             } => {
                 if let Some(waves) = &mut self.waves {
                     // if no cursor is set, move it to
@@ -884,7 +884,7 @@ impl State {
                             };
                         }
                     }
-                    waves.set_cursor_at_transition(next, variable, transition_type);
+                    waves.set_cursor_at_transition(next, variable, search_query);
                     let moved = waves.go_to_cursor_if_not_in_view();
                     if moved {
                         self.invalidate_draw_commands();
@@ -1500,8 +1500,8 @@ impl State {
             Message::SetContinuousRedraw(s) => self.sys.continuous_redraw = s,
             Message::SetDragStart(pos) => self.sys.gesture_start_location = pos,
             Message::SetFilterFocused(s) => self.variable_name_filter_focused = s,
-            Message::SetFindTransitionEqual(s) => self.find_transition_equal = s,
-            Message::SetTransitionValueFocused(s) => self.find_transition_value_focused = s,
+            Message::SetSearchType(s) => self.search_type = s,
+            Message::SetSearchValueFocused(s) => self.search_value_focused = s,
             Message::SetVariableNameFilterType(variable_name_filter_type) => {
                 self.variable_name_filter_type = variable_name_filter_type;
             }

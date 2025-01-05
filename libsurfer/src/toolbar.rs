@@ -3,7 +3,7 @@ use egui::{Button, Context, Layout, RichText, TopBottomPanel, Ui};
 use egui_remixicon::icons as remix_icons;
 use emath::{Align, Vec2};
 
-use crate::search::TransitionType;
+use crate::search::{SearchQuery, SearchType};
 use crate::wave_container::SimulationStatus;
 use crate::{
     icons,
@@ -240,7 +240,10 @@ impl State {
                 Message::MoveCursorToTransition {
                     next: false,
                     variable: None,
-                    transition_type: TransitionType::NotEqualTo(0u8.into()),
+                    search_query: Some(SearchQuery {
+                        search_type: SearchType::NotEqualTo,
+                        search_value: 0u8.into(),
+                    }),
                 },
                 item_selected && cursor_set,
             );
@@ -252,7 +255,10 @@ impl State {
                 Message::MoveCursorToTransition {
                     next: false,
                     variable: None,
-                    transition_type: TransitionType::EqualTo(0u8.into()),
+                    search_query: Some(SearchQuery {
+                        search_type: SearchType::EqualTo,
+                        search_value: 0u8.into(),
+                    }),
                 },
                 item_selected && cursor_set,
             );
@@ -264,7 +270,10 @@ impl State {
                 Message::MoveCursorToTransition {
                     next: true,
                     variable: None,
-                    transition_type: TransitionType::NotEqualTo(0u8.into()),
+                    search_query: Some(SearchQuery {
+                        search_type: SearchType::NotEqualTo,
+                        search_value: 0u8.into(),
+                    }),
                 },
                 item_selected && cursor_set,
             );
@@ -276,7 +285,10 @@ impl State {
                 Message::MoveCursorToTransition {
                     next: true,
                     variable: None,
-                    transition_type: TransitionType::EqualTo(0u8.into()),
+                    search_query: Some(SearchQuery {
+                        search_type: SearchType::EqualTo,
+                        search_value: 0u8.into(),
+                    }),
                 },
                 item_selected && cursor_set,
             );
@@ -288,7 +300,7 @@ impl State {
                 Message::MoveCursorToTransition {
                     next: false,
                     variable: None,
-                    transition_type: TransitionType::Any,
+                    search_query: None,
                 },
                 item_selected && cursor_set,
             );
@@ -300,11 +312,11 @@ impl State {
                 Message::MoveCursorToTransition {
                     next: true,
                     variable: None,
-                    transition_type: TransitionType::Any,
+                    search_query: None,
                 },
                 item_selected && cursor_set,
             );
-            self.draw_find_widget(msgs, item_selected, cursor_set, ui);
+            self.draw_search_widget(msgs, item_selected, cursor_set, ui);
             ui.separator();
             // Add items
             add_toolbar_button(

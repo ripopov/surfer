@@ -1,7 +1,9 @@
+use derive_more::Display;
 use egui::{Button, RichText, TextEdit, Ui};
 use egui_remixicon::icons as remix_icons;
+use enum_iterator::Sequence;
 use num::{bigint::ToBigInt, BigInt, BigUint, Num as _};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use surfer_translation_types::VariableValue;
 
 use crate::{
@@ -11,11 +13,36 @@ use crate::{
     State,
 };
 
-#[derive(Debug, Deserialize, PartialEq)]
-pub enum TransitionType {
-    Any,
-    NotEqualTo(BigUint),
-    EqualTo(BigUint),
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+pub struct SearchQuery {
+    pub search_type: SearchType,
+    pub search_value: BigUint,
+}
+
+#[derive(Clone, Debug, Deserialize, Display, PartialEq, Serialize, Sequence)]
+pub enum SearchType {
+    #[display("≠")]
+    NotEqualTo,
+    #[display("=")]
+    EqualTo,
+}
+
+impl Default for SearchType {
+    fn default() -> Self {
+        SearchType::EqualTo
+    }
+}
+
+#[derive(Debug, Deserialize, Display, PartialEq, Sequence, Serialize)]
+pub enum ConversionRadix {
+    #[display("Bin")]
+    Binary,
+    #[display("Oct")]
+    Octal,
+    #[display("Dec")]
+    Decimal,
+    #[display("Hex")]
+    Hexadecimal,
 }
 
 impl WaveData {
@@ -25,7 +52,7 @@ impl WaveData {
         &mut self,
         next: bool,
         variable: Option<DisplayedItemIndex>,
-        transition_type: TransitionType,
+        search_query: Option<SearchQuery>,
     ) {
         if let Some(DisplayedItemIndex(vidx)) = variable.or(self.focused_item) {
             if let Some(cursor) = &self.cursor {
@@ -40,7 +67,7 @@ impl WaveData {
                             .expect("No timestamp count even though waveforms should be loaded");
                         if let Some(cursor) = find_transition_time(
                             next,
-                            transition_type,
+                            search_query,
                             waves,
                             variable,
                             cursor,
@@ -57,7 +84,7 @@ impl WaveData {
 
 fn find_transition_time(
     next: bool,
-    transition_type: TransitionType,
+    search_query: Option<SearchQuery>,
     waves: &crate::wave_container::WaveContainer,
     variable: &crate::displayed_item::DisplayedVariable,
     cursor: &BigInt,
@@ -99,75 +126,85 @@ fn find_transition_time(
             }
         }
 
-        match transition_type {
-            TransitionType::NotEqualTo(n) => {
-                // check if the next transition is 0, if so and requested, go to
-                // next positive transition
-                let next_value = waves.query_variable(
-                    &variable.variable_ref,
-                    &new_cursor.to_biguint().unwrap_or_default(),
-                );
-                if next_value.is_ok_and(|r| {
-                    r.is_some_and(|r| {
-                        r.current.is_some_and(|v| match v.1 {
-                            VariableValue::BigUint(v) => v == n,
-                            _ => false,
+        if let Some(query) = search_query {
+            match query {
+                SearchQuery {
+                    search_type: SearchType::NotEqualTo,
+                    search_value,
+                } => {
+                    // check if the next transition is 0, if so and requested, go to
+                    // next positive transition
+                    let next_value = waves.query_variable(
+                        &variable.variable_ref,
+                        &new_cursor.to_biguint().unwrap_or_default(),
+                    );
+                    if next_value.is_ok_and(|r| {
+                        r.is_some_and(|r| {
+                            r.current.is_some_and(|v| match v.1 {
+                                VariableValue::BigUint(v) => v == search_value,
+                                _ => false,
+                            })
                         })
-                    })
-                }) {
-                    if let Some(cursor) = find_transition_time(
-                        next,
-                        TransitionType::Any,
-                        waves,
-                        variable,
-                        &new_cursor,
-                        num_timestamps,
-                    ) {
-                        new_cursor.clone_from(&cursor);
-                    };
+                    }) {
+                        if let Some(cursor) = find_transition_time(
+                            next,
+                            None,
+                            waves,
+                            variable,
+                            &new_cursor,
+                            num_timestamps,
+                        ) {
+                            new_cursor.clone_from(&cursor);
+                        };
+                    }
                 }
-            }
-            TransitionType::EqualTo(n) => {
-                // find transition where value is zero
-                let next_value = waves.query_variable(
-                    &variable.variable_ref,
-                    &new_cursor.to_biguint().unwrap_or_default(),
-                );
-                if next_value.is_ok_and(|r| {
-                    r.is_some_and(|r| {
-                        r.current.is_some_and(|v| match v.1 {
-                            VariableValue::BigUint(val) => {
-                                if val == n {
-                                    new_cursor = v.0.into();
-                                    false
-                                } else {
-                                    true
+                SearchQuery {
+                    search_type: SearchType::EqualTo,
+                    search_value,
+                } => {
+                    // find transition where value is zero
+                    let next_value = waves.query_variable(
+                        &variable.variable_ref,
+                        &new_cursor.to_biguint().unwrap_or_default(),
+                    );
+                    if next_value.is_ok_and(|r| {
+                        r.is_some_and(|r| {
+                            r.current.is_some_and(|v| match v.1 {
+                                VariableValue::BigUint(val) => {
+                                    if val == search_value {
+                                        new_cursor = v.0.into();
+                                        false
+                                    } else {
+                                        true
+                                    }
                                 }
-                            }
-                            _ => true,
+                                _ => true,
+                            })
                         })
-                    })
-                }) {
-                    if let Some(cursor) = find_transition_time(
-                        next,
-                        TransitionType::EqualTo(n),
-                        waves,
-                        variable,
-                        &new_cursor,
-                        num_timestamps,
-                    ) {
-                        new_cursor.clone_from(&cursor);
+                    }) {
+                        if let Some(cursor) = find_transition_time(
+                            next,
+                            Some(SearchQuery {
+                                search_type: SearchType::EqualTo,
+                                search_value,
+                            }),
+                            waves,
+                            variable,
+                            &new_cursor,
+                            num_timestamps,
+                        ) {
+                            new_cursor.clone_from(&cursor);
+                        }
                     }
                 }
             }
-            TransitionType::Any => {}
         }
     }
     Some(new_cursor)
 }
 
 impl State {
-    pub fn draw_find_widget(
+    pub fn draw_search_widget(
         &self,
         msgs: &mut Vec<Message>,
         item_selected: bool,
@@ -176,38 +213,28 @@ impl State {
     ) {
         // Create text edit
         let response = ui.add(
-            TextEdit::singleline(&mut *self.sys.transition_value.borrow_mut())
+            TextEdit::singleline(&mut *self.sys.search_value.borrow_mut())
                 .desired_width(100.0)
-                .hint_text("value"),
+                .clip_text(true)
+                .hint_text("Value"),
         );
         // Handle focus of text edit
         if response.gained_focus() {
-            msgs.push(Message::SetTransitionValueFocused(true));
+            msgs.push(Message::SetSearchValueFocused(true));
         }
         if response.lost_focus() {
-            msgs.push(Message::SetTransitionValueFocused(false));
+            msgs.push(Message::SetSearchValueFocused(false));
         }
-        ui.menu_button(
-            if self.find_transition_equal {
-                "="
-            } else {
-                "≠"
-            },
-            |ui| {
-                ui.radio(self.find_transition_equal, "=")
+        ui.menu_button(self.search_type.to_string(), |ui| {
+            for search_type in enum_iterator::all::<SearchType>() {
+                ui.radio(self.search_type == search_type, search_type.to_string())
                     .clicked()
                     .then(|| {
                         ui.close_menu();
-                        msgs.push(Message::SetFindTransitionEqual(true));
+                        msgs.push(Message::SetSearchType(search_type));
                     });
-                ui.radio(!self.find_transition_equal, "≠")
-                    .clicked()
-                    .then(|| {
-                        ui.close_menu();
-                        msgs.push(Message::SetFindTransitionEqual(false));
-                    });
-            },
-        );
+            }
+        });
         let button =
             Button::new(RichText::new(remix_icons::CONTRACT_LEFT_FILL).heading()).frame(false);
         ui.add_enabled(item_selected && cursor_set, button)
@@ -228,16 +255,14 @@ impl State {
     }
 
     fn find_next_transition(&self, msgs: &mut Vec<Message>, next: bool) {
-        if let Ok(val) = BigUint::from_str_radix((*self.sys.transition_value.borrow()).as_str(), 10)
-        {
+        if let Ok(val) = BigUint::from_str_radix((*self.sys.search_value.borrow()).as_str(), 10) {
             msgs.push(Message::MoveCursorToTransition {
                 next,
                 variable: None,
-                transition_type: if self.find_transition_equal {
-                    TransitionType::EqualTo(val)
-                } else {
-                    TransitionType::NotEqualTo(val)
-                },
+                search_query: Some(SearchQuery {
+                    search_type: self.search_type.clone(),
+                    search_value: val,
+                }),
             })
         }
     }
