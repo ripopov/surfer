@@ -327,6 +327,11 @@ impl State {
     }
 
     fn get_displayed_items(&self, waves: &WaveData) -> Vec<DisplayedItemRef> {
-        waves.displayed_items_order.iter().copied().collect_vec()
+        // TODO check call sites since visible items may now differ from loaded items
+        waves
+            .items_tree
+            .iter_visible()
+            .map(|node| node.item)
+            .collect_vec()
     }
 }

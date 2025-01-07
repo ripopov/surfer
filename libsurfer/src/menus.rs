@@ -4,6 +4,7 @@ use egui::{menu, Button, Context, TextWrapMode, TopBottomPanel, Ui};
 use itertools::Itertools;
 use surfer_translation_types::{TranslationPreference, Translator};
 
+use crate::displayed_item_tree::VisibleItemIndex;
 use crate::wave_container::{FieldRef, VariableRefExt};
 use crate::{
     clock_highlighting::clock_highlight_type_menu,
@@ -338,14 +339,14 @@ impl State {
         path: Option<&FieldRef>,
         msgs: &mut Vec<Message>,
         ui: &mut Ui,
-        vidx: DisplayedItemIndex,
+        vidx: DisplayedItemIndex, // TODO convert to VisibleItemIndex
     ) {
         let Some(waves) = &self.waves else { return };
 
         let (displayed_item_id, displayed_item) = waves
-            .displayed_items_order
-            .get(vidx.0)
-            .map(|id| (*id, &waves.displayed_items[id]))
+            .items_tree
+            .get_visible(VisibleItemIndex(vidx.0))
+            .map(|node| (node.item, &waves.displayed_items[&node.item]))
             .unwrap();
 
         if let Some(path) = path {

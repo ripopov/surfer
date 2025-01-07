@@ -6,7 +6,7 @@ use emath::{Pos2, Vec2};
 use ftr_parser::types::Transaction;
 use num::BigInt;
 use serde::Deserialize;
-use std::path::{Display, PathBuf};
+use std::path::PathBuf;
 use surver::Status;
 
 use crate::graphics::{Graphic, GraphicId};

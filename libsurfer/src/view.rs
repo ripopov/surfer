@@ -341,7 +341,7 @@ impl State {
             self.add_statusbar_panel(ctx, &self.waves, &mut msgs);
         }
         if let Some(waves) = &self.waves {
-            if self.show_overview() && !waves.displayed_items_order.is_empty() {
+            if self.show_overview() && !waves.items_tree.is_empty() {
                 self.add_overview_panel(ctx, waves, &mut msgs);
             }
         }
@@ -866,8 +866,8 @@ impl State {
                     .waves
                     .as_ref()
                     .unwrap()
-                    .displayed_items_order
-                    .iter()
+                    .items_tree
+                    .iter_visible()
                     .enumerate()
                 {
                     let vidx = vidx.into();
@@ -888,12 +888,18 @@ impl State {
 
         let alignment = self.get_name_alignment();
         ui.with_layout(Layout::top_down(alignment).with_cross_justify(true), |ui| {
-            for (vidx, displayed_item_id) in self
+            for (
+                vidx,
+                crate::displayed_item_tree::Node {
+                    item: displayed_item_id,
+                    ..
+                },
+            ) in self
                 .waves
                 .as_ref()
                 .unwrap()
-                .displayed_items_order
-                .iter()
+                .items_tree
+                .iter_visible()
                 .enumerate()
             {
                 let vidx = vidx.into();
@@ -984,7 +990,15 @@ impl State {
                         vidx,
                         item_rect,
                         ui,
-                        vidx.0 == self.waves.as_ref().unwrap().displayed_items_order.len() - 1,
+                        vidx.0
+                            == self
+                                .waves
+                                .as_ref()
+                                .unwrap()
+                                .items_tree
+                                .iter_visible()
+                                .count()
+                                - 1,
                     );
                 };
             }
@@ -1856,7 +1870,15 @@ impl State {
     ) -> Color32 {
         *waves
             .displayed_items
-            .get(&waves.displayed_items_order[drawing_info.item_list_idx()])
+            .get(
+                &waves
+                    .items_tree
+                    .get_visible(crate::displayed_item_tree::VisibleItemIndex(
+                        drawing_info.item_list_idx(),
+                    ))
+                    .unwrap()
+                    .item,
+            )
             .and_then(super::displayed_item::DisplayedItem::background_color)
             .and_then(|color| self.config.theme.get_color(&color))
             .unwrap_or_else(|| self.get_default_alternating_background_color(vidx))

@@ -2,6 +2,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use crate::displayed_item::DisplayedItemRef;
+use crate::MoveDir;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Node {
@@ -36,6 +37,7 @@ pub enum TargetPosition {
     End(u8),
 }
 
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct VisibleItemIterator<'a> {
     items: std::slice::Iter<'a, Node>,
     last: Option<&'a Node>,
@@ -65,6 +67,46 @@ impl<'a> Iterator for VisibleItemIterator<'a> {
     }
 }
 
+#[must_use = "iterators are lazy and do nothing unless consumed"]
+pub struct VisibleItemIteratorMut<'a> {
+    items: &'a mut DisplayedItemTree,
+    next_idx: usize,
+    skip_to: Option<u8>,
+}
+
+impl<'a> Iterator for VisibleItemIteratorMut<'a> {
+    type Item = &'a mut Node;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(skip_to) = self.skip_to {
+            while self.next_idx < self.items.len() {
+                if self.items.items[self.next_idx].level <= skip_to {
+                    break;
+                }
+                self.next_idx += 1;
+            }
+            self.skip_to = None;
+        }
+        if self.next_idx < self.items.items.len() {
+            let idx = self.next_idx;
+
+            self.next_idx += 1;
+            if !self.items.items[idx].unfolded {
+                self.skip_to = Some(self.items.items[idx].level)
+            }
+            let ptr = self.items.items.as_mut_ptr();
+            // access is safe since we
+            // - do access within bounds
+            // - know that we won't generate two equal references (next call, next item)
+            // - know that no second iterator or other access can happen while the references/iterator exist
+            Some(unsafe { &mut *ptr.add(idx) })
+        } else {
+            None
+        }
+    }
+}
+
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct VisibleItemIteratorExtraInfo<'a> {
     tree: &'a DisplayedItemTree,
     /// Index of the next element to return, not guaranteed to be in-bounds
@@ -144,6 +186,14 @@ impl DisplayedItemTree {
         });
     }
 
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &Node> + use<'_> {
         self.items.iter()
     }
@@ -153,6 +203,14 @@ impl DisplayedItemTree {
         VisibleItemIterator {
             items: self.items.iter(),
             last: None,
+        }
+    }
+
+    pub fn iter_visible_mut(&mut self) -> VisibleItemIteratorMut {
+        VisibleItemIteratorMut {
+            items: self,
+            next_idx: 0,
+            skip_to: None,
         }
     }
 
@@ -180,6 +238,10 @@ impl DisplayedItemTree {
         self.items.get(index.0)
     }
 
+    pub fn get_mut(&mut self, index: ItemIndex) -> Option<&mut Node> {
+        self.items.get_mut(index.0)
+    }
+
     pub fn to_displayed(&self, index: VisibleItemIndex) -> Option<ItemIndex> {
         // TODO make this more efficient
         let item = self.get_visible(index)?;
@@ -201,7 +263,9 @@ impl DisplayedItemTree {
         &mut self,
         item: DisplayedItemRef,
         position: TargetPosition,
-    ) -> Result<(), MoveResult> {
+    ) -> Result<ItemIndex, MoveResult> {
+        self.is_valid_position(position)?;
+
         let target_idx = match position {
             TargetPosition::Before(ref_idx) => ref_idx.0,
             TargetPosition::After(ref_idx) => ref_idx.0 + 1,
@@ -215,8 +279,6 @@ impl DisplayedItemTree {
             TargetPosition::End(level) => level,
         };
 
-        self.is_valid_position(position)?;
-
         self.items.insert(
             target_idx,
             Node {
@@ -227,7 +289,7 @@ impl DisplayedItemTree {
             },
         );
 
-        Ok(())
+        Ok(ItemIndex(target_idx))
     }
 
     /// Return the index past the end of the subtree started by `idx`
@@ -255,28 +317,54 @@ impl DisplayedItemTree {
         self.items.remove(item).item
     }
 
-    pub fn move_item(&mut self, ItemIndex(item): ItemIndex, down: bool) -> Result<(), MoveResult> {
+    pub fn extract_recursive_if<F>(&mut self, f: F) -> Vec<DisplayedItemRef>
+    where
+        F: Fn(&Node) -> bool,
+    {
+        let mut removed = vec![];
+
+        let mut idx = 0;
+        while idx < self.items.len() {
+            if f(self.items.get(idx).unwrap()) {
+                let end = self.subtree_end(idx);
+                removed.extend(self.items.drain(idx..end).map(|x| x.item));
+            } else {
+                idx += 1;
+            }
+        }
+
+        removed
+    }
+
+    pub fn move_item(
+        &mut self,
+        ItemIndex(item): ItemIndex,
+        direction: MoveDir,
+    ) -> Result<(), MoveResult> {
         if item >= self.items.len() {
             return Err(MoveResult::InvalidIndex);
         }
 
-        if down {
-            let end = self.subtree_end(item);
-            if end == self.items.len() {
-                return Ok(());
+        match direction {
+            MoveDir::Down => {
+                let end = self.subtree_end(item);
+                if end == self.items.len() {
+                    return Ok(());
+                }
+                self.move_items(vec![ItemIndex(item)], TargetPosition::After(ItemIndex(end)))
             }
-            self.move_items(vec![ItemIndex(item)], TargetPosition::After(ItemIndex(end)))
-        } else {
-            // find previous sibling or parent
-            let level = self.items[item].level;
-            let prev = self.items[..item]
-                .iter()
-                .rposition(|x| x.level <= level)
-                .unwrap_or(0);
-            self.move_items(
-                vec![ItemIndex(item)],
-                TargetPosition::After(ItemIndex(prev)),
-            )
+            MoveDir::Up => {
+                // find previous sibling or parent
+                let level = self.items[item].level;
+                let prev = self.items[..item]
+                    .iter()
+                    .rposition(|x| x.level <= level)
+                    .unwrap_or(0);
+                self.move_items(
+                    vec![ItemIndex(item)],
+                    TargetPosition::After(ItemIndex(prev)),
+                )
+            }
         }
     }
 
@@ -520,6 +608,23 @@ impl DisplayedItemTree {
         }
     }
 
+    /// Change selection for visible items, in inclusive range
+    pub fn xselect_visible_range(
+        &mut self,
+        VisibleItemIndex(from): VisibleItemIndex,
+        VisibleItemIndex(to): VisibleItemIndex,
+        selected: bool,
+    ) {
+        let (from, to) = if from < to {
+            (from, to + 1)
+        } else {
+            (to, from + 1)
+        };
+        for node in self.iter_visible_mut().skip(from).take(to - from) {
+            node.selected = selected
+        }
+    }
+
     pub fn for_each_mut<F>(&mut self, mut f: F)
     where
         F: FnMut(&mut Node),
@@ -577,7 +682,7 @@ mod tests {
     }
 
     /// common tes tree
-    /// ```
+    /// ```text
     /// 0: 0
     /// 1: 1
     /// 2: 2       < folded
@@ -678,7 +783,7 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_item_into() {
+    fn test_insert_item_end() {
         let mut tree = test_tree();
         tree.insert_item(DisplayedItemRef(0xff), TargetPosition::End(1))
             .expect("insert_item must succeed");

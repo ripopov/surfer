@@ -53,9 +53,9 @@ impl WaveData {
         let num_timestamps = self.num_timestamps().unwrap_or(1.into());
         for (idx, marker) in &self.markers {
             let color = self
-                .displayed_items_order
+                .items_tree
                 .iter()
-                .map(|id| self.displayed_items.get(id))
+                .map(|node| self.displayed_items.get(&node.item))
                 .find_map(|item| match item {
                     Some(DisplayedItem::Marker(tmp_marker)) => {
                         if *idx == tmp_marker.idx {
@@ -111,11 +111,27 @@ impl WaveData {
 
     pub fn remove_marker(&mut self, idx: u8) {
         self.markers.remove(&idx);
-        self.displayed_items_order
-            .retain(|id| match self.displayed_items.get(id) {
-                Some(DisplayedItem::Marker(marker)) => marker.idx != idx,
-                _ => true,
-            });
+        let item_ref = self
+            .displayed_items
+            .iter()
+            .find_map(|(id, item)| match item {
+                DisplayedItem::Marker(marker) if marker.idx == idx => Some(id),
+                _ => None,
+            })
+            .expect("Inconsistent state, could not find marker item");
+        let item_index = self
+            .items_tree
+            .iter()
+            .enumerate()
+            .find_map(|(idx, node)| {
+                if node.item == *item_ref {
+                    Some(crate::displayed_item_tree::ItemIndex(idx))
+                } else {
+                    None
+                }
+            })
+            .expect("Inconsistent state, could not find marker in tree");
+        self.items_tree.remove_recursive(item_index);
     }
 
     /// Set the marker with the specified id to the location. If the marker doesn't exist already,
@@ -152,9 +168,9 @@ impl WaveData {
         let text_size = ctx.cfg.text_size;
 
         for displayed_item in self
-            .displayed_items_order
-            .iter()
-            .map(|id| self.displayed_items.get(id))
+            .items_tree
+            .iter_visible()
+            .map(|node| self.displayed_items.get(&node.item))
             .filter_map(|item| match item {
                 Some(DisplayedItem::Marker(marker)) => Some(marker),
                 _ => None,
@@ -209,9 +225,9 @@ impl State {
         }
 
         let mut numbered_markers = waves
-            .displayed_items_order
+            .items_tree
             .iter()
-            .map(|id| waves.displayed_items.get(id))
+            .map(|node| waves.displayed_items.get(&node.item))
             .filter_map(|displayed_item| match displayed_item {
                 Some(DisplayedItem::Marker(marker)) => {
                     let text_color = self.get_item_text_color(displayed_item.unwrap());
@@ -307,9 +323,11 @@ impl State {
             _ => None,
         }) {
             let Some(item) = waves
-                .displayed_items_order
-                .get(drawing_info.item_list_idx.0)
-                .and_then(|id| waves.displayed_items.get(id))
+                .items_tree
+                .get_visible(crate::displayed_item_tree::VisibleItemIndex(
+                    drawing_info.item_list_idx.0,
+                )) // TODO store as VII
+                .and_then(|node| waves.displayed_items.get(&node.item))
             else {
                 return;
             };

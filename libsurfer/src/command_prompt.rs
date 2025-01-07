@@ -92,25 +92,27 @@ pub fn get_parser(state: &State) -> Command<Message> {
     };
     let displayed_items = match &state.waves {
         Some(v) => v
-            .displayed_items_order
+            .items_tree
             .iter()
             .enumerate()
-            .map(|(idx, item_id)| {
-                let idx = DisplayedItemIndex(idx);
-                let item = &v.displayed_items[item_id];
-                match item {
-                    DisplayedItem::Variable(var) => format!(
-                        "{}_{}",
-                        uint_idx_to_alpha_idx(idx, v.displayed_items.len()),
-                        var.variable_ref.full_path_string()
-                    ),
-                    _ => format!(
-                        "{}_{}",
-                        uint_idx_to_alpha_idx(idx, v.displayed_items.len()),
-                        item.name()
-                    ),
-                }
-            })
+            .map(
+                |(idx, crate::displayed_item_tree::Node { item: item_id, .. })| {
+                    let idx = DisplayedItemIndex(idx);
+                    let item = &v.displayed_items[item_id];
+                    match item {
+                        DisplayedItem::Variable(var) => format!(
+                            "{}_{}",
+                            uint_idx_to_alpha_idx(idx, v.displayed_items.len()),
+                            var.variable_ref.full_path_string()
+                        ),
+                        _ => format!(
+                            "{}_{}",
+                            uint_idx_to_alpha_idx(idx, v.displayed_items.len()),
+                            item.name()
+                        ),
+                    }
+                },
+            )
             .collect_vec(),
         None => vec![],
     };
@@ -161,10 +163,10 @@ pub fn get_parser(state: &State) -> Command<Message> {
 
     let markers = if let Some(waves) = &state.waves {
         waves
-            .displayed_items_order
+            .items_tree
             .iter()
-            .map(|id| {
-                let x = waves.displayed_items.get(id);
+            .map(|crate::displayed_item_tree::Node { item, .. }| {
+                let x = waves.displayed_items.get(item);
                 x
             })
             .filter_map(|item| match item {
