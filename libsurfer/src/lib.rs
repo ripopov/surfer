@@ -53,7 +53,7 @@ pub mod wave_source;
 pub mod wcp;
 pub mod wellen;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
@@ -229,7 +229,6 @@ struct CanvasState {
     message: String,
     focused_item: Option<DisplayedItemIndex>,
     focused_transaction: (Option<TransactionRef>, Option<Transaction>),
-    selected_items: HashSet<DisplayedItemRef>,
     items_tree: DisplayedItemTree,
     displayed_items: HashMap<DisplayedItemRef, DisplayedItem>,
     markers: HashMap<u8, BigInt>,
@@ -576,7 +575,7 @@ impl State {
                     waves.remove_displayed_item(node.item); // TODO going back and forth between index and ref
                 }
             }
-            Message::RemoveItems(items) => {
+            Message::RemoveItems(mut items) => {
                 let undo_msg = self
                     .waves
                     .as_ref()
@@ -601,6 +600,8 @@ impl State {
                     return;
                 };
 
+                items.sort();
+                items.reverse(); // TODO do with sorting already...
                 for id in items {
                     waves.remove_displayed_item(id);
                 }
@@ -779,10 +780,14 @@ impl State {
                     redraw = true;
                 }
                 if displayed_field_ref.is_none() {
-                    for item in &waves.selected_items {
-                        let field_ref = DisplayedFieldRef::from(*item);
+                    for item in waves
+                        .items_tree
+                        .iter_visible_selected()
+                        .map(|node| node.item)
+                    {
+                        let field_ref = DisplayedFieldRef::from(item);
                         if let Some(DisplayedItem::Variable(variable)) =
-                            waves.displayed_items.get_mut(item)
+                            waves.displayed_items.get_mut(&item)
                         {
                             update_format(variable, field_ref);
                         }
@@ -796,7 +801,7 @@ impl State {
             }
             Message::ItemSelectionClear => {
                 if let Some(waves) = self.waves.as_mut() {
-                    waves.selected_items.clear();
+                    waves.items_tree.xselect_all(false);
                 }
             }
             Message::ItemColorChange(vidx, color_name) => {
@@ -1691,7 +1696,6 @@ impl State {
                                 .push(State::current_canvas_state(waves, prev_state.message));
                             waves.focused_item = prev_state.focused_item;
                             waves.focused_transaction = prev_state.focused_transaction;
-                            waves.selected_items = prev_state.selected_items;
                             waves.items_tree = prev_state.items_tree;
                             waves.displayed_items = prev_state.displayed_items;
                             waves.markers = prev_state.markers;

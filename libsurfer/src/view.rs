@@ -1645,7 +1645,11 @@ impl State {
 
     fn item_is_selected(&self, id: DisplayedItemRef) -> bool {
         if let Some(waves) = &self.waves {
-            waves.selected_items.contains(&id)
+            waves
+                .items_tree
+                .iter_visible_selected()
+                .find(|node| node.item == id)
+                .is_some()
         } else {
             false
         }

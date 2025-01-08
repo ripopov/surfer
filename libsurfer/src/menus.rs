@@ -368,7 +368,12 @@ impl State {
                     .then(|| {
                         ui.close_menu();
                         msgs.push(Message::ItemColorChange(
-                            if waves.selected_items.contains(&displayed_item_id) {
+                            if waves
+                                .items_tree
+                                .iter_visible_selected()
+                                .map(|node| node.item)
+                                .contains(&displayed_item_id)
+                            {
                                 None
                             } else {
                                 Some(vidx)
@@ -397,7 +402,12 @@ impl State {
                     .then(|| {
                         ui.close_menu();
                         msgs.push(Message::ItemBackgroundColorChange(
-                            if waves.selected_items.contains(&displayed_item_id) {
+                            if waves
+                                .items_tree
+                                .iter_visible_selected()
+                                .map(|node| node.item)
+                                .contains(&displayed_item_id)
+                            {
                                 None
                             } else {
                                 Some(vidx)
@@ -435,14 +445,27 @@ impl State {
         }
 
         if ui.button("Remove").clicked() {
-            msgs.push(if waves.selected_items.contains(&displayed_item_id) {
-                Message::Batch(vec![
-                    Message::RemoveItems(waves.selected_items.iter().copied().collect_vec()),
-                    Message::UnfocusItem,
-                ])
-            } else {
-                Message::RemoveItems(vec![displayed_item_id])
-            });
+            msgs.push(
+                if waves
+                    .items_tree
+                    .iter_visible_selected()
+                    .map(|node| node.item)
+                    .contains(&displayed_item_id)
+                {
+                    Message::Batch(vec![
+                        Message::RemoveItems(
+                            waves
+                                .items_tree
+                                .iter_visible_selected()
+                                .map(|node| node.item)
+                                .collect_vec(),
+                        ),
+                        Message::UnfocusItem,
+                    ])
+                } else {
+                    Message::RemoveItems(vec![displayed_item_id])
+                },
+            );
             msgs.push(Message::InvalidateCount);
             ui.close_menu();
         }
@@ -535,7 +558,12 @@ impl State {
                 .then(|| {
                     ui.close_menu();
                     msgs.push(Message::VariableFormatChange(
-                        if waves.selected_items.contains(&displayed_field_ref.item) {
+                        if waves
+                            .items_tree
+                            .iter_visible_selected()
+                            .map(|node| node.item)
+                            .contains(&displayed_field_ref.item)
+                        {
                             None
                         } else {
                             Some(displayed_field_ref.clone())
