@@ -39,67 +39,60 @@ pub enum TargetPosition {
 
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct VisibleItemIterator<'a> {
-    items: std::slice::Iter<'a, Node>,
-    last: Option<&'a Node>,
+    items: &'a Vec<Node>,
+    next_idx: usize,
+}
+
+/// Find the index of the next visible item, or return items.len()
+///
+/// Precondition: `this_idx` must be a valid `items` index
+fn next_visible_item(items: &[Node], this_idx: usize) -> usize {
+    let this_level = items[this_idx].level;
+    let mut next_idx = this_idx + 1;
+    if !items[this_idx].unfolded {
+        while next_idx < items.len() && items[next_idx].level > this_level {
+            next_idx += 1;
+        }
+    }
+    next_idx
 }
 
 impl<'a> Iterator for VisibleItemIterator<'a> {
     type Item = &'a Node;
+
     fn next(&mut self) -> Option<Self::Item> {
-        let (skip, skip_to) = match self.last {
-            Some(x) => (!x.unfolded, x.level),
-            None => (false, 0),
+        let this_idx = self.next_idx;
+
+        let this_item = self.items.get(this_idx);
+        if let Some(_) = this_item {
+            self.next_idx = next_visible_item(&self.items, this_idx);
         };
-
-        if skip {
-            for x in self.items.by_ref() {
-                if x.level <= skip_to {
-                    self.last = Some(x);
-                    return self.last;
-                }
-            }
-            self.last = None;
-            return None;
-        }
-
-        self.last = self.items.next();
-        self.last
+        this_item
     }
 }
 
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct VisibleItemIteratorMut<'a> {
-    items: &'a mut DisplayedItemTree,
+    items: &'a mut Vec<Node>,
+    /// Index of the next element to return, not guaranteed to be in-bounds
     next_idx: usize,
-    skip_to: Option<u8>,
 }
 
 impl<'a> Iterator for VisibleItemIteratorMut<'a> {
     type Item = &'a mut Node;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(skip_to) = self.skip_to {
-            while self.next_idx < self.items.len() {
-                if self.items.items[self.next_idx].level <= skip_to {
-                    break;
-                }
-                self.next_idx += 1;
-            }
-            self.skip_to = None;
-        }
-        if self.next_idx < self.items.items.len() {
-            let idx = self.next_idx;
+        let this_idx = self.next_idx;
 
-            self.next_idx += 1;
-            if !self.items.items[idx].unfolded {
-                self.skip_to = Some(self.items.items[idx].level)
-            }
-            let ptr = self.items.items.as_mut_ptr();
+        if this_idx < self.items.len() {
+            self.next_idx = next_visible_item(&mut self.items, this_idx);
+
+            let ptr = self.items.as_mut_ptr();
             // access is safe since we
             // - do access within bounds
             // - know that we won't generate two equal references (next call, next item)
             // - know that no second iterator or other access can happen while the references/iterator exist
-            Some(unsafe { &mut *ptr.add(idx) })
+            Some(unsafe { &mut *ptr.add(this_idx) })
         } else {
             None
         }
@@ -108,7 +101,7 @@ impl<'a> Iterator for VisibleItemIteratorMut<'a> {
 
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct VisibleItemIteratorExtraInfo<'a> {
-    tree: &'a DisplayedItemTree,
+    items: &'a Vec<Node>,
     /// Index of the next element to return, not guaranteed to be in-bounds
     next_idx: usize,
 }
@@ -117,40 +110,20 @@ impl<'a> Iterator for VisibleItemIteratorExtraInfo<'a> {
     type Item = (&'a Node, ItemIndex, bool);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (skip, skip_to) = match self.next_idx {
-            0 => (false, 0),
-            _ => match self.tree.items.get(self.next_idx - 1) {
-                None => return None,
-                Some(item) => (!item.unfolded, item.level),
-            },
-        };
+        let this_idx = self.next_idx;
+        if this_idx < self.items.len() {
+            self.next_idx = next_visible_item(&self.items, this_idx);
 
-        let idx = if skip {
-            let mut candidate_idx = self.next_idx;
-            loop {
-                if candidate_idx >= self.tree.items.len()
-                    || self.tree.items[candidate_idx].level <= skip_to
-                {
-                    break;
-                }
-                candidate_idx += 1;
-            }
-            candidate_idx
+            let this_level = self.items[this_idx].level;
+            let has_child = self
+                .items
+                .get(this_idx + 1)
+                .map(|item| item.level > this_level)
+                .unwrap_or(false);
+            Some((&self.items[this_idx], ItemIndex(this_idx), has_child))
         } else {
-            self.next_idx
-        };
-
-        self.next_idx = idx + 1;
-        let result = self.tree.items.get(idx);
-        // we can unwrap in map bec. if the next element exists then this element exists as well...
-        let has_child = self
-            .tree
-            .items
-            .get(self.next_idx)
-            .map(|next| next.level > result.map(|this| this.level).unwrap())
-            .unwrap_or(false);
-
-        result.map(|x| (x, ItemIndex(idx), has_child))
+            None
+        }
     }
 }
 
@@ -201,22 +174,21 @@ impl DisplayedItemTree {
     /// Iterate through all visible items
     pub fn iter_visible(&self) -> VisibleItemIterator {
         VisibleItemIterator {
-            items: self.items.iter(),
-            last: None,
+            items: &self.items,
+            next_idx: 0,
         }
     }
 
     pub fn iter_visible_mut(&mut self) -> VisibleItemIteratorMut {
         VisibleItemIteratorMut {
-            items: self,
+            items: &mut self.items,
             next_idx: 0,
-            skip_to: None,
         }
     }
 
     pub fn iter_visible_extra(&self) -> VisibleItemIteratorExtraInfo {
         VisibleItemIteratorExtraInfo {
-            tree: self,
+            items: &self.items,
             next_idx: 0,
         }
     }
