@@ -110,28 +110,16 @@ impl WaveData {
     }
 
     pub fn remove_marker(&mut self, idx: u8) {
-        self.markers.remove(&idx);
-        let item_ref = self
-            .displayed_items
-            .iter()
-            .find_map(|(id, item)| match item {
-                DisplayedItem::Marker(marker) if marker.idx == idx => Some(id),
-                _ => None,
-            })
-            .expect("Inconsistent state, could not find marker item");
-        let item_index = self
-            .items_tree
-            .iter()
-            .enumerate()
-            .find_map(|(idx, node)| {
-                if node.item == *item_ref {
-                    Some(crate::displayed_item_tree::ItemIndex(idx))
-                } else {
-                    None
-                }
-            })
-            .expect("Inconsistent state, could not find marker in tree");
-        self.items_tree.remove_recursive(item_index);
+        if let Some(&marker_item_ref) =
+            self.displayed_items
+                .iter()
+                .find_map(|(id, item)| match item {
+                    DisplayedItem::Marker(marker) if marker.idx == idx => Some(id),
+                    _ => None,
+                })
+        {
+            self.remove_displayed_item(marker_item_ref);
+        }
     }
 
     /// Set the marker with the specified id to the location. If the marker doesn't exist already,
