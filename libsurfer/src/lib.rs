@@ -174,7 +174,7 @@ pub fn run_egui(cc: &CreationContext, mut state: State) -> Result<Box<dyn App>> 
     Ok(Box::new(state))
 }
 
-#[derive(Debug, Deserialize, Display)]
+#[derive(Debug, Clone, Copy, Deserialize, Display, PartialEq, Eq)]
 pub enum MoveDir {
     #[display("up")]
     Up,
@@ -614,13 +614,28 @@ impl State {
                 let Some(DisplayedItemIndex(vidx)) = waves.focused_item else {
                     return;
                 };
-                let Some(idx) = waves
+                let Some(mut idx) = waves
                     .items_tree
                     .to_displayed(crate::displayed_item_tree::VisibleItemIndex(vidx))
                 else {
                     return;
                 };
-                waves.items_tree.move_item(idx, direction);
+                let focused_item_ref = waves
+                    .items_tree
+                    .get(idx)
+                    .expect("we must have an element here, checked above")
+                    .item;
+                for _ in 0..count {
+                    idx = waves
+                        .items_tree
+                        .move_item(idx, direction)
+                        .expect("move failed for unknown reason");
+                }
+                waves.focused_item = waves
+                    .items_tree
+                    .iter_visible()
+                    .find_position(|node| node.item == focused_item_ref)
+                    .map(|(idx, _)| DisplayedItemIndex(idx));
             }
             Message::CanvasScroll {
                 delta,
@@ -1594,12 +1609,12 @@ impl State {
                     let Some(waves) = self.waves.as_mut() else {
                         return;
                     };
-                    let Some(target_idx) = waves
+                    let target_idx = waves
                         .items_tree
                         .to_displayed(crate::displayed_item_tree::VisibleItemIndex(target_vidx))
-                    else {
-                        return;
-                    };
+                        .unwrap_or_else(|| {
+                            crate::displayed_item_tree::ItemIndex(waves.items_tree.len())
+                        });
 
                     let focused_index = waves.focused_item.and_then(|vidx| {
                         waves
@@ -1623,7 +1638,10 @@ impl State {
 
                     let _ = waves.items_tree.move_items(
                         to_move,
-                        crate::displayed_item_tree::TargetPosition::After(target_idx),
+                        crate::displayed_item_tree::TargetPosition {
+                            before: target_idx.0,
+                            level: 0, // TODO once we have groups...
+                        },
                     );
                 }
                 self.drag_source_idx = None;

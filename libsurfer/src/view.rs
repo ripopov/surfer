@@ -1502,9 +1502,9 @@ impl State {
         };
 
         let vidx = vidx.0;
-        if self.drag_started {
-            if let Some(DisplayedItemIndex(source_idx)) = self.drag_source_idx {
-                let target_idx = if ui.rect_contains_pointer(before_rect) {
+        if self.drag_started && self.drag_source_idx.is_some() {
+            if let Some(DisplayedItemIndex(_source_idx)) = self.drag_source_idx {
+                if ui.rect_contains_pointer(before_rect) {
                     ui.painter().rect_filled(
                         Rect {
                             min: rect_with_margin.left_top() - half_line_width,
@@ -1513,11 +1513,7 @@ impl State {
                         egui::Rounding::ZERO,
                         self.config.theme.drag_hint_color,
                     );
-                    if vidx > source_idx {
-                        vidx - 1
-                    } else {
-                        vidx
-                    }
+                    msgs.push(Message::VariableDragTargetChanged(vidx.into()));
                 } else if ui.rect_contains_pointer(after_rect) {
                     ui.painter().rect_filled(
                         Rect {
@@ -1527,17 +1523,7 @@ impl State {
                         egui::Rounding::ZERO,
                         self.config.theme.drag_hint_color,
                     );
-                    if vidx < source_idx {
-                        vidx + 1
-                    } else {
-                        vidx
-                    }
-                } else {
-                    source_idx
-                };
-
-                if source_idx != target_idx {
-                    msgs.push(Message::VariableDragTargetChanged(target_idx.into()));
+                    msgs.push(Message::VariableDragTargetChanged((vidx + 1).into()));
                 }
             }
         }

@@ -23,6 +23,7 @@ use crate::wave_container::{ScopeRef, VariableMeta, VariableRef, VariableRefExt,
 use crate::wave_source::{WaveFormat, WaveSource};
 use crate::wellen::LoadSignalsCmd;
 use ftr_parser::types::Transaction;
+use itertools::Itertools;
 use std::fmt::Formatter;
 use std::ops::Not;
 
@@ -446,24 +447,10 @@ impl WaveData {
             return;
         };
 
-        // TODO implement focus move on erase
-        /*if let Some(fidx) = self.focused_item {
-            self.focused_item = match fidx.0.cmp(&idx.0) {
-                // move focus up if if signal was removed below focus
-                std::cmp::Ordering::Greater => Some(DisplayedItemIndex(
-                    fidx.0
-                        .saturating_sub(1)
-                        .min(self.displayed_items_order.len().saturating_sub(2)),
-                )),
-                // if the focus was removed move if it was the last element
-                std::cmp::Ordering::Equal => Some(DisplayedItemIndex(
-                    fidx.0
-                        .min(self.displayed_items_order.len().saturating_sub(2)),
-                )),
-                // when the removed item is above the focus, the focus does not move
-                _ => self.focused_item,
-            }
-        }*/
+        let focused_item_ref = self
+            .focused_item
+            .and_then(|vidx| self.items_tree.get_visible(VisibleItemIndex(vidx.0)))
+            .map(|node| node.item);
 
         for removed_ref in self
             .items_tree
@@ -473,9 +460,34 @@ impl WaveData {
                 self.markers.remove(&m.idx);
             }
         }
-        if self.items_tree.is_empty() {
-            self.focused_item = None;
-        }
+
+        self.focused_item = focused_item_ref.and_then(|focused_item_ref| {
+            match self
+                .items_tree
+                .iter_visible()
+                .find_position(|node| node.item == focused_item_ref)
+                .map(|(idx, _)| DisplayedItemIndex(idx))
+            {
+                Some(idx) => Some(idx),
+                None if self
+                    .items_tree
+                    .to_displayed(VisibleItemIndex(
+                        self.focused_item
+                            .expect("should be ensured by check above")
+                            .0,
+                    ))
+                    .is_some() =>
+                {
+                    Some(self.focused_item.unwrap())
+                }
+                None => self
+                    .items_tree
+                    .iter_visible()
+                    .count()
+                    .checked_sub(1)
+                    .map(|idx| DisplayedItemIndex(idx)),
+            }
+        })
     }
 
     pub fn add_divider(&mut self, name: Option<String>, vidx: Option<DisplayedItemIndex>) {
@@ -634,20 +646,27 @@ impl WaveData {
         new_item: DisplayedItem,
         vidx: Option<DisplayedItemIndex>,
     ) -> DisplayedItemRef {
-        let target_index = vidx
-            .and_then(|DisplayedItemIndex(i)| self.items_tree.to_displayed(VisibleItemIndex(i)));
         let target = match (vidx, self.focused_item) {
-            (Some(idx), _) => TargetPosition::After(
-                self.items_tree
-                    .to_displayed(VisibleItemIndex(idx.0))
-                    .unwrap(),
-            ),
-            (None, Some(idx)) => TargetPosition::After(
-                self.items_tree
-                    .to_displayed(VisibleItemIndex(idx.0))
-                    .unwrap(),
-            ),
-            _ => TargetPosition::End(0),
+            (Some(idx), _) => TargetPosition {
+                before: self
+                    .items_tree
+                    .to_displayed(VisibleItemIndex(idx.0 + 1))
+                    .unwrap()
+                    .0,
+                level: 0, // TODO update for groups...
+            },
+            (None, Some(idx)) => TargetPosition {
+                before: self
+                    .items_tree
+                    .to_displayed(VisibleItemIndex(idx.0 + 1))
+                    .unwrap_or_else(|| crate::displayed_item_tree::ItemIndex(self.items_tree.len()))
+                    .0,
+                level: 0,
+            },
+            _ => TargetPosition {
+                before: self.items_tree.len(),
+                level: 0,
+            },
         };
         let item_ref = self.next_displayed_item_ref();
         let insert_index = self.items_tree.insert_item(item_ref, target).unwrap();
