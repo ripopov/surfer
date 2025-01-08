@@ -1572,7 +1572,7 @@ impl State {
                 if self.waves.is_some() {
                     self.waves.as_mut().unwrap().focused_item = None;
                     let waves = self.waves.as_mut().unwrap();
-                    if let Some(DisplayedItemIndex(target_idx)) = self.drag_target_idx {
+                    if let Some(DisplayedItemIndex(_target_idx)) = self.drag_target_idx {
                         // TODO add parameter so that we insert into the right location
                         if let (Some(cmd), _) =
                             waves.add_variables(&self.sys.translators, variables)
@@ -1664,17 +1664,18 @@ impl State {
             Message::VariableValueToClipbord(vidx) => {
                 if let Some(waves) = &self.waves {
                     if let Some(DisplayedItemIndex(vidx)) = vidx.or(waves.focused_item) {
-                        if let Some(item @ DisplayedItem::Variable(_displayed_variable)) = waves
+                        if let Some(item_ref) = waves
                             .items_tree
                             .get_visible(crate::displayed_item_tree::VisibleItemIndex(vidx))
-                            .and_then(|node| waves.displayed_items.get(&node.item))
+                            .map(|node| node.item)
                         {
-                            let field_ref = (waves
-                                .items_tree
-                                .get_visible(crate::displayed_item_tree::VisibleItemIndex(vidx))
-                                .map(|node| node.item)
-                                .unwrap())
-                            .into();
+                            let Some(DisplayedItem::Variable(_displayed_variable)) =
+                                waves.displayed_items.get(&item_ref)
+                            else {
+                                return;
+                            };
+
+                            let field_ref = item_ref.into();
                             let variable_value = self.get_variable_value(
                                 waves,
                                 &field_ref,
@@ -1735,9 +1736,9 @@ impl State {
                 }
             }
             Message::GroupNew {
-                name,
-                anchor,
-                items,
+                name: _name,
+                anchor: _anchor,
+                items: _items,
             } => {
                 /*let Some(waves) = self.waves.as_mut() else {
                     return;

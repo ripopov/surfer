@@ -1,5 +1,6 @@
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
+use std::ops::Range;
 
 use crate::displayed_item::DisplayedItemRef;
 use crate::MoveDir;
@@ -142,7 +143,7 @@ impl<'a> Iterator for VisibleItemIteratorExtraInfo<'a> {
 /// - The nesting levels of the tree must monotonically increase (but may jump levels going down)
 #[derive(Default, Serialize, Deserialize, Debug, Clone)]
 pub struct DisplayedItemTree {
-    items: Vec<Node>,
+    pub items: Vec<Node>, // TODO make private?
 }
 
 impl DisplayedItemTree {
@@ -311,7 +312,6 @@ impl DisplayedItemTree {
                 let (insert, level) = if self.has_visible_children(ItemIndex(end)) {
                     (end + 1, self.items[end].level + 1)
                 } else {
-                    let subtree_end = self.subtree_end(end);
                     (self.subtree_end(end), self.items[end].level)
                 };
 
@@ -455,26 +455,59 @@ impl DisplayedItemTree {
         Ok(())
     }
 
+    /// Return the range of valid levels given the visible nodes
+    ///
+    /// `f` will be called with what will become the in-order predecessor node
+    /// after insert. It must return true iff that node may have child nodes.
+    pub fn valid_levels_visible<F>(&self, item: VisibleItemIndex, f: F) -> Range<u8>
+    where
+        F: Fn(&Node) -> bool,
+    {
+        let Some(split) = item.0.checked_sub(1) else {
+            return 0..1;
+        };
+        match self
+            .iter_visible()
+            .skip(split)
+            .take(2)
+            .collect_vec()
+            .as_slice()
+        {
+            [] => 0..1, // only happens for indices > self.items.len()
+            [last] => 0..last.level.saturating_add(1 + f(*last) as u8),
+            [pre, post, ..] => post.level..pre.level.saturating_add(1 + f(*pre) as u8),
+        }
+    }
+
+    /// Checks if the position is valid for the current tree
+    ///
+    /// Does not do any application logic checks, only whether the position is
+    /// in general valid, ignoring visibility and assuming that every node
+    /// may have children.
+    /// It returns an appropriate error in case the position is invalid.
     fn is_valid_position(&self, position: TargetPosition) -> Result<(), MoveResult> {
-        // TODO
-        /*match position {
-            TargetPosition::Before(ItemIndex(idx))
-            | TargetPosition::After(ItemIndex(idx))
-            | TargetPosition::Into(ItemIndex(idx))
-                if idx >= self.items.len() =>
-            {
-                Err(MoveResult::InvalidIndex)
-            }
-            TargetPosition::End(level) => match self.items.last() {
-                Some(last) if (level as i16) - (last.level as i16) > 1 => {
-                    Err(MoveResult::InvalidLevel)
-                }
-                None if level != 0 => Err(MoveResult::InvalidLevel),
-                _ => Ok(()),
-            },
-            _ => Ok(()),
-        }*/
         Ok(())
+        /*if position.before > self.items.len() {
+            return Err(MoveResult::InvalidIndex);
+        }
+        let Some(split) = position.before.checked_sub(1) else {
+            return match position.level {
+                0 => return Ok(()),
+                _ => Err(MoveResult::InvalidIndex),
+            };
+        };
+
+        let valid_range = match self.items[split..split + 2].len() {
+            0 => panic!("inconsistent state, length was checked above"),
+            1 => 0..self.items[split].level.saturating_add(1),
+            _ => self.items[split + 1].level..self.items[split].level.saturating_add(1),
+        };
+
+        if valid_range.contains(&position.level) {
+            Ok(())
+        } else {
+            Err(MoveResult::InvalidLevel)
+        }*/
     }
 
     fn has_visible_children(&self, ItemIndex(index): ItemIndex) -> bool {
@@ -1181,5 +1214,86 @@ mod tests {
         );
         assert_eq!(result, Err(MoveResult::CircularMove));
         assert_eq!(tree.items, test_tree().items);
+    }
+
+    #[test]
+    fn test_valid_levels() {
+        let tree = build_tree(&[
+            /* 0 */ (0, 0, true, false),
+            /* 1 */ (1, 0, true, false),
+            /* 2 */ (2, 0, false, false),
+            /* - */ (20, 1, true, false),
+            /* 3 */ (3, 0, true, false),
+            /* 4 */ (30, 1, true, false),
+            /* 5 */ (300, 2, true, false),
+            /* 6 */ (4, 0, true, false),
+            /* 7 */ (40, 1, true, false),
+            /* 8 */ (400, 2, true, false),
+            /* 9 */ (41, 1, true, false),
+            /* 10 */ (410, 2, true, false),
+        ]);
+
+        // To insert before the first element we can't indent,
+        // regardless of what comes after
+        assert_eq!(
+            tree.valid_levels_visible(VisibleItemIndex(0), |_| false),
+            0..1
+        );
+        assert_eq!(
+            tree.valid_levels_visible(VisibleItemIndex(0), |_| true),
+            0..1
+        );
+
+        // if flat we don't allow indent, except if the app logic allows it
+        assert_eq!(
+            tree.valid_levels_visible(VisibleItemIndex(1), |_| false),
+            0..1
+        );
+        assert_eq!(
+            tree.valid_levels_visible(VisibleItemIndex(1), |_| true),
+            0..2
+        );
+
+        // invisible item must be ignored, but allow the user to move item into subtree
+        // TODO check if we really want to allow the indent here
+        assert_eq!(
+            tree.valid_levels_visible(VisibleItemIndex(3), |_| false),
+            0..1
+        );
+        assert_eq!(
+            tree.valid_levels_visible(VisibleItemIndex(3), |_| true),
+            0..2
+        );
+
+        // if we are past a full "cliff" allow to insert all along to the root
+        assert_eq!(
+            tree.valid_levels_visible(VisibleItemIndex(6), |_| false),
+            0..3
+        );
+        assert_eq!(
+            tree.valid_levels_visible(VisibleItemIndex(6), |_| true),
+            0..4
+        );
+
+        // if the next item is indented then we don't allow to go to the root
+        // otherwise the moved element would become the new root of some subtree
+        assert_eq!(
+            tree.valid_levels_visible(VisibleItemIndex(9), |_| false),
+            1..3
+        );
+        assert_eq!(
+            tree.valid_levels_visible(VisibleItemIndex(9), |_| true),
+            1..4
+        );
+
+        // past the end we can go back to the root
+        assert_eq!(
+            tree.valid_levels_visible(VisibleItemIndex(11), |_| false),
+            0..3
+        );
+        assert_eq!(
+            tree.valid_levels_visible(VisibleItemIndex(11), |_| true),
+            0..4
+        );
     }
 }
