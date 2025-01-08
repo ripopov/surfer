@@ -669,7 +669,7 @@ impl WaveData {
         let item_ref = self.next_displayed_item_ref();
         let insert_index = self.items_tree.insert_item(item_ref, target).unwrap();
         self.displayed_items.insert(item_ref, new_item);
-        self.focused_item = Some(insert_index.0.into());
+        self.focused_item = self.focused_item.and_then(|_| Some(insert_index.0.into()));
         item_ref
     }
 
