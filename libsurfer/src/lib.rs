@@ -1648,6 +1648,15 @@ impl State {
                             level: 0, // TODO once we have groups...
                         },
                     );
+
+                    waves.focused_item = focused_item_ref
+                        .and_then(|item_ref| {
+                            waves
+                                .items_tree
+                                .iter_visible()
+                                .position(|node| node.item == item_ref)
+                        })
+                        .map(|idx| DisplayedItemIndex(idx));
                 }
                 self.drag_source_idx = None;
                 self.drag_target_idx = None;
