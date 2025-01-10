@@ -93,7 +93,7 @@ use crate::variable_name_filter::VariableNameFilterType;
 use crate::viewport::Viewport;
 use crate::wasm_util::{perform_work, UrlArgs};
 use crate::wave_container::{ScopeRefExt, WaveContainer};
-use crate::wave_data::ScopeType;
+use crate::wave_data::{ScopeType, WaveData};
 use crate::wave_source::{LoadOptions, WaveFormat, WaveSource};
 use crate::wellen::convert_format;
 
@@ -236,7 +236,9 @@ struct CanvasState {
 
 impl State {
     pub fn update(&mut self, message: Message) {
-        if log::log_enabled!(log::Level::Info) {
+        if log::log_enabled!(log::Level::Info)
+            && !matches!(message, Message::CommandPromptUpdate { .. })
+        {
             let mut s = format!("{message:?}");
             s.shrink_to(100);
             log::info!("processing: {}", &s);
@@ -1735,30 +1737,80 @@ impl State {
                     self.invalidate_draw_commands();
                 }
             }
+            Message::DumpTree => {
+                let Some(waves) = self.waves.as_mut() else {
+                    return;
+                };
+
+                dump_tree(waves);
+            }
             Message::GroupNew {
-                name: _name,
-                anchor: _anchor,
-                items: _items,
+                name,
+                anchor,
+                items,
             } => {
-                /*let Some(waves) = self.waves.as_mut() else {
+                self.invalidate_draw_commands();
+                let Some(waves) = self.waves.as_mut() else {
                     return;
                 };
-                let Some(anchor) = anchor.or(waves.focused_item) else {
+                let Some(anchor_item) = anchor.or(waves.focused_item) else {
                     return;
                 };
-                let Some(anchor_item) = waves.displayed_items_order.get(anchor.0).cloned() else {
+                let Some(anchor_node) = waves
+                    .items_tree
+                    .get(crate::displayed_item_tree::ItemIndex(anchor_item.0))
+                    .cloned()
+                else {
                     return;
                 };
-                let mut items = items
-                    .unwrap_or_else(|| waves.selected_items.iter().cloned().collect::<Vec<_>>());
-                items.retain(|x| x != &anchor_item);
-                // TODO use set to filter displayed_items_order vec - might be faster?
-                items.sort_by_cached_key(|x| {
-                    waves.displayed_items_order.iter().position(|y| y == x)
+                let mut item_refs = items.unwrap_or_else(|| {
+                    waves
+                        .items_tree
+                        .iter_visible_selected()
+                        .map(|node| node.item)
+                        .collect::<Vec<_>>()
                 });
 
-                waves.add_group(name.unwrap(), Some(anchor)); // FIXME: consider whether name should be optional
-                waves.displayed_items_order.retain(|x| !items.contains(x));*/
+                // if we are using the focus as the insert anchor, then move that as well
+                let item_refs = if anchor.is_none() {
+                    item_refs.push(anchor_node.item);
+                    item_refs
+                } else {
+                    item_refs
+                };
+
+                // TODO pass anchor.level
+                info!("anchor: {anchor:?} anchor_node: {anchor_node:?}");
+                info!("moving: {item_refs:?}");
+                waves.add_group(name.unwrap_or("Group".to_owned()), Some(anchor_item)); // TODO consider whether name should be optional
+                let insert_idx = waves
+                    .items_tree
+                    .to_displayed(crate::displayed_item_tree::VisibleItemIndex(anchor_item.0))
+                    .expect("can this go wrong"); // TODO ...
+                info!("insert_idx: {insert_idx:?}");
+
+                let item_idxs = waves
+                    .items_tree
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, node)| {
+                        item_refs
+                            .contains(&node.item)
+                            .then_some(crate::displayed_item_tree::ItemIndex(idx))
+                    })
+                    .collect::<Vec<_>>();
+
+                waves
+                    .items_tree
+                    .move_items(
+                        item_idxs,
+                        crate::displayed_item_tree::TargetPosition {
+                            before: insert_idx.0 + 1,
+                            level: anchor_node.level.saturating_add(1),
+                        },
+                    )
+                    .inspect_err(|e| error!("failed to move items into group: {e:?}"))
+                    .ok();
             }
 
             Message::GroupDissolve(_index) => {}
@@ -1835,6 +1887,32 @@ impl State {
             Message::AddCharToPrompt(c) => *self.sys.char_to_add_to_prompt.borrow_mut() = Some(c),
         }
     }
+}
+
+pub fn dump_tree(waves: &WaveData) {
+    let mut result = String::new();
+    for (idx, node) in waves.items_tree.iter().enumerate() {
+        for _ in 0..node.level.saturating_sub(1) {
+            result.push_str(" ");
+        }
+
+        if node.level > 0 {
+            match waves.items_tree.items.get(idx + 1) {
+                Some(next) if next.level < node.level => result.push_str("╰╴"),
+                _ => result.push_str("├╴"),
+            }
+        }
+
+        result.push_str(
+            &waves
+                .displayed_items
+                .get(&node.item)
+                .map(|item| item.name())
+                .unwrap_or("?".to_owned()),
+        );
+        result.push_str("\n");
+    }
+    info!("tree: \n{}", &result);
 }
 
 pub struct StateWrapper(Arc<RwLock<State>>);

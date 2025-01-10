@@ -271,6 +271,7 @@ pub fn get_parser(state: &State) -> Command<Message> {
             "preference_set_arrow_key_bindings",
             "goto_cursor",
             "goto_marker",
+            "dump_tree",
             "group_marked",
             "group_dissolve",
             "save_state",
@@ -650,11 +651,12 @@ pub fn get_parser(state: &State) -> Command<Message> {
                             .map(|idx| Command::Terminal(Message::GoToMarkerPosition(idx, 0)))
                     }),
                 ),
+                "dump_tree" => Some(Command::Terminal(Message::DumpTree)),
                 "group_marked" => single_word(
                     vec![],
-                    Box::new(|_| {
+                    Box::new(|name| {
                         Some(Command::Terminal(Message::GroupNew {
-                            name: None,
+                            name: Some(name.to_owned()),
                             anchor: None,
                             items: None,
                         }))

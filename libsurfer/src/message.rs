@@ -299,6 +299,7 @@ pub enum Message {
     Undo(usize),
     /// Redo the last n changes
     Redo(usize),
+    DumpTree,
     GroupNew {
         name: Option<String>,
         anchor: Option<DisplayedItemIndex>,

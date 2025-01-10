@@ -485,8 +485,9 @@ impl DisplayedItemTree {
     /// in general valid, ignoring visibility and assuming that every node
     /// may have children.
     /// It returns an appropriate error in case the position is invalid.
-    fn is_valid_position(&self, position: TargetPosition) -> Result<(), MoveResult> {
+    fn is_valid_position(&self, _position: TargetPosition) -> Result<(), MoveResult> {
         Ok(())
+        // TODO
         /*if position.before > self.items.len() {
             return Err(MoveResult::InvalidIndex);
         }
@@ -644,9 +645,6 @@ impl DisplayedItemTree {
     pub fn retain_recursive(&mut self, mut f: impl FnMut(&Node) -> bool) {
         self.items.retain(|x| f(x));
     }
-
-    // TODO retain
-    // TODO move item up/down
 }
 
 fn shift_subtree_to_level(nodes: &mut [Node], target_level: u8) {

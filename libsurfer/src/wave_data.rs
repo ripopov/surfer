@@ -510,7 +510,11 @@ impl WaveData {
         );
     }
 
-    pub fn add_group(&mut self, name: String, vidx: Option<DisplayedItemIndex>) {
+    pub fn add_group(
+        &mut self,
+        name: String,
+        vidx: Option<DisplayedItemIndex>,
+    ) -> DisplayedItemRef {
         self.insert_item(
             DisplayedItem::Group(DisplayedGroup {
                 name,
@@ -520,7 +524,7 @@ impl WaveData {
                 is_open: false,
             }),
             vidx,
-        );
+        )
     }
 
     pub fn add_generator(&mut self, gen_ref: TransactionStreamRef) {
@@ -648,7 +652,7 @@ impl WaveData {
             (Some(idx), _) => TargetPosition {
                 before: self
                     .items_tree
-                    .to_displayed(VisibleItemIndex(idx.0 + 1))
+                    .to_displayed(VisibleItemIndex(idx.0))
                     .unwrap()
                     .0,
                 level: 0, // TODO update for groups...
