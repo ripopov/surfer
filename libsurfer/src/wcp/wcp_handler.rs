@@ -121,7 +121,7 @@ impl State {
                                 .map(|n| VariableRef::from_hierarchy_string(n))
                                 .collect_vec();
                             let (cmd, ids) =
-                                waves.add_variables(&self.sys.translators, variable_refs);
+                                waves.add_variables(&self.sys.translators, variable_refs, None);
                             if let Some(cmd) = cmd {
                                 self.load_variables(cmd);
                             }
@@ -146,7 +146,8 @@ impl State {
 
                             let variables =
                                 waves.inner.as_waves().unwrap().variables_in_scope(&scope);
-                            let (cmd, ids) = waves.add_variables(&self.sys.translators, variables);
+                            let (cmd, ids) =
+                                waves.add_variables(&self.sys.translators, variables, None);
                             if let Some(cmd) = cmd {
                                 self.load_variables(cmd);
                             }

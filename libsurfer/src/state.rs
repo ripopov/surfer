@@ -253,7 +253,7 @@ impl State {
             .collect_vec();
 
         // TODO add parameter to add_variables, insert to (self.drag_target_idx, self.drag_source_idx)
-        if let (Some(cmd), _) = waves.add_variables(&self.sys.translators, variables) {
+        if let (Some(cmd), _) = waves.add_variables(&self.sys.translators, variables, None) {
             self.load_variables(cmd);
         }
 

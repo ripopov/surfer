@@ -272,7 +272,9 @@ impl State {
                     };
                     self.save_current_canvas(undo_msg);
                     if let Some(waves) = self.waves.as_mut() {
-                        if let (Some(cmd), _) = waves.add_variables(&self.sys.translators, vars) {
+                        if let (Some(cmd), _) =
+                            waves.add_variables(&self.sys.translators, vars, None)
+                        {
                             self.load_variables(cmd);
                         }
                         self.invalidate_draw_commands();
@@ -1574,22 +1576,12 @@ impl State {
                 if self.waves.is_some() {
                     self.waves.as_mut().unwrap().focused_item = None;
                     let waves = self.waves.as_mut().unwrap();
-                    if let Some(target_position) = self.drag_target_idx {
-                        // TODO add parameter so that we insert into the right location
-                        if let (Some(cmd), _) =
-                            waves.add_variables(&self.sys.translators, variables)
-                        //, target_position)
-                        {
-                            self.load_variables(cmd);
-                        }
-                    } else if let (Some(cmd), _) = self
-                        .waves
-                        .as_mut()
-                        .unwrap()
-                        .add_variables(&self.sys.translators, variables)
+                    if let (Some(cmd), _) =
+                        waves.add_variables(&self.sys.translators, variables, self.drag_target_idx)
                     {
                         self.load_variables(cmd);
                     }
+
                     self.invalidate_draw_commands();
                 }
                 self.drag_source_idx = None;
@@ -1742,7 +1734,7 @@ impl State {
             } => {
                 self.save_current_canvas(format!(
                     "Create group {}",
-                    name.clone()unwrap_or("".to_owned())
+                    name.clone().unwrap_or("".to_owned())
                 ));
                 self.invalidate_draw_commands();
                 let Some(waves) = self.waves.as_mut() else {

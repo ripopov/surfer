@@ -384,7 +384,7 @@ impl WaveData {
         &mut self,
         translators: &TranslatorList,
         variables: Vec<VariableRef>,
-        //target_position: TargetPosition,
+        target_position: Option<TargetPosition>,
     ) -> (Option<LoadSignalsCmd>, Vec<DisplayedItemRef>) {
         let mut indices = vec![];
         // load variables from waveform
@@ -402,6 +402,9 @@ impl WaveData {
         };
 
         // initialize translator and add display item
+        let mut target_position = target_position
+            .or_else(|| self.focused_insert_position())
+            .unwrap_or(self.end_insert_position());
         for variable in variables {
             let Ok(meta) = self
                 .inner
@@ -429,7 +432,11 @@ impl WaveData {
                 field_formats: vec![],
             });
 
-            indices.push(self.insert_item(new_variable, None));
+            indices.push(self.insert_item(new_variable, Some(target_position)));
+            target_position = TargetPosition {
+                before: target_position.before + 1,
+                level: target_position.level,
+            }
         }
 
         self.compute_variable_display_names();
@@ -496,7 +503,7 @@ impl WaveData {
                 background_color: None,
                 name,
             }),
-            vidx,
+            self.vidx_insert_position(vidx),
         );
     }
 
@@ -507,7 +514,7 @@ impl WaveData {
                 background_color: None,
                 name: None,
             }),
-            vidx,
+            self.vidx_insert_position(vidx),
         );
     }
 
@@ -524,7 +531,7 @@ impl WaveData {
                 content: vec![],
                 is_open: false,
             }),
-            vidx,
+            self.vidx_insert_position(vidx),
         )
     }
 
@@ -641,40 +648,76 @@ impl WaveData {
         }
     }
 
+    fn vidx_insert_position(&self, vidx: Option<DisplayedItemIndex>) -> Option<TargetPosition> {
+        let vidx = vidx?;
+        let (node, index, _) = self
+            .items_tree
+            .get_visible_extra(VisibleItemIndex(vidx.0))?;
+        let level = match self.displayed_items.get(&node.item)? {
+            DisplayedItem::Group(_) if node.unfolded => node.level + 1,
+            _ => node.level,
+        };
+        Some(TargetPosition {
+            before: index.0 + 1,
+            level,
+        })
+    }
+
+    /// Return an insert position based on the focused item
+    ///
+    /// If an item is focused, and it is
+    /// - an unfolded group, insert index is to the first element of the group
+    /// - a folded group, insert index is to before the next sibling (if exists)
+    /// - otherwise insert index is past it on the same level
+    fn focused_insert_position(&self) -> Option<TargetPosition> {
+        let vidx = self.focused_item?;
+        let item_index = self.items_tree.to_displayed(VisibleItemIndex(vidx.0))?;
+        let node = self.items_tree.get(item_index)?;
+        let item = self.displayed_items.get(&node.item)?;
+
+        // TODO add get_next_sibling to tree?
+        let (before, level) = match item {
+            DisplayedItem::Group(..) if node.unfolded => (item_index.0 + 1, node.level + 1),
+            DisplayedItem::Group(..) => {
+                let next_idx = self.items_tree.to_displayed(VisibleItemIndex(vidx.0 + 1));
+                match next_idx {
+                    Some(idx) => (idx.0, node.level),
+                    None => (self.items_tree.len(), node.level),
+                }
+            }
+            _ => (item_index.0 + 1, node.level),
+        };
+        Some(TargetPosition { before, level })
+    }
+
+    fn end_insert_position(&self) -> TargetPosition {
+        TargetPosition {
+            before: self.items_tree.len(),
+            level: 0,
+        }
+    }
+
     /// Insert item after item vidx if Some(vidx).
-    /// If None, insert after focused item if there is one, otherwise insert at the end.
-    /// Focus on the inserted item if there was a focues item.
+    /// If None, insert in relation to focused item (see [`focused_insert_position`]).
+    /// If nothing is selected, fall back to appending.
+    /// Focus on the inserted item if there was a focused item.
     pub(crate) fn insert_item(
         &mut self,
         new_item: DisplayedItem,
-        vidx: Option<DisplayedItemIndex>,
+        target_position: Option<TargetPosition>,
     ) -> DisplayedItemRef {
-        let target = match (vidx, self.focused_item) {
-            (Some(idx), _) => TargetPosition {
-                before: self
-                    .items_tree
-                    .to_displayed(VisibleItemIndex(idx.0))
-                    .unwrap()
-                    .0,
-                level: 0, // TODO update for groups...
-            },
-            (None, Some(idx)) => TargetPosition {
-                before: self
-                    .items_tree
-                    .to_displayed(VisibleItemIndex(idx.0 + 1))
-                    .unwrap_or_else(|| crate::displayed_item_tree::ItemIndex(self.items_tree.len()))
-                    .0,
-                level: 0,
-            },
-            _ => TargetPosition {
-                before: self.items_tree.len(),
-                level: 0,
-            },
-        };
+        let target_position = target_position
+            .or_else(|| self.focused_insert_position())
+            .unwrap_or_else(|| self.end_insert_position());
+
         let item_ref = self.next_displayed_item_ref();
-        let insert_index = self.items_tree.insert_item(item_ref, target).unwrap();
+        let insert_index = self
+            .items_tree
+            .insert_item(item_ref, target_position)
+            .unwrap();
         self.displayed_items.insert(item_ref, new_item);
         self.focused_item = self.focused_item.and_then(|_| Some(insert_index.0.into()));
+        self.items_tree.xselect_all(false);
         item_ref
     }
 

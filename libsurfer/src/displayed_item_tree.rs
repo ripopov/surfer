@@ -198,6 +198,10 @@ impl DisplayedItemTree {
         self.iter_visible().nth(index.0)
     }
 
+    pub fn get_visible_extra(&self, index: VisibleItemIndex) -> Option<(&Node, ItemIndex, bool)> {
+        self.iter_visible_extra().nth(index.0)
+    }
+
     pub fn get(&self, index: ItemIndex) -> Option<&Node> {
         self.items.get(index.0)
     }
