@@ -1574,7 +1574,7 @@ impl State {
                 if self.waves.is_some() {
                     self.waves.as_mut().unwrap().focused_item = None;
                     let waves = self.waves.as_mut().unwrap();
-                    if let Some(DisplayedItemIndex(_target_idx)) = self.drag_target_idx {
+                    if let Some(_target_position) = self.drag_target_idx {
                         // TODO add parameter so that we insert into the right location
                         if let (Some(cmd), _) =
                             waves.add_variables(&self.sys.translators, variables)
@@ -1599,29 +1599,21 @@ impl State {
                 self.drag_source_idx = Some(vidx);
                 self.drag_target_idx = None;
             }
-            Message::VariableDragTargetChanged(vidx) => {
-                self.drag_target_idx = Some(vidx);
+            Message::VariableDragTargetChanged(position) => {
+                self.drag_target_idx = Some(position);
             }
             Message::VariableDragFinished => {
                 self.drag_started = false;
 
                 // reordering
-                if let (
-                    Some(DisplayedItemIndex(source_vidx)),
-                    Some(DisplayedItemIndex(target_vidx)),
-                ) = (self.drag_source_idx, self.drag_target_idx)
+                if let (Some(DisplayedItemIndex(source_vidx)), Some(target_position)) =
+                    (self.drag_source_idx, self.drag_target_idx)
                 {
                     self.save_current_canvas("Drag item".to_string());
                     self.invalidate_draw_commands();
                     let Some(waves) = self.waves.as_mut() else {
                         return;
                     };
-                    let target_idx = waves
-                        .items_tree
-                        .to_displayed(crate::displayed_item_tree::VisibleItemIndex(target_vidx))
-                        .unwrap_or_else(|| {
-                            crate::displayed_item_tree::ItemIndex(waves.items_tree.len())
-                        });
 
                     let focused_index = waves.focused_item.and_then(|vidx| {
                         waves
@@ -1637,19 +1629,17 @@ impl State {
                         .iter_visible_extra()
                         .filter_map(|(node, idx, _)| if node.selected { Some(idx) } else { None })
                         .collect::<Vec<_>>();
-                    focused_index.map(|idx| to_move.push(idx));
-                    waves
+                    if let Some(idx) = focused_index {
+                        to_move.push(idx)
+                    };
+                    if let Some(idx) = waves
                         .items_tree
                         .to_displayed(crate::displayed_item_tree::VisibleItemIndex(source_vidx))
-                        .map(|idx| to_move.push(idx));
+                    {
+                        to_move.push(idx)
+                    };
 
-                    let _ = waves.items_tree.move_items(
-                        to_move,
-                        crate::displayed_item_tree::TargetPosition {
-                            before: target_idx.0,
-                            level: 0, // TODO once we have groups...
-                        },
-                    );
+                    let _ = waves.items_tree.move_items(to_move, target_position);
 
                     waves.focused_item = focused_item_ref
                         .and_then(|item_ref| {
@@ -1658,7 +1648,7 @@ impl State {
                                 .iter_visible()
                                 .position(|node| node.item == item_ref)
                         })
-                        .map(|idx| DisplayedItemIndex(idx));
+                        .map(DisplayedItemIndex);
                 }
                 self.drag_source_idx = None;
                 self.drag_target_idx = None;
@@ -1811,6 +1801,7 @@ impl State {
                     )
                     .inspect_err(|e| error!("failed to move items into group: {e:?}"))
                     .ok();
+                waves.items_tree.xselect_all(false);
             }
 
             Message::GroupDissolve(_index) => {}

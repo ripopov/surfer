@@ -58,7 +58,7 @@ pub struct State {
     pub(crate) waves: Option<WaveData>,
     pub(crate) drag_started: bool,
     pub(crate) drag_source_idx: Option<DisplayedItemIndex>,
-    pub(crate) drag_target_idx: Option<DisplayedItemIndex>,
+    pub(crate) drag_target_idx: Option<crate::displayed_item_tree::TargetPosition>,
 
     pub(crate) previous_waves: Option<WaveData>,
 

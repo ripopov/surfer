@@ -898,6 +898,7 @@ impl State {
         }
 
         // TODO use the much nicer remixicon arrow? do a layout here and paint the galley into the rect?
+        // or alternatively: change how the tree iterator works and use the egui facilities (cross widget?)
         let icon_rect = Rect::from_center_size(
             rect.center(),
             emath::vec2(rect.width(), rect.height()) * 0.75,
@@ -928,8 +929,17 @@ impl State {
     fn draw_item_list(&mut self, msgs: &mut Vec<Message>, ui: &mut egui::Ui, ctx: &egui::Context) {
         let mut item_offsets = Vec::new();
 
+        let last_vidx = self
+            .waves
+            .as_ref()
+            .unwrap()
+            .items_tree
+            .iter_visible()
+            .count()
+            - 1;
         let alignment = self.get_name_alignment();
         ui.with_layout(Layout::top_down(alignment).with_cross_justify(true), |ui| {
+            let available_rect = ui.available_rect_before_wrap();
             for (
                 vidx,
                 (
@@ -1047,20 +1057,21 @@ impl State {
                             ui,
                         ),
                     };
+                    // expand to the left, but not over the icon size
+                    let mut expanded_rect = item_rect;
+                    expanded_rect.set_left(
+                        available_rect.left()
+                            + self.config.layout.waveforms_text_size
+                            + ui.spacing().item_spacing.x,
+                    );
+                    expanded_rect.set_right(available_rect.right());
                     self.draw_drag_target(
                         msgs,
                         vidx,
-                        item_rect,
+                        expanded_rect,
+                        available_rect,
                         ui,
-                        vidx.0
-                            == self
-                                .waves
-                                .as_ref()
-                                .unwrap()
-                                .items_tree
-                                .iter_visible()
-                                .count()
-                                - 1,
+                        vidx.0 == last_vidx,
                     );
                 });
             }
@@ -1523,72 +1534,94 @@ impl State {
         &self,
         msgs: &mut Vec<Message>,
         vidx: DisplayedItemIndex,
-        item_rect: Rect,
+        expanded_rect: Rect,
+        available_rect: Rect,
         ui: &mut egui::Ui,
         last: bool,
     ) {
-        // Add default margin as it was removed when creating the frame
-        let rect_with_margin = Rect {
-            min: item_rect.min - ui.spacing().item_spacing / 2f32,
-            max: item_rect.max + ui.spacing().item_spacing / 2f32,
-        };
-
-        let vertical_translation_up = Vec2 {
-            x: 0f32,
-            y: -rect_with_margin.height() / 2f32,
-        };
-
-        let before_rect = Rect {
-            min: ui
-                .painter()
-                .round_pos_to_pixels(rect_with_margin.left_top()),
-            max: ui
-                .painter()
-                .round_pos_to_pixels(rect_with_margin.right_bottom() + vertical_translation_up),
-        };
-
-        let expanded_after_rect = if last {
-            ui.max_rect().max
-        } else {
-            rect_with_margin.right_bottom()
-        };
-
-        let after_rect = Rect {
-            min: ui.painter().round_pos_to_pixels(before_rect.left_bottom()),
-            max: ui.painter().round_pos_to_pixels(expanded_after_rect),
-        };
-
-        let half_line_width = Vec2 {
-            x: 0f32,
-            y: self.config.theme.linewidth / 2f32,
-        };
-
-        let vidx = vidx.0;
-        if self.drag_started && self.drag_source_idx.is_some() {
-            if let Some(DisplayedItemIndex(_source_idx)) = self.drag_source_idx {
-                if ui.rect_contains_pointer(before_rect) {
-                    ui.painter().rect_filled(
-                        Rect {
-                            min: rect_with_margin.left_top() - half_line_width,
-                            max: rect_with_margin.right_top() + half_line_width,
-                        },
-                        egui::Rounding::ZERO,
-                        self.config.theme.drag_hint_color,
-                    );
-                    msgs.push(Message::VariableDragTargetChanged(vidx.into()));
-                } else if ui.rect_contains_pointer(after_rect) {
-                    ui.painter().rect_filled(
-                        Rect {
-                            min: rect_with_margin.left_bottom() - half_line_width,
-                            max: rect_with_margin.right_bottom() + half_line_width,
-                        },
-                        egui::Rounding::ZERO,
-                        self.config.theme.drag_hint_color,
-                    );
-                    msgs.push(Message::VariableDragTargetChanged((vidx + 1).into()));
-                }
-            }
+        if !self.drag_started || self.drag_source_idx.is_none() {
+            return;
         }
+
+        let waves = self
+            .waves
+            .as_ref()
+            .expect("waves not available, but expected");
+
+        // expanded_rect is just for the label, leaving us with gaps between lines
+        // expand to counter that
+        let rect_with_margin = expanded_rect.expand2(ui.spacing().item_spacing / 2f32);
+
+        // collision check rect need to be
+        // - limited to half the height of the item text
+        // - extended to cover the empty space to the left
+        // - for the last element, expanded till the bottom
+        let before_rect = ui.painter().round_rect_to_pixels(
+            rect_with_margin
+                .with_max_y(rect_with_margin.left_center().y)
+                .with_min_x(available_rect.left()),
+        );
+        let after_rect = ui.painter().round_rect_to_pixels(
+            if last {
+                rect_with_margin.with_max_y(ui.max_rect().max.y)
+            } else {
+                rect_with_margin
+            }
+            .with_min_y(rect_with_margin.left_center().y)
+            .with_min_x(available_rect.left()),
+        );
+
+        let (insert_vidx, line_y) = if ui.rect_contains_pointer(before_rect) {
+            (vidx, rect_with_margin.top())
+        } else if ui.rect_contains_pointer(after_rect) {
+            ((vidx.0 + 1).into(), rect_with_margin.bottom())
+        } else {
+            return;
+        };
+
+        let level_range = waves.items_tree.valid_levels_visible(
+            crate::displayed_item_tree::VisibleItemIndex(insert_vidx.0),
+            |node| {
+                node.unfolded
+                    && matches!(
+                        waves.displayed_items.get(&node.item),
+                        Some(DisplayedItem::Group(..))
+                    )
+            },
+        );
+
+        let left_x = |level: u8| -> f32 { rect_with_margin.left() + level as f32 * 10.0 };
+        let Some(insert_level) = level_range.find_or_last(|&level| {
+            let mut rect = expanded_rect.with_min_x(left_x(level));
+            rect.set_width(10.0);
+            if level == 0 {
+                rect.set_left(available_rect.left());
+            }
+            ui.rect_contains_pointer(rect)
+        }) else {
+            return;
+        };
+
+        ui.painter().line_segment(
+            [
+                Pos2::new(left_x(insert_level), line_y),
+                Pos2::new(rect_with_margin.right(), line_y),
+            ],
+            Stroke::new(
+                self.config.theme.linewidth,
+                self.config.theme.drag_hint_color,
+            ),
+        );
+        msgs.push(Message::VariableDragTargetChanged(
+            crate::displayed_item_tree::TargetPosition {
+                before: waves
+                    .items_tree
+                    .to_displayed(crate::displayed_item_tree::VisibleItemIndex(insert_vidx.0))
+                    .map(|index| index.0)
+                    .unwrap_or_else(|| waves.items_tree.len()),
+                level: insert_level,
+            },
+        ));
     }
 
     fn draw_plain_item(
@@ -1710,8 +1743,7 @@ impl State {
             waves
                 .items_tree
                 .iter_visible_selected()
-                .find(|node| node.item == id)
-                .is_some()
+                .any(|node| node.item == id)
         } else {
             false
         }

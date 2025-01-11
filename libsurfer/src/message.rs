@@ -269,7 +269,7 @@ pub enum Message {
 
     /// Variable dragging messages
     VariableDragStarted(DisplayedItemIndex),
-    VariableDragTargetChanged(DisplayedItemIndex),
+    VariableDragTargetChanged(crate::displayed_item_tree::TargetPosition),
     VariableDragFinished,
     AddDraggedVariables(Vec<VariableRef>),
     /// Unpauses the simulation if the wave source supports this kind of interactivity. Otherwise
