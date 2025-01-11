@@ -30,7 +30,7 @@ pub struct VisibleItemIndex(pub usize);
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
 pub struct ItemIndex(pub usize);
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub struct TargetPosition {
     /// before which index to insert, may be in a range of 0..=tree.len() to allow for appending
     pub before: usize,
@@ -65,8 +65,8 @@ impl<'a> Iterator for VisibleItemIterator<'a> {
         let this_idx = self.next_idx;
 
         let this_item = self.items.get(this_idx);
-        if let Some(_) = this_item {
-            self.next_idx = next_visible_item(&self.items, this_idx);
+        if this_item.is_some() {
+            self.next_idx = next_visible_item(self.items, this_idx);
         };
         this_item
     }
@@ -86,7 +86,7 @@ impl<'a> Iterator for VisibleItemIteratorMut<'a> {
         let this_idx = self.next_idx;
 
         if this_idx < self.items.len() {
-            self.next_idx = next_visible_item(&mut self.items, this_idx);
+            self.next_idx = next_visible_item(self.items, this_idx);
 
             let ptr = self.items.as_mut_ptr();
             // access is safe since we
@@ -113,7 +113,7 @@ impl<'a> Iterator for VisibleItemIteratorExtraInfo<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let this_idx = self.next_idx;
         if this_idx < self.items.len() {
-            self.next_idx = next_visible_item(&self.items, this_idx);
+            self.next_idx = next_visible_item(self.items, this_idx);
 
             let this_level = self.items[this_idx].level;
             let has_child = self
@@ -374,7 +374,6 @@ impl DisplayedItemTree {
         mut indices: Vec<ItemIndex>,
         target: TargetPosition,
     ) -> Result<(), MoveResult> {
-        dbg!(&indices, &target, &self.items);
         indices.sort();
         let indices = indices.into_iter().dedup().collect_vec();
 
@@ -399,8 +398,6 @@ impl DisplayedItemTree {
             panic!("multiple stable elements - this should never happen")
         }
 
-        dbg!(pre_split, post_split, pre_indices, stable, post_indices);
-
         if self.path_to_root_would_intersect(pre_indices, target.before, target.level) {
             return Err(MoveResult::CircularMove);
         }
@@ -413,11 +410,10 @@ impl DisplayedItemTree {
         // Note: due to intersect check above we can't have a subtree that crosses over the target_idx
         let mut pre_index_insert = target
             .before
-            .min(stable.get(0).map(|x| x.0).unwrap_or(usize::MAX));
+            .min(stable.first().map(|x| x.0).unwrap_or(usize::MAX));
         for &ItemIndex(from_start) in pre_indices.iter().rev() {
             let from_end = self.subtree_end(from_start);
 
-            dbg!(from_start, from_end);
             shift_subtree_to_level(&mut self.items[from_start..from_end], target.level);
 
             let cnt = from_end - from_start;
@@ -438,20 +434,17 @@ impl DisplayedItemTree {
         let mut idx_offset = 0;
         let post_index_insert = target
             .before
-            .max(stable.get(0).map(|x| x.0 + 1).unwrap_or(0));
+            .max(stable.first().map(|x| x.0 + 1).unwrap_or(0));
         for &ItemIndex(orig_start) in post_indices.iter().rev() {
             let from_start = orig_start + idx_offset;
             let from_end = self.subtree_end(from_start);
 
-            dbg!(from_start, from_end);
             shift_subtree_to_level(&mut self.items[from_start..from_end], target.level);
 
             let cnt = from_end - from_start;
             self.items[post_index_insert..from_end].rotate_right(cnt);
             idx_offset += cnt;
         }
-
-        dbg!(&self.items);
         Ok(())
     }
 
@@ -474,8 +467,8 @@ impl DisplayedItemTree {
             .as_slice()
         {
             [] => 0..1, // only happens for indices > self.items.len()
-            [last] => 0..last.level.saturating_add(1 + f(*last) as u8),
-            [pre, post, ..] => post.level..pre.level.saturating_add(1 + f(*pre) as u8),
+            [last] => 0..last.level.saturating_add(1 + f(last) as u8),
+            [pre, post, ..] => post.level..pre.level.saturating_add(1 + f(pre) as u8),
         }
     }
 
@@ -648,7 +641,7 @@ impl DisplayedItemTree {
 }
 
 fn shift_subtree_to_level(nodes: &mut [Node], target_level: u8) {
-    let Some(from_level) = nodes.get(0).map(|node| node.level) else {
+    let Some(from_level) = nodes.first().map(|node| node.level) else {
         return;
     };
     let level_corr = (target_level as i16) - (from_level as i16);
