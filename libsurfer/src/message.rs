@@ -302,7 +302,7 @@ pub enum Message {
     DumpTree,
     GroupNew {
         name: Option<String>,
-        anchor: Option<DisplayedItemIndex>,
+        target_position: Option<crate::displayed_item_tree::TargetPosition>,
         items: Option<Vec<DisplayedItemRef>>,
     },
     GroupDissolve(Option<DisplayedItemRef>),

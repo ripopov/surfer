@@ -521,7 +521,7 @@ impl WaveData {
     pub fn add_group(
         &mut self,
         name: String,
-        vidx: Option<DisplayedItemIndex>,
+        target_position: Option<TargetPosition>,
     ) -> DisplayedItemRef {
         self.insert_item(
             DisplayedItem::Group(DisplayedGroup {
@@ -531,7 +531,7 @@ impl WaveData {
                 content: vec![],
                 is_open: false,
             }),
-            self.vidx_insert_position(vidx),
+            target_position,
         )
     }
 
@@ -669,7 +669,7 @@ impl WaveData {
     /// - an unfolded group, insert index is to the first element of the group
     /// - a folded group, insert index is to before the next sibling (if exists)
     /// - otherwise insert index is past it on the same level
-    fn focused_insert_position(&self) -> Option<TargetPosition> {
+    pub fn focused_insert_position(&self) -> Option<TargetPosition> {
         let vidx = self.focused_item?;
         let item_index = self.items_tree.to_displayed(VisibleItemIndex(vidx.0))?;
         let node = self.items_tree.get(item_index)?;
@@ -690,7 +690,7 @@ impl WaveData {
         Some(TargetPosition { before, level })
     }
 
-    fn end_insert_position(&self) -> TargetPosition {
+    pub fn end_insert_position(&self) -> TargetPosition {
         TargetPosition {
             before: self.items_tree.len(),
             level: 0,

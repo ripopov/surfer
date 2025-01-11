@@ -1159,6 +1159,29 @@ mod tests {
     }
 
     #[test]
+    fn test_move_items_shared_subtree_no_overlap() {
+        let mut tree = build_tree(&[
+            (0, 0, true, false),
+            (10, 1, false, false),
+            (11, 1, false, false),
+            (12, 1, false, false),
+            (13, 1, false, false),
+        ]);
+        tree.move_items(
+            vec![ItemIndex(2), ItemIndex(4)],
+            TargetPosition {
+                before: 4,
+                level: 2,
+            },
+        )
+        .expect("move_items must succeed");
+        assert_eq!(
+            tree.items.iter().map(|x| x.item.0).collect_vec(),
+            vec![0, 10, 12, 11, 13]
+        );
+    }
+
+    #[test]
     /// Moving "after" a node that has children moves into the subtree,
     /// so we must error out if the node itself should be moved
     fn test_move_items_reject_after_self_into_subtree() {

@@ -657,7 +657,7 @@ pub fn get_parser(state: &State) -> Command<Message> {
                     Box::new(|name| {
                         Some(Command::Terminal(Message::GroupNew {
                             name: Some(name.to_owned()),
-                            anchor: None,
+                            target_position: None,
                             items: None,
                         }))
                     }),

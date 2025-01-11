@@ -1729,7 +1729,7 @@ impl State {
             }
             Message::GroupNew {
                 name,
-                anchor,
+                target_position,
                 items,
             } => {
                 self.save_current_canvas(format!(
@@ -1740,16 +1740,10 @@ impl State {
                 let Some(waves) = self.waves.as_mut() else {
                     return;
                 };
-                let Some(anchor_item) = anchor.or(waves.focused_item) else {
-                    return;
-                };
-                let Some(anchor_node) = waves
-                    .items_tree
-                    .get(crate::displayed_item_tree::ItemIndex(anchor_item.0))
-                    .cloned()
-                else {
-                    return;
-                };
+
+                let passed_or_focused = target_position.or_else(|| waves.focused_insert_position());
+                let final_target = passed_or_focused.unwrap_or_else(|| waves.end_insert_position());
+
                 let mut item_refs = items.unwrap_or_else(|| {
                     waves
                         .items_tree
@@ -1759,21 +1753,32 @@ impl State {
                 });
 
                 // if we are using the focus as the insert anchor, then move that as well
-                let item_refs = if anchor.is_none() {
-                    item_refs.push(anchor_node.item);
+                let item_refs = if target_position.is_none() && passed_or_focused.is_some() {
+                    info!("moving focus item");
+                    let focus_index = waves
+                        .items_tree
+                        .to_displayed(crate::displayed_item_tree::VisibleItemIndex(
+                            waves.focused_item.expect("Inconsistent state").0,
+                        ))
+                        .expect("Inconsistent state");
+                    item_refs.push(
+                        waves
+                            .items_tree
+                            .get(focus_index)
+                            .expect("Inconsistent state")
+                            .item,
+                    );
                     item_refs
                 } else {
                     item_refs
                 };
 
-                // TODO pass anchor.level
-                info!("anchor: {anchor:?} anchor_node: {anchor_node:?}");
+                dump_tree(waves);
+                info!("final_target: {final_target:?}");
                 info!("moving: {item_refs:?}");
-                waves.add_group(name.unwrap_or("Group".to_owned()), Some(anchor_item)); // TODO consider whether name should be optional
-                let insert_idx = waves
-                    .items_tree
-                    .to_displayed(crate::displayed_item_tree::VisibleItemIndex(anchor_item.0))
-                    .expect("can this go wrong"); // TODO ...
+                let group_ref =
+                    waves.add_group(name.unwrap_or("Group".to_owned()), Some(final_target));
+                let insert_idx = final_target.before;
                 info!("insert_idx: {insert_idx:?}");
 
                 let item_idxs = waves
@@ -1786,18 +1791,19 @@ impl State {
                             .then_some(crate::displayed_item_tree::ItemIndex(idx))
                     })
                     .collect::<Vec<_>>();
+                info!("post indices: {item_idxs:?}");
 
-                waves
-                    .items_tree
-                    .move_items(
-                        item_idxs,
-                        crate::displayed_item_tree::TargetPosition {
-                            before: insert_idx.0 + 1,
-                            level: anchor_node.level.saturating_add(1),
-                        },
-                    )
-                    .inspect_err(|e| error!("failed to move items into group: {e:?}"))
-                    .ok();
+                if let Err(e) = waves.items_tree.move_items(
+                    item_idxs,
+                    crate::displayed_item_tree::TargetPosition {
+                        before: final_target.before + 1,
+                        level: final_target.level.saturating_add(1),
+                    },
+                ) {
+                    dump_tree(waves);
+                    waves.remove_displayed_item(group_ref);
+                    error!("failed to move items into group: {e:?}")
+                }
                 waves.items_tree.xselect_all(false);
             }
 
@@ -1928,6 +1934,7 @@ pub fn dump_tree(waves: &WaveData) {
                 .map(|item| item.name())
                 .unwrap_or("?".to_owned()),
         );
+        result.push_str(&format!("   ({:?})", node.item));
         result.push_str("\n");
     }
     info!("tree: \n{}", &result);
