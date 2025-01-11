@@ -1814,8 +1814,32 @@ impl State {
             }
 
             Message::GroupDissolve(_index) => {}
-            Message::GroupFold(_index) => {}
-            Message::GroupUnfold(_index) => {}
+            Message::GroupFold(item_ref) | Message::GroupUnfold(item_ref) => {
+                self.invalidate_draw_commands();
+                let Some(waves) = self.waves.as_mut() else {
+                    return;
+                };
+                let item = if let Some(item_ref) = item_ref {
+                    waves.items_tree.iter().enumerate().find_map(|(idx, node)| {
+                        (node.item == item_ref)
+                            .then_some(crate::displayed_item_tree::ItemIndex(idx))
+                    })
+                } else if let Some(focused_item) = waves.focused_item {
+                    waves
+                        .items_tree
+                        .iter_visible_extra()
+                        .enumerate()
+                        .find_map(|(vidx, (_, idx, _))| (vidx == focused_item.0).then_some(idx))
+                } else {
+                    return;
+                };
+                let Some(item) = item else {
+                    return;
+                };
+                waves
+                    .items_tree
+                    .xfold(item, matches!(message, Message::GroupUnfold(..)));
+            }
             Message::GroupFoldRecursive(_index) => {}
             Message::GroupUnfoldRecursive(_index) => {}
             Message::GroupFoldAll => {}

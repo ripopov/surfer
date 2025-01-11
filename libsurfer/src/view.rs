@@ -907,10 +907,10 @@ impl State {
             icon_rect.right_top(),
             icon_rect.center_bottom(),
         ];
-        let rotation = emath::Rot2::from_angle(if !unfolded {
+        let rotation = emath::Rot2::from_angle(if unfolded {
             0.0
         } else {
-            -std::f32::consts::TAU
+            -std::f32::consts::TAU / 4.0
         });
         for p in &mut points {
             *p = icon_rect.center() + rotation * (*p - icon_rect.center());
@@ -964,6 +964,13 @@ impl State {
                 ui.with_layout(Layout::left_to_right(Align::TOP), |ui| {
                     ui.add_space(10.0 * *level as f32);
                     let response = self.hierarchy_icon(ui, has_children, *unfolded);
+                    if response.clicked() {
+                        if *unfolded {
+                            msgs.push(Message::GroupFold(Some(*displayed_item_id)));
+                        } else {
+                            msgs.push(Message::GroupUnfold(Some(*displayed_item_id)));
+                        }
+                    }
 
                     let item_rect = match displayed_item {
                         DisplayedItem::Variable(displayed_variable) => {
