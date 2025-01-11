@@ -937,6 +937,13 @@ impl State {
             .iter_visible()
             .count()
             - 1;
+        let any_groups = self
+            .waves
+            .as_ref()
+            .unwrap()
+            .items_tree
+            .iter()
+            .any(|node| node.level > 0);
         let alignment = self.get_name_alignment();
         ui.with_layout(Layout::top_down(alignment).with_cross_justify(true), |ui| {
             let available_rect = ui.available_rect_before_wrap();
@@ -973,12 +980,14 @@ impl State {
 
                 ui.with_layout(Layout::left_to_right(Align::TOP), |ui| {
                     ui.add_space(10.0 * *level as f32);
-                    let response = self.hierarchy_icon(ui, has_children, *unfolded);
-                    if response.clicked() {
-                        if *unfolded {
-                            msgs.push(Message::GroupFold(Some(*displayed_item_id)));
-                        } else {
-                            msgs.push(Message::GroupUnfold(Some(*displayed_item_id)));
+                    if any_groups {
+                        let response = self.hierarchy_icon(ui, has_children, *unfolded);
+                        if response.clicked() {
+                            if *unfolded {
+                                msgs.push(Message::GroupFold(Some(*displayed_item_id)));
+                            } else {
+                                msgs.push(Message::GroupUnfold(Some(*displayed_item_id)));
+                            }
                         }
                     }
 
