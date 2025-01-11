@@ -1574,10 +1574,11 @@ impl State {
                 if self.waves.is_some() {
                     self.waves.as_mut().unwrap().focused_item = None;
                     let waves = self.waves.as_mut().unwrap();
-                    if let Some(_target_position) = self.drag_target_idx {
+                    if let Some(target_position) = self.drag_target_idx {
                         // TODO add parameter so that we insert into the right location
                         if let (Some(cmd), _) =
                             waves.add_variables(&self.sys.translators, variables)
+                        //, target_position)
                         {
                             self.load_variables(cmd);
                         }
@@ -1739,6 +1740,10 @@ impl State {
                 anchor,
                 items,
             } => {
+                self.save_current_canvas(format!(
+                    "Create group {}",
+                    name.clone()unwrap_or("".to_owned())
+                ));
                 self.invalidate_draw_commands();
                 let Some(waves) = self.waves.as_mut() else {
                     return;
@@ -1806,6 +1811,12 @@ impl State {
 
             Message::GroupDissolve(_index) => {}
             Message::GroupFold(item_ref) | Message::GroupUnfold(item_ref) => {
+                let undo_msg = if matches!(message, Message::GroupFold(..)) {
+                    "Fold group".to_owned()
+                } else {
+                    "Unfold group".to_owned()
+                };
+                self.save_current_canvas(undo_msg); // TODO add group name
                 self.invalidate_draw_commands();
                 let Some(waves) = self.waves.as_mut() else {
                     return;
