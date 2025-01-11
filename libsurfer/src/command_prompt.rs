@@ -274,6 +274,10 @@ pub fn get_parser(state: &State) -> Command<Message> {
             "dump_tree",
             "group_marked",
             "group_dissolve",
+            "group_fold_recursive",
+            "group_unfold_recursive",
+            "group_fold_all",
+            "group_unfold_all",
             "save_state",
             "save_state_as",
             "timeline_add",
@@ -663,6 +667,14 @@ pub fn get_parser(state: &State) -> Command<Message> {
                     }),
                 ),
                 "group_dissolve" => Some(Command::Terminal(Message::GroupDissolve(None))),
+                "group_fold_recursive" => {
+                    Some(Command::Terminal(Message::GroupFoldRecursive(None)))
+                }
+                "group_unfold_recursive" => {
+                    Some(Command::Terminal(Message::GroupUnfoldRecursive(None)))
+                }
+                "group_fold_all" => Some(Command::Terminal(Message::GroupFoldAll)),
+                "group_unfold_all" => Some(Command::Terminal(Message::GroupUnfoldAll)),
                 "show_controls" => Some(Command::Terminal(Message::SetKeyHelpVisible(true))),
                 "show_mouse_gestures" => {
                     Some(Command::Terminal(Message::SetGestureHelpVisible(true)))

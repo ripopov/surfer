@@ -1808,14 +1808,33 @@ impl State {
             }
 
             Message::GroupDissolve(_index) => {}
-            Message::GroupFold(item_ref) | Message::GroupUnfold(item_ref) => {
-                let undo_msg = if matches!(message, Message::GroupFold(..)) {
-                    "Fold group".to_owned()
-                } else {
+            Message::GroupFold(item_ref)
+            | Message::GroupUnfold(item_ref)
+            | Message::GroupFoldRecursive(item_ref)
+            | Message::GroupUnfoldRecursive(item_ref) => {
+                let unfold = matches!(
+                    message,
+                    Message::GroupUnfold(..) | Message::GroupUnfoldRecursive(..)
+                );
+                let recursive = matches!(
+                    message,
+                    Message::GroupFoldRecursive(..) | Message::GroupUnfoldRecursive(..)
+                );
+
+                let undo_msg = if unfold {
                     "Unfold group".to_owned()
-                };
-                self.save_current_canvas(undo_msg); // TODO add group name
+                } else {
+                    "Fold group".to_owned()
+                } + &(if recursive {
+                    " recursive".to_owned()
+                } else {
+                    "".to_owned()
+                });
+                // TODO add group name? would have to break the pattern that we insert an
+                // undo message even if no waves are available
+                self.save_current_canvas(undo_msg);
                 self.invalidate_draw_commands();
+
                 let Some(waves) = self.waves.as_mut() else {
                     return;
                 };
@@ -1833,17 +1852,55 @@ impl State {
                 } else {
                     return;
                 };
+
                 let Some(item) = item else {
                     return;
                 };
-                waves
-                    .items_tree
-                    .xfold(item, matches!(message, Message::GroupUnfold(..)));
+
+                if let Some(focused_item) = waves.focused_item {
+                    let (_, focused_index, _) = waves
+                        .items_tree
+                        .get_visible_extra(crate::displayed_item_tree::VisibleItemIndex(
+                            focused_item.0,
+                        ))
+                        .expect("Inconsistent state");
+                    if waves.items_tree.subtree_contains(item, focused_index) {
+                        waves.focused_item = None;
+                    }
+                }
+                if recursive {
+                    waves.items_tree.xfold_subtree(item, unfold);
+                } else {
+                    waves.items_tree.xfold(item, unfold);
+                }
             }
-            Message::GroupFoldRecursive(_index) => {}
-            Message::GroupUnfoldRecursive(_index) => {}
-            Message::GroupFoldAll => {}
-            Message::GroupUnfoldAll => {}
+            Message::GroupFoldAll | Message::GroupUnfoldAll => {
+                let unfold = matches!(message, Message::GroupUnfoldAll);
+                let undo_msg = if unfold {
+                    "Fold all groups".to_owned()
+                } else {
+                    "Unfold all groups".to_owned()
+                };
+                self.save_current_canvas(undo_msg);
+                self.invalidate_draw_commands();
+
+                let Some(waves) = self.waves.as_mut() else {
+                    return;
+                };
+                // remove focus if focused item is folded away -> prevent future waveform
+                // adds being invisibly inserted
+                if let Some(focused_item) = waves.focused_item {
+                    let focused_level = waves
+                        .items_tree
+                        .get_visible(crate::displayed_item_tree::VisibleItemIndex(focused_item.0))
+                        .expect("Inconsistent state")
+                        .level;
+                    if !unfold && focused_level > 0 {
+                        waves.focused_item = None;
+                    }
+                }
+                waves.items_tree.xfold_all(unfold);
+            }
             #[cfg(target_arch = "wasm32")]
             Message::StartWcpServer(_) => {
                 error!("Wcp is not supported on wasm")

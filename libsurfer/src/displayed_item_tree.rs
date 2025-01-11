@@ -642,6 +642,15 @@ impl DisplayedItemTree {
     pub fn retain_recursive(&mut self, mut f: impl FnMut(&Node) -> bool) {
         self.items.retain(|x| f(x));
     }
+
+    pub fn subtree_contains(
+        &self,
+        ItemIndex(root): ItemIndex,
+        ItemIndex(candidate): ItemIndex,
+    ) -> bool {
+        let end = self.subtree_end(candidate);
+        (root..end).contains(&candidate)
+    }
 }
 
 fn shift_subtree_to_level(nodes: &mut [Node], target_level: u8) {
