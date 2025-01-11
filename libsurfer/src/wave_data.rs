@@ -12,7 +12,7 @@ use crate::displayed_item::{
     DisplayedDivider, DisplayedFieldRef, DisplayedGroup, DisplayedItem, DisplayedItemIndex,
     DisplayedItemRef, DisplayedStream, DisplayedTimeLine, DisplayedVariable,
 };
-use crate::displayed_item_tree::{DisplayedItemTree, TargetPosition, VisibleItemIndex};
+use crate::displayed_item_tree::{DisplayedItemTree, ItemIndex, TargetPosition, VisibleItemIndex};
 use crate::graphics::{Graphic, GraphicId};
 use crate::transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef};
 use crate::translation::{DynTranslator, TranslatorList, VariableInfoExt};
@@ -694,6 +694,21 @@ impl WaveData {
         TargetPosition {
             before: self.items_tree.len(),
             level: 0,
+        }
+    }
+
+    pub fn index_for_ref_or_focus(&self, item_ref: Option<DisplayedItemRef>) -> Option<ItemIndex> {
+        if let Some(item_ref) = item_ref {
+            self.items_tree.iter().enumerate().find_map(|(idx, node)| {
+                (node.item == item_ref).then_some(crate::displayed_item_tree::ItemIndex(idx))
+            })
+        } else if let Some(focused_item) = self.focused_item {
+            self.items_tree
+                .iter_visible_extra()
+                .enumerate()
+                .find_map(|(vidx, (_, idx, _))| (vidx == focused_item.0).then_some(idx))
+        } else {
+            None
         }
     }
 

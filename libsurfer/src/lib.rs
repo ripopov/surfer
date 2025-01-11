@@ -1806,8 +1806,19 @@ impl State {
                 }
                 waves.items_tree.xselect_all(false);
             }
+            Message::GroupDissolve(item_ref) => {
+                self.save_current_canvas("Dissolve group".to_owned());
+                self.invalidate_draw_commands();
+                let Some(waves) = self.waves.as_mut() else {
+                    return;
+                };
 
-            Message::GroupDissolve(_index) => {}
+                let Some(item_index) = waves.index_for_ref_or_focus(item_ref) else {
+                    return;
+                };
+
+                waves.items_tree.remove_dissolve(item_index);
+            }
             Message::GroupFold(item_ref)
             | Message::GroupUnfold(item_ref)
             | Message::GroupFoldRecursive(item_ref)
@@ -1838,22 +1849,8 @@ impl State {
                 let Some(waves) = self.waves.as_mut() else {
                     return;
                 };
-                let item = if let Some(item_ref) = item_ref {
-                    waves.items_tree.iter().enumerate().find_map(|(idx, node)| {
-                        (node.item == item_ref)
-                            .then_some(crate::displayed_item_tree::ItemIndex(idx))
-                    })
-                } else if let Some(focused_item) = waves.focused_item {
-                    waves
-                        .items_tree
-                        .iter_visible_extra()
-                        .enumerate()
-                        .find_map(|(vidx, (_, idx, _))| (vidx == focused_item.0).then_some(idx))
-                } else {
-                    return;
-                };
 
-                let Some(item) = item else {
+                let Some(item) = waves.index_for_ref_or_focus(item_ref) else {
                     return;
                 };
 
