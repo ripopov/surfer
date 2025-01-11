@@ -883,6 +883,48 @@ impl State {
         );
     }
 
+    fn hierarchy_icon(
+        &self,
+        ui: &mut egui::Ui,
+        has_children: bool,
+        unfolded: bool,
+    ) -> egui::Response {
+        let (rect, response) = ui.allocate_exact_size(
+            Vec2::splat(self.config.layout.waveforms_text_size),
+            Sense::click(),
+        );
+        if !has_children {
+            return response;
+        }
+
+        // TODO use the much nicer remixicon arrow? do a layout here and paint the galley into the rect?
+        let icon_rect = Rect::from_center_size(
+            rect.center(),
+            emath::vec2(rect.width(), rect.height()) * 0.75,
+        );
+        let mut points = vec![
+            icon_rect.left_top(),
+            icon_rect.right_top(),
+            icon_rect.center_bottom(),
+        ];
+        let rotation = emath::Rot2::from_angle(if !unfolded {
+            0.0
+        } else {
+            -std::f32::consts::TAU
+        });
+        for p in &mut points {
+            *p = icon_rect.center() + rotation * (*p - icon_rect.center());
+        }
+
+        let style = ui.style().interact(&response);
+        ui.painter().add(egui::Shape::convex_polygon(
+            points,
+            style.fg_stroke.color,
+            egui::Stroke::NONE,
+        ));
+        response
+    }
+
     fn draw_item_list(&mut self, msgs: &mut Vec<Message>, ui: &mut egui::Ui, ctx: &egui::Context) {
         let mut item_offsets = Vec::new();
 
@@ -890,26 +932,39 @@ impl State {
         ui.with_layout(Layout::top_down(alignment).with_cross_justify(true), |ui| {
             for (
                 vidx,
-                crate::displayed_item_tree::Node {
-                    item: displayed_item_id,
-                    ..
-                },
+                (
+                    crate::displayed_item_tree::Node {
+                        item: displayed_item_id,
+                        level,
+                        unfolded,
+                        ..
+                    },
+                    _index,
+                    has_children,
+                ),
             ) in self
                 .waves
                 .as_ref()
                 .unwrap()
                 .items_tree
-                .iter_visible()
+                .iter_visible_extra()
                 .enumerate()
             {
                 let vidx = vidx.into();
-                if let Some(displayed_item) = self
+                let Some(displayed_item) = self
                     .waves
                     .as_ref()
                     .unwrap()
                     .displayed_items
                     .get(displayed_item_id)
-                {
+                else {
+                    continue;
+                };
+
+                ui.with_layout(Layout::left_to_right(Align::TOP), |ui| {
+                    ui.add_space(10.0 * *level as f32);
+                    let response = self.hierarchy_icon(ui, has_children, *unfolded);
+
                     let item_rect = match displayed_item {
                         DisplayedItem::Variable(displayed_variable) => {
                             let levels_to_force_expand =
@@ -1000,7 +1055,7 @@ impl State {
                                 .count()
                                 - 1,
                     );
-                };
+                });
             }
         });
 
