@@ -43,10 +43,10 @@ pub struct ItemInfo {
 #[serde(tag = "command")]
 #[allow(non_camel_case_types)]
 pub enum WcpResponse {
-    get_item_list(Vec<String>),
-    get_item_info(Vec<ItemInfo>),
-    add_variables(Vec<DisplayedItemRef>),
-    add_scope(Vec<DisplayedItemRef>),
+    get_item_list { ids: Vec<String> },
+    get_item_info { results: Vec<ItemInfo> },
+    add_variables { ids: Vec<DisplayedItemRef> },
+    add_scope { ids: Vec<DisplayedItemRef> },
     ack,
 }
 
