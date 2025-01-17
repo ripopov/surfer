@@ -656,11 +656,16 @@ pub fn get_parser(state: &State) -> Command<Message> {
                     }),
                 ),
                 "dump_tree" => Some(Command::Terminal(Message::DumpTree)),
-                "group_marked" => single_word(
+                "group_marked" => optional_single_word(
                     vec![],
                     Box::new(|name| {
+                        let trimmed = name.trim();
                         Some(Command::Terminal(Message::GroupNew {
-                            name: Some(name.to_owned()),
+                            name: if !trimmed.is_empty() {
+                                Some(trimmed.to_owned())
+                            } else {
+                                None
+                            },
                             target_position: None,
                             items: None,
                         }))
