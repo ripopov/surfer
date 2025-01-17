@@ -49,7 +49,7 @@ impl State {
                                 .iter()
                                 .map(|i| format!("{}", i.0))
                                 .collect_vec();
-                            self.send_response(WcpResponse::get_item_list { ids: ids });
+                            self.send_response(WcpResponse::get_item_list { ids });
                         } else {
                             self.send_error("No waveform loaded", vec![], "No waveform loaded");
                         }
