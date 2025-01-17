@@ -196,7 +196,7 @@ wcp_test! {
         load_file(&tx, &mut rx, "../examples/counter.vcd").await?;
 
         tx.send(WcpCSMessage::command(
-            proto::WcpCommand::add_variables { names: vec![
+            proto::WcpCommand::add_variables { variables: vec![
                 "tb._tmp",
                 "tb.clk",
                 "tb.overflow",
@@ -241,7 +241,7 @@ wcp_test! {
         load_file(&tx, &mut rx, "../examples/counter.vcd").await?;
 
         tx.send(WcpCSMessage::command(
-            proto::WcpCommand::add_variables { names: vec![
+            proto::WcpCommand::add_variables { variables: vec![
                 "tb._tmp",
                 "tb.clk",
                 "tb.overflow",

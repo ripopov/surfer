@@ -119,7 +119,7 @@ pub enum WcpCommand {
     /// Responds with [WcpResponse::add_variables] which contains a list of the item references
     /// that can be used to reference the added items later
     /// Responds with an error if no waveforms are loaded
-    add_variables { names: Vec<String> },
+    add_variables { variables: Vec<String> },
     /// Adds all variables in the specified scope to the view.
     /// Responds with [WcpResponse::add_variables] which contains a list of the item references
     /// that can be used to reference the added items later

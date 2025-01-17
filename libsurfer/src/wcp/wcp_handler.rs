@@ -108,7 +108,7 @@ impl State {
                         }
                         self.send_response(WcpResponse::get_item_info { results: items });
                     }
-                    WcpCommand::add_variables { names } => {
+                    WcpCommand::add_variables { variables: names } => {
                         if self.waves.is_some() {
                             self.save_current_canvas(format!("Add {} variables", names.len()));
                         }
