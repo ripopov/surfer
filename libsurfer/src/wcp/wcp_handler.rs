@@ -44,10 +44,10 @@ impl State {
                 match command {
                     WcpCommand::get_item_list => {
                         if let Some(waves) = &self.waves {
-                            let ids = self
+                            let ids: Vec<crate::wcp::proto::DisplayedItemRef> = self
                                 .get_displayed_items(waves)
                                 .iter()
-                                .map(|i| format!("{}", i.0))
+                                .map(|r| r.into())
                                 .collect_vec();
                             self.send_response(WcpResponse::get_item_list { ids });
                         } else {
@@ -185,10 +185,8 @@ impl State {
                             self.send_error("remove_items", vec![], "No waveform loaded");
                             return;
                         };
-                        let mut msgs = vec![];
-                        msgs.push(Message::RemoveItems(
-                            ids.into_iter().map(|d| d.into()).collect(),
-                        ));
+                        let msgs =
+                            vec![Message::RemoveItems(ids.iter().map(|d| d.into()).collect())];
                         self.update(Message::Batch(msgs));
 
                         self.send_response(WcpResponse::ack);

@@ -1,6 +1,8 @@
 use num::BigInt;
 use serde::{Deserialize, Serialize};
 
+use crate::displayed_item;
+
 /// A reference to a currently displayed item. From the protocol perspective,
 /// This can be any integer or a string and what it is is decided by the server,
 /// in this case surfer.
@@ -9,6 +11,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
 #[serde(transparent)]
 pub struct DisplayedItemRef(pub usize);
+
+impl From<&displayed_item::DisplayedItemRef> for crate::DisplayedItemRef {
+    fn from(value: &displayed_item::DisplayedItemRef) -> Self {
+        crate::DisplayedItemRef(value.0)
+    }
+}
 
 impl From<&DisplayedItemRef> for crate::DisplayedItemRef {
     fn from(value: &DisplayedItemRef) -> Self {
@@ -43,7 +51,7 @@ pub struct ItemInfo {
 #[serde(tag = "command")]
 #[allow(non_camel_case_types)]
 pub enum WcpResponse {
-    get_item_list { ids: Vec<String> },
+    get_item_list { ids: Vec<DisplayedItemRef> },
     get_item_info { results: Vec<ItemInfo> },
     add_variables { ids: Vec<DisplayedItemRef> },
     add_scope { ids: Vec<DisplayedItemRef> },
