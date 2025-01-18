@@ -52,6 +52,11 @@ mod tests {
     }
 
     #[test]
+    fn zero_scaling_factor() {
+        check(32_u32, 0, "32")
+    }
+
+    #[test]
     fn test_exact_integer() {
         check(256_u32, 8, "1")
     }
