@@ -577,9 +577,7 @@ pub(crate) fn var_to_meta(
         var: r.clone(),
         num_bits: var.length(),
         variable_type: Some(VariableType::from_wellen_type(var.var_type())),
-        index: var
-            .index()
-            .map(|index| VariableIndex::from_wellen_type(index)),
+        index: var.index().map(VariableIndex::from_wellen_type),
         direction: Some(VariableDirection::from_wellen_direction(var.direction())),
         enum_map,
         encoding,

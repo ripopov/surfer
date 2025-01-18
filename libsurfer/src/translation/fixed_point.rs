@@ -1,38 +1,42 @@
 use num::{BigUint, Integer, Zero};
+use std::cmp::Ordering;
 
 /// Converts an unsigned, fixed-point value to a string.
 /// The output is equivalent to `real(uint / (2 ** lg_scaling_factor)).to_string()`.
 pub(crate) fn big_uint_to_ufixed(uint: &BigUint, lg_scaling_factor: i64) -> String {
-    if lg_scaling_factor == 0 {
-        return format!("{uint}");
-    } else if lg_scaling_factor < 0 {
-        return format!("{}", uint * 2_u32.pow(-lg_scaling_factor as u32));
-    }
-    // Compute the scaling divisor (2 ** lg_scaling_factor)
-    let divisor = BigUint::from(1_u32) << lg_scaling_factor;
+    match lg_scaling_factor.cmp(&0) {
+        Ordering::Less => {
+            format!("{}", uint * 2_u32.pow(-lg_scaling_factor as u32))
+        }
+        Ordering::Equal => format!("{}", uint * 2_u32.pow(-lg_scaling_factor as u32)),
+        Ordering::Greater => {
+            // Compute the scaling divisor (2 ** lg_scaling_factor)
+            let divisor = BigUint::from(1_u32) << lg_scaling_factor;
 
-    // Perform the integer division and remainder
-    let (integer_part, mut remainder) = uint.div_rem(&divisor);
+            // Perform the integer division and remainder
+            let (integer_part, mut remainder) = uint.div_rem(&divisor);
 
-    if remainder.is_zero() {
-        integer_part.to_string() // No fractional part
-    } else {
-        let mut fractional_part = String::new();
-
-        // Scale up the remainder to extract fractional digits
-        for _ in 0..lg_scaling_factor {
-            remainder *= 10_u32;
-            let digit = &remainder >> lg_scaling_factor;
-            fractional_part.push_str(&digit.to_string());
-            remainder %= &divisor;
-
-            // Stop if the scaled remainder becomes zero
             if remainder.is_zero() {
-                break;
+                integer_part.to_string() // No fractional part
+            } else {
+                let mut fractional_part = String::new();
+
+                // Scale up the remainder to extract fractional digits
+                for _ in 0..lg_scaling_factor {
+                    remainder *= 10_u32;
+                    let digit = &remainder >> lg_scaling_factor;
+                    fractional_part.push_str(&digit.to_string());
+                    remainder %= &divisor;
+
+                    // Stop if the scaled remainder becomes zero
+                    if remainder.is_zero() {
+                        break;
+                    }
+                }
+
+                format!("{}.{}", integer_part, fractional_part)
             }
         }
-
-        format!("{}.{}", integer_part, fractional_part)
     }
 }
 
