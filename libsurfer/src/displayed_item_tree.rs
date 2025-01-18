@@ -108,7 +108,7 @@ pub struct VisibleItemIteratorExtraInfo<'a> {
 }
 
 impl<'a> Iterator for VisibleItemIteratorExtraInfo<'a> {
-    type Item = (&'a Node, ItemIndex, bool);
+    type Item = (&'a Node, ItemIndex, bool, bool);
 
     fn next(&mut self) -> Option<Self::Item> {
         let this_idx = self.next_idx;
@@ -121,7 +121,12 @@ impl<'a> Iterator for VisibleItemIteratorExtraInfo<'a> {
                 .get(this_idx + 1)
                 .map(|item| item.level > this_level)
                 .unwrap_or(false);
-            Some((&self.items[this_idx], ItemIndex(this_idx), has_child))
+            Some((
+                &self.items[this_idx],
+                ItemIndex(this_idx),
+                has_child,
+                self.next_idx >= self.items.len(),
+            ))
         } else {
             None
         }
@@ -198,7 +203,10 @@ impl DisplayedItemTree {
         self.iter_visible().nth(index.0)
     }
 
-    pub fn get_visible_extra(&self, index: VisibleItemIndex) -> Option<(&Node, ItemIndex, bool)> {
+    pub fn get_visible_extra(
+        &self,
+        index: VisibleItemIndex,
+    ) -> Option<(&Node, ItemIndex, bool, bool)> {
         self.iter_visible_extra().nth(index.0)
     }
 
@@ -455,7 +463,7 @@ impl DisplayedItemTree {
     /// Return the range of valid levels given the visible nodes
     ///
     /// `f` will be called with what will become the in-order predecessor node
-    /// after insert. It must return true iff that node may have child nodes.
+    /// after insert. It must return true iff that node is allowed to have child nodes.
     pub fn valid_levels_visible<F>(&self, item: VisibleItemIndex, f: F) -> Range<u8>
     where
         F: Fn(&Node) -> bool,
@@ -725,17 +733,17 @@ mod tests {
         let tree = test_tree();
         assert_eq!(
             tree.iter_visible_extra()
-                .map(|(x, idx, child)| (x.item.0, idx.0, child))
+                .map(|(x, idx, child, last)| (x.item.0, idx.0, child, last))
                 .collect_vec(),
             vec![
-                (0, 0, false),
-                (1, 1, false),
-                (2, 2, true),
-                (3, 5, true),
-                (30, 6, false),
-                (31, 7, false),
-                (4, 8, false),
-                (5, 9, false),
+                (0, 0, false, false),
+                (1, 1, false, false),
+                (2, 2, true, false),
+                (3, 5, true, false),
+                (30, 6, false, false),
+                (31, 7, false, false),
+                (4, 8, false, false),
+                (5, 9, false, true),
             ]
         )
     }

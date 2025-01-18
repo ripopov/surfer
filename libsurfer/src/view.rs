@@ -929,14 +929,6 @@ impl State {
     fn draw_item_list(&mut self, msgs: &mut Vec<Message>, ui: &mut egui::Ui, ctx: &egui::Context) {
         let mut item_offsets = Vec::new();
 
-        let last_vidx = self
-            .waves
-            .as_ref()
-            .unwrap()
-            .items_tree
-            .iter_visible()
-            .count()
-            - 1;
         let any_groups = self
             .waves
             .as_ref()
@@ -958,6 +950,7 @@ impl State {
                     },
                     _index,
                     has_children,
+                    last,
                 ),
             ) in self
                 .waves
@@ -1074,14 +1067,7 @@ impl State {
                             + ui.spacing().item_spacing.x,
                     );
                     expanded_rect.set_right(available_rect.right());
-                    self.draw_drag_target(
-                        msgs,
-                        vidx,
-                        expanded_rect,
-                        available_rect,
-                        ui,
-                        vidx.0 == last_vidx,
-                    );
+                    self.draw_drag_target(msgs, vidx, expanded_rect, available_rect, ui, last);
                 });
             }
         });

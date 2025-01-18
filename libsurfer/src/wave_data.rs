@@ -650,7 +650,7 @@ impl WaveData {
 
     fn vidx_insert_position(&self, vidx: Option<DisplayedItemIndex>) -> Option<TargetPosition> {
         let vidx = vidx?;
-        let (node, index, _) = self
+        let (node, index, _, _) = self
             .items_tree
             .get_visible_extra(VisibleItemIndex(vidx.0))?;
         let level = match self.displayed_items.get(&node.item)? {
@@ -706,7 +706,7 @@ impl WaveData {
             self.items_tree
                 .iter_visible_extra()
                 .enumerate()
-                .find_map(|(vidx, (_, idx, _))| (vidx == focused_item.0).then_some(idx))
+                .find_map(|(vidx, (_, idx, _, _))| (vidx == focused_item.0).then_some(idx))
         } else {
             None
         }

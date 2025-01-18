@@ -1620,7 +1620,9 @@ impl State {
                     let mut to_move = waves
                         .items_tree
                         .iter_visible_extra()
-                        .filter_map(|(node, idx, _)| if node.selected { Some(idx) } else { None })
+                        .filter_map(
+                            |(node, idx, _, _)| if node.selected { Some(idx) } else { None },
+                        )
                         .collect::<Vec<_>>();
                     if let Some(idx) = focused_index {
                         to_move.push(idx)
@@ -1855,7 +1857,7 @@ impl State {
                 };
 
                 if let Some(focused_item) = waves.focused_item {
-                    let (_, focused_index, _) = waves
+                    let (_, focused_index, _, _) = waves
                         .items_tree
                         .get_visible_extra(crate::displayed_item_tree::VisibleItemIndex(
                             focused_item.0,
