@@ -888,6 +888,7 @@ impl State {
         ui: &mut egui::Ui,
         has_children: bool,
         unfolded: bool,
+        alignment: Align,
     ) -> egui::Response {
         let (rect, response) = ui.allocate_exact_size(
             Vec2::splat(self.config.layout.waveforms_text_size),
@@ -897,7 +898,7 @@ impl State {
             return response;
         }
 
-        // TODO use the much nicer remixicon arrow? do a layout here and paint the galley into the rect?
+        // fixme: use the much nicer remixicon arrow? do a layout here and paint the galley into the rect?
         // or alternatively: change how the tree iterator works and use the egui facilities (cross widget?)
         let icon_rect = Rect::from_center_size(
             rect.center(),
@@ -911,7 +912,11 @@ impl State {
         let rotation = emath::Rot2::from_angle(if unfolded {
             0.0
         } else {
-            -std::f32::consts::TAU / 4.0
+            if alignment == Align::LEFT {
+                -std::f32::consts::TAU / 4.0
+            } else {
+                std::f32::consts::TAU / 4.0
+            }
         });
         for p in &mut points {
             *p = icon_rect.center() + rotation * (*p - icon_rect.center());
@@ -971,104 +976,114 @@ impl State {
                     continue;
                 };
 
-                ui.with_layout(Layout::left_to_right(Align::TOP), |ui| {
-                    ui.add_space(10.0 * *level as f32);
-                    if any_groups {
-                        let response = self.hierarchy_icon(ui, has_children, *unfolded);
-                        if response.clicked() {
-                            if *unfolded {
-                                msgs.push(Message::GroupFold(Some(*displayed_item_id)));
-                            } else {
-                                msgs.push(Message::GroupUnfold(Some(*displayed_item_id)));
+                ui.with_layout(
+                    if alignment == Align::LEFT {
+                        Layout::left_to_right(Align::TOP)
+                    } else {
+                        Layout::right_to_left(Align::TOP)
+                    },
+                    |ui| {
+                        ui.add_space(10.0 * *level as f32);
+                        if any_groups {
+                            let response =
+                                self.hierarchy_icon(ui, has_children, *unfolded, alignment);
+                            if response.clicked() {
+                                if *unfolded {
+                                    msgs.push(Message::GroupFold(Some(*displayed_item_id)));
+                                } else {
+                                    msgs.push(Message::GroupUnfold(Some(*displayed_item_id)));
+                                }
                             }
                         }
-                    }
 
-                    let item_rect = match displayed_item {
-                        DisplayedItem::Variable(displayed_variable) => {
-                            let levels_to_force_expand =
-                                self.sys.items_to_expand.borrow().iter().find_map(
-                                    |(id, levels)| {
-                                        if displayed_item_id == id {
-                                            Some(*levels)
-                                        } else {
-                                            None
-                                        }
-                                    },
-                                );
+                        let item_rect = match displayed_item {
+                            DisplayedItem::Variable(displayed_variable) => {
+                                let levels_to_force_expand =
+                                    self.sys.items_to_expand.borrow().iter().find_map(
+                                        |(id, levels)| {
+                                            if displayed_item_id == id {
+                                                Some(*levels)
+                                            } else {
+                                                None
+                                            }
+                                        },
+                                    );
 
-                            self.draw_variable(
+                                self.draw_variable(
+                                    msgs,
+                                    vidx,
+                                    displayed_item,
+                                    *displayed_item_id,
+                                    FieldRef::without_fields(
+                                        displayed_variable.variable_ref.clone(),
+                                    ),
+                                    &mut item_offsets,
+                                    &displayed_variable.info,
+                                    ui,
+                                    ctx,
+                                    levels_to_force_expand,
+                                )
+                            }
+                            DisplayedItem::Divider(_) => self.draw_plain_item(
                                 msgs,
                                 vidx,
-                                displayed_item,
                                 *displayed_item_id,
-                                FieldRef::without_fields(displayed_variable.variable_ref.clone()),
+                                displayed_item,
                                 &mut item_offsets,
-                                &displayed_variable.info,
                                 ui,
-                                ctx,
-                                levels_to_force_expand,
-                            )
-                        }
-                        DisplayedItem::Divider(_) => self.draw_plain_item(
-                            msgs,
-                            vidx,
-                            *displayed_item_id,
-                            displayed_item,
-                            &mut item_offsets,
-                            ui,
-                        ),
-                        DisplayedItem::Marker(_) => self.draw_plain_item(
-                            msgs,
-                            vidx,
-                            *displayed_item_id,
-                            displayed_item,
-                            &mut item_offsets,
-                            ui,
-                        ),
-                        DisplayedItem::Placeholder(_) => self.draw_plain_item(
-                            msgs,
-                            vidx,
-                            *displayed_item_id,
-                            displayed_item,
-                            &mut item_offsets,
-                            ui,
-                        ),
-                        DisplayedItem::TimeLine(_) => self.draw_plain_item(
-                            msgs,
-                            vidx,
-                            *displayed_item_id,
-                            displayed_item,
-                            &mut item_offsets,
-                            ui,
-                        ),
-                        DisplayedItem::Stream(_) => self.draw_plain_item(
-                            msgs,
-                            vidx,
-                            *displayed_item_id,
-                            displayed_item,
-                            &mut item_offsets,
-                            ui,
-                        ),
-                        DisplayedItem::Group(_) => self.draw_plain_item(
-                            msgs,
-                            vidx,
-                            *displayed_item_id,
-                            displayed_item,
-                            &mut item_offsets,
-                            ui,
-                        ),
-                    };
-                    // expand to the left, but not over the icon size
-                    let mut expanded_rect = item_rect;
-                    expanded_rect.set_left(
-                        available_rect.left()
-                            + self.config.layout.waveforms_text_size
-                            + ui.spacing().item_spacing.x,
-                    );
-                    expanded_rect.set_right(available_rect.right());
-                    self.draw_drag_target(msgs, vidx, expanded_rect, available_rect, ui, last);
-                });
+                            ),
+                            DisplayedItem::Marker(_) => self.draw_plain_item(
+                                msgs,
+                                vidx,
+                                *displayed_item_id,
+                                displayed_item,
+                                &mut item_offsets,
+                                ui,
+                            ),
+                            DisplayedItem::Placeholder(_) => self.draw_plain_item(
+                                msgs,
+                                vidx,
+                                *displayed_item_id,
+                                displayed_item,
+                                &mut item_offsets,
+                                ui,
+                            ),
+                            DisplayedItem::TimeLine(_) => self.draw_plain_item(
+                                msgs,
+                                vidx,
+                                *displayed_item_id,
+                                displayed_item,
+                                &mut item_offsets,
+                                ui,
+                            ),
+                            DisplayedItem::Stream(_) => self.draw_plain_item(
+                                msgs,
+                                vidx,
+                                *displayed_item_id,
+                                displayed_item,
+                                &mut item_offsets,
+                                ui,
+                            ),
+                            DisplayedItem::Group(_) => self.draw_plain_item(
+                                msgs,
+                                vidx,
+                                *displayed_item_id,
+                                displayed_item,
+                                &mut item_offsets,
+                                ui,
+                            ),
+                        };
+                        // expand to the left, but not over the icon size
+                        let mut expanded_rect = item_rect;
+                        expanded_rect.set_left(
+                            available_rect.left()
+                                + self.config.layout.waveforms_text_size
+                                + ui.spacing().item_spacing.x,
+                        );
+                        expanded_rect.set_right(available_rect.right());
+                        self.draw_drag_target(msgs, vidx, expanded_rect, available_rect, ui, last);
+                    },
+                );
             }
         });
 
