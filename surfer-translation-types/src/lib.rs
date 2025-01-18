@@ -6,11 +6,11 @@ mod scope_ref;
 mod translator;
 mod variable_ref;
 
-use std::collections::HashMap;
-
 use derive_more::Display;
 use ecolor::Color32;
 use num::BigUint;
+use std::collections::HashMap;
+use std::fmt::Formatter;
 
 pub use crate::field_ref::FieldRef;
 pub use crate::result::{
@@ -147,7 +147,7 @@ pub enum VariableType {
     StdULogicVector,
 }
 
-#[derive(Clone, Display, Copy)]
+#[derive(Clone, Display, Copy, Debug)]
 pub enum VariableDirection {
     #[display("unknown")]
     Unknown,
@@ -165,13 +165,38 @@ pub enum VariableDirection {
     Linkage,
 }
 
-#[derive(Clone)]
+/// An index that defines the extents of a variable.
+/// For instance, in Verilog, this is declared using `[msb:lsb]`, e.g.:
+/// ```verilog
+/// reg [WIDTH-1:0] foo;
+/// ```
+///
+/// A negative `lsb` usually indicates a fixed-point value where the
+/// `[msb:0]` bits (including 0) belong to the integer part and the `[-1:lsb]` bits
+/// belong to the fractional part of a number.
+#[derive(Clone, Debug)]
+pub struct VariableIndex {
+    pub msb: i64,
+    pub lsb: i64,
+}
+
+impl Display for VariableIndex {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.msb == self.lsb {
+            write!(f, "[{}]", self.lsb)
+        } else {
+            write!(f, "[{}:{}]", self.msb, self.lsb)
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct VariableMeta<VarId, ScopeId> {
     pub var: VariableRef<VarId, ScopeId>,
     pub num_bits: Option<u32>,
     /// Type of the variable in the HDL (on a best effort basis).
     pub variable_type: Option<VariableType>,
-    pub index: Option<String>,
+    pub index: Option<VariableIndex>,
     pub direction: Option<VariableDirection>,
     pub enum_map: HashMap<String, String>,
     /// Indicates how the variable is stored. A variable of "type" boolean for example
