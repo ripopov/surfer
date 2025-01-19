@@ -813,6 +813,7 @@ impl State {
                     "Change item color to {}",
                     color_name.clone().unwrap_or("default".into())
                 ));
+                self.invalidate_draw_commands();
                 if let Some(waves) = self.waves.as_mut() {
                     if let Some(DisplayedItemIndex(idx)) = vidx.or(waves.focused_item) {
                         waves
@@ -1991,6 +1992,9 @@ pub fn dump_tree(waves: &WaveData) {
                 .unwrap_or("?".to_owned()),
         );
         result.push_str(&format!("   ({:?})", node.item));
+        if node.selected {
+            result.push_str(" !SEL! ")
+        }
         result.push_str("\n");
     }
     info!("tree: \n{}", &result);
