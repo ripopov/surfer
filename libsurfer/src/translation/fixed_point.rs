@@ -1,5 +1,6 @@
-use num::{BigUint, Integer, One, Zero};
+use num::{BigUint, One, Zero};
 use std::cmp::Ordering;
+use std::ops::BitAnd;
 
 /// Converts a `BigUint` to a string interpreted as unsigned fixed point value.
 ///
@@ -11,11 +12,11 @@ pub(crate) fn big_uint_to_ufixed(uint: &BigUint, lg_scaling_factor: i64) -> Stri
         }
         Ordering::Equal => format!("{}", uint),
         Ordering::Greater => {
-            // Compute the scaling divisor (2 ** lg_scaling_factor)
-            let divisor = BigUint::one() << lg_scaling_factor;
+            let mask = (BigUint::one() << lg_scaling_factor) - 1_u32;
 
-            // Perform the integer division and remainder
-            let (integer_part, mut remainder) = uint.div_rem(&divisor);
+            // Split fixed point value into integer and remainder
+            let integer_part = uint >> lg_scaling_factor;
+            let mut remainder = uint.bitand(&mask);
 
             if remainder.is_zero() {
                 integer_part.to_string() // No fractional part
@@ -27,7 +28,7 @@ pub(crate) fn big_uint_to_ufixed(uint: &BigUint, lg_scaling_factor: i64) -> Stri
                     remainder *= 10_u32;
                     let digit = &remainder >> lg_scaling_factor;
                     fractional_part.push_str(&digit.to_string());
-                    remainder %= &divisor;
+                    remainder &= &mask;
 
                     // Stop if the scaled remainder becomes zero
                     if remainder.is_zero() {
@@ -93,7 +94,6 @@ mod tests {
     #[test]
     fn test_exact_integer() {
         ucheck(256_u32, 8, "1");
-        scheck(256_u32, 9, 8, "-1")
     }
 
     #[test]
@@ -138,6 +138,7 @@ mod tests {
     fn test_negative_exact_integer() {
         scheck(0xFCC_u32, 12, 2, "-13");
         scheck(0x100_u32, 9, 7, "-2");
+        scheck(256_u32, 9, 8, "-1")
     }
 
     #[test]
