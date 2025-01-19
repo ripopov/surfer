@@ -2,7 +2,7 @@
 use color_eyre::eyre::WrapErr;
 use egui::{menu, Button, Context, TextWrapMode, TopBottomPanel, Ui};
 use itertools::Itertools;
-use surfer_translation_types::{TranslationPreference, Translator};
+use surfer_translation_types::{TranslationPreference, TranslatorInfo as _};
 
 use crate::wave_container::{FieldRef, VariableRefExt};
 use crate::{

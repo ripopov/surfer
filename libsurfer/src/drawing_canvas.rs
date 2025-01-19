@@ -121,9 +121,8 @@ fn variable_draw_commands(
     };
 
     let displayed_field_ref: DisplayedFieldRef = display_id.into();
-    let translator = waves.variable_translator(&displayed_field_ref, translators);
     // we need to get the variable info here to get the correct info for aliases
-    let info = translator.variable_info(&meta).unwrap();
+    let info = displayed_variable.translator.variable_info().unwrap();
     let num_timestamps = waves.num_timestamps().unwrap_or(1.into());
 
     let mut local_commands: HashMap<Vec<_>, _> = HashMap::new();
@@ -187,12 +186,12 @@ fn variable_draw_commands(
             continue;
         }
 
-        let translation_result = match translator.translate(&meta, &val) {
+        let translation_result = match displayed_variable.translator.translate(&val) {
             Ok(result) => result,
             Err(e) => {
                 error!(
-                    "{translator_name} for {variable_name} failed. Disabling:",
-                    translator_name = translator.name(),
+                    "{translator_name:?} for {variable_name} failed. Disabling:",
+                    translator_name = displayed_variable.format,
                     variable_name = displayed_variable.variable_ref.full_path_string()
                 );
                 error!("{e:#}");

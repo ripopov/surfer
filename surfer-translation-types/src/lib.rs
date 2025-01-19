@@ -18,7 +18,9 @@ pub use crate::result::{
     TranslationResult, ValueRepr,
 };
 pub use crate::scope_ref::ScopeRef;
-pub use crate::translator::{translates_all_bit_types, BasicTranslator, Translator};
+pub use crate::translator::{
+    translates_all_bit_types, BasicTranslator, BasicTranslatorInfo, Translator, TranslatorInfo,
+};
 pub use crate::variable_ref::VariableRef;
 
 #[derive(Debug, PartialEq, Clone, Display)]
@@ -168,7 +170,7 @@ pub enum VariableDirection {
 #[derive(Clone)]
 pub struct VariableMeta<VarId, ScopeId> {
     pub var: VariableRef<VarId, ScopeId>,
-    pub num_bits: Option<u32>,
+    pub num_bits: Option<u64>,
     /// Type of the variable in the HDL (on a best effort basis).
     pub variable_type: Option<VariableType>,
     pub index: Option<String>,

@@ -3,7 +3,8 @@ use half::{bf16, f16};
 use num::BigUint;
 use softposit::{P16E1, P32E2, P8E0, Q16E1, Q8E0};
 use surfer_translation_types::{
-    translates_all_bit_types, BasicTranslator, ValueKind, VariableMeta, VariableValue,
+    translates_all_bit_types, BasicTranslator, BasicTranslatorInfo, ValueKind, VariableMeta,
+    VariableValue,
 };
 
 use crate::variable_type::INTEGER_TYPES;
@@ -38,26 +39,32 @@ fn translate_numeric(
 pub struct UnsignedTranslator {}
 
 impl BasicTranslator<VarId, ScopeId> for UnsignedTranslator {
-    fn name(&self) -> String {
-        String::from("Unsigned")
-    }
-
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
+    fn basic_translate(&self, v: &VariableValue) -> (String, ValueKind) {
         translate_numeric(|v| format!("{v}"), v)
     }
 }
 
-pub struct SignedTranslator {}
-
-impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
+impl BasicTranslatorInfo<VarId, ScopeId> for UnsignedTranslator {
     fn name(&self) -> String {
-        String::from("Signed")
+        String::from("Unsigned")
     }
 
-    fn basic_translate(&self, num_bits: u64, v: &VariableValue) -> (String, ValueKind) {
+    type Translator = UnsignedTranslator;
+
+    fn create_instance(&self, _variable: &VariableMeta<VarId, ScopeId>) -> Self::Translator {
+        UnsignedTranslator {}
+    }
+}
+
+pub struct SignedTranslator {
+    num_bits: u64,
+}
+
+impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
+    fn basic_translate(&self, v: &VariableValue) -> (String, ValueKind) {
         translate_numeric(
             |v| {
-                let signweight = BigUint::from(1u8) << (num_bits - 1);
+                let signweight = BigUint::from(1u8) << (self.num_bits - 1);
                 if v < signweight {
                     format!("{v}")
                 } else {
@@ -68,6 +75,14 @@ impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
             v,
         )
     }
+}
+
+pub struct SignedTranslatorInfo {}
+
+impl BasicTranslatorInfo<VarId, ScopeId> for SignedTranslatorInfo {
+    fn name(&self) -> String {
+        String::from("Signed")
+    }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         if INTEGER_TYPES.contains(&variable.variable_type) {
@@ -76,16 +91,20 @@ impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
             translates_all_bit_types(variable)
         }
     }
+
+    type Translator = SignedTranslator;
+
+    fn create_instance(&self, variable: &VariableMeta<VarId, ScopeId>) -> Self::Translator {
+        SignedTranslator {
+            num_bits: variable.num_bits.unwrap_or_default(),
+        }
+    }
 }
 
 pub struct SinglePrecisionTranslator {}
 
 impl BasicTranslator<VarId, ScopeId> for SinglePrecisionTranslator {
-    fn name(&self) -> String {
-        String::from("FP: 32-bit IEEE 754")
-    }
-
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
+    fn basic_translate(&self, v: &VariableValue) -> (String, ValueKind) {
         translate_numeric(
             |v| {
                 shortest_float_representation(f32::from_bits(
@@ -95,19 +114,28 @@ impl BasicTranslator<VarId, ScopeId> for SinglePrecisionTranslator {
             v,
         )
     }
+}
+
+impl BasicTranslatorInfo<VarId, ScopeId> for SinglePrecisionTranslator {
+    fn name(&self) -> String {
+        String::from("FP: 32-bit IEEE 754")
+    }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 32)
+    }
+
+    type Translator = SinglePrecisionTranslator;
+
+    fn create_instance(&self, _variable: &VariableMeta<VarId, ScopeId>) -> Self::Translator {
+        SinglePrecisionTranslator {}
     }
 }
 
 pub struct DoublePrecisionTranslator {}
 
 impl BasicTranslator<VarId, ScopeId> for DoublePrecisionTranslator {
-    fn name(&self) -> String {
-        String::from("FP: 64-bit IEEE 754")
-    }
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
+    fn basic_translate(&self, v: &VariableValue) -> (String, ValueKind) {
         translate_numeric(
             |v| {
                 shortest_float_representation(f64::from_bits(
@@ -117,8 +145,21 @@ impl BasicTranslator<VarId, ScopeId> for DoublePrecisionTranslator {
             v,
         )
     }
+}
+
+impl BasicTranslatorInfo<VarId, ScopeId> for DoublePrecisionTranslator {
+    fn name(&self) -> String {
+        String::from("FP: 64-bit IEEE 754")
+    }
+
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 64)
+    }
+
+    type Translator = DoublePrecisionTranslator;
+
+    fn create_instance(&self, _variable: &VariableMeta<VarId, ScopeId>) -> Self::Translator {
+        DoublePrecisionTranslator {}
     }
 }
 
@@ -127,9 +168,6 @@ pub struct QuadPrecisionTranslator {}
 
 #[cfg(feature = "f128")]
 impl BasicTranslator<VarId, ScopeId> for QuadPrecisionTranslator {
-    fn name(&self) -> String {
-        String::from("FP: 128-bit IEEE 754")
-    }
     fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
         translate_numeric(
             |v| {
@@ -146,18 +184,29 @@ impl BasicTranslator<VarId, ScopeId> for QuadPrecisionTranslator {
             v,
         )
     }
+}
+
+#[cfg(feature = "f128")]
+impl BasicTranslatorInfo<VarId, ScopeId> for QuadPrecisionTranslator {
+    fn name(&self) -> String {
+        String::from("FP: 128-bit IEEE 754")
+    }
+
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 128)
+    }
+
+    type Translator = QuadPrecisionTranslator;
+
+    fn create_instance(&self, _variable: &VariableMeta<VarId, ScopeId>) -> Self::Translator {
+        QuadPrecisionTranslator {}
     }
 }
 
 pub struct HalfPrecisionTranslator {}
 
 impl BasicTranslator<VarId, ScopeId> for HalfPrecisionTranslator {
-    fn name(&self) -> String {
-        String::from("FP: 16-bit IEEE 754")
-    }
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
+    fn basic_translate(&self, v: &VariableValue) -> (String, ValueKind) {
         translate_numeric(
             |v| {
                 shortest_float_representation(f16::from_bits(
@@ -167,18 +216,28 @@ impl BasicTranslator<VarId, ScopeId> for HalfPrecisionTranslator {
             v,
         )
     }
+}
+
+impl BasicTranslatorInfo<VarId, ScopeId> for HalfPrecisionTranslator {
+    fn name(&self) -> String {
+        String::from("FP: 16-bit IEEE 754")
+    }
+
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 16)
+    }
+
+    type Translator = HalfPrecisionTranslator;
+
+    fn create_instance(&self, _variable: &VariableMeta<VarId, ScopeId>) -> Self::Translator {
+        HalfPrecisionTranslator {}
     }
 }
 
 pub struct BFloat16Translator {}
 
 impl BasicTranslator<VarId, ScopeId> for BFloat16Translator {
-    fn name(&self) -> String {
-        String::from("FP: bfloat16")
-    }
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
+    fn basic_translate(&self, v: &VariableValue) -> (String, ValueKind) {
         translate_numeric(
             |v| {
                 shortest_float_representation(bf16::from_bits(
@@ -188,8 +247,21 @@ impl BasicTranslator<VarId, ScopeId> for BFloat16Translator {
             v,
         )
     }
+}
+
+impl BasicTranslatorInfo<VarId, ScopeId> for BFloat16Translator {
+    fn name(&self) -> String {
+        String::from("FP: bfloat16")
+    }
+
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 16)
+    }
+
+    type Translator = BFloat16Translator;
+
+    fn create_instance(&self, _variable: &VariableMeta<VarId, ScopeId>) -> Self::Translator {
+        BFloat16Translator {}
     }
 }
 
@@ -410,15 +482,15 @@ mod test {
     #[test]
     fn signed_translation_from_string() {
         assert_eq!(
-            SignedTranslator {}
-                .basic_translate(5, &VariableValue::String("10000".to_string()))
+            SignedTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("10000".to_string()))
                 .0,
             "-16"
         );
 
         assert_eq!(
-            SignedTranslator {}
-                .basic_translate(5, &VariableValue::String("01000".to_string()))
+            SignedTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::String("01000".to_string()))
                 .0,
             "8"
         );
@@ -427,21 +499,21 @@ mod test {
     #[test]
     fn signed_translation_from_biguint() {
         assert_eq!(
-            SignedTranslator {}
-                .basic_translate(5, &VariableValue::BigUint(BigUint::from(0b10011u32)))
+            SignedTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b10011u32)))
                 .0,
             "-13"
         );
 
         assert_eq!(
-            SignedTranslator {}
-                .basic_translate(5, &VariableValue::BigUint(BigUint::from(0b01000u32)))
+            SignedTranslator { num_bits: 5 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b01000u32)))
                 .0,
             "8"
         );
         assert_eq!(
-            SignedTranslator {}
-                .basic_translate(2, &VariableValue::BigUint(BigUint::from(0u32)))
+            SignedTranslator { num_bits: 2 }
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0u32)))
                 .0,
             "0"
         );
@@ -451,14 +523,14 @@ mod test {
     fn unsigned_translation_from_string() {
         assert_eq!(
             UnsignedTranslator {}
-                .basic_translate(5, &VariableValue::String("10000".to_string()))
+                .basic_translate(&VariableValue::String("10000".to_string()))
                 .0,
             "16"
         );
 
         assert_eq!(
             UnsignedTranslator {}
-                .basic_translate(5, &VariableValue::String("01000".to_string()))
+                .basic_translate(&VariableValue::String("01000".to_string()))
                 .0,
             "8"
         );
@@ -468,20 +540,20 @@ mod test {
     fn unsigned_translation_from_biguint() {
         assert_eq!(
             UnsignedTranslator {}
-                .basic_translate(5, &VariableValue::BigUint(BigUint::from(0b10011u32)))
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b10011u32)))
                 .0,
             "19"
         );
 
         assert_eq!(
             UnsignedTranslator {}
-                .basic_translate(5, &VariableValue::BigUint(BigUint::from(0b01000u32)))
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b01000u32)))
                 .0,
             "8"
         );
         assert_eq!(
             UnsignedTranslator {}
-                .basic_translate(2, &VariableValue::BigUint(BigUint::from(0u32)))
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0u32)))
                 .0,
             "0"
         );
@@ -491,7 +563,7 @@ mod test {
     fn e4m3_translation_from_biguint() {
         assert_eq!(
             E4M3Translator {}
-                .basic_translate(8, &VariableValue::BigUint(BigUint::from(0b10001000u8)))
+                .basic_translate(&VariableValue::BigUint(BigUint::from(0b10001000u8)))
                 .0,
             "-0.015625"
         );

@@ -1,4 +1,6 @@
-use surfer_translation_types::{TranslationResult, Translator, VariableInfo, VariableValue};
+use surfer_translation_types::{
+    TranslationResult, Translator, TranslatorInfo, VariableInfo, VariableValue,
+};
 
 use crate::message::Message;
 use crate::translation::{AnyTranslator, BitTranslator};
@@ -17,27 +19,21 @@ impl ClockTranslator {
     }
 }
 
-impl Default for ClockTranslator {
-    fn default() -> Self {
-        Self::new()
+impl Translator<VarId, ScopeId, Message> for ClockTranslator {
+    fn translate(&self, value: &VariableValue) -> color_eyre::Result<TranslationResult> {
+        self.inner.translate(value)
+    }
+
+    fn variable_info(&self) -> color_eyre::Result<VariableInfo> {
+        Ok(VariableInfo::Clock)
     }
 }
 
-impl Translator<VarId, ScopeId, Message> for ClockTranslator {
+impl TranslatorInfo<VarId, ScopeId, Message> for ClockTranslator {
+    type Translator = ClockTranslator;
+
     fn name(&self) -> String {
         "Clock".to_string()
-    }
-
-    fn translate(
-        &self,
-        variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
-        value: &VariableValue,
-    ) -> color_eyre::Result<TranslationResult> {
-        self.inner.translate(variable, value)
-    }
-
-    fn variable_info(&self, _variable: &VariableMeta) -> color_eyre::Result<VariableInfo> {
-        Ok(VariableInfo::Clock)
     }
 
     fn translates(
@@ -49,5 +45,12 @@ impl Translator<VarId, ScopeId, Message> for ClockTranslator {
         } else {
             Ok(super::TranslationPreference::No)
         }
+    }
+
+    fn create_instance(
+        &self,
+        _variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Self::Translator {
+        Self::new()
     }
 }

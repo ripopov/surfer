@@ -5,7 +5,7 @@ use log::{error, info, warn};
 use num::bigint::ToBigInt as _;
 use num::{BigInt, BigUint, Zero};
 use serde::{Deserialize, Serialize};
-use surfer_translation_types::{TranslationPreference, Translator, VariableValue};
+use surfer_translation_types::{TranslationPreference, TranslatorInfo, VariableValue};
 
 use crate::data_container::DataContainer;
 use crate::displayed_item::{
@@ -77,11 +77,11 @@ pub struct WaveData {
     pub old_num_timestamps: Option<BigInt>,
 }
 
-fn select_preferred_translator(var: &VariableMeta, translators: &TranslatorList) -> String {
+fn select_preferred_translator(variable: &VariableMeta, translators: &TranslatorList) -> String {
     let mut preferred: Vec<_> = translators
         .all_translators()
         .iter()
-        .filter_map(|t| match t.translates(var) {
+        .filter_map(|t| match t.translates(variable) {
             Ok(TranslationPreference::Prefer) => Some(t.name()),
             Ok(TranslationPreference::Yes) => None,
             Ok(TranslationPreference::No) => None,
@@ -89,7 +89,7 @@ fn select_preferred_translator(var: &VariableMeta, translators: &TranslatorList)
                 error!(
                     "Failed to check if {} translates {}\n{e:#?}",
                     t.name(),
-                    var.var.full_path_string()
+                    variable.var.full_path_string()
                 );
                 None
             }
@@ -99,14 +99,14 @@ fn select_preferred_translator(var: &VariableMeta, translators: &TranslatorList)
         // For a single bit that has other preferred translators in addition to "Bit", like enum,
         // we would like to select the other one.
         let bit = "Bit".to_string();
-        if var.num_bits == Some(1) {
+        if variable.num_bits == Some(1) {
             preferred.retain(|x| x != &bit);
         }
         if preferred.len() > 1 {
             warn!(
                 "More than one preferred translator for variable {} in scope {}: {}",
-                var.var.name,
-                var.var.path.strs.join("."),
+                variable.var.name,
+                variable.var.path.strs.join("."),
                 preferred.join(", ")
             );
             preferred.sort();
@@ -144,8 +144,10 @@ where
         })
         .unwrap();
 
-    let translator = translators.get_translator(&translator_name);
-    translator
+    let translator = translators
+        .get_translator(&translator_name)
+        .create_instance(&meta().clone().unwrap());
+    &translator
 }
 
 impl WaveData {
@@ -244,7 +246,7 @@ impl WaveData {
                 variable_translator(displayed_variable.get_format(&[]), &[], translators, || {
                     Ok(meta.clone())
                 });
-            let info = translator.variable_info(&meta).ok();
+            let info = translator.variable_info().ok();
 
             match info {
                 Some(info) => displayed_variable
@@ -332,7 +334,7 @@ impl WaveData {
                                     translators,
                                     || Ok(meta.clone()),
                                 );
-                                let info = translator.variable_info(&meta).unwrap();
+                                let info = translator.variable_info().unwrap();
                                 Some((
                                     *id,
                                     DisplayedItem::Variable(
@@ -413,7 +415,7 @@ impl WaveData {
             };
 
             let translator = variable_translator(None, &[], translators, || Ok(meta.clone()));
-            let info = translator.variable_info(&meta).unwrap();
+            let info = translator.variable_info().unwrap();
 
             let new_variable = DisplayedItem::Variable(DisplayedVariable {
                 variable_ref: variable.clone(),
@@ -424,6 +426,7 @@ impl WaveData {
                 display_name_type: self.default_variable_name_type,
                 manual_name: None,
                 format: None,
+                translator: translator,
                 field_formats: vec![],
             });
 
