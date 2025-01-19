@@ -1378,6 +1378,92 @@ impl State {
         }
     }
 
+    fn draw_variable_label(
+        &self,
+        vidx: DisplayedItemIndex,
+        displayed_item: &DisplayedItem,
+        displayed_id: DisplayedItemRef,
+        field: FieldRef,
+        msgs: &mut Vec<Message>,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+    ) -> egui::Response {
+        let style = ui.style_mut();
+        let text_color: Color32;
+        if self.item_is_focused(vidx) {
+            style.visuals.selection.bg_fill = self.config.theme.accent_info.background;
+            text_color = self.config.theme.accent_info.foreground;
+        } else if self.item_is_selected(displayed_id) {
+            style.visuals.selection.bg_fill = self.config.theme.selected_elements_colors.background;
+            text_color = self.config.theme.selected_elements_colors.foreground;
+        } else {
+            style.visuals.selection.bg_fill = self.config.theme.primary_ui_color.background;
+            text_color = self.config.theme.primary_ui_color.foreground;
+        }
+
+        let mut layout_job = LayoutJob::default();
+        displayed_item.add_to_layout_job(
+            &text_color,
+            style,
+            &mut layout_job,
+            Some(&field),
+            &self.config,
+        );
+
+        let mut variable_label = ui
+            .selectable_label(
+                self.item_is_selected(displayed_id) || self.item_is_focused(vidx),
+                WidgetText::LayoutJob(layout_job),
+            )
+            .interact(Sense::drag());
+
+        variable_label.context_menu(|ui| {
+            self.item_context_menu(Some(&field), msgs, ui, vidx);
+        });
+
+        if self.show_tooltip() {
+            let tooltip = if let Some(waves) = &self.waves {
+                if field.field.is_empty() {
+                    let wave_container = waves.inner.as_waves().unwrap();
+                    let meta = wave_container.variable_meta(&field.root).ok();
+                    variable_tooltip_text(&meta, &field.root)
+                } else {
+                    "From translator".to_string()
+                }
+            } else {
+                "No VCD loaded".to_string()
+            };
+            variable_label = variable_label.on_hover_text(tooltip);
+        }
+
+        if variable_label.clicked() {
+            if self
+                .waves
+                .as_ref()
+                .is_some_and(|w| w.focused_item.is_some_and(|f| f == vidx))
+            {
+                msgs.push(Message::UnfocusItem);
+            } else {
+                let modifiers = ctx.input(|i| i.modifiers);
+                if modifiers.ctrl {
+                    msgs.push(Message::ToggleItemSelected(Some(vidx)));
+                } else if modifiers.shift {
+                    msgs.push(Message::Batch(vec![
+                        Message::ItemSelectionClear,
+                        Message::ItemSelectRange(vidx),
+                    ]));
+                } else {
+                    msgs.push(Message::Batch(vec![
+                        Message::ItemSelectionClear,
+                        Message::FocusItem(vidx),
+                    ]));
+                }
+            }
+        }
+
+        variable_label
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn draw_variable(
         &self,
@@ -1392,84 +1478,6 @@ impl State {
         ctx: &egui::Context,
         levels_to_force_expand: Option<usize>,
     ) -> Rect {
-        let mut draw_label = |ui: &mut egui::Ui| {
-            let style = ui.style_mut();
-            let text_color: Color32;
-            if self.item_is_focused(vidx) {
-                style.visuals.selection.bg_fill = self.config.theme.accent_info.background;
-                text_color = self.config.theme.accent_info.foreground;
-            } else if self.item_is_selected(displayed_id) {
-                style.visuals.selection.bg_fill =
-                    self.config.theme.selected_elements_colors.background;
-                text_color = self.config.theme.selected_elements_colors.foreground;
-            } else {
-                style.visuals.selection.bg_fill = self.config.theme.primary_ui_color.background;
-                text_color = self.config.theme.primary_ui_color.foreground;
-            }
-
-            let mut layout_job = LayoutJob::default();
-            displayed_item.add_to_layout_job(
-                &text_color,
-                style,
-                &mut layout_job,
-                Some(&field),
-                &self.config,
-            );
-
-            let mut variable_label = ui
-                .selectable_label(
-                    self.item_is_selected(displayed_id) || self.item_is_focused(vidx),
-                    WidgetText::LayoutJob(layout_job),
-                )
-                .interact(Sense::drag());
-
-            variable_label.context_menu(|ui| {
-                self.item_context_menu(Some(&field), msgs, ui, vidx);
-            });
-
-            if self.show_tooltip() {
-                let tooltip = if let Some(waves) = &self.waves {
-                    if field.field.is_empty() {
-                        let wave_container = waves.inner.as_waves().unwrap();
-                        let meta = wave_container.variable_meta(&field.root).ok();
-                        variable_tooltip_text(&meta, &field.root)
-                    } else {
-                        "From translator".to_string()
-                    }
-                } else {
-                    "No VCD loaded".to_string()
-                };
-                variable_label = variable_label.on_hover_text(tooltip);
-            }
-
-            if variable_label.clicked() {
-                if self
-                    .waves
-                    .as_ref()
-                    .is_some_and(|w| w.focused_item.is_some_and(|f| f == vidx))
-                {
-                    msgs.push(Message::UnfocusItem);
-                } else {
-                    let modifiers = ctx.input(|i| i.modifiers);
-                    if modifiers.ctrl {
-                        msgs.push(Message::ToggleItemSelected(Some(vidx)));
-                    } else if modifiers.shift {
-                        msgs.push(Message::Batch(vec![
-                            Message::ItemSelectionClear,
-                            Message::ItemSelectRange(vidx),
-                        ]));
-                    } else {
-                        msgs.push(Message::Batch(vec![
-                            Message::ItemSelectionClear,
-                            Message::FocusItem(vidx),
-                        ]));
-                    }
-                }
-            }
-
-            variable_label
-        };
-
         let displayed_field_ref = DisplayedFieldRef {
             item: displayed_id,
             field: field.field.clone(),
@@ -1486,32 +1494,48 @@ impl State {
                     header.set_open(level > 0);
                 }
 
-                let response = header
-                    .show_header(ui, |ui| {
-                        ui.with_layout(
-                            Layout::top_down(Align::LEFT).with_cross_justify(true),
-                            draw_label,
-                        );
-                    })
-                    .body(|ui| {
-                        for (name, info) in subfields {
-                            let mut new_path = field.clone();
-                            new_path.field.push(name.clone());
-                            self.draw_variable(
-                                msgs,
-                                vidx,
-                                displayed_item,
-                                displayed_id,
-                                new_path,
-                                drawing_infos,
-                                info,
-                                ui,
-                                ctx,
-                                levels_to_force_expand.map(|l| l.saturating_sub(1)),
-                            );
-                        }
-                    });
-
+                let response = ui
+                    .with_layout(
+                        Layout::top_down(Align::LEFT).with_cross_justify(true),
+                        |ui| {
+                            header
+                                .show_header(ui, |ui| {
+                                    ui.with_layout(
+                                        Layout::top_down(Align::LEFT).with_cross_justify(true),
+                                        |ui| {
+                                            self.draw_variable_label(
+                                                vidx,
+                                                displayed_item,
+                                                displayed_id,
+                                                field.clone(),
+                                                msgs,
+                                                ui,
+                                                ctx,
+                                            )
+                                        },
+                                    );
+                                })
+                                .body(|ui| {
+                                    for (name, info) in subfields {
+                                        let mut new_path = field.clone();
+                                        new_path.field.push(name.clone());
+                                        self.draw_variable(
+                                            msgs,
+                                            vidx,
+                                            displayed_item,
+                                            displayed_id,
+                                            new_path,
+                                            drawing_infos,
+                                            info,
+                                            ui,
+                                            ctx,
+                                            levels_to_force_expand.map(|l| l.saturating_sub(1)),
+                                        );
+                                    }
+                                })
+                        },
+                    )
+                    .inner;
                 drawing_infos.push(ItemDrawingInfo::Variable(VariableDrawingInfo {
                     displayed_field_ref,
                     field_ref: field.clone(),
@@ -1526,7 +1550,15 @@ impl State {
             | VariableInfo::Clock
             | VariableInfo::String
             | VariableInfo::Real => {
-                let label = draw_label(ui);
+                let label = self.draw_variable_label(
+                    vidx,
+                    displayed_item,
+                    displayed_id,
+                    field.clone(),
+                    msgs,
+                    ui,
+                    ctx,
+                );
                 self.draw_drag_source(msgs, vidx, &label);
                 drawing_infos.push(ItemDrawingInfo::Variable(VariableDrawingInfo {
                     displayed_field_ref,
