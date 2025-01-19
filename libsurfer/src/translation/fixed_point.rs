@@ -147,4 +147,9 @@ mod tests {
         scheck(0x02000_u32, 17, 15, "0.25");
         scheck(0x0FF_u32, 9, 7, "1.9921875");
     }
+
+    #[test]
+    fn large_bit_widths() {
+        ucheck(0x123456789ABCDEF0_u64, 20, "1250999896491.8044281005859375");
+    }
 }
