@@ -4,13 +4,13 @@ pub mod python;
 mod result;
 mod scope_ref;
 mod translator;
+pub mod variable_index;
 mod variable_ref;
 
 use derive_more::Display;
 use ecolor::Color32;
 use num::BigUint;
 use std::collections::HashMap;
-use std::fmt::Formatter;
 
 pub use crate::field_ref::FieldRef;
 pub use crate::result::{
@@ -19,6 +19,7 @@ pub use crate::result::{
 };
 pub use crate::scope_ref::ScopeRef;
 pub use crate::translator::{translates_all_bit_types, BasicTranslator, Translator};
+pub use crate::variable_index::VariableIndex;
 pub use crate::variable_ref::VariableRef;
 
 #[derive(Debug, PartialEq, Clone, Display)]
@@ -163,31 +164,6 @@ pub enum VariableDirection {
     Buffer,
     #[display("linkage")]
     Linkage,
-}
-
-/// An index that defines the extents of a variable.
-/// For instance, in Verilog, this is declared using `[msb:lsb]`, e.g.:
-/// ```verilog
-/// reg [WIDTH-1:0] foo;
-/// ```
-///
-/// A negative `lsb` usually indicates a fixed-point value where the
-/// `[msb:0]` bits (including 0) belong to the integer part and the `[-1:lsb]` bits
-/// belong to the fractional part of a number.
-#[derive(Clone, Debug)]
-pub struct VariableIndex {
-    pub msb: i64,
-    pub lsb: i64,
-}
-
-impl Display for VariableIndex {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if self.msb == self.lsb {
-            write!(f, "[{}]", self.lsb)
-        } else {
-            write!(f, "[{}:{}]", self.msb, self.lsb)
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
