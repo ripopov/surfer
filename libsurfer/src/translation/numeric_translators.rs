@@ -432,16 +432,8 @@ impl Translator<VarId, ScopeId, Message> for UnsignedFixedPointTranslator {
         Ok(VariableInfo::Bits)
     }
 
-    fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        if variable
-            .index
-            .as_ref()
-            .is_some_and(|index| index.lsb < 0 && index.lsb != index.msb)
-        {
-            Ok(TranslationPreference::Prefer)
-        } else {
-            Ok(TranslationPreference::Yes)
-        }
+    fn translates(&self, _: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
+        Ok(TranslationPreference::Yes)
     }
 }
 
