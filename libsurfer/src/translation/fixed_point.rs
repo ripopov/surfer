@@ -46,6 +46,9 @@ pub(crate) fn big_uint_to_ufixed(uint: &BigUint, lg_scaling_factor: i64) -> Stri
 /// The output is equivalent to `real(uint.as_signed() / (2 ** lg_scaling_factor)).to_string()`.
 /// where `as_signed()` interprets the `uint` as a signed value using two's complement.
 pub(crate) fn big_uint_to_sfixed(uint: &BigUint, num_bits: u64, lg_scaling_factor: i64) -> String {
+    if num_bits == 0 {
+        return "".to_string();
+    }
     if uint.bit(num_bits - 1) {
         let inverted_uint = (BigUint::one() << num_bits) - uint;
         format!("-{}", big_uint_to_ufixed(&inverted_uint, lg_scaling_factor))
@@ -78,12 +81,19 @@ mod tests {
 
     #[test]
     fn zero_scaling_factor() {
-        ucheck(32_u32, 0, "32")
+        ucheck(32_u32, 0, "32");
+        scheck(32_u32, 6, 0, "-32");
+    }
+
+    #[test]
+    fn zero_width_signed() {
+        scheck(32_u32, 0, 0, "");
     }
 
     #[test]
     fn test_exact_integer() {
-        ucheck(256_u32, 8, "1")
+        ucheck(256_u32, 8, "1");
+        scheck(256_u32, 9, 8, "-1")
     }
 
     #[test]
