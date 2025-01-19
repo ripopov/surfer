@@ -1,5 +1,5 @@
 use crate::message::Message;
-use crate::translation::fixed_point::big_uint_to_ufixed;
+use crate::translation::fixed_point::{big_uint_to_sfixed, big_uint_to_ufixed};
 use crate::variable_type::INTEGER_TYPES;
 use crate::wave_container::{ScopeId, VarId};
 use color_eyre::Result;
@@ -404,7 +404,7 @@ impl BasicTranslator<VarId, ScopeId> for E4M3Translator {
     }
 }
 
-pub struct UnsignedFixedPointTranslator {}
+pub struct UnsignedFixedPointTranslator;
 
 impl Translator<VarId, ScopeId, Message> for UnsignedFixedPointTranslator {
     fn name(&self) -> String {
@@ -442,6 +442,42 @@ impl Translator<VarId, ScopeId, Message> for UnsignedFixedPointTranslator {
         } else {
             Ok(TranslationPreference::Yes)
         }
+    }
+}
+
+pub struct SignedFixedPointTranslator;
+
+impl Translator<VarId, ScopeId, Message> for SignedFixedPointTranslator {
+    fn name(&self) -> String {
+        "Signed fixed point".into()
+    }
+
+    fn translate(
+        &self,
+        variable: &VariableMeta<VarId, ScopeId>,
+        value: &VariableValue,
+    ) -> Result<TranslationResult> {
+        let (string, value_kind) = if let Some(idx) = &variable.index {
+            translate_numeric(
+                |v| big_uint_to_sfixed(&v, variable.num_bits.unwrap_or(0) as u64, -idx.lsb),
+                value,
+            )
+        } else {
+            translate_numeric(|v| format!("{}", v), value)
+        };
+        Ok(TranslationResult {
+            kind: value_kind,
+            val: ValueRepr::String(string),
+            subfields: vec![],
+        })
+    }
+
+    fn variable_info(&self, _: &VariableMeta<VarId, ScopeId>) -> Result<VariableInfo> {
+        Ok(VariableInfo::Bits)
+    }
+
+    fn translates(&self, _: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
+        Ok(TranslationPreference::Yes)
     }
 }
 

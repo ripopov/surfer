@@ -275,7 +275,8 @@ pub fn all_translators() -> TranslatorList {
             Box::new(ClockTranslator::new()),
             Box::new(StringTranslator {}),
             Box::new(EnumTranslator {}),
-            Box::new(UnsignedFixedPointTranslator {}),
+            Box::new(UnsignedFixedPointTranslator),
+            Box::new(SignedFixedPointTranslator),
         ],
     )
 }
