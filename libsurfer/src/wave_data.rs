@@ -491,7 +491,7 @@ impl WaveData {
                     .iter_visible()
                     .count()
                     .checked_sub(1)
-                    .map(|idx| DisplayedItemIndex(idx)),
+                    .map(DisplayedItemIndex),
             }
         })
     }
@@ -731,7 +731,7 @@ impl WaveData {
             .insert_item(item_ref, target_position)
             .unwrap();
         self.displayed_items.insert(item_ref, new_item);
-        self.focused_item = self.focused_item.and_then(|_| Some(insert_index.0.into()));
+        self.focused_item = self.focused_item.map(|_| insert_index.0.into());
         self.items_tree.xselect_all(false);
         item_ref
     }

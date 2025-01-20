@@ -1974,7 +1974,7 @@ pub fn dump_tree(waves: &WaveData) {
     let mut result = String::new();
     for (idx, node) in waves.items_tree.iter().enumerate() {
         for _ in 0..node.level.saturating_sub(1) {
-            result.push_str(" ");
+            result.push(' ');
         }
 
         if node.level > 0 {
@@ -1995,7 +1995,7 @@ pub fn dump_tree(waves: &WaveData) {
         if node.selected {
             result.push_str(" !SEL! ")
         }
-        result.push_str("\n");
+        result.push('\n');
     }
     info!("tree: \n{}", &result);
 }

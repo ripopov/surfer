@@ -255,14 +255,13 @@ impl State {
                                 .iter_selected()
                                 .map(|i| i.item)
                                 .collect::<Vec<_>>();
-                            waves // TODO change focused_item to ref?
-                                .focused_item
-                                .and_then(|focus| {
-                                    waves.items_tree.get_visible(
-                                        crate::displayed_item_tree::VisibleItemIndex(focus.0),
-                                    )
-                                })
-                                .map(|node| remove_ids.push(node.item));
+                            if let Some(node) = waves.focused_item.and_then(|focus| {
+                                waves.items_tree.get_visible(
+                                    crate::displayed_item_tree::VisibleItemIndex(focus.0),
+                                )
+                            }) {
+                                remove_ids.push(node.item)
+                            }
 
                             msgs.push(Message::RemoveItems(remove_ids));
                         }
