@@ -1,5 +1,6 @@
-use num::BigInt;
-use serde::{Deserialize, Serialize};
+use num::{BigInt, FromPrimitive};
+use serde::{de, Deserialize, Deserializer, Serialize};
+use serde_json::Number;
 
 use crate::displayed_item;
 
@@ -133,7 +134,10 @@ pub enum WcpCommand {
     /// Moves the viewport to center it on the specified timestamp. Does not affect the zoom
     /// level.
     /// Responds with [WcpResponse::ack]
-    set_viewport_to { timestamp: BigInt },
+    set_viewport_to {
+        #[serde(deserialize_with = "deserialize_timestamp")]
+        timestamp: BigInt,
+    },
     /// Removes the specified items from the view.
     /// Responds with [WcpResponse::ack]
     /// Does not error if some of the IDs do not exist
@@ -178,5 +182,28 @@ impl WcpCSMessage {
             version: version.to_string(),
             commands,
         }
+    }
+}
+
+fn deserialize_timestamp<'de, D>(deserializer: D) -> Result<BigInt, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let num = Number::deserialize(deserializer)?;
+    if let Some(timestamp) = num.as_u128() {
+        Ok(BigInt::from(timestamp))
+    } else if let Some(timestamp) = num.as_i128() {
+        Ok(BigInt::from(timestamp))
+    } else if let Some(timestamp) = num.as_f64() {
+        BigInt::from_f64(timestamp).ok_or_else(|| {
+            <D::Error as serde::de::Error>::invalid_value(
+                serde::de::Unexpected::Float(timestamp),
+                &"a finite value",
+            )
+        })
+    } else {
+        Err(de::Error::custom(
+            "Error durian deserialization of timestamp value {num}",
+        ))
     }
 }
