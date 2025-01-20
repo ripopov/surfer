@@ -4,7 +4,8 @@ use std::ops::BitAnd;
 
 /// Converts a `BigUint` to a string interpreted as unsigned fixed point value.
 ///
-/// The output is equivalent to `real(uint / (2 ** lg_scaling_factor)).to_string()`.
+/// The output is equivalent to `uint / (2 ** lg_scaling_factor)` (without integer truncation
+/// through division)
 pub(crate) fn big_uint_to_ufixed(uint: &BigUint, lg_scaling_factor: i64) -> String {
     match lg_scaling_factor.cmp(&0) {
         Ordering::Less => {
@@ -44,7 +45,8 @@ pub(crate) fn big_uint_to_ufixed(uint: &BigUint, lg_scaling_factor: i64) -> Stri
 
 /// Converts a `BigUint` to a string interpreted as signed fixed point value.
 ///
-/// The output is equivalent to `real(uint.as_signed() / (2 ** lg_scaling_factor)).to_string()`.
+/// The output is equivalent to `as_signed(uint) / (2 ** lg_scaling_factor)` (without integer
+/// truncation through division)
 /// where `as_signed()` interprets the `uint` as a signed value using two's complement.
 pub(crate) fn big_uint_to_sfixed(uint: &BigUint, num_bits: u64, lg_scaling_factor: i64) -> String {
     if num_bits == 0 {
