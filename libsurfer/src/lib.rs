@@ -1585,43 +1585,78 @@ impl State {
                 self.drag_source_idx = None;
                 self.drag_target_idx = None;
             }
-            Message::VariableDragStarted(vidx) => {
-                self.drag_started = true;
-                self.drag_source_idx = Some(vidx);
-                self.drag_target_idx = None;
+            Message::VariableDragStarted {
+                item,
+                select,
+                reset_selection,
+            } => {
+                if let Some(waves) = self.waves.as_mut() {
+                    self.drag_started = true;
+                    self.drag_source_idx = Some(item);
+                    self.drag_target_idx = None;
+
+                    if reset_selection {
+                        waves.selected_items.clear();
+                        waves.focused_item = None;
+                    }
+                    if select {
+                        waves
+                            .selected_items
+                            .insert(waves.displayed_items_order[item.0]);
+                    }
+                }
             }
             Message::VariableDragTargetChanged(vidx) => {
                 self.drag_target_idx = Some(vidx);
             }
             Message::VariableDragFinished => {
                 self.drag_started = false;
+                let (Some(DisplayedItemIndex(_source)), Some(DisplayedItemIndex(target))) =
+                    (self.drag_source_idx, self.drag_target_idx)
+                else {
+                    return;
+                };
 
-                // reordering
-                if let (
-                    Some(DisplayedItemIndex(source_vidx)),
-                    Some(DisplayedItemIndex(target_vidx)),
-                ) = (self.drag_source_idx, self.drag_target_idx)
-                {
-                    self.save_current_canvas("Drag item".to_string());
-                    self.invalidate_draw_commands();
-                    let Some(waves) = self.waves.as_mut() else {
-                        return;
-                    };
-                    let visible_items_len = waves.displayed_items.len();
-                    if visible_items_len > 0 {
-                        let old_idx = waves.displayed_items_order.remove(source_vidx);
-                        if waves.displayed_items_order.len() < target_vidx {
-                            waves.displayed_items_order.push(old_idx);
-                        } else {
-                            waves.displayed_items_order.insert(target_vidx, old_idx);
-                        }
+                self.save_current_canvas("Drag item".to_string());
 
-                        // carry focused item when moving it
-                        if waves.focused_item.is_some_and(|f| f.0 == source_vidx) {
-                            waves.focused_item = Some(target_vidx.into());
+                let Some(waves) = self.waves.as_mut() else {
+                    return;
+                };
+
+                let focused_ref = waves.focused_item.map(|f| waves.displayed_items_order[f.0]);
+                let mut pre_indices = vec![];
+                let mut post_indices = vec![];
+                for (idx, id) in waves.displayed_items_order.iter().enumerate() {
+                    if waves.selected_items.contains(id) || focused_ref == Some(*id) {
+                        use std::cmp::Ordering;
+                        match idx.cmp(&target) {
+                            Ordering::Less => pre_indices.push(idx),
+                            Ordering::Greater => post_indices.push(idx),
+                            Ordering::Equal => {}
                         }
                     }
                 }
+
+                for (&from, to) in pre_indices
+                    .iter()
+                    .zip(target - pre_indices.len() + 1..target + 1)
+                    .rev()
+                {
+                    waves.displayed_items_order[from..=to].rotate_left(1);
+                }
+                for (&from, to) in post_indices.iter().zip(target..) {
+                    waves.displayed_items_order[to..=from].rotate_right(1);
+                }
+                if let Some(focused) = focused_ref {
+                    waves.focused_item = waves
+                        .displayed_items_order
+                        .iter()
+                        .position(|&x| x == focused)
+                        .map(|idx| idx.into());
+                }
+
+                self.invalidate_draw_commands();
+
                 self.drag_source_idx = None;
                 self.drag_target_idx = None;
             }
