@@ -196,14 +196,16 @@ wcp_test! {
         load_file(&tx, &mut rx, "../examples/counter.vcd").await?;
 
         tx.send(WcpCSMessage::command(
-            proto::WcpCommand::add_variables { names: vec![
+            proto::WcpCommand::add_variables { variables: vec![
                 "tb._tmp",
                 "tb.clk",
                 "tb.overflow",
                 "tb.reset"
             ].into_iter().map(str::to_string).collect()
         })).await?;
-        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_variables(indices)));
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_variables{
+            ids: indices
+        }));
 
         assert_eq!(indices.len(), 4);
 
@@ -225,7 +227,7 @@ wcp_test! {
 
         tx.send(WcpCSMessage::command(
             proto::WcpCommand::add_scope {scope: "tb".to_string()})).await?;
-        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope(indices)));
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope{ ids: indices }));
 
         assert_eq!(indices.len(), 4);
 
@@ -239,7 +241,7 @@ wcp_test! {
         load_file(&tx, &mut rx, "../examples/counter.vcd").await?;
 
         tx.send(WcpCSMessage::command(
-            proto::WcpCommand::add_variables { names: vec![
+            proto::WcpCommand::add_variables { variables: vec![
                 "tb._tmp",
                 "tb.clk",
                 "tb.overflow",
@@ -247,7 +249,7 @@ wcp_test! {
             ].into_iter().map(str::to_string).collect()
         })).await?;
 
-        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_variables(refs)));
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_variables{ ids: refs }));
 
         for (i, c) in [(1, "Gray"), (2, "Yellow"), (3, "Blue")] {
             tx.send(WcpCSMessage::command(
@@ -268,7 +270,7 @@ wcp_test! {
         send_commands(&tx, vec![
             WcpCommand::add_scope {scope: "tb".to_string()},
         ]).await?;
-        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope(refs)));
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope{ ids: refs }));
 
         send_commands(&tx, vec![
             WcpCommand::remove_items { ids: vec![refs[1], refs[2]] }
@@ -288,7 +290,7 @@ wcp_test! {
         send_commands(&tx, vec![
             WcpCommand::add_scope {scope: "tb".to_string()},
         ]).await?;
-        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope(refs)));
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope{ ids: refs }));
 
         send_commands(&tx, vec![
             WcpCommand::focus_item { id: refs[1] }
@@ -306,7 +308,7 @@ wcp_test! {
             WcpCommand::add_scope {scope: "tb".to_string()},
             WcpCommand::clear,
         ]).await?;
-        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope(_)));
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope{ ids: _ }));
         expect_ack(&mut rx).await
     }
 }
@@ -320,7 +322,7 @@ wcp_test! {
             WcpCommand::add_scope {scope: "tb".to_string()},
             WcpCommand::set_viewport_to { timestamp: BigInt::from(70) },
         ]).await?;
-        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope(_)));
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope{ ids: _ }));
         expect_ack(&mut rx).await?;
         Ok(())
     }
@@ -336,7 +338,7 @@ wcp_test! {
             WcpCommand::set_viewport_to { timestamp: BigInt::from(70) },
             WcpCommand::zoom_to_fit { viewport_idx: 0 }
         ]).await?;
-        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope(_)));
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope{ ids: _ }));
         expect_ack(&mut rx).await?;
         expect_ack(&mut rx).await?;
 
@@ -352,13 +354,13 @@ wcp_test! {
         send_commands(&tx, vec![
             WcpCommand::add_scope {scope: "tb".to_string()},
         ]).await?;
-        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope(items)));
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope{ ids: items }));
 
         send_commands(&tx, vec![
             WcpCommand::get_item_info { ids: items }
         ]).await?;
 
-        expect_response!(rx, WcpSCMessage::response(WcpResponse::get_item_info(info)));
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::get_item_info{ results: info }));
         let expected = vec![
             proto::ItemInfo { name: "overflow".to_string(),
                  t: "Variable".to_string(),
@@ -391,7 +393,7 @@ wcp_test! {
         send_commands(&tx, vec![
             WcpCommand::add_scope {scope: "tb".to_string()},
         ]).await?;
-        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope(_)));
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope{ ids: _ }));
 
         send_commands(&tx, vec![
             WcpCommand::get_item_info { ids: vec![proto::DisplayedItemRef(usize::MAX)] }
