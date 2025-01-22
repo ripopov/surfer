@@ -108,12 +108,12 @@ impl State {
                         }
                         self.send_response(WcpResponse::get_item_info { results: items });
                     }
-                    WcpCommand::add_variables { variables: names } => {
+                    WcpCommand::add_variables { variables } => {
                         if self.waves.is_some() {
-                            self.save_current_canvas(format!("Add {} variables", names.len()));
+                            self.save_current_canvas(format!("Add {} variables", variables.len()));
                         }
                         if let Some(waves) = self.waves.as_mut() {
-                            let variable_refs = names
+                            let variable_refs = variables
                                 .iter()
                                 .map(|n| VariableRef::from_hierarchy_string(n))
                                 .collect_vec();
