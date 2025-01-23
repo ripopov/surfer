@@ -4,6 +4,7 @@ use emath::Vec2;
 
 use crate::config::ArrowKeyBindings;
 use crate::displayed_item::DisplayedItemIndex;
+use crate::search::{QueryType, SearchQuery};
 use crate::{
     message::Message,
     wave_data::{PER_SCROLL_EVENT, SCROLL_EVENTS_PER_PAGE},
@@ -24,7 +25,7 @@ impl State {
                     key,
                     pressed,
                     self.sys.command_prompt.visible,
-                    self.variable_name_filter_focused,
+                    self.variable_name_filter_focused | self.query_value_focused,
                 ) {
                     (Key::Num0, true, false, false) => {
                         handle_digit(0, modifiers, msgs);
@@ -77,7 +78,10 @@ impl State {
                         msgs.push(Message::InvalidateCount);
                         msgs.push(Message::ItemSelectionClear);
                     }
-                    (Key::Escape, true, _, true) => msgs.push(Message::SetFilterFocused(false)),
+                    (Key::Escape, true, _, true) => {
+                        msgs.push(Message::SetFilterFocused(false));
+                        msgs.push(Message::SetQueryValueFocused(false));
+                    }
                     (Key::B, true, false, false) => msgs.push(Message::ToggleSidePanel),
                     (Key::M, true, false, false) => msgs.push(Message::ToggleMenu),
                     (Key::T, true, false, false) => msgs.push(Message::ToggleToolbar),
@@ -127,12 +131,30 @@ impl State {
                     (Key::H, true, false, false) => msgs.push(Message::MoveCursorToTransition {
                         next: false,
                         variable: None,
-                        skip_zero: modifiers.shift,
+                        search_query: {
+                            if modifiers.shift {
+                                Some(SearchQuery::Numeric {
+                                    query_type: QueryType::NotEqualTo,
+                                    query_value: 0u8.into(),
+                                })
+                            } else {
+                                None
+                            }
+                        },
                     }),
                     (Key::L, true, false, false) => msgs.push(Message::MoveCursorToTransition {
                         next: true,
                         variable: None,
-                        skip_zero: modifiers.shift,
+                        search_query: {
+                            if modifiers.shift {
+                                Some(SearchQuery::Numeric {
+                                    query_type: QueryType::NotEqualTo,
+                                    query_value: 0u8.into(),
+                                })
+                            } else {
+                                None
+                            }
+                        },
                     }),
                     (Key::Minus, true, false, false) => msgs.push(Message::CanvasZoom {
                         mouse_ptr: None,
@@ -165,7 +187,16 @@ impl State {
                             ArrowKeyBindings::Edge => Message::MoveCursorToTransition {
                                 next: true,
                                 variable: None,
-                                skip_zero: modifiers.shift,
+                                search_query: {
+                                    if modifiers.shift {
+                                        Some(SearchQuery::Numeric {
+                                            query_type: QueryType::NotEqualTo,
+                                            query_value: 0u8.into(),
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                },
                             },
                             ArrowKeyBindings::Scroll => Message::CanvasScroll {
                                 delta: Vec2 {
@@ -181,7 +212,16 @@ impl State {
                             ArrowKeyBindings::Edge => Message::MoveCursorToTransition {
                                 next: false,
                                 variable: None,
-                                skip_zero: modifiers.shift,
+                                search_query: {
+                                    if modifiers.shift {
+                                        Some(SearchQuery::Numeric {
+                                            query_type: QueryType::NotEqualTo,
+                                            query_value: 0u8.into(),
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                },
                             },
                             ArrowKeyBindings::Scroll => Message::CanvasScroll {
                                 delta: Vec2 {
