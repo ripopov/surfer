@@ -676,6 +676,11 @@ snapshot_ui_with_file_and_msgs! {ghw_from_ghdl_suite_loads, "examples/tb_recv.gh
     Message::AddScope(ScopeRef::from_strs(&["tb_recv", "dut"]), false),
 ]}
 
+// This GHW file was generated with GHDL using the VHDL fixed_pkg.
+snapshot_ui_with_file_and_msgs! {fixedpoint_translator_selected, "examples/vhdlfixed.ghw", [
+    Message::AddScope(ScopeRef::from_strs(&["constantadder_fixed_tb", "dut"]), false),
+]}
+
 #[cfg(feature = "spade")]
 snapshot_ui_with_file_spade_and_msgs! {
     spade_translation_works,
