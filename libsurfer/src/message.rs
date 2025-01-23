@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use surver::Status;
 
 use crate::graphics::{Graphic, GraphicId};
+use crate::search::{QueryRadix, QueryTextType, QueryType, SearchQuery};
 use crate::transaction_container::{
     StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
 };
@@ -224,6 +225,7 @@ pub enum Message {
     SetLogsVisible(bool),
     SetDragStart(Option<Pos2>),
     SetFilterFocused(bool),
+    SetQueryValueFocused(bool),
     SetVariableNameFilterType(VariableNameFilterType),
     SetVariableNameFilterCaseInsensitive(bool),
     SetUIZoomFactor(f32),
@@ -258,8 +260,12 @@ pub enum Message {
     MoveCursorToTransition {
         next: bool,
         variable: Option<DisplayedItemIndex>,
-        skip_zero: bool,
+        search_query: Option<SearchQuery>,
     },
+    SetQueryType(QueryType),
+    SetQueryRadix(QueryRadix),
+    SetQueryNumericalValue(bool),
+    SetQueryTextType(QueryTextType),
     MoveTransaction {
         next: bool,
     },
