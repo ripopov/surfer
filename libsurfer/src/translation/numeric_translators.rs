@@ -47,6 +47,18 @@ impl BasicTranslator<VarId, ScopeId> for UnsignedTranslator {
     fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
         translate_numeric(|v| format!("{v}"), v)
     }
+
+    fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
+        let type_names = [
+            Some("unresolved_unsigned".to_string()),
+            Some("unsigned".to_string()),
+        ];
+        if type_names.contains(&variable.variable_type_name) {
+            Ok(TranslationPreference::Prefer)
+        } else {
+            translates_all_bit_types(variable)
+        }
+    }
 }
 
 pub struct SignedTranslator {}
@@ -72,7 +84,13 @@ impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        if INTEGER_TYPES.contains(&variable.variable_type) {
+        let type_names = [
+            Some("unresolved_signed".to_string()),
+            Some("signed".to_string()),
+        ];
+        if INTEGER_TYPES.contains(&variable.variable_type)
+            | type_names.contains(&variable.variable_type_name)
+        {
             Ok(TranslationPreference::Prefer)
         } else {
             translates_all_bit_types(variable)
@@ -432,8 +450,16 @@ impl Translator<VarId, ScopeId, Message> for UnsignedFixedPointTranslator {
         Ok(VariableInfo::Bits)
     }
 
-    fn translates(&self, _: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        Ok(TranslationPreference::Yes)
+    fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
+        let type_names = [
+            Some("unresolved_ufixed".to_string()),
+            Some("ufixed".to_string()),
+        ];
+        if type_names.contains(&variable.variable_type_name) {
+            Ok(TranslationPreference::Prefer)
+        } else {
+            translates_all_bit_types(variable)
+        }
     }
 }
 
@@ -468,8 +494,16 @@ impl Translator<VarId, ScopeId, Message> for SignedFixedPointTranslator {
         Ok(VariableInfo::Bits)
     }
 
-    fn translates(&self, _: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        Ok(TranslationPreference::Yes)
+    fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
+        let type_names = [
+            Some("unresolved_sfixed".to_string()),
+            Some("sfixed".to_string()),
+        ];
+        if type_names.contains(&variable.variable_type_name) {
+            Ok(TranslationPreference::Prefer)
+        } else {
+            translates_all_bit_types(variable)
+        }
     }
 }
 
