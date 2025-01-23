@@ -824,7 +824,7 @@ impl State {
                     if self.show_tooltip() {
                         // Should be possible to reuse the meta from above?
                         let meta = wave_container.variable_meta(&variable).ok();
-                        response = response.on_hover_text(variable_tooltip_text(&meta, &variable));
+                        response = response.on_hover_text(variable_tooltip_text(&variable, &meta));
                     }
                     response.drag_started().then(|| {
                         msgs.push(Message::VariableDragStarted(
@@ -1314,9 +1314,13 @@ impl State {
             if self.show_tooltip() {
                 let tooltip = if let Some(waves) = &self.waves {
                     if field.field.is_empty() {
-                        let wave_container = waves.inner.as_waves().unwrap();
-                        let meta = wave_container.variable_meta(&field.root).ok();
-                        variable_tooltip_text(&meta, &field.root)
+                        let meta = waves
+                            .inner
+                            .as_waves()
+                            .unwrap()
+                            .variable_meta(&field.root)
+                            .ok();
+                        variable_tooltip_text(&field.root, &meta)
                     } else {
                         "From translator".to_string()
                     }
@@ -1880,23 +1884,23 @@ impl State {
     }
 }
 
-fn variable_tooltip_text(meta: &Option<VariableMeta>, variable: &VariableRef) -> String {
-    format!(
-        "{}\nNum bits: {}\nType: {}\nDirection: {}",
-        variable.full_path_string(),
-        meta.as_ref()
-            .and_then(|meta| meta.num_bits)
-            .map_or_else(|| "unknown".to_string(), |num_bits| format!("{num_bits}")),
-        meta.as_ref()
-            .and_then(|meta| meta.variable_type)
-            .map_or_else(
-                || "unknown".to_string(),
-                |variable_type| format!("{variable_type}")
-            ),
-        meta.as_ref()
-            .and_then(|meta| meta.direction)
-            .map_or_else(|| "unknown".to_string(), |direction| format!("{direction}"))
-    )
+fn variable_tooltip_text(variable: &VariableRef, meta: &Option<VariableMeta>) -> String {
+    if let Some(meta) = meta {
+        format!(
+            "{}\nNum bits: {}\nType: {}\nDirection: {}",
+            variable.full_path_string(),
+            meta.num_bits
+                .map_or_else(|| "unknown".to_string(), |bits| bits.to_string()),
+            meta.variable_type_name
+                .clone()
+                .or_else(|| meta.variable_type.map(|t| t.to_string()))
+                .unwrap_or_else(|| "unknown".to_string()),
+            meta.direction
+                .map_or_else(|| "unknown".to_string(), |direction| format!("{direction}"))
+        )
+    } else {
+        variable.full_path_string()
+    }
 }
 
 fn scope_tooltip_text(wave: &WaveData, scope: &ScopeRef) -> String {
