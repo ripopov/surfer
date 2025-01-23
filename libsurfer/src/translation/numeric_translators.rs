@@ -11,7 +11,7 @@ use surfer_translation_types::{
     VariableInfo, VariableMeta, VariableValue,
 };
 
-use super::{check_single_wordlength, TranslationPreference};
+use super::{check_single_wordlength, match_variable_type_name, TranslationPreference};
 
 #[inline]
 fn shortest_float_representation<T: std::fmt::LowerExp + std::fmt::Display>(v: T) -> String {
@@ -49,11 +49,8 @@ impl BasicTranslator<VarId, ScopeId> for UnsignedTranslator {
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        let type_names = [
-            Some("unresolved_unsigned".to_string()),
-            Some("unsigned".to_string()),
-        ];
-        if type_names.contains(&variable.variable_type_name) {
+        let candidates = ["unresolved_unsigned".to_string(), "unsigned".to_string()];
+        if match_variable_type_name(&variable.variable_type_name, &candidates) {
             Ok(TranslationPreference::Prefer)
         } else {
             translates_all_bit_types(variable)
@@ -84,12 +81,9 @@ impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        let type_names = [
-            Some("unresolved_signed".to_string()),
-            Some("signed".to_string()),
-        ];
+        let candidates = ["unresolved_signed".to_string(), "signed".to_string()];
         if INTEGER_TYPES.contains(&variable.variable_type)
-            | type_names.contains(&variable.variable_type_name)
+            | match_variable_type_name(&variable.variable_type_name, &candidates)
         {
             Ok(TranslationPreference::Prefer)
         } else {
@@ -451,11 +445,8 @@ impl Translator<VarId, ScopeId, Message> for UnsignedFixedPointTranslator {
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        let type_names = [
-            Some("unresolved_ufixed".to_string()),
-            Some("ufixed".to_string()),
-        ];
-        if type_names.contains(&variable.variable_type_name) {
+        let candidates = ["unresolved_ufixed".to_string(), "ufixed".to_string()];
+        if match_variable_type_name(&variable.variable_type_name, &candidates) {
             Ok(TranslationPreference::Prefer)
         } else {
             translates_all_bit_types(variable)
@@ -495,11 +486,8 @@ impl Translator<VarId, ScopeId, Message> for SignedFixedPointTranslator {
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        let type_names = [
-            Some("unresolved_sfixed".to_string()),
-            Some("sfixed".to_string()),
-        ];
-        if type_names.contains(&variable.variable_type_name) {
+        let candidates = ["unresolved_sfixed".to_string(), "sfixed".to_string()];
+        if match_variable_type_name(&variable.variable_type_name, &candidates) {
             Ok(TranslationPreference::Prefer)
         } else {
             translates_all_bit_types(variable)
