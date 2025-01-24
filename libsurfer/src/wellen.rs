@@ -210,7 +210,7 @@ impl WellenContainer {
     pub fn variables(&self) -> Vec<VariableRef> {
         let h = &self.hierarchy;
         h.iter_vars()
-            .map(|r| VariableRef::from_hierarchy_string(&r.full_name(h)))
+            .map(|r| VariableRef::from_space_hierarchy_string(&r.full_name(h)))
             .collect::<Vec<_>>()
     }
 
