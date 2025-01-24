@@ -70,7 +70,7 @@ impl WcpServer {
         } else if self.stream.is_some() {
             self.initiate();
         } else {
-            error!("Shouldn't get here");
+            error!("Internal error: calling `run` with both listener and stream unset");
         }
     }
 
