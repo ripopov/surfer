@@ -254,8 +254,10 @@ impl WaveContainer {
         match self {
             WaveContainer::Wellen(_) => true,
             WaveContainer::Empty => true,
-            // FIXME: Once we do AA on the server side, we can set this to false
-            WaveContainer::Cxxrtl(_) => true,
+            // Since CXXRTL sends all signals at all timesteps, we can't use the
+            // built in antialias. We'll need server side support for it to work
+            // correctly
+            WaveContainer::Cxxrtl(_) => false,
         }
     }
 
