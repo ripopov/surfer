@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crate::channels::IngressReceiver;
 use crate::message::Message;
 use crate::tests::snapshot::render_and_compare;
 use crate::wcp::proto::{self, WcpCSMessage, WcpCommand, WcpEvent, WcpResponse, WcpSCMessage};
@@ -71,7 +72,7 @@ where
         let (sc_tx, sc_rx) = tokio::sync::mpsc::channel(100);
         state.sys.channels.wcp_s2c_sender = Some(sc_tx);
         let (cs_tx, cs_rx) = tokio::sync::mpsc::channel(100);
-        state.sys.channels.wcp_c2s_receiver = Some(cs_rx);
+        state.sys.channels.wcp_c2s_receiver = Some(IngressReceiver::new(cs_rx));
 
         {
             let client = client.clone();
@@ -197,10 +198,10 @@ wcp_test! {
 
         tx.send(WcpCSMessage::command(
             proto::WcpCommand::add_variables { names: vec![
-                "tb._tmp",
-                "tb.clk",
-                "tb.overflow",
-                "tb.reset"
+                "tb _tmp",
+                "tb clk",
+                "tb overflow",
+                "tb reset"
             ].into_iter().map(str::to_string).collect()
         })).await?;
         expect_response!(rx, WcpSCMessage::response(WcpResponse::add_variables(indices)));
@@ -240,10 +241,10 @@ wcp_test! {
 
         tx.send(WcpCSMessage::command(
             proto::WcpCommand::add_variables { names: vec![
-                "tb._tmp",
-                "tb.clk",
-                "tb.overflow",
-                "tb.reset"
+                "tb _tmp",
+                "tb clk",
+                "tb overflow",
+                "tb reset"
             ].into_iter().map(str::to_string).collect()
         })).await?;
 
