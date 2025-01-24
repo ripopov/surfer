@@ -81,8 +81,14 @@ impl ScopeRefExt for ScopeRef {
     }
 
     /// Creates a ScopeRef from a string with each scope separated by `.`
-    fn from_hierarchy_string(s: &str) -> Self {
+    fn from_dot_hierarchy_string(s: &str) -> Self {
         let strs = s.split('.').map(std::string::ToString::to_string).collect();
+        let id = ScopeId::default();
+        Self { strs, id }
+    }
+
+    fn from_space_hierarchy_string(s: &str) -> Self {
+        let strs = s.split(' ').map(std::string::ToString::to_string).collect();
         let id = ScopeId::default();
         Self { strs, id }
     }
@@ -124,9 +130,9 @@ impl VariableRefExt for VariableRef {
         Self { path, name, id }
     }
 
-    fn from_hierarchy_string(s: &str) -> Self {
+    fn from_hierarchy_string(s: &str, sep: char) -> Self {
         let components = s
-            .split('.')
+            .split(sep)
             .map(std::string::ToString::to_string)
             .collect::<Vec<_>>();
 
@@ -143,6 +149,14 @@ impl VariableRefExt for VariableRef {
                 id: VarId::default(),
             }
         }
+    }
+
+    fn from_dot_hierarchy_string(s: &str) -> Self {
+        Self::from_hierarchy_string(s, '.')
+    }
+
+    fn from_space_hierarchy_string(s: &str) -> Self {
+        Self::from_hierarchy_string(s, ' ')
     }
 
     /// A human readable full path to the scope
