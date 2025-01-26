@@ -46,10 +46,10 @@ impl State {
                         if let Some(waves) = &self.waves {
                             let ids = self
                                 .get_displayed_items(waves)
-                                .iter()
-                                .map(|i| format!("{}", i.0))
-                                .collect_vec();
-                            self.send_response(WcpResponse::get_item_list(ids));
+                                .into_iter()
+                                .map(|id| id.into())
+                                .collect();
+                            self.send_response(WcpResponse::get_item_list { ids });
                         } else {
                             self.send_error("No waveform loaded", vec![], "No waveform loaded");
                         }
@@ -109,7 +109,7 @@ impl State {
                                 return;
                             }
                         }
-                        self.send_response(WcpResponse::get_item_info(items));
+                        self.send_response(WcpResponse::get_item_info { info: items });
                     }
                     WcpCommand::add_variables { names } => {
                         if self.waves.is_some() {
@@ -125,9 +125,9 @@ impl State {
                             if let Some(cmd) = cmd {
                                 self.load_variables(cmd);
                             }
-                            self.send_response(WcpResponse::add_variables(
-                                ids.into_iter().map(|id| id.into()).collect_vec(),
-                            ));
+                            self.send_response(WcpResponse::add_variables {
+                                ids: ids.into_iter().map(|id| id.into()).collect_vec(),
+                            });
                             self.invalidate_draw_commands();
                         } else {
                             self.send_error(
@@ -151,9 +151,9 @@ impl State {
                             if let Some(cmd) = cmd {
                                 self.load_variables(cmd);
                             }
-                            self.send_response(WcpResponse::add_scope(
-                                ids.into_iter().map(|id| id.into()).collect_vec(),
-                            ));
+                            self.send_response(WcpResponse::add_scope {
+                                ids: ids.into_iter().map(|id| id.into()).collect_vec(),
+                            });
                             self.invalidate_draw_commands();
                         } else {
                             self.send_error("scope_add", vec![], "No waveform loaded");
