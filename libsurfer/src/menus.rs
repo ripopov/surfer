@@ -9,7 +9,7 @@ use crate::wave_container::{FieldRef, VariableRefExt};
 use crate::{
     clock_highlighting::clock_highlight_type_menu,
     config::{ArrowKeyBindings, HierarchyStyle},
-    displayed_item::{DisplayedFieldRef, DisplayedItem, DisplayedItemIndex},
+    displayed_item::{DisplayedFieldRef, DisplayedItem},
     message::Message,
     time::{timeformat_menu, timeunit_menu},
     variable_name_filter::variable_name_filter_type_menu,
@@ -346,15 +346,22 @@ impl State {
         path: Option<&FieldRef>,
         msgs: &mut Vec<Message>,
         ui: &mut Ui,
-        vidx: DisplayedItemIndex, // TODO convert to VisibleItemIndex
+        vidx: VisibleItemIndex,
     ) {
         let Some(waves) = &self.waves else { return };
 
         let (displayed_item_id, displayed_item) = waves
             .items_tree
-            .get_visible(VisibleItemIndex(vidx.0))
-            .map(|node| (node.item, &waves.displayed_items[&node.item]))
+            .get_visible(vidx)
+            .map(|node| (node.item_ref, &waves.displayed_items[&node.item_ref]))
             .unwrap();
+
+        let affect_selected = waves
+            .items_tree
+            .iter_visible_selected()
+            .map(|node| node.item_ref)
+            .contains(&displayed_item_id);
+        let affected_vidxs = if affect_selected { None } else { Some(vidx) };
 
         if let Some(path) = path {
             let dfr = DisplayedFieldRef {
@@ -375,16 +382,7 @@ impl State {
                     .then(|| {
                         ui.close_menu();
                         msgs.push(Message::ItemColorChange(
-                            if waves
-                                .items_tree
-                                .iter_visible_selected()
-                                .map(|node| node.item)
-                                .contains(&displayed_item_id)
-                            {
-                                None
-                            } else {
-                                Some(vidx)
-                            },
+                            affected_vidxs,
                             Some(color_name.clone()),
                         ));
                     });
@@ -409,16 +407,7 @@ impl State {
                     .then(|| {
                         ui.close_menu();
                         msgs.push(Message::ItemBackgroundColorChange(
-                            if waves
-                                .items_tree
-                                .iter_visible_selected()
-                                .map(|node| node.item)
-                                .contains(&displayed_item_id)
-                            {
-                                None
-                            } else {
-                                Some(vidx)
-                            },
+                            affected_vidxs,
                             Some(color_name.clone()),
                         ));
                     });
@@ -456,7 +445,7 @@ impl State {
                 if waves
                     .items_tree
                     .iter_visible_selected()
-                    .map(|node| node.item)
+                    .map(|node| node.item_ref)
                     .contains(&displayed_item_id)
                 {
                     Message::Batch(vec![
@@ -464,7 +453,7 @@ impl State {
                             waves
                                 .items_tree
                                 .iter_visible_selected()
-                                .map(|node| node.item)
+                                .map(|node| node.item_ref)
                                 .collect_vec(),
                         ),
                         Message::UnfocusItem,
@@ -493,6 +482,74 @@ impl State {
             if ui.button("Timeline").clicked() {
                 ui.close_menu();
                 msgs.push(Message::AddTimeLine(Some(vidx)));
+            }
+        });
+
+        ui.menu_button("Group", |ui| {
+            let info = waves
+                .items_tree
+                .iter_visible_extra()
+                .find(|info| info.node.item_ref == displayed_item_id)
+                .expect("Inconsistent, could not find displayed signal in tree");
+
+            if ui.button("Create").clicked() {
+                ui.close_menu();
+
+                let mut items = if affect_selected {
+                    waves
+                        .items_tree
+                        .iter_selected()
+                        .map(|node| node.item_ref)
+                        .collect::<Vec<_>>()
+                } else {
+                    vec![]
+                };
+                // the focused item may not yet be selected, so add it
+                if affect_selected {
+                    if let Some(focused_item_node) = waves
+                        .focused_item
+                        .and_then(|focused_item| waves.items_tree.get_visible(focused_item))
+                    {
+                        items.push(focused_item_node.item_ref);
+                    }
+                }
+
+                // the clicked item may not be selected yet, add it
+                items.push(displayed_item_id);
+
+                msgs.push(Message::GroupNew {
+                    name: None,
+                    before: Some(info.idx),
+                    items: Some(items),
+                })
+            }
+            if matches!(displayed_item, DisplayedItem::Group(_)) {
+                if ui.button("Dissolve").clicked() {
+                    ui.close_menu();
+                    msgs.push(Message::GroupDissolve(Some(displayed_item_id)))
+                }
+
+                let (text, msg, msg_recursive) = if info.node.unfolded {
+                    (
+                        "Collapse",
+                        Message::GroupFold(Some(displayed_item_id)),
+                        Message::GroupFoldRecursive(Some(displayed_item_id)),
+                    )
+                } else {
+                    (
+                        "Expand",
+                        Message::GroupUnfold(Some(displayed_item_id)),
+                        Message::GroupUnfold(Some(displayed_item_id)),
+                    )
+                };
+                if ui.button(text).clicked() {
+                    ui.close_menu();
+                    msgs.push(msg)
+                }
+                if ui.button(text.to_owned() + " recursive").clicked() {
+                    ui.close_menu();
+                    msgs.push(msg_recursive)
+                }
             }
         });
     }
@@ -568,7 +625,7 @@ impl State {
                         if waves
                             .items_tree
                             .iter_visible_selected()
-                            .map(|node| node.item)
+                            .map(|node| node.item_ref)
                             .contains(&displayed_field_ref.item)
                         {
                             None

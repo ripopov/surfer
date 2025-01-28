@@ -3,7 +3,7 @@ use std::iter::zip;
 use std::{fs, str::FromStr};
 
 use crate::config::{ArrowKeyBindings, HierarchyStyle};
-use crate::displayed_item::DisplayedItemIndex;
+use crate::displayed_item_tree::{Node, VisibleItemIndex};
 use crate::lazy_static;
 use crate::transaction_container::StreamScopeRef;
 use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, VariableRefExt};
@@ -93,11 +93,16 @@ pub fn get_parser(state: &State) -> Command<Message> {
     let displayed_items = match &state.waves {
         Some(v) => v
             .items_tree
-            .iter()
+            .iter_visible()
             .enumerate()
             .map(
-                |(idx, crate::displayed_item_tree::Node { item: item_id, .. })| {
-                    let idx = DisplayedItemIndex(idx);
+                |(
+                    vidx,
+                    Node {
+                        item_ref: item_id, ..
+                    },
+                )| {
+                    let idx = VisibleItemIndex(vidx);
                     let item = &v.displayed_items[item_id];
                     match item {
                         DisplayedItem::Variable(var) => format!(
@@ -165,10 +170,7 @@ pub fn get_parser(state: &State) -> Command<Message> {
         waves
             .items_tree
             .iter()
-            .map(|crate::displayed_item_tree::Node { item, .. }| {
-                let x = waves.displayed_items.get(item);
-                x
-            })
+            .map(|Node { item_ref, .. }| waves.displayed_items.get(item_ref))
             .filter_map(|item| match item {
                 Some(DisplayedItem::Marker(marker)) => Some((marker.name.clone(), marker.idx)),
                 _ => None,
@@ -661,12 +663,8 @@ pub fn get_parser(state: &State) -> Command<Message> {
                     Box::new(|name| {
                         let trimmed = name.trim();
                         Some(Command::Terminal(Message::GroupNew {
-                            name: if !trimmed.is_empty() {
-                                Some(trimmed.to_owned())
-                            } else {
-                                None
-                            },
-                            target_position: None,
+                            name: (!trimmed.is_empty()).then_some(trimmed.to_owned()),
+                            before: None,
                             items: None,
                         }))
                     }),
