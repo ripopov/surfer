@@ -9,8 +9,8 @@ use surfer_translation_types::{TranslationPreference, Translator, VariableValue}
 
 use crate::data_container::DataContainer;
 use crate::displayed_item::{
-    DisplayedDivider, DisplayedFieldRef, DisplayedGroup, DisplayedItem, DisplayedItemIndex,
-    DisplayedItemRef, DisplayedStream, DisplayedTimeLine, DisplayedVariable,
+    DisplayedDivider, DisplayedFieldRef, DisplayedGroup, DisplayedItem, DisplayedItemRef,
+    DisplayedStream, DisplayedTimeLine, DisplayedVariable,
 };
 use crate::displayed_item_tree::{DisplayedItemTree, ItemIndex, TargetPosition, VisibleItemIndex};
 use crate::graphics::{Graphic, GraphicId};
@@ -60,7 +60,7 @@ pub struct WaveData {
     pub viewports: Vec<Viewport>,
     pub cursor: Option<BigInt>,
     pub markers: HashMap<u8, BigInt>,
-    pub focused_item: Option<DisplayedItemIndex>,
+    pub focused_item: Option<VisibleItemIndex>,
     pub focused_transaction: (Option<TransactionRef>, Option<Transaction>),
     pub default_variable_name_type: VariableNameType,
     pub scroll_offset: f32,
@@ -434,7 +434,7 @@ impl WaveData {
 
             indices.push(self.insert_item(new_variable, Some(target_position)));
             target_position = TargetPosition {
-                before: target_position.before + 1,
+                before: ItemIndex(target_position.before.0 + 1),
                 level: target_position.level,
             }
         }
@@ -444,24 +444,22 @@ impl WaveData {
     }
 
     pub fn remove_displayed_item(&mut self, id: DisplayedItemRef) {
-        let Some((idx, _)) = self
+        let Some(idx) = self
             .items_tree
             .iter()
             .enumerate()
-            .find(|(_, node)| node.item == id)
+            .find(|(_, node)| node.item_ref == id)
+            .map(|(idx, _)| ItemIndex(idx))
         else {
             return;
         };
 
         let focused_item_ref = self
             .focused_item
-            .and_then(|vidx| self.items_tree.get_visible(VisibleItemIndex(vidx.0)))
-            .map(|node| node.item);
+            .and_then(|vidx| self.items_tree.get_visible(vidx))
+            .map(|node| node.item_ref);
 
-        for removed_ref in self
-            .items_tree
-            .remove_recursive(crate::displayed_item_tree::ItemIndex(idx))
-        {
+        for removed_ref in self.items_tree.remove_recursive(idx) {
             if let Some(DisplayedItem::Marker(m)) = self.displayed_items.remove(&removed_ref) {
                 self.markers.remove(&m.idx);
             }
@@ -471,17 +469,13 @@ impl WaveData {
             match self
                 .items_tree
                 .iter_visible()
-                .find_position(|node| node.item == focused_item_ref)
-                .map(|(idx, _)| DisplayedItemIndex(idx))
+                .find_position(|node| node.item_ref == focused_item_ref)
+                .map(|(vidx, _)| VisibleItemIndex(vidx))
             {
-                Some(idx) => Some(idx),
+                Some(vidx) => Some(vidx),
                 None if self
-                    .items_tree
-                    .to_displayed(VisibleItemIndex(
-                        self.focused_item
-                            .expect("should be ensured by check above")
-                            .0,
-                    ))
+                    .focused_item
+                    .and_then(|focused_vidx| self.items_tree.to_displayed(focused_vidx))
                     .is_some() =>
                 {
                     Some(self.focused_item.unwrap())
@@ -491,12 +485,12 @@ impl WaveData {
                     .iter_visible()
                     .count()
                     .checked_sub(1)
-                    .map(DisplayedItemIndex),
+                    .map(VisibleItemIndex),
             }
         })
     }
 
-    pub fn add_divider(&mut self, name: Option<String>, vidx: Option<DisplayedItemIndex>) {
+    pub fn add_divider(&mut self, name: Option<String>, vidx: Option<VisibleItemIndex>) {
         self.insert_item(
             DisplayedItem::Divider(DisplayedDivider {
                 color: None,
@@ -507,7 +501,7 @@ impl WaveData {
         );
     }
 
-    pub fn add_timeline(&mut self, vidx: Option<DisplayedItemIndex>) {
+    pub fn add_timeline(&mut self, vidx: Option<VisibleItemIndex>) {
         self.insert_item(
             DisplayedItem::TimeLine(DisplayedTimeLine {
                 color: None,
@@ -648,17 +642,15 @@ impl WaveData {
         }
     }
 
-    fn vidx_insert_position(&self, vidx: Option<DisplayedItemIndex>) -> Option<TargetPosition> {
+    fn vidx_insert_position(&self, vidx: Option<VisibleItemIndex>) -> Option<TargetPosition> {
         let vidx = vidx?;
-        let (node, index, _, _) = self
-            .items_tree
-            .get_visible_extra(VisibleItemIndex(vidx.0))?;
-        let level = match self.displayed_items.get(&node.item)? {
-            DisplayedItem::Group(_) if node.unfolded => node.level + 1,
-            _ => node.level,
+        let info = self.items_tree.get_visible_extra(vidx)?;
+        let level = match self.displayed_items.get(&info.node.item_ref)? {
+            DisplayedItem::Group(_) if info.node.unfolded => info.node.level + 1,
+            _ => info.node.level,
         };
         Some(TargetPosition {
-            before: index.0 + 1,
+            before: ItemIndex(info.idx.0 + 1),
             level,
         })
     }
@@ -671,9 +663,9 @@ impl WaveData {
     /// - otherwise insert index is past it on the same level
     pub fn focused_insert_position(&self) -> Option<TargetPosition> {
         let vidx = self.focused_item?;
-        let item_index = self.items_tree.to_displayed(VisibleItemIndex(vidx.0))?;
+        let item_index = self.items_tree.to_displayed(vidx)?;
         let node = self.items_tree.get(item_index)?;
-        let item = self.displayed_items.get(&node.item)?;
+        let item = self.displayed_items.get(&node.item_ref)?;
 
         // TODO add get_next_sibling to tree?
         let (before, level) = match item {
@@ -687,26 +679,29 @@ impl WaveData {
             }
             _ => (item_index.0 + 1, node.level),
         };
-        Some(TargetPosition { before, level })
+        Some(TargetPosition {
+            before: ItemIndex(before),
+            level,
+        })
     }
 
     pub fn end_insert_position(&self) -> TargetPosition {
         TargetPosition {
-            before: self.items_tree.len(),
+            before: ItemIndex(self.items_tree.len()),
             level: 0,
         }
     }
 
     pub fn index_for_ref_or_focus(&self, item_ref: Option<DisplayedItemRef>) -> Option<ItemIndex> {
         if let Some(item_ref) = item_ref {
-            self.items_tree.iter().enumerate().find_map(|(idx, node)| {
-                (node.item == item_ref).then_some(crate::displayed_item_tree::ItemIndex(idx))
-            })
+            self.items_tree
+                .iter()
+                .enumerate()
+                .find_map(|(idx, node)| (node.item_ref == item_ref).then_some(ItemIndex(idx)))
         } else if let Some(focused_item) = self.focused_item {
             self.items_tree
-                .iter_visible_extra()
-                .enumerate()
-                .find_map(|(vidx, (_, idx, _, _))| (vidx == focused_item.0).then_some(idx))
+                .get_visible_extra(focused_item)
+                .map(|info| info.idx)
         } else {
             None
         }
@@ -731,7 +726,11 @@ impl WaveData {
             .insert_item(item_ref, target_position)
             .unwrap();
         self.displayed_items.insert(item_ref, new_item);
-        self.focused_item = self.focused_item.map(|_| insert_index.0.into());
+        self.focused_item = self.focused_item.and_then(|_| {
+            self.items_tree
+                .iter_visible_extra()
+                .find_map(|info| (info.idx == insert_index).then_some(info.vidx))
+        });
         self.items_tree.xselect_all(false);
         item_ref
     }
@@ -766,7 +765,7 @@ impl WaveData {
     pub fn remove_placeholders(&mut self) {
         let removed_refs = self.items_tree.extract_recursive_if(|node| {
             matches!(
-                self.displayed_items.get(&node.item),
+                self.displayed_items.get(&node.item_ref),
                 Some(DisplayedItem::Placeholder(_))
             )
         });
@@ -795,7 +794,7 @@ impl WaveData {
     }
 
     /// Find the item at a given y-location.
-    pub fn get_item_at_y(&self, y: f32) -> Option<usize> {
+    pub fn get_item_at_y(&self, y: f32) -> Option<VisibleItemIndex> {
         if self.drawing_infos.is_empty() {
             return None;
         }
@@ -810,7 +809,7 @@ impl WaveData {
             .enumerate()
             .rev()
             .find(|(_, di)| di.top() <= threshold)
-            .map(|(idx, _)| idx)
+            .map(|(vidx, _)| VisibleItemIndex(vidx))
     }
 
     pub fn scroll_to_item(&mut self, idx: usize) {
@@ -835,15 +834,15 @@ impl WaveData {
     pub fn set_cursor_at_transition(
         &mut self,
         next: bool,
-        variable: Option<DisplayedItemIndex>,
+        variable: Option<VisibleItemIndex>,
         skip_zero: bool,
     ) {
-        if let Some(DisplayedItemIndex(vidx)) = variable.or(self.focused_item) {
+        if let Some(vidx) = variable.or(self.focused_item) {
             if let Some(cursor) = &self.cursor {
                 if let Some(DisplayedItem::Variable(variable)) = &self
                     .items_tree
-                    .get_visible(VisibleItemIndex(vidx))
-                    .and_then(|node| self.displayed_items.get(&node.item))
+                    .get_visible(vidx)
+                    .and_then(|node| self.displayed_items.get(&node.item_ref))
                 {
                     if let Ok(Some(res)) = self.inner.as_waves().unwrap().query_variable(
                         &variable.variable_ref,
@@ -900,7 +899,7 @@ impl WaveData {
                                         })
                                     })
                                 }) {
-                                    self.set_cursor_at_transition(next, Some(vidx.into()), false);
+                                    self.set_cursor_at_transition(next, Some(vidx), false);
                                 }
                             }
                         }
@@ -925,14 +924,17 @@ impl WaveData {
             .and_then(|r| r.to_bigint())
     }
 
-    pub fn get_displayed_item_index(&self, item: &DisplayedItemRef) -> Option<DisplayedItemIndex> {
+    pub fn get_displayed_item_index(
+        &self,
+        item_ref: &DisplayedItemRef,
+    ) -> Option<VisibleItemIndex> {
         // TODO check where this is called since it could now fail...
         self.items_tree
             .iter_visible()
             .enumerate()
-            .find_map(|(idx, node)| {
-                if node.item == *item {
-                    Some(DisplayedItemIndex(idx))
+            .find_map(|(vidx, node)| {
+                if node.item_ref == *item_ref {
+                    Some(VisibleItemIndex(vidx))
                 } else {
                     None
                 }

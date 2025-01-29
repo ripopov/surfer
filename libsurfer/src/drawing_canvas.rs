@@ -20,9 +20,8 @@ use surfer_translation_types::{
 use crate::clock_highlighting::draw_clock_edge;
 use crate::config::SurferTheme;
 use crate::data_container::DataContainer;
-use crate::displayed_item::{
-    DisplayedFieldRef, DisplayedItemIndex, DisplayedItemRef, DisplayedVariable,
-};
+use crate::displayed_item::{DisplayedFieldRef, DisplayedItemRef, DisplayedVariable};
+use crate::displayed_item_tree::VisibleItemIndex;
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
 use crate::translation::{TranslationResultExt, TranslatorList, ValueKindExt, VariableInfoExt};
 use crate::view::{DrawConfig, DrawingContext, ItemDrawingInfo};
@@ -338,7 +337,7 @@ impl State {
         let commands = waves
             .items_tree
             .iter_visible()
-            .map(|node| (node.item, waves.displayed_items.get(&node.item)))
+            .map(|node| (node.item_ref, waves.displayed_items.get(&node.item_ref)))
             .filter_map(|(id, item)| match item {
                 Some(DisplayedItem::Variable(variable_ref)) => Some((id, variable_ref)),
                 _ => None,
@@ -419,7 +418,7 @@ impl State {
         let displayed_streams = waves
             .items_tree
             .iter_visible()
-            .map(|node| node.item)
+            .map(|node| node.item_ref)
             .collect::<Vec<_>>()
             .par_iter()
             .map(|id| waves.displayed_items.get(id))
@@ -719,10 +718,10 @@ impl State {
         // direction is also in absolute coordinates, so we need to
         // compensate for that
         let y_zero = to_screen.transform_pos(Pos2::ZERO).y;
-        for (idx, drawing_info) in waves.drawing_infos.iter().enumerate() {
+        for (vidx, drawing_info) in waves.drawing_infos.iter().enumerate() {
             // Get background color
             let background_color =
-                &self.get_background_color(waves, drawing_info, DisplayedItemIndex(idx));
+                &self.get_background_color(waves, drawing_info, VisibleItemIndex(vidx));
 
             self.draw_background(
                 drawing_info,
@@ -849,7 +848,8 @@ impl State {
             }
         }
         let zero_y = (ctx.to_screen)(0., 0.).y;
-        for (idx, drawing_info) in waves.drawing_infos.iter().enumerate() {
+        for (vidx, drawing_info) in waves.drawing_infos.iter().enumerate() {
+            let vidx = VisibleItemIndex(vidx);
             // We draw in absolute coords, but the variable offset in the y
             // direction is also in absolute coordinates, so we need to
             // compensate for that
@@ -857,10 +857,8 @@ impl State {
 
             let displayed_item = waves
                 .items_tree
-                .get_visible(crate::displayed_item_tree::VisibleItemIndex(
-                    drawing_info.item_list_idx(),
-                ))
-                .and_then(|node| waves.displayed_items.get(&node.item));
+                .get_visible(drawing_info.item_list_idx())
+                .and_then(|node| waves.displayed_items.get(&node.item_ref));
             let color = displayed_item
                 .and_then(super::displayed_item::DisplayedItem::color)
                 .and_then(|color| self.config.theme.get_color(&color));
@@ -869,8 +867,7 @@ impl State {
                 ItemDrawingInfo::Variable(variable_info) => {
                     if let Some(commands) = draw_commands.get(&variable_info.displayed_field_ref) {
                         // Get background color and determine best text color
-                        let background_color =
-                            self.get_background_color(waves, drawing_info, DisplayedItemIndex(idx));
+                        let background_color = self.get_background_color(waves, drawing_info, vidx);
                         let text_color = self.config.theme.get_best_text_color(&background_color);
 
                         let color = *color.unwrap_or_else(|| {
@@ -921,7 +918,7 @@ impl State {
                             .get_best_text_color(&self.get_background_color(
                                 waves,
                                 drawing_info,
-                                DisplayedItemIndex(idx),
+                                vidx,
                             )),
                     );
                     waves.draw_ticks(
@@ -981,15 +978,13 @@ impl State {
         }
 
         let zero_y = (ctx.to_screen)(0., 0.).y;
-        for (idx, drawing_info) in waves.drawing_infos.iter().enumerate() {
+        for (vidx, drawing_info) in waves.drawing_infos.iter().enumerate() {
             let y_offset = drawing_info.top() - zero_y;
 
             let displayed_item = waves
                 .items_tree
-                .get_visible(crate::displayed_item_tree::VisibleItemIndex(
-                    drawing_info.item_list_idx(),
-                ))
-                .and_then(|node| waves.displayed_items.get(&node.item));
+                .get_visible(drawing_info.item_list_idx())
+                .and_then(|node| waves.displayed_items.get(&node.item_ref));
             let color = displayed_item
                 .and_then(super::displayed_item::DisplayedItem::color)
                 .and_then(|color| self.config.theme.get_color(&color));
@@ -1094,7 +1089,7 @@ impl State {
                             .get_best_text_color(&self.get_background_color(
                                 waves,
                                 drawing_info,
-                                DisplayedItemIndex(idx),
+                                VisibleItemIndex(vidx),
                             )),
                     );
                     waves.draw_ticks(
@@ -1402,11 +1397,10 @@ impl State {
         let timestamp = viewport.as_time_bigint(pos.x, frame_width, &num_timestamps);
         if let Some(utimestamp) = timestamp.to_biguint() {
             if let Some(vidx) = waves.get_item_at_y(pos.y) {
-                if let Some(node) = waves
-                    .items_tree
-                    .get_visible(crate::displayed_item_tree::VisibleItemIndex(vidx))
-                {
-                    if let DisplayedItem::Variable(variable) = &waves.displayed_items[&node.item] {
+                if let Some(node) = waves.items_tree.get_visible(vidx) {
+                    if let DisplayedItem::Variable(variable) =
+                        &waves.displayed_items[&node.item_ref]
+                    {
                         if let Ok(Some(res)) = waves
                             .inner
                             .as_waves()

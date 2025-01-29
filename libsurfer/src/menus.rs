@@ -9,7 +9,7 @@ use crate::wave_container::{FieldRef, VariableRefExt};
 use crate::{
     clock_highlighting::clock_highlight_type_menu,
     config::{ArrowKeyBindings, HierarchyStyle},
-    displayed_item::{DisplayedFieldRef, DisplayedItem, DisplayedItemIndex},
+    displayed_item::{DisplayedFieldRef, DisplayedItem},
     message::Message,
     time::{timeformat_menu, timeunit_menu},
     variable_name_filter::variable_name_filter_type_menu,
@@ -346,14 +346,14 @@ impl State {
         path: Option<&FieldRef>,
         msgs: &mut Vec<Message>,
         ui: &mut Ui,
-        vidx: DisplayedItemIndex, // TODO convert to VisibleItemIndex
+        vidx: VisibleItemIndex,
     ) {
         let Some(waves) = &self.waves else { return };
 
         let (displayed_item_id, displayed_item) = waves
             .items_tree
-            .get_visible(VisibleItemIndex(vidx.0))
-            .map(|node| (node.item, &waves.displayed_items[&node.item]))
+            .get_visible(vidx)
+            .map(|node| (node.item_ref, &waves.displayed_items[&node.item_ref]))
             .unwrap();
 
         if let Some(path) = path {
@@ -378,7 +378,7 @@ impl State {
                             if waves
                                 .items_tree
                                 .iter_visible_selected()
-                                .map(|node| node.item)
+                                .map(|node| node.item_ref)
                                 .contains(&displayed_item_id)
                             {
                                 None
@@ -412,7 +412,7 @@ impl State {
                             if waves
                                 .items_tree
                                 .iter_visible_selected()
-                                .map(|node| node.item)
+                                .map(|node| node.item_ref)
                                 .contains(&displayed_item_id)
                             {
                                 None
@@ -456,7 +456,7 @@ impl State {
                 if waves
                     .items_tree
                     .iter_visible_selected()
-                    .map(|node| node.item)
+                    .map(|node| node.item_ref)
                     .contains(&displayed_item_id)
                 {
                     Message::Batch(vec![
@@ -464,7 +464,7 @@ impl State {
                             waves
                                 .items_tree
                                 .iter_visible_selected()
-                                .map(|node| node.item)
+                                .map(|node| node.item_ref)
                                 .collect_vec(),
                         ),
                         Message::UnfocusItem,
@@ -568,7 +568,7 @@ impl State {
                         if waves
                             .items_tree
                             .iter_visible_selected()
-                            .map(|node| node.item)
+                            .map(|node| node.item_ref)
                             .contains(&displayed_field_ref.item)
                         {
                             None
