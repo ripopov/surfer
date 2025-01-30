@@ -3,7 +3,6 @@ use egui::{Context, Event, Key, Modifiers};
 use emath::Vec2;
 
 use crate::config::ArrowKeyBindings;
-use crate::displayed_item_tree::VisibleItemIndex;
 use crate::{
     message::Message,
     wave_data::{PER_SCROLL_EVENT, SCROLL_EVENTS_PER_PAGE},
@@ -73,6 +72,11 @@ impl State {
                             msgs.push(Message::ShowCommandPrompt(None))
                         }
                     }
+                    (Key::G, true, false, false) => msgs.push(Message::GroupNew {
+                        name: None,
+                        before: None,
+                        items: None,
+                    }),
                     (Key::Escape, true, false, false) => {
                         msgs.push(Message::InvalidateCount);
                         msgs.push(Message::ItemSelectionClear);
@@ -107,15 +111,7 @@ impl State {
                     }
                     (Key::A, true, false, false) => {
                         if modifiers.command {
-                            msgs.push(Message::Batch(vec![
-                                Message::FocusItem(VisibleItemIndex(0)),
-                                Message::ItemSelectRange(VisibleItemIndex(
-                                    self.waves
-                                        .as_ref()
-                                        .map_or(0, |w| w.items_tree.iter_visible().count() - 1),
-                                )),
-                                Message::UnfocusItem,
-                            ]));
+                            msgs.push(Message::ItemSelectAll);
                         } else {
                             msgs.push(Message::ToggleItemSelected(None));
                         }
