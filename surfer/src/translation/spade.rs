@@ -376,7 +376,7 @@ fn not_present_value(ty: &ConcreteType) -> TranslationResult {
             .enumerate()
             .map(|(i, t)| SubFieldTranslationResult::new(i, not_present_value(t)))
             .collect(),
-        ConcreteType::Struct { name: _, members } => members
+        ConcreteType::Struct { name: _, is_port: _, members } => members
             .iter()
             .map(|(n, t)| SubFieldTranslationResult::new(n, not_present_value(t)))
             .collect(),
@@ -386,6 +386,7 @@ fn not_present_value(ty: &ConcreteType) -> TranslationResult {
         ConcreteType::Enum { options } => not_present_enum_options(options),
         ConcreteType::Single { .. } => vec![],
         ConcreteType::Integer(_) => vec![],
+        ConcreteType::Bool(_) => vec![],
         ConcreteType::Backward(inner) | ConcreteType::Wire(inner) => {
             not_present_value(inner).subfields
         }
@@ -464,7 +465,7 @@ fn translate_concrete(
                 kind: handle_problematic!(),
             }
         }
-        ConcreteType::Struct { name: _, members } => {
+        ConcreteType::Struct { name: _, is_port: _, members } => {
             let mut subfields = vec![];
             let mut offset = 0;
             for (n, t) in members.iter() {
@@ -621,7 +622,7 @@ fn translate_concrete(
             kind: ValueKind::Normal,
             subfields: vec![],
         },
-        ConcreteType::Single { base: _, params: _ } | ConcreteType::Integer(_) => {
+        ConcreteType::Single { base: _, params: _ } | ConcreteType::Integer(_) | ConcreteType::Bool(_) => {
             TranslationResult {
                 val: ValueRepr::Bits(
                     mir_ty.size().to_u64().context("Size did not fit in u64")?,
@@ -650,7 +651,7 @@ fn info_from_concrete(ty: &ConcreteType) -> Result<VariableInfo> {
                 .map(|(i, inner)| Ok((format!("{i}"), info_from_concrete(inner)?)))
                 .collect::<Result<_>>()?,
         },
-        ConcreteType::Struct { name: _, members } => VariableInfo::Compound {
+        ConcreteType::Struct { name: _, is_port: _, members } => VariableInfo::Compound {
             subfields: members
                 .iter()
                 .map(|(f, inner)| Ok((f.0.clone(), info_from_concrete(inner)?)))
@@ -689,6 +690,7 @@ fn info_from_concrete(ty: &ConcreteType) -> Result<VariableInfo> {
         } => VariableInfo::Clock,
         ConcreteType::Single { .. } => VariableInfo::Bits,
         ConcreteType::Integer(_) => VariableInfo::Bits,
+        ConcreteType::Bool(_) => VariableInfo::Bits,
         ConcreteType::Backward(inner) => info_from_concrete(inner)?,
         ConcreteType::Wire(inner) => info_from_concrete(inner)?,
     };
@@ -727,6 +729,7 @@ fn descriptive_loc(expr: &Loc<Expression>) -> Option<Loc<()>> {
         | spade_hir::ExprKind::Match(_, _)
         | spade_hir::ExprKind::Block(_)
         | spade_hir::ExprKind::If(_, _, _)
+        | spade_hir::ExprKind::TypeLevelIf(_, _, _)
         | spade_hir::ExprKind::PipelineRef { .. }
         | spade_hir::ExprKind::StageValid
         | spade_hir::ExprKind::StageReady
