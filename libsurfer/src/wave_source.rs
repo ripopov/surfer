@@ -1,4 +1,5 @@
 use std::fmt::{Display, Formatter};
+use std::fs;
 use std::io::Cursor;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
@@ -54,6 +55,36 @@ impl WaveSource {
             WaveSource::File(path) => Some(path.as_path()),
             _ => None,
         }
+    }
+
+    pub fn path(&self) -> Option<&Utf8PathBuf> {
+        match self {
+            WaveSource::File(path) => Some(path),
+            WaveSource::DragAndDrop(Some(path)) => Some(path),
+            _ => None,
+        }
+    }
+
+    pub fn sibling_state_file(&self) -> Option<Utf8PathBuf> {
+        let path = self.path()?;
+        let directory = path.parent()?;
+        let paths = fs::read_dir(directory).ok()?;
+
+        for entry in paths {
+            let Ok(entry) = entry else { continue };
+            let path = entry.path();
+            let Some(extension) = path.extension() else {
+                continue;
+            };
+            if extension == "ron" {
+                let Ok(path) = Utf8PathBuf::from_path_buf(path) else {
+                    continue;
+                };
+                return Some(path);
+            }
+        }
+
+        return None;
     }
 }
 
