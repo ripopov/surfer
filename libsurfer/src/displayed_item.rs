@@ -1,6 +1,6 @@
 //! The items that are drawn in the main wave form view: waves, dividers, etc.
 use ecolor::Color32;
-use egui::{Context, FontSelection, Key, RichText, Style, WidgetText, Window};
+use egui::{Context, FontSelection, Key, RichText, Style, TextBuffer, WidgetText, Window};
 use emath::Align;
 use epaint::text::LayoutJob;
 use serde::{Deserialize, Serialize};
@@ -369,17 +369,16 @@ impl DisplayedItem {
         }
     }
 
-    pub fn background_color(&self) -> Option<String> {
-        let background_color = match self {
-            DisplayedItem::Variable(variable) => &variable.background_color,
-            DisplayedItem::Divider(divider) => &divider.background_color,
-            DisplayedItem::Marker(marker) => &marker.background_color,
-            DisplayedItem::TimeLine(timeline) => &timeline.background_color,
-            DisplayedItem::Placeholder(_) => &None,
-            DisplayedItem::Stream(stream) => &stream.background_color,
-            DisplayedItem::Group(group) => &group.background_color,
-        };
-        background_color.clone()
+    pub fn background_color(&self) -> Option<&str> {
+        match self {
+            DisplayedItem::Variable(variable) => variable.background_color.as_deref(),
+            DisplayedItem::Divider(divider) => divider.background_color.as_deref(),
+            DisplayedItem::Marker(marker) => marker.background_color.as_deref(),
+            DisplayedItem::TimeLine(timeline) => timeline.background_color.as_deref(),
+            DisplayedItem::Placeholder(_) => None,
+            DisplayedItem::Stream(stream) => stream.background_color.as_deref(),
+            DisplayedItem::Group(group) => group.background_color.as_deref(),
+        }
     }
 
     pub fn set_background_color(&mut self, color_name: Option<String>) {
