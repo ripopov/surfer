@@ -400,7 +400,7 @@ impl State {
             let selected_color = &displayed_item
                 .background_color()
                 .clone()
-                .unwrap_or_else(|| "__nocolor__".to_string());
+                .unwrap_or_else(|| "__nocolor__");
             for color_name in self.config.theme.colors.keys() {
                 ui.radio(selected_color == color_name, color_name)
                     .clicked()
@@ -413,7 +413,7 @@ impl State {
                     });
             }
             ui.separator();
-            ui.radio(selected_color == "__nocolor__", "Default")
+            ui.radio(*selected_color == "__nocolor__", "Default")
                 .clicked()
                 .then(|| {
                     ui.close_menu();
