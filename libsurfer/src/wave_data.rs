@@ -428,7 +428,7 @@ impl WaveData {
                 display_name: variable.name.clone(),
                 display_name_type: self.default_variable_name_type,
                 manual_name: None,
-                format: None,
+                format: Some(translator.name()),
                 field_formats: vec![],
             });
 

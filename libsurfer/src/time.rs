@@ -314,16 +314,6 @@ pub fn time_string(
     let wanted_exponent = wanted_timeunit.exponent();
     let data_exponent = timescale.unit.exponent();
     let exponent_diff = wanted_exponent - data_exponent;
-    let timeunit = if wanted_time_format.show_unit {
-        wanted_timeunit.to_string()
-    } else {
-        String::new()
-    };
-    let space = if wanted_time_format.show_space {
-        " ".to_string()
-    } else {
-        String::new()
-    };
     let timestring = if exponent_diff >= 0 {
         let precision = exponent_diff as usize;
         strip_trailing_zeros_and_period(format!(
@@ -341,7 +331,16 @@ pub fn time_string(
     };
     format!(
         "{scaledtime}{space}{timeunit}",
-        scaledtime = split_and_format_number(timestring, &wanted_time_format.format)
+        scaledtime = split_and_format_number(timestring, &wanted_time_format.format),
+        space = if wanted_time_format.show_space {
+            " "
+        } else {
+            ""
+        },
+        timeunit = wanted_time_format
+            .show_unit
+            .then_some(wanted_timeunit.to_string())
+            .unwrap_or_default()
     )
 }
 

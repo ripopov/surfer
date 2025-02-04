@@ -310,9 +310,9 @@ impl State {
             }
             Message::AddStreamOrGenerator(s) => {
                 let undo_msg = if let Some(gen_id) = s.gen_id {
-                    format!("Add generator(id: {})", gen_id)
+                    format!("Add generator (id: {})", gen_id)
                 } else {
-                    format!("Add stream(id: {})", s.stream_id)
+                    format!("Add stream (id: {})", s.stream_id)
                 };
                 self.save_current_canvas(undo_msg);
 
@@ -878,12 +878,10 @@ impl State {
                 }
             }
             Message::MoveTransaction { next } => {
-                let undo_msg = if next {
-                    "Move to next transaction"
-                } else {
-                    "Move to previous transaction"
-                };
-                self.save_current_canvas(undo_msg.to_string());
+                self.save_current_canvas(format!(
+                    "Move to {} transaction",
+                    if next { "next" } else { "previous" }
+                ));
                 if let Some(waves) = &mut self.waves {
                     if let Some(inner) = waves.inner.as_transactions() {
                         let mut transactions = waves
@@ -982,6 +980,7 @@ impl State {
                 #[cfg(feature = "spade")]
                 {
                     let sender = self.sys.channels.msg_sender.clone();
+
                     perform_work(move || {
                         #[cfg(feature = "spade")]
                         SpadeTranslator::init(&top, &state, sender);
@@ -1688,11 +1687,9 @@ impl State {
                 }
             }
             Message::DumpTree => {
-                let Some(waves) = self.waves.as_mut() else {
-                    return;
-                };
-
-                dump_tree(waves);
+                if let Some(waves) = self.waves.as_mut() {
+                    dump_tree(waves);
+                }
             }
             Message::GroupNew {
                 name,
