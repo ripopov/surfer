@@ -118,7 +118,7 @@ impl State {
                         if let Some(waves) = self.waves.as_mut() {
                             let variable_refs = variables
                                 .iter()
-                                .map(|n| VariableRef::from_hierarchy_string(n))
+                                .map(|n| VariableRef::from_space_hierarchy_string(n))
                                 .collect_vec();
                             let (cmd, ids) =
                                 waves.add_variables(&self.sys.translators, variable_refs, None);
@@ -142,7 +142,7 @@ impl State {
                             self.save_current_canvas(format!("Add scope {}", scope));
                         }
                         if let Some(waves) = self.waves.as_mut() {
-                            let scope = ScopeRef::from_hierarchy_string(scope);
+                            let scope = ScopeRef::from_space_hierarchy_string(scope);
 
                             let variables =
                                 waves.inner.as_waves().unwrap().variables_in_scope(&scope);

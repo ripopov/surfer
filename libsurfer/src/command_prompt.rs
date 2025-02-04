@@ -420,7 +420,7 @@ pub fn get_parser(state: &State) -> Command<Message> {
                             scopes,
                             Box::new(move |word| {
                                 Some(Command::Terminal(Message::AddScope(
-                                    ScopeRef::from_hierarchy_string(word),
+                                    ScopeRef::from_dot_hierarchy_string(word),
                                     recursive,
                                 )))
                             }),
@@ -445,7 +445,7 @@ pub fn get_parser(state: &State) -> Command<Message> {
                             scopes.clone(),
                             Box::new(|word| {
                                 Some(Command::Terminal(Message::SetActiveScope(
-                                    ScopeType::WaveScope(ScopeRef::from_hierarchy_string(word)),
+                                    ScopeType::WaveScope(ScopeRef::from_dot_hierarchy_string(word)),
                                 )))
                             }),
                         )
@@ -472,7 +472,7 @@ pub fn get_parser(state: &State) -> Command<Message> {
                             variables.clone(),
                             Box::new(|word| {
                                 Some(Command::Terminal(Message::AddVariables(vec![
-                                    VariableRef::from_hierarchy_string(word),
+                                    VariableRef::from_dot_hierarchy_string(word),
                                 ])))
                             }),
                         )
