@@ -229,15 +229,15 @@ pub struct DisplayedGroup {
 }
 
 impl DisplayedItem {
-    pub fn color(&self) -> Option<String> {
+    pub fn color(&self) -> Option<&str> {
         match self {
-            DisplayedItem::Variable(variable) => variable.color.clone(),
-            DisplayedItem::Divider(divider) => divider.color.clone(),
-            DisplayedItem::Marker(marker) => marker.color.clone(),
-            DisplayedItem::TimeLine(timeline) => timeline.color.clone(),
+            DisplayedItem::Variable(variable) => variable.color.as_deref(),
+            DisplayedItem::Divider(divider) => divider.color.as_deref(),
+            DisplayedItem::Marker(marker) => marker.color.as_deref(),
+            DisplayedItem::TimeLine(timeline) => timeline.color.as_deref(),
             DisplayedItem::Placeholder(_) => None,
-            DisplayedItem::Stream(stream) => stream.color.clone(),
-            DisplayedItem::Group(group) => group.color.clone(),
+            DisplayedItem::Stream(stream) => stream.color.as_deref(),
+            DisplayedItem::Group(group) => group.color.as_deref(),
         }
     }
 
@@ -369,17 +369,16 @@ impl DisplayedItem {
         }
     }
 
-    pub fn background_color(&self) -> Option<String> {
-        let background_color = match self {
-            DisplayedItem::Variable(variable) => &variable.background_color,
-            DisplayedItem::Divider(divider) => &divider.background_color,
-            DisplayedItem::Marker(marker) => &marker.background_color,
-            DisplayedItem::TimeLine(timeline) => &timeline.background_color,
-            DisplayedItem::Placeholder(_) => &None,
-            DisplayedItem::Stream(stream) => &stream.background_color,
-            DisplayedItem::Group(group) => &group.background_color,
-        };
-        background_color.clone()
+    pub fn background_color(&self) -> Option<&str> {
+        match self {
+            DisplayedItem::Variable(variable) => variable.background_color.as_deref(),
+            DisplayedItem::Divider(divider) => divider.background_color.as_deref(),
+            DisplayedItem::Marker(marker) => marker.background_color.as_deref(),
+            DisplayedItem::TimeLine(timeline) => timeline.background_color.as_deref(),
+            DisplayedItem::Placeholder(_) => None,
+            DisplayedItem::Stream(stream) => stream.background_color.as_deref(),
+            DisplayedItem::Group(group) => group.background_color.as_deref(),
+        }
     }
 
     pub fn set_background_color(&mut self, color_name: Option<String>) {
