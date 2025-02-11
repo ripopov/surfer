@@ -1,0 +1,35 @@
+[project]
+name = "python_surfer"
+version = "0.1.0"
+description = "Python library for interaction with [Surfer](https://surfer-project.org/)"
+authors = [
+    {name = "Rob Taylor", email = "rob.taylor@chipflow.io"},
+]
+dependencies = [
+    "pytest-cov>=6.0.0",
+]
+requires-python = ">=3.11"
+readme = "README.md"
+license = {text = "EUPL-1.2"}
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.25.2",
+    "maturin>=1.8.1",
+]
+doc = [
+    "sphinx>=8.1.3",
+]
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[tool.pdm]
+distribution = true
+
+[tool.pdm.scripts]
+test = "pytest tests/"
+test-cov = "pytest --cov=python_surfer --cov-report=html tests/"
+lint = "ruff check src/"
+format = "ruff format src/"
