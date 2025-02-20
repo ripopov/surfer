@@ -9,7 +9,7 @@ use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use log::{error, info, warn};
-use rand::distributions::{Alphanumeric, DistString};
+use rand::distr::{Alphanumeric, SampleString};
 use std::collections::HashMap;
 use std::io::{BufRead, Seek};
 use std::net::SocketAddr;
@@ -293,7 +293,7 @@ pub async fn server_main(
     // if no token was provided, we generate one
     let token = token.unwrap_or_else(|| {
         // generate a random ASCII token
-        Alphanumeric.sample_string(&mut rand::thread_rng(), RAND_TOKEN_LEN)
+        Alphanumeric.sample_string(&mut rand::rng(), RAND_TOKEN_LEN)
     });
 
     if token.len() < MIN_TOKEN_LEN {
