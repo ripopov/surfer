@@ -28,5 +28,5 @@ leb128.workspace = true
 http-body-util = "0.1.2"
 hyper = { version = "1.4", features = ["http1", "server"] }
 hyper-util = { version = "0.1.6", features = ["tokio"] }
-rand = "0.8.5"
+rand = "0.9"
 whoami = "1.5.1"
