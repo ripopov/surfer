@@ -163,7 +163,9 @@ impl WcpServer {
                 Err(e) => {
                     match e.classify() {
                         //error when the client disconnects
-                        serde_json::error::Category::Eof => return Err(e),
+                        serde_json::error::Category::Eof | serde_json::error::Category::Io => {
+                            return Err(e)
+                        }
                         _ => match e.io_error_kind() {
                             Some(std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
                                 continue;
