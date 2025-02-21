@@ -731,7 +731,7 @@ impl WaveData {
                 .iter_visible_extra()
                 .find_map(|info| (info.idx == insert_index).then_some(info.vidx))
         });
-        self.items_tree.xselect_all(false);
+        self.items_tree.xselect_all_visible(false);
         item_ref
     }
 
@@ -763,7 +763,7 @@ impl WaveData {
     }
 
     pub fn remove_placeholders(&mut self) {
-        let removed_refs = self.items_tree.extract_recursive_if(|node| {
+        let removed_refs = self.items_tree.drain_recursive_if(|node| {
             matches!(
                 self.displayed_items.get(&node.item_ref),
                 Some(DisplayedItem::Placeholder(_))
