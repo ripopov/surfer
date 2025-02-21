@@ -1761,7 +1761,7 @@ snapshot_ui!(save_and_start_with_state, || {
     // not with a separate load command like here
     let save_file = get_project_root()
         .unwrap()
-        .join("examples/save_and_start_with_state.ron");
+        .join("examples/save_and_start_with_state.surf");
     let mut state = State::new_default_config()
         .unwrap()
         .with_params(StartupParams {
@@ -2012,7 +2012,7 @@ snapshot_ui!(switch_and_switch_back, || {
 snapshot_ui!(save_and_load, || {
     let save_file = get_project_root()
         .unwrap()
-        .join("examples/save_and_load.ron");
+        .join("examples/save_and_load.surf");
     let mut state = State::new_default_config()
         .unwrap()
         .with_params(StartupParams {

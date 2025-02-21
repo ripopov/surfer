@@ -76,7 +76,7 @@ impl WaveSource {
             let Some(extension) = path.extension() else {
                 continue;
             };
-            if extension == "ron" {
+            if extension == "surf" {
                 let Ok(path) = Utf8PathBuf::from_path_buf(path) else {
                     continue;
                 };
@@ -214,7 +214,7 @@ impl State {
     ) -> Result<()> {
         match filename.extension() {
             Some("ftr") => self.load_transactions_from_file(filename, load_options),
-            Some("ron") => {
+            Some("surf") => {
                 self.load_state_file(Some(filename.into_std_path_buf()));
                 Ok(())
             }
@@ -289,7 +289,7 @@ impl State {
                 Err(anyhow!("Dropped an empty file"))
             } else {
                 if let Some(path) = path.clone() {
-                    if path.extension() == Some("ron") {
+                    if path.extension() == Some("surf") {
                         let sender = self.sys.channels.msg_sender.clone();
                         perform_async_work(async move {
                             let new_state = match ron::de::from_bytes(&bytes)
@@ -828,7 +828,7 @@ impl State {
             } else {
                 AsyncFileDialog::new()
                     .set_title("Load state")
-                    .add_filter("Surfer state files (*.ron)", &["ron"])
+                    .add_filter("Surfer state files (*.surf)", &["surf"])
                     .add_filter("All files", &["*"])
                     .pick_file()
                     .await
@@ -869,7 +869,7 @@ impl State {
             } else {
                 AsyncFileDialog::new()
                     .set_title("Save state")
-                    .add_filter("Surfer state files (*.ron)", &["ron"])
+                    .add_filter("Surfer state files (*.surf)", &["surf"])
                     .add_filter("All files", &["*"])
                     .save_file()
                     .await
