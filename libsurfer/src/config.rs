@@ -129,6 +129,13 @@ pub struct SurferLayout {
     pub zoom_factors: Vec<f32>,
     /// Default UI zoom factor
     pub default_zoom_factor: f32,
+    /// Fill high values in boolean waveforms
+    #[serde(default = "default_true")]
+    fill_high_values: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl SurferLayout {
@@ -176,6 +183,9 @@ impl SurferLayout {
     }
     pub fn show_parameters_in_scopes(&self) -> bool {
         self.show_parameters_in_scopes
+    }
+    pub fn fill_high_values(&self) -> bool {
+        self.fill_high_values
     }
 }
 

@@ -1343,6 +1343,7 @@ impl State {
             Message::SetClockHighlightType(new_type) => {
                 self.config.default_clock_highlight_type = new_type;
             }
+            Message::SetFillHighValues(fill) => self.fill_high_values = Some(fill),
             Message::AddMarker { time, name } => {
                 if let Some(name) = &name {
                     self.save_current_canvas(format!("Add marker {name} at {time}"));
