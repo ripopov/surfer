@@ -97,4 +97,10 @@ impl State {
         self.show_default_timeline
             .unwrap_or_else(|| self.config.layout.show_default_timeline())
     }
+
+    #[inline]
+    pub fn fill_high_values(&self) -> bool {
+        self.fill_high_values
+            .unwrap_or_else(|| self.config.layout.fill_high_values())
+    }
 }

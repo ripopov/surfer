@@ -900,6 +900,7 @@ impl State {
                                     color,
                                     y_offset,
                                     commands.is_clock && draw_clock_rising_marker,
+                                    self.fill_high_values(),
                                     ctx,
                                 );
                             } else {
@@ -1189,6 +1190,7 @@ impl State {
         color: Color32,
         offset: f32,
         draw_clock_marker: bool,
+        draw_background: bool,
         ctx: &mut DrawingContext,
     ) {
         if let (Some(prev_result), Some(new_result)) = (&prev_region.inner, &new_region.inner) {
@@ -1203,7 +1205,7 @@ impl State {
                     .value
                     .bool_drawing_spec(color, &self.config.theme, new_result.kind);
 
-            if let Some(old_bg) = old_bg {
+            if let (Some(old_bg), true) = (old_bg, draw_background) {
                 ctx.painter.add(RectShape::new(
                     Rect {
                         min: (ctx.to_screen)(*old_x, offset),
