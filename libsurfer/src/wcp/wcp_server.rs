@@ -163,15 +163,13 @@ impl WcpServer {
                 Err(e) => {
                     match e.classify() {
                         //error when the client disconnects
-                        serde_json::error::Category::Eof | serde_json::error::Category::Io => {
-                            return Err(e)
-                        }
+                        serde_json::error::Category::Eof => return Err(e),
                         _ => match e.io_error_kind() {
                             Some(std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
                                 continue;
                             }
-                            //if different error get next message and send error
-                            _ => {
+                            //if a recoverable IO error or a decoding error get next message and send error
+                            Some(std::io::ErrorKind::Interrupted) | None => {
                                 warn!("WCP S>C error: {e:?}\n");
 
                                 let _ = serde_json::to_writer(
@@ -184,6 +182,7 @@ impl WcpServer {
                                 );
                                 continue;
                             }
+                            _ => return Err(e),
                         },
                     }
                 }

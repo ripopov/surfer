@@ -10,7 +10,7 @@ use lazy_static::lazy_static;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::{
-    io::Read,
+    io::{self, Read},
     net::{Shutdown, TcpListener, TcpStream},
     thread,
     time::{Duration, Instant},
@@ -56,11 +56,22 @@ fn get_test_port() -> usize {
     *port
 }
 
+fn consume_stream(mut stream: &TcpStream) -> () {
+    let mut buf = [0; 1024];
+
+    stream.set_nonblocking(true).ok();
+    let _ = stream.read(&mut buf);
+    stream.set_nonblocking(false).ok();
+}
+
 fn get_json_response(mut stream: &TcpStream) -> Result<WcpSCMessage, serde_Error> {
     let mut de = serde_json::Deserializer::from_reader(DebugReader {
         r: SkipNullReader { r: &mut stream },
     });
-    WcpSCMessage::deserialize(&mut de)
+    let message = WcpSCMessage::deserialize(&mut de);
+    // Need to eat the message separator
+    consume_stream(stream);
+    message
 }
 
 fn connect(port: usize) -> TcpStream {
@@ -143,4 +154,45 @@ fn initiate() {
     } else {
         panic!("Failed to connect");
     }
+}
+
+fn is_connected(stream: &TcpStream) -> bool {
+    let mut buf = [0; 1];
+
+    // Set non-blocking mode
+    stream.set_nonblocking(true).ok();
+
+    // Try to peek at the stream
+    let result = stream.peek(&mut buf);
+
+    // Reset back to blocking mode if needed
+    stream.set_nonblocking(false).ok();
+
+    match result {
+        Ok(0) => false, // Connection closed (EOF)
+        Ok(_) => true,  // Data available
+        Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => true, // No data but still connected
+        Err(_) => false, // Other error, likely disconnected
+    }
+}
+
+#[test]
+fn long_pause() {
+    let mut state = State::new_default_config().unwrap();
+    let port = get_test_port();
+    state.update(Message::StartWcpServer {
+        address: Some(format!("127.0.0.1:{port}").to_string()),
+        initiate: false,
+    });
+    let stream = connect(port);
+    get_json_response(&stream).expect("failed to get WCP greeting");
+
+    // confirm that we can be silent for a while and still be connected
+    std::thread::sleep(Duration::from_millis(10000));
+    if !is_connected(&stream) {
+        panic!("No longer connected");
+    }
+    stream
+        .shutdown(Shutdown::Both)
+        .expect("failed to shutdown TCP session");
 }
