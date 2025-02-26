@@ -177,6 +177,7 @@ fn is_connected(stream: &TcpStream) -> bool {
 }
 
 #[test]
+#[ignore = "This test is long running and disabled by default"]
 fn long_pause() {
     let mut state = State::new_default_config().unwrap();
     let port = get_test_port();
