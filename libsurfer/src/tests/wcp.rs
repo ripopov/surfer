@@ -198,10 +198,10 @@ wcp_test! {
 
         tx.send(WcpCSMessage::command(
             proto::WcpCommand::add_variables { variables: vec![
-                "tb._tmp",
-                "tb.clk",
-                "tb.overflow",
-                "tb.reset"
+                "tb _tmp",
+                "tb clk",
+                "tb overflow",
+                "tb reset"
             ].into_iter().map(str::to_string).collect()
         })).await?;
         expect_response!(rx, WcpSCMessage::response(WcpResponse::add_variables{
@@ -243,10 +243,10 @@ wcp_test! {
 
         tx.send(WcpCSMessage::command(
             proto::WcpCommand::add_variables { variables: vec![
-                "tb._tmp",
-                "tb.clk",
-                "tb.overflow",
-                "tb.reset"
+                "tb _tmp",
+                "tb clk",
+                "tb overflow",
+                "tb reset"
             ].into_iter().map(str::to_string).collect()
         })).await?;
 
