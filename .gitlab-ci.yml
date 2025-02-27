@@ -316,6 +316,10 @@ macos-aarch64_build:
         paths:
             - surfer_macos-aarch64.zip
         expire_in: 1 week
+  # macOS runners are not available for "normal" GitLab users, but we are
+  # part of the open source program.
+    rules:
+        - if: '$CI_PROJECT_NAMESPACE == "surfer-project"'
 
 trigger-docs:
     stage: deploy
