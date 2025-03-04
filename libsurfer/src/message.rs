@@ -267,6 +267,8 @@ pub enum Message {
         next: bool,
     },
     VariableValueToClipbord(Option<VisibleItemIndex>),
+    VariableNameToClipboard(Option<VisibleItemIndex>),
+    VariableFullNameToClipboard(Option<VisibleItemIndex>),
     InvalidateDrawCommands,
     AddGraphic(GraphicId, Graphic),
     RemoveGraphic(GraphicId),
