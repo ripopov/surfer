@@ -267,7 +267,7 @@ fn controls_listing(ui: &mut Ui) {
             "b",
             "Show or hide the design hierarchy",
         ),
-        (icons::MENU_FILL, "m", "Show or hide menu"),
+        (icons::MENU_FILL, "Alt+m", "Show or hide menu"),
         (icons::TOOLS_FILL, "t", "Show or hide toolbar"),
     ];
 
