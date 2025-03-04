@@ -1605,6 +1605,9 @@ impl State {
                     }
                 }
             }
+            Message::SetShowFileEntries(b) => {
+                self.show_file_entries = b;
+            }
             Message::Undo(count) => {
                 if let Some(waves) = &mut self.waves {
                     for _ in 0..count {

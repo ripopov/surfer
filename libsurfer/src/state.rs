@@ -56,6 +56,7 @@ pub struct State {
     pub(crate) show_variable_direction: Option<bool>,
     pub(crate) show_empty_scopes: Option<bool>,
     pub(crate) show_parameters_in_scopes: Option<bool>,
+    pub(crate) show_file_entries: bool,
     #[serde(default)]
     pub(crate) highlight_focused: Option<bool>,
 
@@ -141,6 +142,7 @@ impl State {
             show_url_entry: false,
             show_quick_start: false,
             show_reload_suggestion: None,
+            show_file_entries: true,
             rename_target: None,
             variable_name_filter_focused: false,
             variable_name_filter_type: VariableNameFilterType::Fuzzy,
