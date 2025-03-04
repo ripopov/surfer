@@ -83,32 +83,35 @@ impl State {
                 ui.separator();
             }
             // Files
-            add_toolbar_button(
-                ui,
-                msgs,
-                icons::FOLDER_OPEN_FILL,
-                "Open file...",
-                Message::OpenFileDialog(OpenMode::Open),
-                true,
-            );
-            add_toolbar_button(
-                ui,
-                msgs,
-                icons::DOWNLOAD_CLOUD_FILL,
-                "Open URL...",
-                Message::SetUrlEntryVisible(true),
-                true,
-            );
-            #[cfg(not(target_arch = "wasm32"))]
-            add_toolbar_button(
-                ui,
-                msgs,
-                icons::REFRESH_LINE,
-                "Reload",
-                Message::ReloadWaveform(self.config.behavior.keep_during_reload),
-                wave_loaded,
-            );
-            ui.separator();
+            if self.show_file_entries {
+                add_toolbar_button(
+                    ui,
+                    msgs,
+                    icons::FOLDER_OPEN_FILL,
+                    "Open file...",
+                    Message::OpenFileDialog(OpenMode::Open),
+                    true,
+                );
+                add_toolbar_button(
+                    ui,
+                    msgs,
+                    icons::DOWNLOAD_CLOUD_FILL,
+                    "Open URL...",
+                    Message::SetUrlEntryVisible(true),
+                    true,
+                );
+                #[cfg(not(target_arch = "wasm32"))]
+                add_toolbar_button(
+                    ui,
+                    msgs,
+                    icons::REFRESH_LINE,
+                    "Reload",
+                    Message::ReloadWaveform(self.config.behavior.keep_during_reload),
+                    wave_loaded,
+                );
+
+                ui.separator();
+            }
             add_toolbar_button(
                 ui,
                 msgs,
