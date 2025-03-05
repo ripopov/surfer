@@ -198,7 +198,7 @@ macro_rules! snapshot_ui {
 macro_rules! snapshot_empty_state_with_msgs {
     ($name:ident, $msgs:expr) => {
         snapshot_ui! {$name, || {
-            let mut state = State::new_default_config().unwrap().with_params(StartupParams::empty());
+            let mut state = State::new_default_config().unwrap().with_params(StartupParams::default());
             for msg in $msgs {
                 state.update(msg);
             }
@@ -256,6 +256,7 @@ macro_rules! snapshot_ui_with_file_spade_and_msgs {
                     spade_top: spade_top.clone(),
                     spade_state,
                     startup_commands: vec![],
+                    ..Default::default()
                 });
 
             $initial_state_mod(&mut state);
@@ -331,9 +332,7 @@ fn render_readme_screenshot() {
                             .try_into()
                             .unwrap(),
                     )),
-                    spade_top: None,
-                    spade_state: None,
-                    startup_commands: vec![],
+                    ..Default::default()
                 });
 
             let load_start = std::time::Instant::now();
@@ -412,13 +411,13 @@ fn render_readme_screenshot() {
 }
 
 snapshot_ui! {startup_screen_looks_fine, || {
-    State::new_default_config().unwrap().with_params(StartupParams::empty())
+    State::new_default_config().unwrap().with_params(StartupParams::default())
 }}
 
 snapshot_ui!(menu_can_be_hidden, || {
     let mut state = State::new_default_config()
         .unwrap()
-        .with_params(StartupParams::empty());
+        .with_params(StartupParams::default());
     let msgs = [Message::ToggleMenu];
     for message in msgs {
         state.update(message);
@@ -429,7 +428,7 @@ snapshot_ui!(menu_can_be_hidden, || {
 snapshot_ui!(side_panel_can_be_hidden, || {
     let mut state = State::new_default_config()
         .unwrap()
-        .with_params(StartupParams::empty());
+        .with_params(StartupParams::default());
     let msgs = [Message::ToggleSidePanel];
     for message in msgs {
         state.update(message);
@@ -440,7 +439,7 @@ snapshot_ui!(side_panel_can_be_hidden, || {
 snapshot_ui!(toolbar_can_be_hidden, || {
     let mut state = State::new_default_config()
         .unwrap()
-        .with_params(StartupParams::empty());
+        .with_params(StartupParams::default());
     let msgs = [Message::ToggleToolbar];
     for message in msgs {
         state.update(message);
@@ -459,9 +458,7 @@ snapshot_ui!(overview_can_be_hidden, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
 
     loop {
@@ -492,9 +489,7 @@ snapshot_ui!(statusbar_can_be_hidden, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
 
     loop {
@@ -517,9 +512,7 @@ snapshot_ui!(statusbar_can_be_hidden, || {
 snapshot_ui! {example_vcd_renders, || {
     let mut state = State::new_default_config().unwrap().with_params(StartupParams {
         waves: Some(WaveSource::File(get_project_root().unwrap().join("examples/counter.vcd").try_into().unwrap())),
-        spade_top: None,
-        spade_state: None,
-        startup_commands: vec![]
+        ..Default::default()
     });
 
     loop {
@@ -568,9 +561,7 @@ snapshot_ui_with_file_and_msgs! {top_level_signals_have_no_aliasing, "examples/p
 snapshot_ui! {resizing_the_canvas_redraws, || {
     let mut state = State::new_default_config().unwrap().with_params(StartupParams {
         waves: Some(WaveSource::File(get_project_root().unwrap().join("examples/counter.vcd").try_into().unwrap())),
-        spade_top: None,
-        spade_state: None,
-        startup_commands: vec![]
+        ..Default::default()
     });
 
     loop {
@@ -1057,9 +1048,7 @@ snapshot_ui!(regex_error_indication, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
     loop {
         state.handle_async_messages();
@@ -1104,9 +1093,7 @@ snapshot_ui!(fuzzy_signal_filter_works, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
     loop {
         state.handle_async_messages();
@@ -1149,9 +1136,7 @@ snapshot_ui!(contain_signal_filter_works, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
     loop {
         state.handle_async_messages();
@@ -1194,9 +1179,7 @@ snapshot_ui!(regex_signal_filter_works, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
     loop {
         state.handle_async_messages();
@@ -1243,9 +1226,7 @@ snapshot_ui!(start_signal_filter_works, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
     loop {
         state.handle_async_messages();
@@ -1288,9 +1269,7 @@ snapshot_ui!(case_sensitive_signal_filter_works, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
     loop {
         state.handle_async_messages();
@@ -1335,9 +1314,7 @@ snapshot_ui!(load_keep_all_works, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
     wait_for_waves_fully_loaded(&mut state, 10);
 
@@ -1398,9 +1375,7 @@ snapshot_ui!(load_keep_signal_remove_unavailable_works, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
     wait_for_waves_fully_loaded(&mut state, 10);
 
@@ -1595,9 +1570,7 @@ snapshot_ui!(signals_can_be_added_after_file_switch, || {
         .unwrap()
         .with_params(StartupParams {
             waves: Some(WaveSource::File(project_root.join("examples/counter.vcd"))),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
 
     wait_for_waves_fully_loaded(&mut state, 10);
@@ -1689,9 +1662,7 @@ snapshot_ui!(rising_clock_markers, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
     loop {
         state.handle_async_messages();
@@ -1767,9 +1738,7 @@ snapshot_ui!(save_and_start_with_state, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
     wait_for_waves_fully_loaded(&mut state, 10);
 
@@ -1822,8 +1791,6 @@ snapshot_ui!(save_and_start_with_state, || {
         .map(|content| ron::from_str::<State>(&content).unwrap())
         .unwrap()
         .with_params(StartupParams {
-            spade_state: None,
-            spade_top: None,
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
@@ -1831,7 +1798,7 @@ snapshot_ui!(save_and_start_with_state, || {
                     .try_into()
                     .unwrap(),
             )),
-            startup_commands: vec![],
+            ..Default::default()
         });
 
     // for the tests, we always want the default config
@@ -1853,9 +1820,7 @@ snapshot_ui!(switch, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
 
     wait_for_waves_fully_loaded(&mut state, 10);
@@ -1928,9 +1893,7 @@ snapshot_ui!(switch_and_switch_back, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
 
     wait_for_waves_fully_loaded(&mut state, 10);
@@ -2016,9 +1979,7 @@ snapshot_ui!(save_and_load, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
 
     wait_for_waves_fully_loaded(&mut state, 10);
@@ -2059,9 +2020,7 @@ snapshot_ui!(save_and_load, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
     wait_for_waves_fully_loaded(&mut state, 10);
 
@@ -2143,9 +2102,7 @@ snapshot_ui!(arrow_drawing, || {
                     .try_into()
                     .unwrap(),
             )),
-            spade_top: None,
-            spade_state: None,
-            startup_commands: vec![],
+            ..Default::default()
         });
     loop {
         state.handle_async_messages();
