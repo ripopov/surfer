@@ -97,6 +97,10 @@ impl State {
                                     msgs.push(Message::AddMarker {
                                         time: cursor.clone(),
                                         name: None,
+                                        move_focus: self
+                                            .config
+                                            .layout
+                                            .move_focus_on_inserted_marker(),
                                     });
                                 }
                             }
