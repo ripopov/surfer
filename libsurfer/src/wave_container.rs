@@ -336,7 +336,7 @@ impl WaveContainer {
         match self {
             WaveContainer::Wellen(f) => f.load_all_params(),
             WaveContainer::Empty => bail!("Cannot load parameters from empty container."),
-            WaveContainer::Cxxrtl(c) => {
+            WaveContainer::Cxxrtl(_) => {
                 // Cxxrtl does not deal with parameters
                 Ok(None)
             }
