@@ -83,7 +83,7 @@ fn default_edge_space() -> f64 {
 }
 
 fn default_min_width() -> Absolute {
-    Absolute(2.0)
+    Absolute(0.5)
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
