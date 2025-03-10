@@ -612,10 +612,6 @@ impl CxxrtlContainer {
         Some(res)
     }
 
-    pub fn load_all_params(&mut self) {
-        // TODO
-    }
-
     pub fn load_variables<S: AsRef<VariableRef>, T: Iterator<Item = S>>(&mut self, variables: T) {
         let data = &mut self.data;
         for variable in variables {
