@@ -14,11 +14,13 @@ use std::collections::HashMap;
 
 pub use crate::field_ref::FieldRef;
 pub use crate::result::{
-    HierFormatResult, SubFieldFlatTranslationResult, SubFieldTranslationResult, TranslatedValue,
-    TranslationResult, ValueRepr,
+    HierFormatResult, NumericalValueRepr, SubFieldFlatTranslationResult, SubFieldTranslationResult,
+    TranslatedValue, TranslationResult, ValueRepr,
 };
 pub use crate::scope_ref::ScopeRef;
-pub use crate::translator::{translates_all_bit_types, BasicTranslator, Translator};
+pub use crate::translator::{
+    translates_all_bit_types, BasicTranslator, NumericTranslator, Translator,
+};
 pub use crate::variable_index::VariableIndex;
 pub use crate::variable_ref::VariableRef;
 

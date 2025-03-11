@@ -6,7 +6,7 @@ use std::ops::BitAnd;
 ///
 /// The output is equivalent to `uint / (2 ** lg_scaling_factor)` (without integer truncation
 /// through division)
-pub(crate) fn big_uint_to_ufixed(uint: &BigUint, lg_scaling_factor: i64) -> String {
+pub(crate) fn big_uint_to_ufixed(uint: &BigUint, lg_scaling_factor: i32) -> String {
     match lg_scaling_factor.cmp(&0) {
         Ordering::Less => {
             format!("{}", uint << (-lg_scaling_factor))
@@ -48,7 +48,7 @@ pub(crate) fn big_uint_to_ufixed(uint: &BigUint, lg_scaling_factor: i64) -> Stri
 /// The output is equivalent to `as_signed(uint) / (2 ** lg_scaling_factor)` (without integer
 /// truncation through division)
 /// where `as_signed()` interprets the `uint` as a signed value using two's complement.
-pub(crate) fn big_uint_to_sfixed(uint: &BigUint, num_bits: u64, lg_scaling_factor: i64) -> String {
+pub(crate) fn big_uint_to_sfixed(uint: &BigUint, num_bits: u64, lg_scaling_factor: i32) -> String {
     if num_bits == 0 {
         return "".to_string();
     }

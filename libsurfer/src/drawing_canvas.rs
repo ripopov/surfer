@@ -1,4 +1,5 @@
 use color_eyre::eyre::WrapErr;
+use color_eyre::Result;
 use ecolor::Color32;
 use egui::{PointerButton, Response, Sense, Ui};
 use egui_extras::{Column, TableBuilder};
@@ -16,19 +17,26 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::f64::consts::PI;
 use surfer_translation_types::{
-    SubFieldFlatTranslationResult, TranslatedValue, ValueKind, VariableInfo, VariableType,
+    NumericTranslator, SubFieldFlatTranslationResult, TranslatedValue, TranslationResult,
+    ValueKind, ValueRepr, VariableInfo, VariableType, VariableValue,
 };
 
+use crate::analog::{AnalogDisplayMode, AnalogRangeMode};
 use crate::clock_highlighting::draw_clock_edge;
 use crate::config::SurferTheme;
 use crate::data_container::DataContainer;
 use crate::displayed_item::{DisplayedFieldRef, DisplayedItemRef, DisplayedVariable};
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
-use crate::translation::{TranslationResultExt, TranslatorList, ValueKindExt, VariableInfoExt};
+use crate::translation::{
+    AnyTranslator, DynNumericTranslator, TranslationResultExt, TranslatorList, ValueKindExt,
+    VariableInfoExt,
+};
 use crate::view::{DrawConfig, DrawingContext, ItemDrawingInfo};
 use crate::viewport::Viewport;
-use crate::wave_container::{QueryResult, VariableRefExt};
+use crate::wave_container::{
+    QueryResult, VariableMeta, VariableRef, VariableRefExt, WaveContainer,
+};
 use crate::wave_data::WaveData;
 use crate::CachedDrawData::TransactionDrawData;
 use crate::{
@@ -36,50 +44,31 @@ use crate::{
     Message, State,
 };
 
-pub struct DrawnRegion {
-    inner: Option<TranslatedValue>,
+pub struct DigitalWaveformDrawRegion {
+    value: TranslatedValue,
     /// True if a transition should be drawn even if there is no change in the value
     /// between the previous and next pixels. Only used by the bool drawing logic to
     /// draw draw a vertical line and prevent apparent aliasing
     force_anti_alias: bool,
 }
 
-/// List of values to draw for a variable. It is an ordered list of values that should
-/// be drawn at the *start time* until the *start time* of the next value
-pub struct DrawingCommands {
-    is_bool: bool,
-    is_clock: bool,
-    values: Vec<(f32, DrawnRegion)>,
+pub struct AnalogPlotDrawData {
+    mode: AnalogDisplayMode,
+    normalization_range: (f64, f64),
+    values: Vec<(f32, f32)>,
 }
 
-impl DrawingCommands {
-    pub fn new_bool() -> Self {
-        Self {
-            values: vec![],
-            is_bool: true,
-            is_clock: false,
-        }
-    }
+pub enum DrawingGeometry {
+    DigitalWaveform {
+        clock: bool,
+        values: Vec<(f32, DigitalWaveformDrawRegion)>,
+    },
 
-    pub fn new_clock() -> Self {
-        Self {
-            values: vec![],
-            is_bool: true,
-            is_clock: true,
-        }
-    }
-
-    pub fn new_wide() -> Self {
-        Self {
-            values: vec![],
-            is_bool: false,
-            is_clock: false,
-        }
-    }
-
-    pub fn push(&mut self, val: (f32, DrawnRegion)) {
-        self.values.push(val);
-    }
+    // For displaying more complex types like numbers or strings.
+    InterpretedWaveform {
+        values: Vec<(f32, TranslatedValue)>,
+    },
+    AnalogPlot(AnalogPlotDrawData),
 }
 
 pub struct TxDrawingCommands {
@@ -91,19 +80,64 @@ pub struct TxDrawingCommands {
 struct VariableDrawCommands {
     clock_edges: Vec<f32>,
     display_id: DisplayedItemRef,
-    local_commands: HashMap<Vec<String>, DrawingCommands>,
+    geometries: HashMap<Vec<String>, DrawingGeometry>,
     local_msgs: Vec<Message>,
+}
+
+fn sample_variable_for_drawing(
+    waves: &WaveContainer,
+    var_ref: &VariableRef,
+    timestamps: &[(i32, num::BigUint)],
+) -> Result<Vec<(i32, VariableValue, bool)>> {
+    let mut samples = vec![];
+
+    // Iterate over all the time stamps to draw on
+    let mut next_change = timestamps.first().map(|t| t.1.clone()).unwrap_or_default();
+    for (i, (pixel, time)) in timestamps.iter().enumerate() {
+        let is_last = i == timestamps.len() - 1;
+
+        if *time < next_change && !is_last {
+            continue;
+        }
+
+        let prev_time = if i == 0 {
+            BigUint::ZERO
+        } else {
+            timestamps.get(i - 1).map(|t| t.1.clone()).unwrap()
+        };
+
+        let query_result = waves.query_variable(var_ref, time)?;
+
+        match query_result {
+            None => return Ok(vec![]),
+            Some(QueryResult { current, next }) => {
+                next_change = match next {
+                    Some(timestamp) => timestamp.clone(),
+                    None => timestamps.last().map(|t| t.1.clone()).unwrap_or_default(),
+                };
+
+                let (change_time, val) = match current {
+                    Some((change_time, val)) => (change_time, val),
+                    None => continue,
+                };
+
+                samples.push((*pixel, val, prev_time < change_time));
+            }
+        }
+    }
+
+    return Ok(samples);
 }
 
 fn variable_draw_commands(
     displayed_variable: &DisplayedVariable,
     display_id: DisplayedItemRef,
-    timestamps: &[(f32, num::BigUint)],
+    timestamps: &[(i32, num::BigUint)],
     waves: &WaveData,
     translators: &TranslatorList,
-    view_width: f32,
-    viewport_idx: usize,
 ) -> Option<VariableDrawCommands> {
+    let waves_container = waves.inner.as_waves().unwrap();
+
     let mut clock_edges = vec![];
     let mut local_msgs = vec![];
 
@@ -125,68 +159,42 @@ fn variable_draw_commands(
     let translator = waves.variable_translator(&displayed_field_ref, translators);
     // we need to get the variable info here to get the correct info for aliases
     let info = translator.variable_info(&meta).unwrap();
-    let num_timestamps = waves.num_timestamps().unwrap_or(1.into());
 
-    let mut local_commands: HashMap<Vec<_>, _> = HashMap::new();
+    let mut geometries: HashMap<Vec<_>, _> = HashMap::new();
 
     let mut prev_values = HashMap::new();
 
-    // In order to insert a final draw command at the end of a trace,
-    // we need to know if this is the last timestamp to draw
-    let end_pixel = timestamps.iter().last().map(|t| t.0).unwrap_or_default();
-    // The first pixel we actually draw is the second pixel in the
-    // list, since we skip one pixel to have a previous value
-    let start_pixel = timestamps.get(1).map(|t| t.0).unwrap_or_default();
-
-    // Iterate over all the time stamps to draw on
-    let mut next_change = timestamps.first().map(|t| t.0).unwrap_or_default();
-    for ((_, prev_time), (pixel, time)) in timestamps.iter().zip(timestamps.iter().skip(1)) {
-        let is_last_timestep = pixel == &end_pixel;
-        let is_first_timestep = pixel == &start_pixel;
-
-        if *pixel < next_change && !is_first_timestep && !is_last_timestep {
-            continue;
+    let samples = match sample_variable_for_drawing(
+        waves_container,
+        &displayed_variable.variable_ref,
+        timestamps,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Variable query error {e:#?}");
+            return None;
         }
+    };
 
-        let query_result = waves
-            .inner
-            .as_waves()
-            .unwrap()
-            .query_variable(&displayed_variable.variable_ref, time);
-        next_change = match &query_result {
-            Ok(Some(QueryResult {
-                next: Some(timestamp),
-                ..
-            })) => waves.viewports[viewport_idx].pixel_from_time(
-                &timestamp.to_bigint().unwrap(),
-                view_width,
-                &num_timestamps,
-            ),
-            // If we don't have a next timestamp, we don't need to recheck until the last time
-            // step
-            Ok(_) => timestamps.last().map(|t| t.0).unwrap_or_default(),
-            // If we get an error here, we'll let the next match block handle it, but we'll take
-            // note that we need to recheck every pixel until the end
-            _ => timestamps.first().map(|t| t.0).unwrap_or_default(),
+    for (subfield, subinfo) in VariableInfo::flatten(&info) {
+        let geometry = match subinfo {
+            VariableInfo::Bool => DrawingGeometry::DigitalWaveform {
+                clock: false,
+                values: vec![],
+            },
+            VariableInfo::Clock => DrawingGeometry::DigitalWaveform {
+                clock: true,
+                values: vec![],
+            },
+            _ => DrawingGeometry::InterpretedWaveform { values: vec![] },
         };
 
-        let (change_time, val) = match query_result {
-            Ok(Some(QueryResult {
-                current: Some((change_time, val)),
-                ..
-            })) => (change_time, val),
-            Ok(Some(QueryResult { current: None, .. })) | Ok(None) => continue,
-            Err(e) => {
-                error!("Variable query error {e:#?}");
-                continue;
-            }
-        };
+        geometries.insert(subfield, geometry);
+    }
 
-        // Check if the value remains unchanged between this pixel
-        // and the last
-        if &change_time < prev_time && !is_first_timestep && !is_last_timestep {
-            continue;
-        }
+    for (i, (pixel, val, changed_between_last_pixel)) in samples.iter().enumerate() {
+        let is_first_timestep = i == 0;
+        let is_last_sample = i == samples.len() - 1;
 
         let translation_result = match translator.translate(&meta, &val) {
             Ok(result) => result,
@@ -209,14 +217,6 @@ fn variable_draw_commands(
         );
 
         for SubFieldFlatTranslationResult { names, value } in fields {
-            let entry = local_commands.entry(names.clone()).or_insert_with(|| {
-                match info.get_subinfo(&names) {
-                    VariableInfo::Bool => DrawingCommands::new_bool(),
-                    VariableInfo::Clock => DrawingCommands::new_clock(),
-                    _ => DrawingCommands::new_wide(),
-                }
-            });
-
             let prev = prev_values.get(&names);
 
             // If the value changed between this and the previous pixel, we want to
@@ -224,46 +224,134 @@ fn variable_draw_commands(
             // only want to do this for root variables, because resolving when a
             // sub-field change is tricky without more information from the
             // translators
-            let anti_alias = &change_time > prev_time
+            let anti_alias = *changed_between_last_pixel
                 && names.is_empty()
                 && waves.inner.as_waves().unwrap().wants_anti_aliasing();
             let new_value = prev != Some(&value);
 
             // This is not the value we drew last time
-            if new_value || is_last_timestep || anti_alias {
+            if new_value || is_last_sample || anti_alias {
                 prev_values
                     .entry(names.clone())
                     .or_insert(value.clone())
                     .clone_from(&value);
 
-                if let VariableInfo::Clock = info.get_subinfo(&names) {
-                    match value.as_ref().map(|result| result.value.as_str()) {
-                        Some("1") => {
-                            if !is_last_timestep && !is_first_timestep {
-                                clock_edges.push(*pixel);
+                match geometries.get_mut(&names.clone()).unwrap() {
+                    DrawingGeometry::DigitalWaveform { clock, values } => {
+                        if let Some(trval) = value.as_ref() {
+                            values.push((
+                                *pixel as f32,
+                                DigitalWaveformDrawRegion {
+                                    value: trval.clone(),
+                                    force_anti_alias: anti_alias && !new_value,
+                                },
+                            ));
+
+                            if *clock {
+                                if !is_last_sample && !is_first_timestep {
+                                    clock_edges.push(*pixel as f32);
+                                }
                             }
                         }
-                        Some(_) => {}
-                        None => {}
                     }
-                }
 
-                entry.push((
-                    *pixel,
-                    DrawnRegion {
-                        inner: value,
-                        force_anti_alias: anti_alias && !new_value,
-                    },
-                ));
+                    DrawingGeometry::InterpretedWaveform { values } => {
+                        values.push((*pixel as f32, value.unwrap()));
+                    }
+
+                    _ => {}
+                }
             }
         }
     }
     Some(VariableDrawCommands {
         clock_edges,
         display_id,
-        local_commands,
+        geometries,
         local_msgs,
     })
+}
+
+fn variable_analog_draw_command(
+    displayed_variable: &DisplayedVariable,
+    display_id: DisplayedItemRef,
+    timestamps: &[(i32, num::BigUint)],
+    waves: &WaveData,
+    translators: &TranslatorList,
+) -> Option<VariableDrawCommands> {
+    let waves_container = waves.inner.as_waves().unwrap();
+
+    let meta = match waves_container
+        .variable_meta(&displayed_variable.variable_ref)
+        .context("failed to get variable meta")
+    {
+        Ok(meta) => meta,
+        Err(e) => {
+            warn!("{e:#?}");
+            return None;
+        }
+    };
+
+    let samples = match sample_variable_for_drawing(
+        waves_container,
+        &displayed_variable.variable_ref,
+        timestamps,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Variable query error {e:#?}");
+            return None;
+        }
+    };
+
+    let translator = match translators.get_translator(displayed_variable.format.as_ref().unwrap()) {
+        AnyTranslator::Numeric(translator) => translator,
+        _ => {
+            error!("Failed to get numeric translator. Disabling analog mode TODO");
+            return None;
+        }
+    };
+
+    let value_range = match displayed_variable.analog_view.range {
+        AnalogRangeMode::TypeRange => translator.variable_range(&meta),
+    };
+
+    let mut values = vec![];
+    for (pixel, val, _) in samples {
+        let translation_result = match translator.translate(&meta, &val) {
+            Ok(result) => result,
+            Err(e) => {
+                error!(
+                    "{translator_name} for {variable_name} failed. Disabling:",
+                    translator_name = translator.name(),
+                    variable_name = displayed_variable.variable_ref.full_path_string()
+                );
+                error!("{e:#}");
+                //local_msgs.push(Message::ResetVariableFormat(displayed_field_ref));
+                return None;
+            }
+        };
+
+        let (analog_val, _) = translation_result.as_f64();
+
+        values.push((pixel as f32, analog_val as f32));
+    }
+
+    let commands = HashMap::from([(
+        vec![],
+        DrawingGeometry::AnalogPlot(AnalogPlotDrawData {
+            mode: displayed_variable.analog_view.mode,
+            normalization_range: value_range,
+            values,
+        }),
+    )]);
+
+    return Some(VariableDrawCommands {
+        clock_edges: vec![],
+        display_id,
+        geometries: commands,
+        local_msgs: vec![],
+    });
 }
 
 impl State {
@@ -324,12 +412,12 @@ impl State {
             .par_bridge()
             .filter_map(|x| {
                 let time = waves.viewports[viewport_idx]
-                    .as_absolute_time(x as f64, frame_width, &num_timestamps)
+                    .as_absolute_time(x as f64 + 0.5, frame_width, &num_timestamps)
                     .0;
                 if time < 0. || time > max_time {
                     None
                 } else {
-                    Some((x as f32, time.to_biguint().unwrap_or_default()))
+                    Some((x, time.to_biguint().unwrap_or_default()))
                 }
             })
             .collect::<Vec<_>>();
@@ -350,27 +438,29 @@ impl State {
             // Iterate over the variables, generating draw commands for all the
             // subfields
             .filter_map(|(id, displayed_variable)| {
-                variable_draw_commands(
-                    displayed_variable,
-                    id,
-                    &timestamps,
-                    waves,
-                    translators,
-                    frame_width,
-                    viewport_idx,
-                )
+                if displayed_variable.analog_view.enabled {
+                    variable_analog_draw_command(
+                        displayed_variable,
+                        id,
+                        &timestamps,
+                        waves,
+                        translators,
+                    )
+                } else {
+                    variable_draw_commands(displayed_variable, id, &timestamps, waves, translators)
+                }
             })
             .collect::<Vec<_>>();
 
         for VariableDrawCommands {
             clock_edges: mut new_clock_edges,
             display_id,
-            local_commands,
+            geometries,
             mut local_msgs,
         } in commands
         {
             msgs.append(&mut local_msgs);
-            for (field, val) in local_commands {
+            for (field, val) in geometries {
                 draw_commands.insert(
                     DisplayedFieldRef {
                         item: display_id,
@@ -867,7 +957,7 @@ impl State {
 
             match drawing_info {
                 ItemDrawingInfo::Variable(variable_info) => {
-                    if let Some(commands) = draw_commands.get(&variable_info.displayed_field_ref) {
+                    if let Some(command) = draw_commands.get(&variable_info.displayed_field_ref) {
                         // Get background color and determine best text color
                         let background_color = self.get_background_color(waves, drawing_info, vidx);
                         let text_color = self.config.theme.get_best_text_color(&background_color);
@@ -896,21 +986,29 @@ impl State {
                                 &self.config.theme.variable_default
                             }
                         });
-                        for (old, new) in commands.values.iter().zip(commands.values.iter().skip(1))
-                        {
-                            if commands.is_bool {
-                                self.draw_bool_transition(
-                                    (old, new),
-                                    new.1.force_anti_alias,
+                        match command {
+                            DrawingGeometry::AnalogPlot(data) => {
+                                self.draw_analog_plot(
+                                    data,
                                     color,
                                     y_offset,
                                     height_scaling_factor,
-                                    commands.is_clock && draw_clock_rising_marker,
                                     ctx,
                                 );
-                            } else {
-                                self.draw_region(
-                                    (old, new),
+                            }
+                            DrawingGeometry::DigitalWaveform { clock, values } => {
+                                self.draw_digital_waveform(
+                                    values,
+                                    color,
+                                    y_offset,
+                                    height_scaling_factor,
+                                    *clock && draw_clock_rising_marker,
+                                    ctx,
+                                );
+                            }
+                            DrawingGeometry::InterpretedWaveform { values } => {
+                                self.draw_value_waveform(
+                                    &values,
                                     color,
                                     y_offset,
                                     height_scaling_factor,
@@ -1137,18 +1235,18 @@ impl State {
         }
     }
 
-    fn draw_region(
+    fn draw_value_waveform(
         &self,
-        ((old_x, prev_region), (new_x, _)): (&(f32, DrawnRegion), &(f32, DrawnRegion)),
+        values: &Vec<(f32, TranslatedValue)>,
         user_color: Color32,
         offset: f32,
         height_scaling_factor: f32,
         ctx: &mut DrawingContext,
         text_color: Color32,
     ) {
-        if let Some(prev_result) = &prev_region.inner {
+        for ((old_x, prev_value), (new_x, _)) in values.iter().zip(values.iter().skip(1)) {
             let stroke = Stroke {
-                color: prev_result.kind.color(user_color, ctx.theme),
+                color: prev_value.kind.color(user_color, ctx.theme),
                 width: self.config.theme.linewidth,
             };
 
@@ -1177,16 +1275,16 @@ impl State {
             let num_chars = (text_area / char_width).floor() as usize;
             let fits_text = num_chars >= 1;
 
+            let text = &prev_value.value;
+
             if fits_text {
-                let content = if prev_result.value.len() > num_chars {
-                    prev_result
-                        .value
-                        .chars()
+                let content = if text.len() > num_chars {
+                    text.chars()
                         .take(num_chars - 1)
                         .chain(['…'])
                         .collect::<String>()
                 } else {
-                    prev_result.value.to_string()
+                    text.to_string()
                 };
 
                 ctx.painter.text(
@@ -1200,28 +1298,112 @@ impl State {
         }
     }
 
-    fn draw_bool_transition(
+    fn draw_analog_plot(
         &self,
-        ((old_x, prev_region), (new_x, new_region)): (&(f32, DrawnRegion), &(f32, DrawnRegion)),
-        force_anti_alias: bool,
+        data: &AnalogPlotDrawData,
+        color: Color32,
+        offset: f32,
+        height_scaling_factor: f32,
+        ctx: &mut DrawingContext,
+    ) {
+        for (old, new) in data.values.iter().zip(data.values.iter().skip(1)) {
+            let trace_coords = |x, y| {
+                (ctx.to_screen)(
+                    x,
+                    y as f32 * ctx.cfg.line_height * height_scaling_factor + offset,
+                )
+            };
+
+            let (min, max) = data.normalization_range;
+            let normalize = |y: f64| {
+                if max == min {
+                    0.0
+                } else {
+                    (y - min) / (max - min)
+                }
+            };
+
+            let old_height = normalize(old.1 as f64);
+            let new_height = normalize(new.1 as f64);
+
+            let line_points = match data.mode {
+                AnalogDisplayMode::LinearInterpolation => vec![
+                    trace_coords(old.0, 1. - old_height),
+                    trace_coords(new.0, 1. - new_height),
+                ],
+                AnalogDisplayMode::Step => vec![
+                    trace_coords(old.0, 1. - old_height),
+                    trace_coords(new.0, 1. - old_height),
+                    trace_coords(new.0, 1. - new_height),
+                ],
+            };
+
+            let stroke = Stroke {
+                color: color,
+                width: self.config.theme.linewidth,
+            };
+
+            ctx.painter.add(PathShape::line(line_points, stroke));
+        }
+    }
+
+    fn bool_drawing_spec(
+        str: &str,
+        user_color: Color32,
+        theme: &SurferTheme,
+        value_kind: ValueKind,
+    ) -> (f32, Color32, Option<Color32>) {
+        let color = value_kind.color(user_color, theme);
+        let (height, background) = match (value_kind, str) {
+            (ValueKind::HighImp, _) => (0.5, None),
+            (ValueKind::Undef, _) => (0.5, None),
+            (ValueKind::DontCare, _) => (0.5, None),
+            (ValueKind::Warn, _) => (0.5, None),
+            (ValueKind::Custom(_), _) => (0.5, None),
+            (ValueKind::Weak, other) => {
+                if other.to_lowercase() == "l" {
+                    (0., None)
+                } else {
+                    (1., Some(color.gamma_multiply(theme.waveform_opacity)))
+                }
+            }
+            (ValueKind::Normal, other) => {
+                if other == "0" {
+                    (0., None)
+                } else {
+                    (1., Some(color.gamma_multiply(theme.waveform_opacity)))
+                }
+            }
+        };
+        (height, color, background)
+    }
+
+    fn draw_digital_waveform(
+        &self,
+        values: &Vec<(f32, DigitalWaveformDrawRegion)>,
         color: Color32,
         offset: f32,
         height_scaling_factor: f32,
         draw_clock_marker: bool,
         ctx: &mut DrawingContext,
     ) {
-        if let (Some(prev_result), Some(new_result)) = (&prev_region.inner, &new_region.inner) {
+        for ((old_x, prev_region), (new_x, new_region)) in values.iter().zip(values.iter().skip(1))
+        {
             let trace_coords =
                 |x, y| (ctx.to_screen)(x, y * ctx.cfg.line_height * height_scaling_factor + offset);
 
-            let (old_height, old_color, old_bg) =
-                prev_result
-                    .value
-                    .bool_drawing_spec(color, &self.config.theme, prev_result.kind);
-            let (new_height, _, _) =
-                new_result
-                    .value
-                    .bool_drawing_spec(color, &self.config.theme, new_result.kind);
+            let (old_height, old_color, old_bg) = Self::bool_drawing_spec(
+                &prev_region.value.value,
+                color,
+                &self.config.theme,
+                prev_region.value.kind,
+            );
+            let (new_height, _, _) = Self::bool_drawing_spec(
+                &new_region.value.value,
+                color,
+                &self.config.theme,
+                new_region.value.kind,
+            );
 
             if let Some(old_bg) = old_bg {
                 ctx.painter.add(RectShape::new(
@@ -1246,7 +1428,7 @@ impl State {
                 width: self.config.theme.linewidth,
             };
 
-            if force_anti_alias {
+            if new_region.force_anti_alias {
                 ctx.painter.add(PathShape::line(
                     vec![trace_coords(*new_x, 0.0), trace_coords(*new_x, 1.0)],
                     stroke,
@@ -1485,49 +1667,6 @@ impl State {
 }
 
 impl WaveData {}
-
-trait VariableExt {
-    fn bool_drawing_spec(
-        &self,
-        user_color: Color32,
-        theme: &SurferTheme,
-        value_kind: ValueKind,
-    ) -> (f32, Color32, Option<Color32>);
-}
-
-impl VariableExt for String {
-    /// Return the height and color with which to draw this value if it is a boolean
-    fn bool_drawing_spec(
-        &self,
-        user_color: Color32,
-        theme: &SurferTheme,
-        value_kind: ValueKind,
-    ) -> (f32, Color32, Option<Color32>) {
-        let color = value_kind.color(user_color, theme);
-        let (height, background) = match (value_kind, self) {
-            (ValueKind::HighImp, _) => (0.5, None),
-            (ValueKind::Undef, _) => (0.5, None),
-            (ValueKind::DontCare, _) => (0.5, None),
-            (ValueKind::Warn, _) => (0.5, None),
-            (ValueKind::Custom(_), _) => (0.5, None),
-            (ValueKind::Weak, other) => {
-                if other.to_lowercase() == "l" {
-                    (0., None)
-                } else {
-                    (1., Some(color.gamma_multiply(theme.waveform_opacity)))
-                }
-            }
-            (ValueKind::Normal, other) => {
-                if other == "0" {
-                    (0., None)
-                } else {
-                    (1., Some(color.gamma_multiply(theme.waveform_opacity)))
-                }
-            }
-        };
-        (height, color, background)
-    }
-}
 
 fn handle_transaction_tooltip(
     response: Response,

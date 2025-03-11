@@ -9,6 +9,7 @@ use serde::Deserialize;
 use std::path::PathBuf;
 use surver::Status;
 
+use crate::analog::{AnalogDisplayMode, AnalogRangeMode};
 use crate::displayed_item_tree::{ItemIndex, VisibleItemIndex};
 use crate::graphics::{Graphic, GraphicId};
 use crate::transaction_container::{
@@ -89,6 +90,9 @@ pub enum Message {
     ItemNameChange(Option<VisibleItemIndex>, Option<String>),
     ItemHeightScalingFactorChange(Option<VisibleItemIndex>, f32),
     ChangeVariableNameType(Option<VisibleItemIndex>, VariableNameType),
+    VariableEnableAnalogView(Option<VisibleItemIndex>, bool),
+    VariableChangeAnalogMode(Option<VisibleItemIndex>, AnalogDisplayMode),
+    VariableChangeAnalogValueRange(Option<VisibleItemIndex>, AnalogRangeMode),
     ForceVariableNameTypes(VariableNameType),
     SetNameAlignRight(bool),
     SetClockHighlightType(ClockHighlightType),

@@ -6,6 +6,7 @@ use epaint::text::LayoutJob;
 use serde::{Deserialize, Serialize};
 use surfer_translation_types::VariableInfo;
 
+use crate::analog::AnalogViewSettings;
 use crate::config::SurferConfig;
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::transaction_container::TransactionStreamRef;
@@ -82,6 +83,8 @@ pub struct DisplayedVariable {
     pub format: Option<String>,
     pub field_formats: Vec<FieldFormat>,
     pub height_scaling_factor: Option<f32>,
+    #[serde(default)]
+    pub analog_view: AnalogViewSettings,
 }
 
 impl DisplayedVariable {
@@ -128,6 +131,7 @@ impl DisplayedVariable {
             format: self.format,
             field_formats: self.field_formats,
             height_scaling_factor: self.height_scaling_factor,
+            analog_view: self.analog_view,
         }
     }
 }
@@ -190,6 +194,7 @@ pub struct DisplayedPlaceholder {
     pub format: Option<String>,
     pub field_formats: Vec<FieldFormat>,
     pub height_scaling_factor: Option<f32>,
+    pub analog_view: AnalogViewSettings,
 }
 
 impl DisplayedPlaceholder {
@@ -209,6 +214,7 @@ impl DisplayedPlaceholder {
             format: self.format,
             field_formats: self.field_formats,
             height_scaling_factor: self.height_scaling_factor,
+            analog_view: self.analog_view,
         }
     }
 }

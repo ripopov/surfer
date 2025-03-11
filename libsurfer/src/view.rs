@@ -1959,10 +1959,14 @@ impl State {
 
                 if let Some(SubFieldFlatTranslationResult {
                     names: _,
-                    value: Some(TranslatedValue { value: v, kind: _ }),
+                    value:
+                        Some(TranslatedValue {
+                            value: str,
+                            kind: _,
+                        }),
                 }) = subfield
                 {
-                    Some(v.clone())
+                    Some(str.clone())
                 } else {
                     Some("-".to_string())
                 }

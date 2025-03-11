@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     sync::{atomic::AtomicBool, Arc},
 };
 use tokio::task::JoinHandle;

@@ -29,11 +29,13 @@ use clock::ClockTranslator;
 use instruction_decoder::Decoder;
 pub use instruction_translators::*;
 use itertools::Itertools;
+use num::Signed;
+use num::ToPrimitive;
 pub use numeric_translators::*;
 use surfer_translation_types::{
-    BasicTranslator, HierFormatResult, SubFieldFlatTranslationResult, TranslatedValue,
-    TranslationPreference, TranslationResult, Translator, ValueKind, ValueRepr, VariableEncoding,
-    VariableInfo, VariableValue,
+    BasicTranslator, HierFormatResult, NumericTranslator, NumericalValueRepr,
+    SubFieldFlatTranslationResult, TranslatedValue, TranslationPreference, TranslationResult,
+    Translator, ValueKind, ValueRepr, VariableEncoding, VariableInfo, VariableValue,
 };
 
 use crate::config::SurferTheme;
@@ -43,6 +45,7 @@ use crate::{message::Message, wave_container::VariableMeta};
 
 pub type DynTranslator = dyn Translator<VarId, ScopeId, Message>;
 pub type DynBasicTranslator = dyn BasicTranslator<VarId, ScopeId>;
+pub type DynNumericTranslator = dyn NumericTranslator<VarId, ScopeId>;
 
 fn translate_with_basic(
     t: &DynBasicTranslator,
@@ -59,6 +62,7 @@ fn translate_with_basic(
 
 pub enum AnyTranslator {
     Full(Box<DynTranslator>),
+    Numeric(Box<DynNumericTranslator>),
     Basic(Box<DynBasicTranslator>),
     #[cfg(feature = "python")]
     Python(python_translators::PythonTranslator),
@@ -75,6 +79,7 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
         match self {
             AnyTranslator::Full(t) => t.name(),
             AnyTranslator::Basic(t) => t.name(),
+            AnyTranslator::Numeric(t) => t.name(),
             #[cfg(feature = "python")]
             AnyTranslator::Python(t) => t.name(),
         }
@@ -88,6 +93,7 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
         match self {
             AnyTranslator::Full(t) => t.translate(variable, value),
             AnyTranslator::Basic(t) => translate_with_basic(&**t, variable, value),
+            AnyTranslator::Numeric(t) => t.translate(variable, value),
             #[cfg(feature = "python")]
             AnyTranslator::Python(t) => translate_with_basic(t, variable, value),
         }
@@ -97,6 +103,7 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
         match self {
             AnyTranslator::Full(t) => t.variable_info(variable),
             AnyTranslator::Basic(t) => t.variable_info(variable),
+            AnyTranslator::Numeric(t) => t.variable_info(variable),
             #[cfg(feature = "python")]
             #[cfg(target_family = "unix")]
             AnyTranslator::Python(t) => t.variable_info(variable),
@@ -107,6 +114,7 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
         match self {
             AnyTranslator::Full(t) => t.translates(variable),
             AnyTranslator::Basic(t) => t.translates(variable),
+            AnyTranslator::Numeric(t) => t.translates(variable),
             #[cfg(feature = "python")]
             AnyTranslator::Python(t) => t.translates(variable),
         }
@@ -116,6 +124,7 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
         match self {
             AnyTranslator::Full(t) => t.reload(sender),
             AnyTranslator::Basic(_) => (),
+            AnyTranslator::Numeric(_) => (),
             #[cfg(feature = "python")]
             AnyTranslator::Python(_) => (),
         }
@@ -243,19 +252,6 @@ pub fn all_translators() -> TranslatorList {
         Box::new(new_rv64_translator()),
         Box::new(new_mips_translator()),
         Box::new(LebTranslator {}),
-        Box::new(UnsignedTranslator {}),
-        Box::new(SignedTranslator {}),
-        Box::new(SinglePrecisionTranslator {}),
-        Box::new(DoublePrecisionTranslator {}),
-        Box::new(HalfPrecisionTranslator {}),
-        Box::new(BFloat16Translator {}),
-        Box::new(Posit32Translator {}),
-        Box::new(Posit16Translator {}),
-        Box::new(Posit8Translator {}),
-        Box::new(PositQuire8Translator {}),
-        Box::new(PositQuire16Translator {}),
-        Box::new(E5M2Translator {}),
-        Box::new(E4M3Translator {}),
         Box::new(NumberOfOnesTranslator {}),
         Box::new(LeadingOnesTranslator {}),
         Box::new(TrailingOnesTranslator {}),
@@ -269,14 +265,31 @@ pub fn all_translators() -> TranslatorList {
     #[cfg(not(target_arch = "wasm32"))]
     basic_translators.append(&mut find_user_decoders());
 
+    let numeric_translators: Vec<Box<DynNumericTranslator>> = vec![
+        Box::new(UnsignedTranslator {}),
+        Box::new(SignedTranslator {}),
+        Box::new(SinglePrecisionTranslator {}),
+        Box::new(DoublePrecisionTranslator {}),
+        Box::new(HalfPrecisionTranslator {}),
+        Box::new(BFloat16Translator {}),
+        Box::new(Posit32Translator {}),
+        Box::new(Posit16Translator {}),
+        Box::new(Posit8Translator {}),
+        Box::new(PositQuire8Translator {}),
+        Box::new(PositQuire16Translator {}),
+        Box::new(E5M2Translator {}),
+        Box::new(E4M3Translator {}),
+        Box::new(UnsignedFixedPointTranslator {}),
+        Box::new(SignedFixedPointTranslator {}),
+    ];
+
     TranslatorList::new(
         basic_translators,
+        numeric_translators,
         vec![
             Box::new(ClockTranslator::new()),
             Box::new(StringTranslator {}),
             Box::new(EnumTranslator {}),
-            Box::new(UnsignedFixedPointTranslator),
-            Box::new(SignedFixedPointTranslator),
         ],
     )
 }
@@ -290,12 +303,21 @@ pub struct TranslatorList {
 }
 
 impl TranslatorList {
-    pub fn new(basic: Vec<Box<DynBasicTranslator>>, translators: Vec<Box<DynTranslator>>) -> Self {
+    pub fn new(
+        basic: Vec<Box<DynBasicTranslator>>,
+        numeric: Vec<Box<DynNumericTranslator>>,
+        translators: Vec<Box<DynTranslator>>,
+    ) -> Self {
         Self {
             default: "Hexadecimal".to_string(),
             inner: basic
                 .into_iter()
                 .map(|t| (t.name(), AnyTranslator::Basic(t)))
+                .chain(
+                    numeric
+                        .into_iter()
+                        .map(|t| (t.name(), AnyTranslator::Numeric(t))),
+                )
                 .chain(
                     translators
                         .into_iter()
@@ -353,6 +375,13 @@ impl TranslatorList {
             .unwrap_or_else(|| panic!("No translator called {name}"))
     }
 
+    pub fn is_translator_numeric(&self, name: &str) -> bool {
+        match self.get_translator(name) {
+            AnyTranslator::Numeric(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn add_or_replace(&mut self, t: AnyTranslator) {
         self.inner.insert(t.name(), t);
     }
@@ -395,6 +424,17 @@ impl TranslatorList {
     }
 }
 
+#[inline]
+fn shortest_float_representation<T: std::fmt::LowerExp + std::fmt::Display>(v: T) -> String {
+    let dec = format!("{v}");
+    let exp = format!("{v:e}");
+    if dec.len() > exp.len() {
+        exp
+    } else {
+        dec
+    }
+}
+
 fn format(
     val: &ValueRepr,
     kind: ValueKind,
@@ -429,6 +469,25 @@ fn format(
             value: sval.clone(),
             kind,
         }),
+        ValueRepr::Numerical(num_repr) => {
+            let str = match num_repr {
+                NumericalValueRepr::FloatingPoint(f) => shortest_float_representation(f),
+                NumericalValueRepr::Integer(int) => int.to_string(),
+                NumericalValueRepr::FixedPoint {
+                    int,
+                    scaling_factor,
+                } => {
+                    let uint_str =
+                        fixed_point::big_uint_to_ufixed(int.magnitude(), *scaling_factor);
+                    if int.is_negative() {
+                        format!("-{}", uint_str)
+                    } else {
+                        uint_str
+                    }
+                }
+            };
+            Some(TranslatedValue { value: str, kind })
+        }
         ValueRepr::Tuple => Some(TranslatedValue {
             value: format!(
                 "({})",
@@ -548,6 +607,23 @@ impl TranslationResultExt for TranslationResult {
         formatted.collect_into(&mut collected);
         collected
     }
+
+    fn as_f64(&self) -> (f64, ValueKind) {
+        match &self.val {
+            ValueRepr::Numerical(num) => match num {
+                NumericalValueRepr::FloatingPoint(f) => (*f, self.kind),
+                NumericalValueRepr::Integer(i) => (i.to_f64().unwrap_or(0.0), self.kind),
+                NumericalValueRepr::FixedPoint {
+                    int,
+                    scaling_factor,
+                } => {
+                    let f = int.to_f64().unwrap_or(0.0) / 2f64.powi(*scaling_factor);
+                    (f, self.kind)
+                }
+            },
+            _ => (0.0, ValueKind::Warn),
+        }
+    }
 }
 
 #[local_impl::local_impl]
@@ -569,6 +645,27 @@ impl VariableInfoExt for VariableInfo {
                 VariableInfo::Real => panic!(),
             },
         }
+    }
+
+    fn flatten(info: &VariableInfo) -> Vec<(Vec<String>, VariableInfo)> {
+        fn flatten_recursive(
+            info: &VariableInfo,
+            prefix: Vec<String>,
+        ) -> Vec<(Vec<String>, VariableInfo)> {
+            match info {
+                VariableInfo::Compound { subfields } => subfields
+                    .iter()
+                    .flat_map(|(field_name, sub_info)| {
+                        let mut new_prefix = prefix.clone();
+                        new_prefix.push(field_name.clone());
+                        flatten_recursive(sub_info, new_prefix)
+                    })
+                    .collect(),
+                _ => vec![(prefix, info.clone())],
+            }
+        }
+
+        flatten_recursive(info, Vec::new())
     }
 
     fn has_subpath(&self, path: &[String]) -> bool {

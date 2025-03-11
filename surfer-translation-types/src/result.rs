@@ -1,3 +1,5 @@
+use num::BigInt;
+
 use crate::ValueKind;
 
 #[derive(Clone)]
@@ -5,6 +7,13 @@ pub struct TranslationResult {
     pub val: ValueRepr,
     pub subfields: Vec<SubFieldTranslationResult>,
     pub kind: ValueKind,
+}
+
+#[derive(Clone)]
+pub enum NumericalValueRepr {
+    FloatingPoint(f64),
+    Integer(BigInt),
+    FixedPoint { int: BigInt, scaling_factor: i32 },
 }
 
 /// The representation of the value, compound values can be
@@ -16,6 +25,7 @@ pub enum ValueRepr {
     Bits(u64, String),
     /// The value is exactly the specified string
     String(String),
+    Numerical(NumericalValueRepr),
     /// Represent the value as (f1, f2, f3...)
     Tuple,
     /// Represent the value as {f1: v1, f2: v2, f3: v3...}
@@ -73,7 +83,6 @@ impl SubFieldTranslationResult {
         }
     }
 }
-
 #[derive(Clone, PartialEq)]
 pub struct TranslatedValue {
     pub value: String,
@@ -85,13 +94,6 @@ impl TranslatedValue {
         TranslatedValue {
             value: result.0,
             kind: result.1,
-        }
-    }
-
-    pub fn new(value: impl ToString, kind: ValueKind) -> Self {
-        TranslatedValue {
-            value: value.to_string(),
-            kind,
         }
     }
 }

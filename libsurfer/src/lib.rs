@@ -1,5 +1,6 @@
 #![deny(unused_crate_dependencies)]
 
+pub mod analog;
 #[cfg(feature = "performance_plot")]
 pub mod benchmark;
 mod channels;
@@ -88,6 +89,7 @@ use crate::config::{SurferConfig, SurferTheme};
 use crate::dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog};
 use crate::displayed_item::{DisplayedFieldRef, DisplayedItem, DisplayedItemRef, FieldFormat};
 use crate::displayed_item_tree::VisibleItemIndex;
+use crate::drawing_canvas::DrawingGeometry;
 use crate::drawing_canvas::TxDrawingCommands;
 use crate::message::{HeaderResult, Message};
 use crate::transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef};
@@ -196,7 +198,7 @@ enum CachedDrawData {
 }
 
 struct CachedWaveDrawData {
-    pub draw_commands: HashMap<DisplayedFieldRef, drawing_canvas::DrawingCommands>,
+    pub draw_commands: HashMap<DisplayedFieldRef, DrawingGeometry>,
     pub clock_edges: Vec<f32>,
     pub ticks: Vec<(String, f32)>,
 }
@@ -1422,6 +1424,88 @@ impl State {
                     });
                     if recompute_names {
                         waves.compute_variable_display_names();
+                    }
+                }
+            }
+            Message::VariableEnableAnalogView(vidx, enabled) => {
+                let Some(waves) = self.waves.as_mut() else {
+                    return;
+                };
+
+                let mut redraw = false;
+
+                // checks if vidx is Some then use that, else try focused variable
+                if let Some(vidx) = vidx.or(waves.focused_item) {
+                    let Some(item_ref) =
+                        waves.items_tree.get_visible(vidx).map(|node| node.item_ref)
+                    else {
+                        return;
+                    };
+
+                    waves.displayed_items.entry(item_ref).and_modify(|item| {
+                        if let DisplayedItem::Variable(variable) = item {
+                            variable.analog_view.enabled = enabled;
+                            redraw = true;
+                        }
+                    });
+
+                    if redraw {
+                        self.invalidate_draw_commands();
+                    }
+                }
+            }
+
+            Message::VariableChangeAnalogMode(vidx, mode) => {
+                let Some(waves) = self.waves.as_mut() else {
+                    return;
+                };
+
+                let mut redraw = false;
+
+                // checks if vidx is Some then use that, else try focused variable
+                if let Some(vidx) = vidx.or(waves.focused_item) {
+                    let Some(item_ref) =
+                        waves.items_tree.get_visible(vidx).map(|node| node.item_ref)
+                    else {
+                        return;
+                    };
+
+                    waves.displayed_items.entry(item_ref).and_modify(|item| {
+                        if let DisplayedItem::Variable(variable) = item {
+                            variable.analog_view.mode = mode;
+                            redraw = true;
+                        }
+                    });
+
+                    if redraw {
+                        self.invalidate_draw_commands();
+                    }
+                }
+            }
+            Message::VariableChangeAnalogValueRange(vidx, range) => {
+                let Some(waves) = self.waves.as_mut() else {
+                    return;
+                };
+
+                let mut redraw = false;
+
+                // checks if vidx is Some then use that, else try focused variable
+                if let Some(vidx) = vidx.or(waves.focused_item) {
+                    let Some(item_ref) =
+                        waves.items_tree.get_visible(vidx).map(|node| node.item_ref)
+                    else {
+                        return;
+                    };
+
+                    waves.displayed_items.entry(item_ref).and_modify(|item| {
+                        if let DisplayedItem::Variable(variable) = item {
+                            variable.analog_view.range = range;
+                            redraw = true;
+                        }
+                    });
+
+                    if redraw {
+                        self.invalidate_draw_commands();
                     }
                 }
             }

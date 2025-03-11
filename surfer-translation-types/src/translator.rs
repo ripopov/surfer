@@ -6,7 +6,8 @@ use std::sync::mpsc::Sender;
 
 use crate::result::TranslationResult;
 use crate::{
-    TranslationPreference, ValueKind, VariableEncoding, VariableInfo, VariableMeta, VariableValue,
+    NumericalValueRepr, TranslationPreference, ValueKind, ValueRepr, VariableEncoding,
+    VariableInfo, VariableMeta, VariableValue,
 };
 
 /// The most general translator trait.
@@ -35,6 +36,46 @@ pub trait BasicTranslator<VarId, ScopeId>: Send + Sync {
     fn name(&self) -> String;
 
     fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind);
+
+    fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
+        translates_all_bit_types(variable)
+    }
+
+    fn variable_info(&self, _variable: &VariableMeta<VarId, ScopeId>) -> Result<VariableInfo> {
+        Ok(VariableInfo::Bits)
+    }
+}
+
+pub trait NumericTranslator<VarId, ScopeId>: Send + Sync {
+    fn name(&self) -> String;
+
+    fn translate(
+        &self,
+        variable: &VariableMeta<VarId, ScopeId>,
+        value: &VariableValue,
+    ) -> Result<TranslationResult> {
+        let (value_repr, kind) = match value.clone().parse_biguint() {
+            Ok(raw_value) => match self.numeric_translate(variable, &raw_value) {
+                Some(num_repr) => (ValueRepr::Numerical(num_repr), ValueKind::Normal),
+                None => (ValueRepr::String(String::from("INVALID")), ValueKind::Warn),
+            },
+            Err((v, k)) => (ValueRepr::String(v), k),
+        };
+
+        Ok(TranslationResult {
+            val: value_repr,
+            kind,
+            subfields: vec![],
+        })
+    }
+
+    fn numeric_translate(
+        &self,
+        meta: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr>;
+
+    fn variable_range(&self, meta: &VariableMeta<VarId, ScopeId>) -> (f64, f64);
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         translates_all_bit_types(variable)

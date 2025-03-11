@@ -7,6 +7,7 @@ use num::{BigInt, BigUint, Zero};
 use serde::{Deserialize, Serialize};
 use surfer_translation_types::{TranslationPreference, Translator, VariableValue};
 
+use crate::analog::AnalogViewSettings;
 use crate::data_container::DataContainer;
 use crate::displayed_item::{
     DisplayedDivider, DisplayedFieldRef, DisplayedGroup, DisplayedItem, DisplayedItemRef,
@@ -431,6 +432,7 @@ impl WaveData {
                 format: None,
                 field_formats: vec![],
                 height_scaling_factor: None,
+                analog_view: AnalogViewSettings::default(),
             });
 
             indices.push(self.insert_item(new_variable, Some(target_position), true));

@@ -3,16 +3,18 @@ use color_eyre::eyre::WrapErr;
 use egui::{menu, Button, Context, TextWrapMode, TopBottomPanel, Ui};
 use futures::executor::block_on;
 use itertools::Itertools;
+use log::info;
 use std::sync::atomic::Ordering;
 use surfer_translation_types::{TranslationPreference, Translator};
 
+use crate::analog::{AnalogDisplayMode, AnalogRangeMode};
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::wave_container::{FieldRef, VariableRefExt};
 use crate::wcp::{proto::WcpEvent, proto::WcpSCMessage};
 use crate::{
     clock_highlighting::clock_highlight_type_menu,
     config::{ArrowKeyBindings, HierarchyStyle},
-    displayed_item::{DisplayedFieldRef, DisplayedItem},
+    displayed_item::{DisplayedFieldRef, DisplayedItem, DisplayedVariable},
     message::Message,
     time::{timeformat_menu, timeunit_menu},
     variable_name_filter::variable_name_filter_type_menu,
@@ -427,6 +429,10 @@ impl State {
         });
 
         if let DisplayedItem::Variable(variable) = displayed_item {
+            self.add_analog_menu(variable, vidx, msgs, ui);
+        }
+
+        if let DisplayedItem::Variable(variable) = displayed_item {
             ui.menu_button("Name", |ui| {
                 let variable_name_type = variable.display_name_type;
                 for name_type in enum_iterator::all::<VariableNameType>() {
@@ -690,6 +696,41 @@ impl State {
                     }
                 });
             }
+        });
+    }
+
+    fn add_analog_menu(
+        &self,
+        variable: &DisplayedVariable,
+        vidx: VisibleItemIndex,
+        msgs: &mut Vec<Message>,
+        ui: &mut Ui,
+    ) {
+        let analog_view_possible = match variable.format {
+            Some(ref format) => self.sys.translators.is_translator_numeric(format),
+            None => false,
+        };
+
+        ui.menu_button("Analog", |ui| {
+            ui.add_enabled_ui(analog_view_possible, |ui| {
+                let mut enabled = variable.analog_view.enabled;
+                ui.checkbox(&mut enabled, "Enabled").clicked().then(|| {
+                    ui.close_menu();
+                    msgs.push(Message::VariableEnableAnalogView(Some(vidx), enabled));
+                });
+            });
+
+            ui.menu_button("Mode", |ui| {
+                let selected_mode = variable.analog_view.mode;
+                for mode in enum_iterator::all::<AnalogDisplayMode>() {
+                    ui.radio(selected_mode == mode, mode.to_string())
+                        .clicked()
+                        .then(|| {
+                            ui.close_menu();
+                            msgs.push(Message::VariableChangeAnalogMode(Some(vidx), mode));
+                        });
+                }
+            });
         });
     }
 }

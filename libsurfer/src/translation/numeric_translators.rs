@@ -1,51 +1,45 @@
-use crate::message::Message;
-use crate::translation::fixed_point::{big_uint_to_sfixed, big_uint_to_ufixed};
 use crate::variable_type::INTEGER_TYPES;
 use crate::wave_container::{ScopeId, VarId};
 use color_eyre::Result;
 use half::{bf16, f16};
-use num::BigUint;
+use num::ToPrimitive;
+use num::{BigInt, BigUint};
+
 use softposit::{P16E1, P32E2, P8E0, Q16E1, Q8E0};
 use surfer_translation_types::{
-    translates_all_bit_types, BasicTranslator, TranslationResult, Translator, ValueKind, ValueRepr,
-    VariableInfo, VariableMeta, VariableValue,
+    translates_all_bit_types, NumericTranslator, NumericalValueRepr, VariableMeta,
 };
 
 use super::{check_single_wordlength, match_variable_type_name, TranslationPreference};
 
-#[inline]
-fn shortest_float_representation<T: std::fmt::LowerExp + std::fmt::Display>(v: T) -> String {
-    let dec = format!("{v}");
-    let exp = format!("{v:e}");
-    if dec.len() > exp.len() {
-        exp
+fn biguint_signed(v: &BigUint, num_bits: u32) -> BigInt {
+    let signweight = BigUint::from(1u8) << (num_bits - 1);
+    if v < &signweight {
+        BigInt::from(v.clone())
     } else {
-        dec
-    }
-}
-
-/// If `value` is a biguint or consists only of 1 or 0, translates the value using
-/// `biguint_translator`. If `value` contains other values such as X, Z etc. the result
-/// is the corresponding ValueKind
-fn translate_numeric(
-    biguint_translator: impl Fn(BigUint) -> String,
-    value: &VariableValue,
-) -> (String, ValueKind) {
-    match value.clone().parse_biguint() {
-        Ok(v) => (biguint_translator(v), ValueKind::Normal),
-        Err((v, k)) => (v, k),
+        let v2 = (signweight << 1) - v;
+        -BigInt::from(v2)
     }
 }
 
 pub struct UnsignedTranslator {}
 
-impl BasicTranslator<VarId, ScopeId> for UnsignedTranslator {
+impl NumericTranslator<VarId, ScopeId> for UnsignedTranslator {
     fn name(&self) -> String {
         String::from("Unsigned")
     }
 
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(|v| format!("{v}"), v)
+    fn numeric_translate(
+        &self,
+        _: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr> {
+        Some(NumericalValueRepr::Integer(v.clone().into()))
+    }
+
+    fn variable_range(&self, meta: &VariableMeta<VarId, ScopeId>) -> (f64, f64) {
+        let max: BigInt = (BigInt::from(1u64) << meta.num_bits.unwrap()) - 1;
+        (0.0, max.to_f64().unwrap())
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -60,24 +54,26 @@ impl BasicTranslator<VarId, ScopeId> for UnsignedTranslator {
 
 pub struct SignedTranslator {}
 
-impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
+impl NumericTranslator<VarId, ScopeId> for SignedTranslator {
     fn name(&self) -> String {
         String::from("Signed")
     }
 
-    fn basic_translate(&self, num_bits: u64, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(
-            |v| {
-                let signweight = BigUint::from(1u8) << (num_bits - 1);
-                if v < signweight {
-                    format!("{v}")
-                } else {
-                    let v2 = (signweight << 1) - v;
-                    format!("-{v2}")
-                }
-            },
+    fn numeric_translate(
+        &self,
+        meta: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr> {
+        Some(NumericalValueRepr::Integer(biguint_signed(
             v,
-        )
+            meta.num_bits.unwrap(),
+        )))
+    }
+
+    fn variable_range(&self, meta: &VariableMeta<VarId, ScopeId>) -> (f64, f64) {
+        let max: BigInt = (BigInt::from(1u64) << (meta.num_bits.unwrap() - 1)) - 1;
+        let min: BigInt = max.clone() * -1 + 1;
+        (min.to_f64().unwrap(), max.to_f64().unwrap())
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -94,20 +90,24 @@ impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
 
 pub struct SinglePrecisionTranslator {}
 
-impl BasicTranslator<VarId, ScopeId> for SinglePrecisionTranslator {
+impl NumericTranslator<VarId, ScopeId> for SinglePrecisionTranslator {
     fn name(&self) -> String {
         String::from("FP: 32-bit IEEE 754")
     }
 
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(
-            |v| {
-                shortest_float_representation(f32::from_bits(
-                    v.iter_u32_digits().next().unwrap_or(0),
-                ))
-            },
-            v,
-        )
+    fn numeric_translate(
+        &self,
+        _: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr> {
+        v.to_u32()
+            .map(f32::from_bits)
+            .map(f64::from)
+            .map(NumericalValueRepr::FloatingPoint)
+    }
+
+    fn variable_range(&self, _: &VariableMeta<VarId, ScopeId>) -> (f64, f64) {
+        (f32::MIN.into(), f32::MAX.into())
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -117,20 +117,25 @@ impl BasicTranslator<VarId, ScopeId> for SinglePrecisionTranslator {
 
 pub struct DoublePrecisionTranslator {}
 
-impl BasicTranslator<VarId, ScopeId> for DoublePrecisionTranslator {
+impl NumericTranslator<VarId, ScopeId> for DoublePrecisionTranslator {
     fn name(&self) -> String {
         String::from("FP: 64-bit IEEE 754")
     }
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(
-            |v| {
-                shortest_float_representation(f64::from_bits(
-                    v.iter_u64_digits().next().unwrap_or(0),
-                ))
-            },
-            v,
-        )
+
+    fn numeric_translate(
+        &self,
+        _: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr> {
+        v.to_u64()
+            .map(f64::from_bits)
+            .map(NumericalValueRepr::FloatingPoint)
     }
+
+    fn variable_range(&self, _: &VariableMeta<VarId, ScopeId>) -> (f64, f64) {
+        (f64::MIN.into(), f64::MAX.into())
+    }
+
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 64)
     }
@@ -140,26 +145,26 @@ impl BasicTranslator<VarId, ScopeId> for DoublePrecisionTranslator {
 pub struct QuadPrecisionTranslator {}
 
 #[cfg(feature = "f128")]
-impl BasicTranslator<VarId, ScopeId> for QuadPrecisionTranslator {
+impl NumericTranslator<VarId, ScopeId> for QuadPrecisionTranslator {
     fn name(&self) -> String {
         String::from("FP: 128-bit IEEE 754")
     }
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(
-            |v| {
-                let mut digits = v.iter_u64_digits();
-                let lsb = digits.next().unwrap_or(0);
-                let msb = if digits.len() > 0 {
-                    digits.next().unwrap_or(0)
-                } else {
-                    0
-                };
-                let val = lsb as u128 | (msb as u128) << 64;
-                f128::f128::from_bits(val).to_string()
-            },
-            v,
-        )
+
+    fn numeric_translate(
+        &self,
+        _: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr> {
+        // TODO: we lose precision here
+        v.to_u128()
+            .map(f128::from_bits)
+            .map(|v| NumericalValueRepr::FloatingPoint(v.to_f64()));
     }
+
+    fn variable_range(&self, _: &VariableMeta<VarId, ScopeId>) -> (f64, f64) {
+        (f128::MIN.into(), f128::MAX.into())
+    }
+
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 128)
     }
@@ -167,20 +172,26 @@ impl BasicTranslator<VarId, ScopeId> for QuadPrecisionTranslator {
 
 pub struct HalfPrecisionTranslator {}
 
-impl BasicTranslator<VarId, ScopeId> for HalfPrecisionTranslator {
+impl NumericTranslator<VarId, ScopeId> for HalfPrecisionTranslator {
     fn name(&self) -> String {
         String::from("FP: 16-bit IEEE 754")
     }
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(
-            |v| {
-                shortest_float_representation(f16::from_bits(
-                    v.iter_u32_digits().next().unwrap_or(0) as u16,
-                ))
-            },
-            v,
-        )
+
+    fn numeric_translate(
+        &self,
+        _: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr> {
+        v.to_u16()
+            .map(f16::from_bits)
+            .map(f64::from)
+            .map(NumericalValueRepr::FloatingPoint)
     }
+
+    fn variable_range(&self, _: &VariableMeta<VarId, ScopeId>) -> (f64, f64) {
+        (f16::MIN.into(), f16::MAX.into())
+    }
+
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 16)
     }
@@ -188,20 +199,26 @@ impl BasicTranslator<VarId, ScopeId> for HalfPrecisionTranslator {
 
 pub struct BFloat16Translator {}
 
-impl BasicTranslator<VarId, ScopeId> for BFloat16Translator {
+impl NumericTranslator<VarId, ScopeId> for BFloat16Translator {
     fn name(&self) -> String {
         String::from("FP: bfloat16")
     }
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(
-            |v| {
-                shortest_float_representation(bf16::from_bits(
-                    v.iter_u32_digits().next().unwrap_or(0) as u16,
-                ))
-            },
-            v,
-        )
+
+    fn numeric_translate(
+        &self,
+        _: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr> {
+        v.to_u16()
+            .map(bf16::from_bits)
+            .map(f64::from)
+            .map(NumericalValueRepr::FloatingPoint)
     }
+
+    fn variable_range(&self, _: &VariableMeta<VarId, ScopeId>) -> (f64, f64) {
+        (bf16::MIN.into(), bf16::MAX.into())
+    }
+
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 16)
     }
@@ -209,21 +226,24 @@ impl BasicTranslator<VarId, ScopeId> for BFloat16Translator {
 
 pub struct Posit32Translator {}
 
-impl BasicTranslator<VarId, ScopeId> for Posit32Translator {
+impl NumericTranslator<VarId, ScopeId> for Posit32Translator {
     fn name(&self) -> String {
         String::from("Posit: 32-bit (two exponent bits)")
     }
 
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(
-            |v| {
-                format!(
-                    "{p}",
-                    p = P32E2::from_bits(v.iter_u32_digits().next().unwrap_or(0))
-                )
-            },
-            v,
-        )
+    fn numeric_translate(
+        &self,
+        _: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr> {
+        v.to_u32()
+            .map(P32E2::from_bits)
+            .map(f64::from)
+            .map(NumericalValueRepr::FloatingPoint)
+    }
+
+    fn variable_range(&self, _: &VariableMeta<VarId, ScopeId>) -> (f64, f64) {
+        (P32E2::MIN.into(), P32E2::MAX.into())
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -233,21 +253,24 @@ impl BasicTranslator<VarId, ScopeId> for Posit32Translator {
 
 pub struct Posit16Translator {}
 
-impl BasicTranslator<VarId, ScopeId> for Posit16Translator {
+impl NumericTranslator<VarId, ScopeId> for Posit16Translator {
     fn name(&self) -> String {
         String::from("Posit: 16-bit (one exponent bit)")
     }
 
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(
-            |v| {
-                format!(
-                    "{p}",
-                    p = P16E1::from_bits(v.iter_u32_digits().next().unwrap_or(0) as u16)
-                )
-            },
-            v,
-        )
+    fn numeric_translate(
+        &self,
+        _: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr> {
+        v.to_u16()
+            .map(P16E1::from_bits)
+            .map(f64::from)
+            .map(NumericalValueRepr::FloatingPoint)
+    }
+
+    fn variable_range(&self, _: &VariableMeta<VarId, ScopeId>) -> (f64, f64) {
+        (P16E1::MIN.into(), P16E1::MAX.into())
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -257,21 +280,24 @@ impl BasicTranslator<VarId, ScopeId> for Posit16Translator {
 
 pub struct Posit8Translator {}
 
-impl BasicTranslator<VarId, ScopeId> for Posit8Translator {
+impl NumericTranslator<VarId, ScopeId> for Posit8Translator {
     fn name(&self) -> String {
         String::from("Posit: 8-bit (no exponent bit)")
     }
 
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(
-            |v| {
-                format!(
-                    "{p}",
-                    p = P8E0::from_bits(v.iter_u32_digits().next().unwrap_or(0) as u8)
-                )
-            },
-            v,
-        )
+    fn numeric_translate(
+        &self,
+        _: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr> {
+        v.to_u8()
+            .map(P8E0::from_bits)
+            .map(f64::from)
+            .map(NumericalValueRepr::FloatingPoint)
+    }
+
+    fn variable_range(&self, _: &VariableMeta<VarId, ScopeId>) -> (f64, f64) {
+        (P8E0::MIN.into(), P8E0::MAX.into())
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -281,21 +307,24 @@ impl BasicTranslator<VarId, ScopeId> for Posit8Translator {
 
 pub struct PositQuire8Translator {}
 
-impl BasicTranslator<VarId, ScopeId> for PositQuire8Translator {
+impl NumericTranslator<VarId, ScopeId> for PositQuire8Translator {
     fn name(&self) -> String {
         String::from("Posit: quire for 8-bit (no exponent bit)")
     }
 
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(
-            |v| {
-                format!(
-                    "{p}",
-                    p = Q8E0::from_bits(v.iter_u32_digits().next().unwrap_or(0))
-                )
-            },
-            v,
-        )
+    fn numeric_translate(
+        &self,
+        _: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr> {
+        v.to_u32()
+            .map(Q8E0::from_bits)
+            .map(|v| f64::from(v.to_posit()))
+            .map(NumericalValueRepr::FloatingPoint)
+    }
+
+    fn variable_range(&self, _: &VariableMeta<VarId, ScopeId>) -> (f64, f64) {
+        (0.0, 1.0) // TODO
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -305,26 +334,24 @@ impl BasicTranslator<VarId, ScopeId> for PositQuire8Translator {
 
 pub struct PositQuire16Translator {}
 
-impl BasicTranslator<VarId, ScopeId> for PositQuire16Translator {
+impl NumericTranslator<VarId, ScopeId> for PositQuire16Translator {
     fn name(&self) -> String {
         String::from("Posit: quire for 16-bit (one exponent bit)")
     }
 
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(
-            |v| {
-                let mut digits = v.iter_u64_digits();
-                let lsb = digits.next().unwrap_or(0);
-                let msb = if digits.len() > 0 {
-                    digits.next().unwrap_or(0)
-                } else {
-                    0
-                };
-                let val = lsb as u128 | ((msb as u128) << 64);
-                format!("{p}", p = Q16E1::from_bits(val))
-            },
-            v,
-        )
+    fn numeric_translate(
+        &self,
+        _: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr> {
+        v.to_u128()
+            .map(Q16E1::from_bits)
+            .map(|v| f64::from(v.to_posit()))
+            .map(NumericalValueRepr::FloatingPoint)
+    }
+
+    fn variable_range(&self, _: &VariableMeta<VarId, ScopeId>) -> (f64, f64) {
+        (0.0, 1.0) // TODO
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -334,41 +361,44 @@ impl BasicTranslator<VarId, ScopeId> for PositQuire16Translator {
 
 #[allow(clippy::excessive_precision)]
 /// Decode u8 as 8-bit float with five exponent bits and two mantissa bits
-fn decode_e5m2(v: u8) -> String {
+fn decode_e5m2(v: u8) -> f64 {
     let mant = v & 3;
     let exp = (v >> 2) & 31;
     let sign: i8 = 1 - ((v >> 6) & 2) as i8; // 1 - 2*signbit
     match (exp, mant) {
-        (31, 0) => "∞".to_string(),
-        (31, ..) => "NaN".to_string(),
+        (31, 0) => f64::INFINITY,
+        (31, ..) => f64::NAN,
         (0, 0) => {
             if sign == -1 {
-                "-0".to_string()
+                -0.0f64
             } else {
-                "0".to_string()
+                0.0f64
             }
         }
-        (0, ..) => shortest_float_representation(
-            ((sign * mant as i8) as f32) * 0.0000152587890625f32, // 0.0000152587890625 = 2^-16
-        ),
-        _ => shortest_float_representation(
-            ((sign * (4 + mant as i8)) as f32) * 2.0f32.powi(exp as i32 - 17), // 17 = 15 (bias) + 2 (mantissa bits)
-        ),
+        (0, ..) => ((sign * mant as i8) as f64) * 0.0000152587890625f64, // 0.0000152587890625 = 2^-16
+        _ => ((sign * (4 + mant as i8)) as f64) * 2.0f64.powi(exp as i32 - 17), // 17 = 15 (bias) + 2 (mantissa bits)
     }
 }
 
 pub struct E5M2Translator {}
 
-impl BasicTranslator<VarId, ScopeId> for E5M2Translator {
+impl NumericTranslator<VarId, ScopeId> for E5M2Translator {
     fn name(&self) -> String {
         String::from("FP: 8-bit (E5M2)")
     }
 
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(
-            |v| decode_e5m2(v.iter_u32_digits().next().unwrap_or(0) as u8),
-            v,
-        )
+    fn numeric_translate(
+        &self,
+        _: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr> {
+        v.to_u8()
+            .map(decode_e5m2)
+            .map(NumericalValueRepr::FloatingPoint)
+    }
+
+    fn variable_range(&self, _: &VariableMeta<VarId, ScopeId>) -> (f64, f64) {
+        (0.0, 1.0) // TODO
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -377,38 +407,43 @@ impl BasicTranslator<VarId, ScopeId> for E5M2Translator {
 }
 
 /// Decode u8 as 8-bit float with four exponent bits and three mantissa bits
-fn decode_e4m3(v: u8) -> String {
+fn decode_e4m3(v: u8) -> f64 {
     let mant = v & 7;
     let exp = (v >> 3) & 15;
     let sign: i8 = 1 - ((v >> 6) & 2) as i8; // 1 - 2*signbit
     match (exp, mant) {
-        (15, 7) => "NaN".to_string(),
+        (15, 7) => f64::NAN,
         (0, 0) => {
             if sign == -1 {
-                "-0".to_string()
+                -0.0f64
             } else {
-                "0".to_string()
+                0.0f64
             }
         }
-        (0, ..) => shortest_float_representation(((sign * mant as i8) as f32) * 0.001953125f32), // 0.001953125 = 2^-9
-        _ => shortest_float_representation(
-            ((sign * (8 + mant) as i8) as f32) * 2.0f32.powi(exp as i32 - 10), // 10 = 7 (bias) + 3 (mantissa bits)
-        ),
+        (0, ..) => ((sign * mant as i8) as f64) * 0.001953125f64, // 0.001953125 = 2^-9
+        _ => ((sign * (8 + mant) as i8) as f64) * 2.0f64.powi(exp as i32 - 10), // 10 = 7 (bias) + 3 (mantissa bits)
     }
 }
 
 pub struct E4M3Translator {}
 
-impl BasicTranslator<VarId, ScopeId> for E4M3Translator {
+impl NumericTranslator<VarId, ScopeId> for E4M3Translator {
     fn name(&self) -> String {
         String::from("FP: 8-bit (E4M3)")
     }
 
-    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(
-            |v| decode_e4m3(v.iter_u32_digits().next().unwrap_or(0) as u8),
-            v,
-        )
+    fn numeric_translate(
+        &self,
+        _: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr> {
+        v.to_u8()
+            .map(decode_e4m3)
+            .map(NumericalValueRepr::FloatingPoint)
+    }
+
+    fn variable_range(&self, _: &VariableMeta<VarId, ScopeId>) -> (f64, f64) {
+        (0.0, 1.0) // TODO
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -418,30 +453,24 @@ impl BasicTranslator<VarId, ScopeId> for E4M3Translator {
 
 pub struct UnsignedFixedPointTranslator;
 
-impl Translator<VarId, ScopeId, Message> for UnsignedFixedPointTranslator {
+impl NumericTranslator<VarId, ScopeId> for UnsignedFixedPointTranslator {
     fn name(&self) -> String {
         "Unsigned fixed point".into()
     }
 
-    fn translate(
+    fn numeric_translate(
         &self,
-        variable: &VariableMeta<VarId, ScopeId>,
-        value: &VariableValue,
-    ) -> Result<TranslationResult> {
-        let (string, value_kind) = if let Some(idx) = &variable.index {
-            translate_numeric(|v| big_uint_to_ufixed(&v, -idx.lsb), value)
-        } else {
-            translate_numeric(|v| format!("{}", v), value)
-        };
-        Ok(TranslationResult {
-            kind: value_kind,
-            val: ValueRepr::String(string),
-            subfields: vec![],
+        meta: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr> {
+        Some(NumericalValueRepr::FixedPoint {
+            int: BigInt::from(v.clone()),
+            scaling_factor: meta.index.map(|idx| -idx.lsb).unwrap_or(0) as i32,
         })
     }
 
-    fn variable_info(&self, _: &VariableMeta<VarId, ScopeId>) -> Result<VariableInfo> {
-        Ok(VariableInfo::Bits)
+    fn variable_range(&self, _: &VariableMeta<VarId, ScopeId>) -> (f64, f64) {
+        (0.0, 1.0) // TODO
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -456,33 +485,24 @@ impl Translator<VarId, ScopeId, Message> for UnsignedFixedPointTranslator {
 
 pub struct SignedFixedPointTranslator;
 
-impl Translator<VarId, ScopeId, Message> for SignedFixedPointTranslator {
+impl NumericTranslator<VarId, ScopeId> for SignedFixedPointTranslator {
     fn name(&self) -> String {
         "Signed fixed point".into()
     }
 
-    fn translate(
+    fn numeric_translate(
         &self,
-        variable: &VariableMeta<VarId, ScopeId>,
-        value: &VariableValue,
-    ) -> Result<TranslationResult> {
-        let (string, value_kind) = if let Some(idx) = &variable.index {
-            translate_numeric(
-                |v| big_uint_to_sfixed(&v, variable.num_bits.unwrap_or(0) as u64, -idx.lsb),
-                value,
-            )
-        } else {
-            translate_numeric(|v| format!("{}", v), value)
-        };
-        Ok(TranslationResult {
-            kind: value_kind,
-            val: ValueRepr::String(string),
-            subfields: vec![],
+        meta: &VariableMeta<VarId, ScopeId>,
+        v: &BigUint,
+    ) -> Option<NumericalValueRepr> {
+        Some(NumericalValueRepr::FixedPoint {
+            int: biguint_signed(v, meta.num_bits.unwrap()),
+            scaling_factor: meta.index.map(|idx| -idx.lsb).unwrap_or(0) as i32,
         })
     }
 
-    fn variable_info(&self, _: &VariableMeta<VarId, ScopeId>) -> Result<VariableInfo> {
-        Ok(VariableInfo::Bits)
+    fn variable_range(&self, _: &VariableMeta<VarId, ScopeId>) -> (f64, f64) {
+        (0.0, 1.0) // TODO
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
