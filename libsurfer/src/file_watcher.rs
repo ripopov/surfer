@@ -129,11 +129,13 @@ mod tests {
     }
 
     /// Guard ensuring that a callback is executed.
+    #[cfg(not(target_arch = "wasm32"))]
     pub struct CallbackGuard {
         called: Mutex<bool>,
         lock: Condvar,
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     impl CallbackGuard {
         pub fn new() -> Arc<Self> {
             Arc::new(CallbackGuard {
@@ -181,7 +183,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(windows))]
+    #[cfg(all(not(windows), not(target_arch = "wasm32")))]
     pub fn notifies_on_change() -> Result<(), Box<dyn std::error::Error>> {
         let tmp_dir = TempDir::new();
         let path = tmp_dir.create("test");
@@ -201,6 +203,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn does_not_notify_on_create_and_delete() -> Result<(), Box<dyn std::error::Error>> {
         let tmp_dir = TempDir::new();
         let path = tmp_dir.path().join("test");
@@ -224,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(windows))]
+    #[cfg(all(not(windows), not(target_arch = "wasm32")))]
     pub fn resolves_files_that_are_named_differently() -> Result<(), Box<dyn std::error::Error>> {
         let tmp_dir = TempDir::new();
         let mut path = tmp_dir.mkdir("test");
