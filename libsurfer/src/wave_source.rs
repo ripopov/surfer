@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::cxxrtl_container::CxxrtlContainer;
+use crate::util::get_multi_extension;
 use crate::wasm_util::{perform_async_work, perform_work, sleep_ms};
 use camino::{Utf8Path, Utf8PathBuf};
 use color_eyre::eyre::{anyhow, WrapErr};
@@ -49,6 +50,8 @@ pub enum WaveSource {
     Cxxrtl(CxxrtlKind),
 }
 
+pub const STATE_FILE_EXTENSION: &str = "surf.ron";
+
 impl WaveSource {
     pub fn as_file(&self) -> Option<&Utf8Path> {
         match self {
@@ -72,15 +75,13 @@ impl WaveSource {
 
         for entry in paths {
             let Ok(entry) = entry else { continue };
-            let path = entry.path();
-            let Some(extension) = path.extension() else {
-                continue;
-            };
-            if extension == "surf" {
-                let Ok(path) = Utf8PathBuf::from_path_buf(path) else {
+            if let Ok(path) = Utf8PathBuf::from_path_buf(entry.path()) {
+                let Some(ext) = get_multi_extension(&path) else {
                     continue;
                 };
-                return Some(path);
+                if ext.as_str() == STATE_FILE_EXTENSION {
+                    return Some(path);
+                }
             }
         }
 
@@ -212,12 +213,15 @@ impl State {
         filename: Utf8PathBuf,
         load_options: LoadOptions,
     ) -> Result<()> {
-        match filename.extension() {
-            Some("ftr") => self.load_transactions_from_file(filename, load_options),
-            Some("surf") => {
-                self.load_state_file(Some(filename.into_std_path_buf()));
-                Ok(())
-            }
+        match get_multi_extension(&filename) {
+            Some(ext) => match ext.as_str() {
+                STATE_FILE_EXTENSION => {
+                    self.load_state_file(Some(filename.into_std_path_buf()));
+                    Ok(())
+                }
+                "ftr" => self.load_transactions_from_file(filename, load_options),
+                _ => self.load_wave_from_file(filename, load_options),
+            },
             _ => self.load_wave_from_file(filename, load_options),
         }
     }
@@ -289,7 +293,7 @@ impl State {
                 Err(anyhow!("Dropped an empty file"))
             } else {
                 if let Some(path) = path.clone() {
-                    if path.extension() == Some("surf") {
+                    if get_multi_extension(&path) == Some(STATE_FILE_EXTENSION.to_string()) {
                         let sender = self.sys.channels.msg_sender.clone();
                         perform_async_work(async move {
                             let new_state = match ron::de::from_bytes(&bytes)
@@ -828,7 +832,10 @@ impl State {
             } else {
                 AsyncFileDialog::new()
                     .set_title("Load state")
-                    .add_filter("Surfer state files (*.surf)", &["surf"])
+                    .add_filter(
+                        format!("Surfer state files (*.{})", STATE_FILE_EXTENSION),
+                        &[STATE_FILE_EXTENSION],
+                    )
                     .add_filter("All files", &["*"])
                     .pick_file()
                     .await
@@ -869,7 +876,10 @@ impl State {
             } else {
                 AsyncFileDialog::new()
                     .set_title("Save state")
-                    .add_filter("Surfer state files (*.surf)", &["surf"])
+                    .add_filter(
+                        format!("Surfer state files (*.{})", STATE_FILE_EXTENSION),
+                        &[STATE_FILE_EXTENSION],
+                    )
                     .add_filter("All files", &["*"])
                     .save_file()
                     .await
