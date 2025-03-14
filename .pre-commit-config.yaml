@@ -43,12 +43,4 @@ repos:
     rev: v9.1.3
     hooks:
     - id: oxipng
-  - repo: local
-    hooks:
-      - id: cargo-test
-        name: Run tests
-        entry: cargo test
-        language: system
-        pass_filenames: false
-        types_or: ["rust", "png", "toml"]
 exclude: $(fzcmd|f128|instruction-decoder)
