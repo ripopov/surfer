@@ -87,44 +87,46 @@ impl State {
         }
 
         let waves_loaded = self.waves.is_some();
+        if self.show_file_entries {
+            ui.menu_button("File", |ui| {
+                b("Open file...", Message::OpenFileDialog(OpenMode::Open))
+                    .add_closing_menu(msgs, ui);
+                b("Switch file...", Message::OpenFileDialog(OpenMode::Switch))
+                    .add_closing_menu(msgs, ui);
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    b(
+                        "Reload",
+                        Message::ReloadWaveform(self.config.behavior.keep_during_reload),
+                    )
+                    .shortcut("r")
+                    .add_closing_menu(msgs, ui);
+                }
 
-        ui.menu_button("File", |ui| {
-            b("Open file...", Message::OpenFileDialog(OpenMode::Open)).add_closing_menu(msgs, ui);
-            b("Switch file...", Message::OpenFileDialog(OpenMode::Switch))
-                .add_closing_menu(msgs, ui);
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                b(
-                    "Reload",
-                    Message::ReloadWaveform(self.config.behavior.keep_during_reload),
-                )
-                .shortcut("r")
-                .add_closing_menu(msgs, ui);
-            }
-
-            b("Load state...", Message::LoadStateFile(None)).add_closing_menu(msgs, ui);
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                let save_text = if self.state_file.is_some() {
-                    "Save state"
-                } else {
-                    "Save state..."
-                };
-                b(save_text, Message::SaveStateFile(self.state_file.clone()))
-                    .add_closing_menu(msgs, ui);
-            }
-            b("Save state as...", Message::SaveStateFile(None)).add_closing_menu(msgs, ui);
-            b("Open URL...", Message::SetUrlEntryVisible(true)).add_closing_menu(msgs, ui);
-            #[cfg(feature = "python")]
-            {
-                b("Add Python translator", Message::OpenPythonPluginDialog)
-                    .add_closing_menu(msgs, ui);
-                b("Reload Python translator", Message::ReloadPythonPlugin)
-                    .enabled(self.sys.translators.has_python_translator())
-                    .add_closing_menu(msgs, ui);
-                b("Exit", Message::Exit).add_closing_menu(msgs, ui);
-            }
-        });
+                b("Load state...", Message::LoadStateFile(None)).add_closing_menu(msgs, ui);
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let save_text = if self.state_file.is_some() {
+                        "Save state"
+                    } else {
+                        "Save state..."
+                    };
+                    b(save_text, Message::SaveStateFile(self.state_file.clone()))
+                        .add_closing_menu(msgs, ui);
+                }
+                b("Save state as...", Message::SaveStateFile(None)).add_closing_menu(msgs, ui);
+                b("Open URL...", Message::SetUrlEntryVisible(true)).add_closing_menu(msgs, ui);
+                #[cfg(feature = "python")]
+                {
+                    b("Add Python translator", Message::OpenPythonPluginDialog)
+                        .add_closing_menu(msgs, ui);
+                    b("Reload Python translator", Message::ReloadPythonPlugin)
+                        .enabled(self.sys.translators.has_python_translator())
+                        .add_closing_menu(msgs, ui);
+                    b("Exit", Message::Exit).add_closing_menu(msgs, ui);
+                }
+            });
+        }
         ui.menu_button("View", |ui: &mut Ui| {
             ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
             if waves_loaded {

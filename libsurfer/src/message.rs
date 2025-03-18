@@ -201,6 +201,7 @@ pub enum Message {
     SetTimeUnit(TimeUnit),
     SetTimeStringFormatting(Option<TimeStringFormatting>),
     SetHighlightFocused(bool),
+    SetShowFileEntries(bool),
     CommandPromptClear,
     CommandPromptUpdate {
         suggestions: Vec<(String, Vec<bool>)>,
