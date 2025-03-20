@@ -284,6 +284,12 @@ impl State {
                     if commands.iter().any(|s| s == "goto_declaration") {
                         self.sys.wcp_client_capabilities.goto_declaration = true;
                     }
+                    if commands.iter().any(|s| s == "add_drivers") {
+                        self.sys.wcp_client_capabilities.add_drivers = true;
+                    }
+                    if commands.iter().any(|s| s == "add_loads") {
+                        self.sys.wcp_client_capabilities.add_loads = true;
+                    }
                     self.sys.wcp_greeted_signal.store(true, Ordering::Relaxed);
                     self.send_greeting()
                 }
