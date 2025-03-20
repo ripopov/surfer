@@ -11,10 +11,15 @@ use std::time::Duration;
 use tokio::net::tcp::{ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 
+#[cfg(target_arch = "wasm32")]
 use crate::channels::IngressSender;
 use log::{error, info, warn};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::Receiver;
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::sync::mpsc::Sender;
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::StreamExt;
 
 use super::{proto::WcpCSMessage, proto::WcpCommand, proto::WcpSCMessage};
 
@@ -69,10 +74,14 @@ impl<'a> WcpCSReader<'a> {
 pub struct WcpServer {
     listener: Option<TcpListener>,
     stream: Option<TcpStream>,
+    #[cfg(target_arch = "wasm32")]
     sender: IngressSender<WcpCSMessage>,
-    receiver: Receiver<WcpSCMessage>,
+    #[cfg(not(target_arch = "wasm32"))]
+    sender: Sender<WcpCSMessage>,
+    receiver: ReceiverStream<WcpSCMessage>,
     stop_signal: Arc<AtomicBool>,
     running_signal: Arc<AtomicBool>,
+    greeted_signal: Arc<AtomicBool>,
     ctx: Option<Arc<Context>>,
 }
 
@@ -80,10 +89,12 @@ impl WcpServer {
     pub async fn new(
         address: String,
         initiate: bool,
-        c2s_sender: IngressSender<WcpCSMessage>,
+        #[cfg(target_arch = "wasm32")] c2s_sender: IngressSender<WcpCSMessage>,
+        #[cfg(not(target_arch = "wasm32"))] c2s_sender: Sender<WcpCSMessage>,
         s2c_receiver: Receiver<WcpSCMessage>,
         stop_signal: Arc<AtomicBool>,
         running_signal: Arc<AtomicBool>,
+        greeted_signal: Arc<AtomicBool>,
         ctx: Option<Arc<Context>>,
     ) -> Result<Self> {
         let listener;
@@ -105,9 +116,10 @@ impl WcpServer {
             listener,
             stream,
             sender: c2s_sender,
-            receiver: s2c_receiver,
+            receiver: ReceiverStream::new(s2c_receiver),
             stop_signal,
             running_signal,
+            greeted_signal,
             ctx,
         })
     }
@@ -120,6 +132,9 @@ impl WcpServer {
         } else {
             error!("Internal error: calling `run` with both listener and stream unset");
         }
+        info!("WCP shutting down");
+        self.greeted_signal.store(false, Ordering::Relaxed);
+        self.running_signal.store(false, Ordering::Relaxed);
         self.stop_signal.store(true, Ordering::Relaxed);
     }
 
@@ -151,9 +166,8 @@ impl WcpServer {
                     break;
                 }
             }
+            self.greeted_signal.store(false, Ordering::Relaxed);
         }
-        info!("WCP shutting down");
-        self.running_signal.store(false, Ordering::Relaxed);
     }
 
     async fn initiate(&mut self) {
@@ -192,31 +206,8 @@ impl WcpServer {
     }
 
     async fn handle_client(&mut self, mut stream: TcpStream) -> Result<(), serde_Error> {
-        let commands = vec![
-            "add_variables",
-            "set_viewport_to",
-            "cursor_set",
-            "reload",
-            "add_scopes",
-            "get_item_list",
-            "set_item_color",
-            "get_item_info",
-            "clear_item",
-            "focus_item",
-            "clear",
-            "load",
-            "zoom_to_fit",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect();
-
         let (reader, mut writer) = stream.split();
         let mut reader = WcpCSReader::new(reader);
-
-        //send greeting
-        let greeting = WcpSCMessage::create_greeting(0, commands);
-        self.send_message(&mut writer, &greeting).await;
 
         loop {
             let stop_signal_clone = self.stop_signal.clone();
@@ -247,10 +238,8 @@ impl WcpServer {
                     }
                 }
 
-                s2c = self.receiver.recv() => {
-                    if let Some(s2c) = s2c {
-                        self.send_message(&mut writer, &s2c).await;
-                    }
+                Some(s2c) = self.receiver.next() => {
+                    self.send_message(&mut writer, &s2c).await;
                 }
 
                 _ = stop_signal_waiter => {

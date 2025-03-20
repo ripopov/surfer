@@ -4,12 +4,13 @@ use crate::{
     wave_container::{ScopeRefExt, VariableRef, VariableRefExt},
     wave_data::WaveData,
     wave_source::{string_to_wavesource, LoadOptions, WaveSource},
-    State,
+    State, WcpClientCapabilities,
 };
 
 use futures::executor::block_on;
 use itertools::Itertools;
 use log::{trace, warn};
+use std::sync::atomic::Ordering;
 use surfer_translation_types::ScopeRef;
 
 use super::proto::{ItemInfo, WcpCSMessage, WcpCommand, WcpResponse, WcpSCMessage};
@@ -39,6 +40,15 @@ impl State {
     }
 
     fn handle_wcp_cs_message(&mut self, message: &WcpCSMessage) {
+        if !self.sys.wcp_greeted_signal.load(Ordering::Relaxed) {
+            match message {
+                WcpCSMessage::greeting { .. } => (),
+                _ => {
+                    self.send_error("WCP server has not received greeting messages", vec![], "");
+                    return;
+                }
+            }
+        }
         match message {
             WcpCSMessage::command(command) => {
                 match command {
@@ -222,7 +232,6 @@ impl State {
                         self.send_response(WcpResponse::ack);
                     }
                     WcpCommand::load { source } => {
-                        self.sys.wcp_server_load_outstanding = true;
                         match string_to_wavesource(source) {
                             WaveSource::Url(url) => {
                                 self.update(Message::LoadWaveformFileFromUrl(
@@ -257,11 +266,7 @@ impl State {
                     }
                 };
             }
-            // FIXME: We should actually check the supported commands here
-            WcpCSMessage::greeting {
-                version,
-                commands: _,
-            } => {
+            WcpCSMessage::greeting { version, commands } => {
                 if version != "0" {
                     self.send_error(
                         "greeting",
@@ -272,6 +277,14 @@ impl State {
                         ),
                     )
                 } else {
+                    self.sys.wcp_client_capabilities = WcpClientCapabilities::new();
+                    if commands.iter().any(|s| s == "waveforms_loaded") {
+                        self.sys.wcp_client_capabilities.waveforms_loaded = true;
+                    }
+                    if commands.iter().any(|s| s == "goto_declaration") {
+                        self.sys.wcp_client_capabilities.goto_declaration = true;
+                    }
+                    self.sys.wcp_greeted_signal.store(true, Ordering::Relaxed);
                     self.send_greeting()
                 }
             }

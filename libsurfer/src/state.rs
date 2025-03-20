@@ -7,7 +7,6 @@ use std::{
 use crate::displayed_item_tree::VisibleItemIndex;
 #[cfg(feature = "spade")]
 use crate::translation::spade::SpadeTranslator;
-use crate::WCP_CS_HANDLER;
 use crate::{
     command_prompt::get_parser,
     config,
@@ -218,6 +217,14 @@ impl State {
                 error!("Attempted to load from drag and drop at startup (how?)");
             }
             None => {}
+        }
+
+        if let Some(port) = args.wcp_initiate {
+            let addr = format!("127.0.0.1:{}", port);
+            self.add_startup_message(Message::StartWcpServer {
+                address: Some(addr),
+                initiate: true,
+            });
         }
 
         self.add_startup_commands(args.startup_commands);
@@ -650,14 +657,16 @@ impl State {
         }
         // TODO: Consider an unbounded channel?
         let (wcp_s2c_sender, wcp_s2c_receiver) = tokio::sync::mpsc::channel(100);
-        let wcp_c2s_sender = WCP_CS_HANDLER.tx.clone();
+        let (wcp_c2s_sender, wcp_c2s_receiver) = tokio::sync::mpsc::channel(100);
 
-        self.sys.channels.wcp_c2s_receiver = WCP_CS_HANDLER.rx.try_write().unwrap().take();
+        self.sys.channels.wcp_c2s_receiver = Some(wcp_c2s_receiver);
         self.sys.channels.wcp_s2c_sender = Some(wcp_s2c_sender);
         let stop_signal_copy = self.sys.wcp_stop_signal.clone();
         stop_signal_copy.store(false, std::sync::atomic::Ordering::Relaxed);
         let running_signal_copy = self.sys.wcp_running_signal.clone();
         running_signal_copy.store(true, std::sync::atomic::Ordering::Relaxed);
+        let greeted_signal_copy = self.sys.wcp_greeted_signal.clone();
+        greeted_signal_copy.store(true, std::sync::atomic::Ordering::Relaxed);
 
         let ctx = self.sys.context.clone();
         let address = address.unwrap_or(self.config.wcp.address.clone());
@@ -670,6 +679,7 @@ impl State {
                 wcp_s2c_receiver,
                 stop_signal_copy,
                 running_signal_copy,
+                greeted_signal_copy,
                 ctx,
             )
             .await;

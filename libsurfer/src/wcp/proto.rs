@@ -63,7 +63,8 @@ pub enum WcpResponse {
 #[serde(tag = "event")]
 #[allow(non_camel_case_types)]
 pub enum WcpEvent {
-    waveforms_loaded,
+    waveforms_loaded { source: String },
+    goto_declaration { variable: String },
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]

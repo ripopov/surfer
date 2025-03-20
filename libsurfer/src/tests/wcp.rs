@@ -1,15 +1,16 @@
 use std::path::PathBuf;
 
-use crate::channels::IngressReceiver;
 use crate::message::Message;
 use crate::tests::snapshot::render_and_compare;
 use crate::wcp::proto::{self, WcpCSMessage, WcpCommand, WcpEvent, WcpResponse, WcpSCMessage};
 use crate::State;
+use itertools::Itertools;
 
 use color_eyre::eyre::bail;
 use color_eyre::Result;
 use futures::Future;
 use num::BigInt;
+use std::sync::atomic::Ordering;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 macro_rules! expect_response {
@@ -72,7 +73,8 @@ where
         let (sc_tx, sc_rx) = tokio::sync::mpsc::channel(100);
         state.sys.channels.wcp_s2c_sender = Some(sc_tx);
         let (cs_tx, cs_rx) = tokio::sync::mpsc::channel(100);
-        state.sys.channels.wcp_c2s_receiver = Some(IngressReceiver::new(cs_rx));
+        state.sys.channels.wcp_c2s_receiver = Some(cs_rx);
+        state.sys.wcp_running_signal.store(true, Ordering::Relaxed);
 
         {
             let client = client.clone();
@@ -133,9 +135,13 @@ async fn send_commands(tx: &Sender<WcpCSMessage>, cmds: Vec<WcpCommand>) -> Resu
 }
 
 async fn greet(tx: &Sender<WcpCSMessage>, rx: &mut Receiver<WcpSCMessage>) -> Result<()> {
+    let commands = vec!["waveforms_loaded", "goto_declaration"]
+        .into_iter()
+        .map(str::to_string)
+        .collect_vec();
     tx.send(WcpCSMessage::greeting {
         version: "0".to_string(),
-        commands: vec![],
+        commands,
     })
     .await?;
 
@@ -180,7 +186,11 @@ async fn load_file(
     .await?;
     expect_ack(rx).await?;
 
-    expect_response!(rx, WcpSCMessage::event(WcpEvent::waveforms_loaded));
+    expect_response!(
+        rx,
+        WcpSCMessage::event(WcpEvent::waveforms_loaded { source })
+    );
+    assert_eq!(source, file.to_string());
 
     Ok(())
 }
@@ -224,7 +234,8 @@ wcp_test! {
         })).await?;
         expect_ack(&mut rx).await?;
 
-        expect_response!(rx, WcpSCMessage::event(WcpEvent::waveforms_loaded));
+        expect_response!(rx, WcpSCMessage::event(WcpEvent::waveforms_loaded{source}));
+        assert_eq!(source, "../examples/counter.vcd".to_string());
 
         tx.send(WcpCSMessage::command(
             proto::WcpCommand::add_scope {scope: "tb".to_string()})).await?;
@@ -403,6 +414,19 @@ wcp_test! {
         expect_response!(rx, WcpSCMessage::error{error, arguments: _, message});
         assert_eq!(error, "get_item_info");
         assert_eq!(message, "No item with id DisplayedItemRef(18446744073709551615)");
+
+        Ok(())
+    }
+}
+
+wcp_test! {
+    no_greeting,
+    (tx, rx) {
+        send_commands(&tx, vec![
+            WcpCommand::clear,
+        ]).await?;
+        expect_response!(rx, WcpSCMessage::error{error, ..});
+        assert_eq!(error, "WCP server has not received greeting messages");
 
         Ok(())
     }

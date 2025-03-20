@@ -57,11 +57,12 @@ pub mod wellen;
 use crate::displayed_item_tree::ItemIndex;
 use crate::displayed_item_tree::TargetPosition;
 use std::collections::HashMap;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
 
 use camino::Utf8PathBuf;
+#[cfg(target_arch = "wasm32")]
 use channels::{GlobalChannelTx, IngressHandler, IngressReceiver};
 use color_eyre::eyre::Context;
 use color_eyre::Result;
@@ -79,6 +80,8 @@ use num::BigInt;
 use serde::Deserialize;
 pub use state::State;
 use surfer_translation_types::Translator;
+#[cfg(target_arch = "wasm32")]
+use tokio_stream as _;
 use wcp::{proto::WcpCSMessage, proto::WcpEvent, proto::WcpSCMessage};
 
 use crate::config::{SurferConfig, SurferTheme};
@@ -110,35 +113,31 @@ lazy_static! {
     /// whenever the asynchronous transaction is completed, otherwise we will re-render
     /// things until program exit
     pub(crate) static ref OUTSTANDING_TRANSACTIONS: AtomicU32 = AtomicU32::new(0);
+}
 
+#[cfg(target_arch = "wasm32")]
+lazy_static! {
     pub(crate) static ref WCP_CS_HANDLER: IngressHandler<WcpCSMessage> = IngressHandler::new();
     pub(crate) static ref WCP_SC_HANDLER: GlobalChannelTx<WcpSCMessage> = GlobalChannelTx::new();
 }
 
+#[derive(Default)]
 pub struct StartupParams {
     pub spade_state: Option<Utf8PathBuf>,
     pub spade_top: Option<String>,
     pub waves: Option<WaveSource>,
+    pub wcp_initiate: Option<u16>,
     pub startup_commands: Vec<String>,
 }
 
 impl StartupParams {
-    #[allow(dead_code)] // NOTE: Only used in wasm version
-    pub fn empty() -> Self {
-        Self {
-            spade_state: None,
-            spade_top: None,
-            waves: None,
-            startup_commands: vec![],
-        }
-    }
-
     #[allow(dead_code)] // NOTE: Only used in wasm version
     pub fn from_url(url: UrlArgs) -> Self {
         Self {
             spade_state: None,
             spade_top: None,
             waves: url.load_url.map(WaveSource::Url),
+            wcp_initiate: None,
             startup_commands: url.startup_commands.map(|c| vec![c]).unwrap_or_default(),
         }
     }
@@ -212,7 +211,10 @@ struct CachedTransactionDrawData {
 pub struct Channels {
     pub msg_sender: Sender<Message>,
     pub msg_receiver: Receiver<Message>,
+    #[cfg(target_arch = "wasm32")]
     wcp_c2s_receiver: Option<IngressReceiver<WcpCSMessage>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    wcp_c2s_receiver: Option<tokio::sync::mpsc::Receiver<WcpCSMessage>>,
     wcp_s2c_sender: Option<tokio::sync::mpsc::Sender<WcpSCMessage>>,
 }
 impl Channels {
@@ -223,6 +225,19 @@ impl Channels {
             msg_receiver,
             wcp_c2s_receiver: None,
             wcp_s2c_sender: None,
+        }
+    }
+}
+
+pub struct WcpClientCapabilities {
+    pub waveforms_loaded: bool,
+    pub goto_declaration: bool,
+}
+impl WcpClientCapabilities {
+    fn new() -> Self {
+        Self {
+            waveforms_loaded: false,
+            goto_declaration: false,
         }
     }
 }
@@ -1083,10 +1098,18 @@ impl State {
                         None
                     });
 
-                if self.sys.wcp_server_load_outstanding {
-                    self.sys.wcp_server_load_outstanding = false;
+                if self.sys.wcp_greeted_signal.load(Ordering::Relaxed)
+                    && self.sys.wcp_client_capabilities.waveforms_loaded
+                {
+                    let source = match source {
+                        WaveSource::File(path) => path.to_string(),
+                        WaveSource::Url(url) => url,
+                        _ => "".to_string(),
+                    };
                     self.sys.channels.wcp_s2c_sender.as_ref().map(|ch| {
-                        block_on(ch.send(WcpSCMessage::event(WcpEvent::waveforms_loaded)))
+                        block_on(
+                            ch.send(WcpSCMessage::event(WcpEvent::waveforms_loaded { source })),
+                        )
                     });
                 }
 
@@ -1880,12 +1903,15 @@ impl State {
                 self.stop_wcp_server();
             }
             Message::SetupChannelWCP => {
-                use futures::executor::block_on;
-                self.sys.channels.wcp_c2s_receiver = block_on(WCP_CS_HANDLER.rx.write()).take();
-                if self.sys.channels.wcp_c2s_receiver.is_none() {
-                    error!("Failed to claim wasm tx, was SetupWasmWCP executed twice?");
+                #[cfg(target_arch = "wasm32")]
+                {
+                    use futures::executor::block_on;
+                    self.sys.channels.wcp_c2s_receiver = block_on(WCP_CS_HANDLER.rx.write()).take();
+                    if self.sys.channels.wcp_c2s_receiver.is_none() {
+                        error!("Failed to claim wasm tx, was SetupWasmWCP executed twice?");
+                    }
+                    self.sys.channels.wcp_s2c_sender = Some(WCP_SC_HANDLER.tx.clone());
                 }
-                self.sys.channels.wcp_s2c_sender = Some(WCP_SC_HANDLER.tx.clone());
             }
             Message::Exit | Message::ToggleFullscreen => {} // Handled in eframe::update
             Message::AddViewport => {
