@@ -309,7 +309,7 @@ impl DisplayedItem {
                 RichText::new(name)
                     .color(*color)
                     .line_height(Some(
-                        config.layout.waveforms_line_height * self.height_scaling_factor() as f32,
+                        config.layout.waveforms_line_height * self.height_scaling_factor(),
                     ))
                     .append_to(layout_job, style, FontSelection::Default, Align::Center);
             }
