@@ -470,9 +470,7 @@ impl SystemState {
                     });
                     ui.close_menu();
                 }
-                if self.wcp_client_capabilities.add_drivers
-                    && ui.button("Add drivers").clicked()
-                {
+                if self.wcp_client_capabilities.add_drivers && ui.button("Add drivers").clicked() {
                     let variable = variable.variable_ref.full_path_string();
                     self.channels.wcp_s2c_sender.as_ref().map(|ch| {
                         block_on(ch.send(WcpSCMessage::event(WcpEvent::add_drivers { variable })))
