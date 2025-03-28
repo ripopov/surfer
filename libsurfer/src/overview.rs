@@ -25,6 +25,7 @@ impl SystemState {
             frame_height,
             self.user.config.layout.waveforms_line_height,
             self.user.config.layout.waveforms_text_size,
+            self.user.config.theme.vector_transition_width,
         );
         let container_rect = Rect::from_min_size(Pos2::ZERO, response.rect.size());
         let to_screen = RectTransform::from_to(container_rect, response.rect);

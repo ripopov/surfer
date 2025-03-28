@@ -58,16 +58,23 @@ pub struct DrawConfig {
     pub canvas_height: f32,
     pub line_height: f32,
     pub text_size: f32,
-    pub max_transition_width: i32,
+    pub max_vector_transition_width: f32,
+    pub extra_transition_width: i32,
 }
 
 impl DrawConfig {
-    pub fn new(canvas_height: f32, line_height: f32, text_size: f32) -> Self {
+    pub fn new(
+        canvas_height: f32,
+        line_height: f32,
+        text_size: f32,
+        max_vector_transition_width: f32,
+    ) -> Self {
         Self {
             canvas_height,
             line_height,
             text_size,
-            max_transition_width: 6,
+            max_vector_transition_width,
+            extra_transition_width: 6,
         }
     }
 }
@@ -1839,6 +1846,7 @@ impl SystemState {
             rect.height(),
             self.user.config.layout.waveforms_line_height,
             self.user.config.layout.waveforms_text_size,
+            self.user.config.theme.vector_transition_width,
         );
         let frame_width = rect.width();
 
