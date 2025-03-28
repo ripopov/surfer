@@ -317,10 +317,10 @@ impl SystemState {
         let num_timestamps = waves.num_timestamps().unwrap_or(1.into());
         let max_time = num_timestamps.to_f64().unwrap_or(f64::MAX);
         let mut clock_edges = vec![];
-        // Compute which timestamp to draw in each pixel. We'll draw from -transition_width to
-        // width + transition_width in order to draw initial transitions outside the screen
-        let mut timestamps = (-cfg.max_transition_width
-            ..(frame_width as i32 + cfg.max_transition_width))
+        // Compute which timestamp to draw in each pixel. We'll draw from -extra_transition_width to
+        // width + extra_transition_width in order to draw initial transitions outside the screen
+        let mut timestamps = (-cfg.extra_transition_width
+            ..(frame_width as i32 + cfg.extra_transition_width))
             .par_bridge()
             .filter_map(|x| {
                 let time = waves.viewports[viewport_idx]
@@ -591,11 +591,13 @@ impl SystemState {
                 response.rect.size().y,
                 self.user.config.layout.waveforms_line_height,
                 self.user.config.layout.waveforms_text_size,
+                self.user.config.theme.vector_transition_width,
             ),
             DataContainer::Transactions(_) => DrawConfig::new(
                 response.rect.size().y,
                 self.user.config.layout.transactions_line_height,
                 self.user.config.layout.waveforms_text_size,
+                self.user.config.theme.vector_transition_width,
             ),
             DataContainer::Empty => return,
         };
@@ -1166,7 +1168,7 @@ impl SystemState {
                 width: self.user.config.theme.linewidth,
             };
 
-            let transition_width = (new_x - old_x).min(6.);
+            let transition_width = (new_x - old_x).min(ctx.cfg.max_vector_transition_width);
 
             let trace_coords =
                 |x, y| (ctx.to_screen)(x, y * ctx.cfg.line_height * height_scaling_factor + offset);
