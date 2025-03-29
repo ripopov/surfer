@@ -24,7 +24,7 @@ use crate::{
     setup_custom_font,
     state::UserState,
     transaction_container,
-    variable_name_filter::VariableNameFilterType,
+    variable_filter::{VariableIOFilterType, VariableNameFilterType},
     wave_container::{ScopeRef, VariableRef},
     wave_source::LoadOptions,
     Message, MoveDir, StartupParams, SystemState, WaveSource,
@@ -1105,7 +1105,7 @@ snapshot_ui!(regex_error_indication, || {
     for message in msgs {
         state.update(message);
     }
-    state.variable_name_filter.borrow_mut().push_str("a(");
+    state.user.variable_filter.name_filter_str.push_str("a(");
     // make sure all the signals added by the proceeding messages are properly loaded
     wait_for_waves_fully_loaded(&mut state, 10);
     state
@@ -1159,7 +1159,7 @@ snapshot_ui!(fuzzy_signal_filter_works, || {
     for message in msgs {
         state.update(message);
     }
-    state.variable_name_filter.borrow_mut().push_str("at");
+    state.user.variable_filter.name_filter_str.push_str("at");
     // make sure all the signals added by the proceeding messages are properly loaded
     wait_for_waves_fully_loaded(&mut state, 10);
     state
@@ -1206,7 +1206,7 @@ snapshot_ui!(contain_signal_filter_works, || {
     for message in msgs {
         state.update(message);
     }
-    state.variable_name_filter.borrow_mut().push_str("at");
+    state.user.variable_filter.name_filter_str.push_str("at");
     // make sure all the signals added by the proceeding messages are properly loaded
     wait_for_waves_fully_loaded(&mut state, 10);
     state
@@ -1253,7 +1253,7 @@ snapshot_ui!(regex_signal_filter_works, || {
     for message in msgs {
         state.update(message);
     }
-    state.variable_name_filter.borrow_mut().push_str("a[dx]");
+    state.user.variable_filter.name_filter_str.push_str("a[dx]");
     // make sure all the signals added by the proceeding messages are properly loaded
     wait_for_waves_fully_loaded(&mut state, 10);
     state
@@ -1300,7 +1300,7 @@ snapshot_ui!(start_signal_filter_works, || {
     for message in msgs {
         state.update(message);
     }
-    state.variable_name_filter.borrow_mut().push('a');
+    state.user.variable_filter.name_filter_str.push('a');
     // make sure all the signals added by the proceeding messages are properly loaded
     wait_for_waves_fully_loaded(&mut state, 10);
     state
@@ -1348,7 +1348,143 @@ snapshot_ui!(case_sensitive_signal_filter_works, || {
     for message in msgs {
         state.update(message);
     }
-    state.variable_name_filter.borrow_mut().push('a');
+    state.user.variable_filter.name_filter_str.push('a');
+    // make sure all the signals added by the proceeding messages are properly loaded
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state
+});
+
+snapshot_ui!(signal_type_filter_works_1, || {
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/many_sv_datatypes.fst")
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+    loop {
+        state.handle_async_messages();
+        state.handle_batch_commands();
+        if state.waves_fully_loaded() {
+            break;
+        }
+    }
+
+    let msgs = [
+        Message::ToggleMenu,
+        Message::ToggleToolbar,
+        Message::ToggleOverview,
+        Message::ToggleDirection,
+        Message::CloseOpenSiblingStateFileDialog {
+            load_state: false,
+            do_not_show_again: true,
+        },
+        Message::SetActiveScope(ScopeType::WaveScope(ScopeRef::from_strs(&[
+            "TOP",
+            "SVDataTypeWrapper",
+            "bb",
+        ]))),
+        Message::SetVariableIOFilter(VariableIOFilterType::Other, false),
+    ];
+    for message in msgs {
+        state.update(message);
+    }
+    // make sure all the signals added by the proceeding messages are properly loaded
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state
+});
+
+snapshot_ui!(signal_type_filter_works_2, || {
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/many_sv_datatypes.fst")
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+    loop {
+        state.handle_async_messages();
+        state.handle_batch_commands();
+        if state.waves_fully_loaded() {
+            break;
+        }
+    }
+
+    let msgs = [
+        Message::ToggleMenu,
+        Message::ToggleToolbar,
+        Message::ToggleOverview,
+        Message::ToggleDirection,
+        Message::CloseOpenSiblingStateFileDialog {
+            load_state: false,
+            do_not_show_again: true,
+        },
+        Message::SetActiveScope(ScopeType::WaveScope(ScopeRef::from_strs(&[
+            "TOP",
+            "SVDataTypeWrapper",
+            "bb",
+        ]))),
+        Message::SetVariableIOFilter(VariableIOFilterType::Other, false),
+        Message::SetVariableIOFilter(VariableIOFilterType::Output, false),
+    ];
+    for message in msgs {
+        state.update(message);
+    }
+    // make sure all the signals added by the proceeding messages are properly loaded
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state
+});
+
+snapshot_ui!(signal_type_group_works, || {
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/many_sv_datatypes.fst")
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+    loop {
+        state.handle_async_messages();
+        state.handle_batch_commands();
+        if state.waves_fully_loaded() {
+            break;
+        }
+    }
+
+    let msgs = [
+        Message::ToggleMenu,
+        Message::ToggleToolbar,
+        Message::ToggleOverview,
+        Message::ToggleDirection,
+        Message::CloseOpenSiblingStateFileDialog {
+            load_state: false,
+            do_not_show_again: true,
+        },
+        Message::SetActiveScope(ScopeType::WaveScope(ScopeRef::from_strs(&[
+            "TOP",
+            "SVDataTypeWrapper",
+            "bb",
+        ]))),
+        Message::SetVariableGroupByDirection(true),
+    ];
+    for message in msgs {
+        state.update(message);
+    }
     // make sure all the signals added by the proceeding messages are properly loaded
     wait_for_waves_fully_loaded(&mut state, 10);
     state
