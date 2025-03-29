@@ -240,6 +240,7 @@ pub enum Message {
     SetRenameItemVisible(bool),
     SetLogsVisible(bool),
     SetDragStart(Option<Pos2>),
+    SetMeasureDragStart(Option<Pos2>),
     SetFilterFocused(bool),
     SetVariableNameFilterType(VariableNameFilterType),
     SetVariableNameFilterCaseInsensitive(bool),

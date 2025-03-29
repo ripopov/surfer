@@ -673,7 +673,7 @@ impl SystemState {
 
         let modifiers = egui_ctx.input(|i| i.modifiers);
         if !modifiers.command
-            && (response.dragged_by(PointerButton::Primary)
+            && ((response.dragged_by(PointerButton::Primary) && modifiers.shift)
                 || response.clicked_by(PointerButton::Primary))
         {
             if let Some(snap_point) =
@@ -693,6 +693,15 @@ impl SystemState {
             || modifiers.command && response.drag_started_by(PointerButton::Primary)
         {
             msgs.push(Message::SetDragStart(
+                response
+                    .interact_pointer_pos()
+                    .map(|p| to_screen.inverse().transform_pos(p)),
+            ));
+        }
+
+        // Check for measure drag starting
+        if response.drag_started_by(PointerButton::Primary) {
+            msgs.push(Message::SetMeasureDragStart(
                 response
                     .interact_pointer_pos()
                     .map(|p| to_screen.inverse().transform_pos(p)),
@@ -806,6 +815,16 @@ impl SystemState {
         }
 
         self.draw_mouse_gesture_widget(
+            egui_ctx,
+            waves,
+            pointer_pos_canvas,
+            &response,
+            msgs,
+            &mut ctx,
+            viewport_idx,
+        );
+
+        self.draw_measure_widget(
             egui_ctx,
             waves,
             pointer_pos_canvas,
