@@ -14,7 +14,7 @@ use num::{BigInt, BigUint, ToPrimitive};
 use rayon::prelude::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::f64::consts::PI;
+use std::f32::consts::PI;
 use surfer_translation_types::{
     SubFieldFlatTranslationResult, TranslatedValue, ValueKind, VariableInfo, VariableType,
 };
@@ -317,10 +317,9 @@ impl SystemState {
         let num_timestamps = waves.num_timestamps().unwrap_or(1.into());
         let max_time = num_timestamps.to_f64().unwrap_or(f64::MAX);
         let mut clock_edges = vec![];
-        // Compute which timestamp to draw in each pixel. We'll draw from -transition_width to
-        // width + transition_width in order to draw initial transitions outside the screen
-        let mut timestamps = (-cfg.max_transition_width
-            ..(frame_width as i32 + cfg.max_transition_width))
+        // Compute which timestamp to draw in each pixel. We'll draw from -extra_draw_width to
+        // width + extra_draw_width in order to draw initial transitions outside the screen
+        let mut timestamps = (-cfg.extra_draw_width..(frame_width as i32 + cfg.extra_draw_width))
             .par_bridge()
             .filter_map(|x| {
                 let time = waves.viewports[viewport_idx]
@@ -674,7 +673,7 @@ impl SystemState {
 
         let modifiers = egui_ctx.input(|i| i.modifiers);
         if !modifiers.command
-            && (response.dragged_by(PointerButton::Primary)
+            && ((response.dragged_by(PointerButton::Primary) && modifiers.shift)
                 || response.clicked_by(PointerButton::Primary))
         {
             if let Some(snap_point) =
@@ -693,7 +692,16 @@ impl SystemState {
         if response.drag_started_by(PointerButton::Middle)
             || modifiers.command && response.drag_started_by(PointerButton::Primary)
         {
-            msgs.push(Message::SetDragStart(
+            msgs.push(Message::SetMouseGestureDragStart(
+                response
+                    .interact_pointer_pos()
+                    .map(|p| to_screen.inverse().transform_pos(p)),
+            ));
+        }
+
+        // Check for measure drag starting
+        if response.drag_started_by(PointerButton::Primary) {
+            msgs.push(Message::SetMeasureDragStart(
                 response
                     .interact_pointer_pos()
                     .map(|p| to_screen.inverse().transform_pos(p)),
@@ -807,6 +815,16 @@ impl SystemState {
         }
 
         self.draw_mouse_gesture_widget(
+            egui_ctx,
+            waves,
+            pointer_pos_canvas,
+            &response,
+            msgs,
+            &mut ctx,
+            viewport_idx,
+        );
+
+        self.draw_measure_widget(
             egui_ctx,
             waves,
             pointer_pos_canvas,
@@ -1140,13 +1158,13 @@ impl SystemState {
 
         // Draws the relations of the focused transaction
         if let Some(focused_pos) = focused_transaction_start {
-            let arrow_color = self.user.config.theme.relation_arrow;
+            let arrow_color = self.user.config.theme.relation_arrow.style.color;
             for start_pos in inc_relation_starts {
-                self.draw_arrow(start_pos, focused_pos, 25., arrow_color, ctx);
+                self.draw_arrow(start_pos, focused_pos, arrow_color, ctx);
             }
 
             for end_pos in out_relation_starts {
-                self.draw_arrow(focused_pos, end_pos, 25., arrow_color, ctx);
+                self.draw_arrow(focused_pos, end_pos, arrow_color, ctx);
             }
         }
     }
@@ -1166,7 +1184,7 @@ impl SystemState {
                 width: self.user.config.theme.linewidth,
             };
 
-            let transition_width = (new_x - old_x).min(6.);
+            let transition_width = (new_x - old_x).min(ctx.theme.vector_transition_width);
 
             let trace_coords =
                 |x, y| (ctx.to_screen)(x, y * ctx.cfg.line_height * height_scaling_factor + offset);
@@ -1292,14 +1310,7 @@ impl SystemState {
     }
 
     /// Draws a curvy arrow from `start` to `end`.
-    fn draw_arrow(
-        &self,
-        start: Pos2,
-        end: Pos2,
-        arrowhead_angle: f64,
-        color: Color32,
-        ctx: &DrawingContext,
-    ) {
+    fn draw_arrow(&self, start: Pos2, end: Pos2, color: Color32, ctx: &DrawingContext) {
         let mut anchor1 = Pos2::default();
         let mut anchor2 = Pos2::default();
 
@@ -1311,7 +1322,7 @@ impl SystemState {
         anchor2.x = end.x - (2. / 5.) * x_diff;
         anchor2.y = end.y;
 
-        let stroke = PathStroke::new(1.3, color);
+        let stroke = PathStroke::new(ctx.theme.relation_arrow.style.width, color);
 
         ctx.painter.add(Shape::CubicBezier(CubicBezierShape {
             points: [start, anchor1, anchor2, end],
@@ -1320,8 +1331,8 @@ impl SystemState {
             stroke,
         }));
 
-        let stroke = Stroke::new(1.3, color);
-        self.draw_arrowheads(anchor2, end, arrowhead_angle, ctx, stroke);
+        let stroke = Stroke::new(ctx.theme.relation_arrow.style.width, color);
+        self.draw_arrowheads(anchor2, end, ctx, stroke);
     }
 
     /// Draws arrowheads for the vector going from `vec_start` to `vec_tip`.
@@ -1330,33 +1341,31 @@ impl SystemState {
         &self,
         vec_start: Pos2,
         vec_tip: Pos2,
-        angle: f64, // given in degrees
         ctx: &DrawingContext,
         stroke: Stroke,
     ) {
-        // FIXME: should probably make scale a function parameter
-        let scale = 8.;
+        let head_length = ctx.theme.relation_arrow.head_length;
 
-        let vec_x = (vec_tip.x - vec_start.x) as f64;
-        let vec_y = (vec_tip.y - vec_start.y) as f64;
+        let vec_x = vec_tip.x - vec_start.x;
+        let vec_y = vec_tip.y - vec_start.y;
 
-        let alpha = 2. * PI / 360. * angle;
+        let alpha = 2. * PI / 360. * ctx.theme.relation_arrow.head_angle;
 
         // calculate the points of the new vector, which forms an angle of the given degrees with the given vector
         let vec_angled_x = vec_x * alpha.cos() + vec_y * alpha.sin();
         let vec_angled_y = -vec_x * alpha.sin() + vec_y * alpha.cos();
 
-        // scale the new vector to be ´scale´ long
+        // scale the new vector to be head_length long
         let vec_angled_x =
-            (1. / (vec_angled_y - vec_angled_x).powi(2).sqrt()) * vec_angled_x * scale;
+            (1. / (vec_angled_y - vec_angled_x).powi(2).sqrt()) * vec_angled_x * head_length;
         let vec_angled_y =
-            (1. / (vec_angled_y - vec_angled_x).powi(2).sqrt()) * vec_angled_y * scale;
+            (1. / (vec_angled_y - vec_angled_x).powi(2).sqrt()) * vec_angled_y * head_length;
 
-        let arrowhead_left_x = vec_tip.x - vec_angled_x as f32;
-        let arrowhead_left_y = vec_tip.y - vec_angled_y as f32;
+        let arrowhead_left_x = vec_tip.x - vec_angled_x;
+        let arrowhead_left_y = vec_tip.y - vec_angled_y;
 
-        let arrowhead_right_x = vec_tip.x + vec_angled_y as f32;
-        let arrowhead_right_y = vec_tip.y - vec_angled_x as f32;
+        let arrowhead_right_x = vec_tip.x + vec_angled_y;
+        let arrowhead_right_y = vec_tip.y - vec_angled_x;
 
         ctx.painter.add(Shape::line_segment(
             [vec_tip, Pos2::new(arrowhead_left_x, arrowhead_left_y)],
