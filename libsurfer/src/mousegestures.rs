@@ -1,7 +1,11 @@
 //! Code related to the mouse gesture handling.
+use std::collections::HashMap;
+
+use derive_more::Display;
 use egui::{Context, Painter, PointerButton, Response, RichText, Sense, Window};
 use emath::{Align2, Pos2, Rect, RectTransform, Vec2};
 use epaint::{FontId, Stroke};
+use lazy_static::lazy_static;
 
 use crate::config::SurferTheme;
 use crate::time::time_string;
@@ -9,13 +13,45 @@ use crate::view::DrawingContext;
 use crate::{wave_data::WaveData, Message, SystemState};
 
 /// The supported mouse gesture operations.
-#[derive(Clone, PartialEq, Copy)]
+#[derive(Clone, PartialEq, Copy, Display)]
 enum GestureKind {
+    #[display("Zoom to fit")]
     ZoomToFit,
+    #[display("Zoom in")]
     ZoomIn,
+    #[display("Zoom out")]
     ZoomOut,
+    #[display("Go to end")]
     GoToEnd,
+    #[display("Go to start")]
     GoToStart,
+    Cancel,
+}
+
+/// The supported mouse gesture zones.
+#[derive(Clone, PartialEq, Copy, Eq, Hash)]
+enum GestureZones {
+    North,
+    NorthEast,
+    East,
+    SouthEast,
+    South,
+    SouthWest,
+    West,
+    NorthWest,
+}
+
+lazy_static! {
+    static ref gesture_mapping: HashMap<GestureZones, GestureKind> = HashMap::from([
+        (GestureZones::North, GestureKind::Cancel),
+        (GestureZones::NorthEast, GestureKind::ZoomOut),
+        (GestureZones::East, GestureKind::ZoomIn),
+        (GestureZones::SouthEast, GestureKind::GoToEnd),
+        (GestureZones::South, GestureKind::Cancel),
+        (GestureZones::SouthWest, GestureKind::GoToStart),
+        (GestureZones::West, GestureKind::ZoomIn),
+        (GestureZones::NorthWest, GestureKind::ZoomToFit),
+    ]);
 }
 
 impl SystemState {
@@ -162,7 +198,9 @@ impl SystemState {
                 Some(GestureKind::ZoomOut) => {
                     self.draw_gesture_line(start_location, current_location, "Zoom out", true, ctx)
                 }
-                _ => self.draw_gesture_line(start_location, current_location, "Cancel", false, ctx),
+                Some(GestureKind::Cancel) | None => {
+                    self.draw_gesture_line(start_location, current_location, "Cancel", false, ctx)
+                }
             }
         } else {
             self.draw_gesture_help(response, ctx.painter, Some(start_location), true);
@@ -310,7 +348,7 @@ impl SystemState {
                             x: self.user.config.gesture.size,
                             y: self.user.config.gesture.size,
                         },
-                        Sense::click(),
+                        Sense::empty(),
                     );
                     self.draw_gesture_help(&response, &painter, None, false);
                     ui.add_space(10.);
@@ -406,59 +444,83 @@ impl SystemState {
         let halfwaytexty_upper = top + (deltay - tan225deltax) * 0.5;
         let halfwaytexty_lower = bottom - (deltay - tan225deltax) * 0.5;
         // Draw commands
+        // West
         painter.text(
             to_screen(left, midy),
             Align2::LEFT_CENTER,
-            "Zoom in",
+            gesture_mapping
+                .get(&GestureZones::West)
+                .map_or("unknown".to_string(), |s| s.to_string()),
             FontId::default(),
             self.user.config.theme.foreground,
         );
+        // East
         painter.text(
             to_screen(right, midy),
             Align2::RIGHT_CENTER,
-            "Zoom in",
+            gesture_mapping
+                .get(&GestureZones::East)
+                .map_or("unknown".to_string(), |s| s.to_string()),
             FontId::default(),
             self.user.config.theme.foreground,
         );
+        // NorthWest
         painter.text(
             to_screen(left, halfwaytexty_upper),
             Align2::LEFT_CENTER,
-            "Zoom to fit",
+            gesture_mapping
+                .get(&GestureZones::NorthWest)
+                .map_or("unknown".to_string(), |s| s.to_string()),
             FontId::default(),
             self.user.config.theme.foreground,
         );
+        // NorthEast
         painter.text(
             to_screen(right, halfwaytexty_upper),
             Align2::RIGHT_CENTER,
-            "Zoom out",
+            gesture_mapping
+                .get(&GestureZones::NorthEast)
+                .map_or("unknown".to_string(), |s| s.to_string()),
             FontId::default(),
             self.user.config.theme.foreground,
         );
+        // North
         painter.text(
             to_screen(midx, top),
             Align2::CENTER_TOP,
-            "Cancel",
+            gesture_mapping
+                .get(&GestureZones::North)
+                .map_or("unknown".to_string(), |s| s.to_string()),
             FontId::default(),
             self.user.config.theme.foreground,
         );
+        // SouthWest
         painter.text(
             to_screen(left, halfwaytexty_lower),
             Align2::LEFT_CENTER,
-            "Go to start",
+            gesture_mapping
+                .get(&GestureZones::SouthWest)
+                .map_or("unknown".to_string(), |s| s.to_string()),
             FontId::default(),
             self.user.config.theme.foreground,
         );
+        // SouthEast
         painter.text(
             to_screen(right, halfwaytexty_lower),
             Align2::RIGHT_CENTER,
-            "Go to end",
+            gesture_mapping
+                .get(&GestureZones::SouthEast)
+                .map_or("unknown".to_string(), |s| s.to_string()),
             FontId::default(),
             self.user.config.theme.foreground,
         );
+        // South
         painter.text(
             to_screen(midx, bottom),
             Align2::CENTER_BOTTOM,
-            "Cancel",
+            gesture_mapping
+                .get(&GestureZones::South)
+                .map_or("unknown".to_string(), |s| s.to_string()),
             FontId::default(),
             self.user.config.theme.foreground,
         );
@@ -504,35 +566,35 @@ fn gesture_type(delta: Vec2) -> Option<GestureKind> {
     if delta.x < 0.0 {
         if delta.y.abs() < -tan225x {
             // West
-            Some(GestureKind::ZoomIn)
+            gesture_mapping.get(&GestureZones::West).copied()
         } else if delta.y < 0.0 && delta.x < tan225y {
             // North west
-            Some(GestureKind::ZoomToFit)
+            gesture_mapping.get(&GestureZones::NorthWest).copied()
         } else if delta.y > 0.0 && delta.x < -tan225y {
             // South west
-            Some(GestureKind::GoToStart)
-        // } else if delta.y < 0.0 {
-        //    // North
-        //    None
+            gesture_mapping.get(&GestureZones::SouthWest).copied()
+        } else if delta.y < 0.0 {
+            // North
+            gesture_mapping.get(&GestureZones::North).copied()
         } else {
             // South
-            None
+            gesture_mapping.get(&GestureZones::South).copied()
         }
     } else if tan225x > delta.y.abs() {
         // East
-        Some(GestureKind::ZoomIn)
+        gesture_mapping.get(&GestureZones::East).copied()
     } else if delta.y < 0.0 && delta.x > -tan225y {
         // North east
-        Some(GestureKind::ZoomOut)
+        gesture_mapping.get(&GestureZones::NorthEast).copied()
     } else if delta.y > 0.0 && delta.x > tan225y {
         // South east
-        Some(GestureKind::GoToEnd)
-    // } else if delta.y > 0.0 {
-    //    // North
-    //    None
+        gesture_mapping.get(&GestureZones::SouthEast).copied()
+    } else if delta.y > 0.0 {
+        // North
+        gesture_mapping.get(&GestureZones::North).copied()
     } else {
         // South
-        None
+        gesture_mapping.get(&GestureZones::South).copied()
     }
 }
 
