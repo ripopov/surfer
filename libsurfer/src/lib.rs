@@ -626,9 +626,6 @@ impl SystemState {
                 let Some(vidx) = waves.focused_item else {
                     return;
                 };
-                let Some(idx) = waves.items_tree.to_displayed(vidx) else {
-                    return;
-                };
                 let mut vidx = vidx;
                 for _ in 0..count {
                     vidx = waves
@@ -1367,6 +1364,7 @@ impl SystemState {
             Message::SetClockHighlightType(new_type) => {
                 self.user.config.default_clock_highlight_type = new_type;
             }
+            Message::SetFillHighValues(fill) => self.user.fill_high_values = Some(fill),
             Message::AddMarker {
                 time,
                 name,
@@ -1780,7 +1778,7 @@ impl SystemState {
                 });
 
                 // if we are using the focus as the insert anchor, then move that as well
-                let item_refs = if before.is_none() && passed_or_focused.is_some() {
+                let item_refs = if before.is_none() & passed_or_focused.is_some() {
                     let focus_index = waves
                         .items_tree
                         .to_displayed(waves.focused_item.expect("Inconsistent state"))
@@ -1912,7 +1910,7 @@ impl SystemState {
                         .get_visible(focused_item)
                         .expect("Inconsistent state")
                         .level;
-                    if !unfold && focused_level > 0 {
+                    if !unfold & (focused_level > 0) {
                         waves.focused_item = None;
                     }
                 }
