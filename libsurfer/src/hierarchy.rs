@@ -44,12 +44,7 @@ pub fn separate(state: &mut SystemState, ui: &mut Ui, msgs: &mut Vec<Message>) {
             });
             ui.add_space(3.0);
 
-            ScrollArea::both()
-                .auto_shrink([false; 2])
-                .id_salt("variables")
-                .show(ui, |ui| {
-                    draw_variables(state, msgs, ui);
-                });
+            draw_variables(state, msgs, ui);
         });
 }
 
@@ -66,32 +61,63 @@ fn draw_variables(state: &mut SystemState, msgs: &mut Vec<Message>, ui: &mut Ui)
         match active_scope {
             ScopeType::WaveScope(scope) => {
                 let wave_container = waves.inner.as_waves().unwrap();
-                if !state.show_parameters_in_scopes() {
-                    let parameters = wave_container.parameters_in_scope(scope);
-                    if !parameters.is_empty() {
-                        egui::collapsing_header::CollapsingState::load_with_default_open(
-                            ui.ctx(),
-                            egui::Id::new(&parameters),
-                            false,
-                        )
-                        .show_header(ui, |ui| {
-                            ui.with_layout(
-                                Layout::top_down(Align::LEFT).with_cross_justify(true),
-                                |ui| {
-                                    ui.label("Parameters");
-                                },
-                            );
-                        })
-                        .body(|ui| {
-                            state.draw_variable_list(msgs, wave_container, ui, &parameters, filter);
-                        });
-                    }
-                }
                 let variables = wave_container.variables_in_scope(scope);
-                state.draw_variable_list(msgs, wave_container, ui, &variables, filter);
+                let variables = state.filtered_variables(&variables, filter);
+                if !state.show_parameters_in_scopes() {
+                    ScrollArea::both()
+                        .auto_shrink([false; 2])
+                        .id_salt("variables")
+                        .show(ui, |ui| {
+                            let parameters = wave_container.parameters_in_scope(scope);
+                            if !parameters.is_empty() {
+                                egui::collapsing_header::CollapsingState::load_with_default_open(
+                                    ui.ctx(),
+                                    egui::Id::new(&parameters),
+                                    false,
+                                )
+                                .show_header(ui, |ui| {
+                                    ui.with_layout(
+                                        Layout::top_down(Align::LEFT).with_cross_justify(true),
+                                        |ui| {
+                                            ui.label("Parameters");
+                                        },
+                                    );
+                                })
+                                .body(|ui| {
+                                    state.draw_variable_list(
+                                        msgs,
+                                        wave_container,
+                                        ui,
+                                        &parameters,
+                                        filter,
+                                    );
+                                });
+                            }
+                            state.draw_filtered_variable_list(msgs, wave_container, ui, &variables);
+                        });
+                } else {
+                    let text_style = egui::TextStyle::Body;
+                    let row_height = ui.text_style_height(&text_style);
+                    ScrollArea::both()
+                        .auto_shrink([false; 2])
+                        .id_salt("variables")
+                        .show_rows(ui, row_height, variables.len(), |ui, row_range| {
+                            state.draw_filtered_variable_list(
+                                msgs,
+                                wave_container,
+                                ui,
+                                &variables[row_range],
+                            );
+                        });
+                }
             }
             ScopeType::StreamScope(s) => {
-                state.draw_transaction_variable_list(msgs, waves, ui, s);
+                ScrollArea::both()
+                    .auto_shrink([false; 2])
+                    .id_salt("variables")
+                    .show(ui, |ui| {
+                        state.draw_transaction_variable_list(msgs, waves, ui, s);
+                    });
             }
         }
     }
