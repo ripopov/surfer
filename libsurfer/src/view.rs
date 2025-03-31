@@ -817,7 +817,18 @@ impl SystemState {
         variables: &[VariableRef],
         filter: &VariableFilter,
     ) {
-        for variable in self.filtered_variables(variables, filter) {
+        let variables = self.filtered_variables(variables, filter);
+        self.draw_filtered_variable_list(msgs, wave_container, ui, &variables);
+    }
+
+    pub fn draw_filtered_variable_list(
+        &self,
+        msgs: &mut Vec<Message>,
+        wave_container: &WaveContainer,
+        ui: &mut egui::Ui,
+        variables: &[VariableRef],
+    ) {
+        for variable in variables {
             let meta = wave_container.variable_meta(&variable).ok();
             let index = meta
                 .as_ref()
