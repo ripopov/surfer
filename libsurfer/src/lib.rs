@@ -36,6 +36,7 @@ pub mod tests;
 pub mod time;
 pub mod toolbar;
 pub mod transaction_container;
+pub mod transcript;
 pub mod translation;
 pub mod util;
 pub mod variable_direction;
@@ -318,8 +319,13 @@ impl SystemState {
                 }
             }
             Message::AddScope(scope, recursive) => {
-                self.save_current_canvas(format!("Add scope {}", scope.name()));
+                let name = scope.name();
+                self.save_current_canvas(format!("Add scope {}", name));
                 self.add_scope(scope, recursive);
+                self.log_command(&format!(
+                    "add_scope{} {name}",
+                    if recursive { "_recursive" } else { "" }
+                ));
             }
             Message::AddCount(digit) => {
                 if let Some(count) = &mut self.user.count {
@@ -1182,8 +1188,14 @@ impl SystemState {
                 self.translators.add_or_replace(AnyTranslator::Full(t));
             }
             Message::ToggleSidePanel => self.user.show_hierarchy = Some(!self.show_hierarchy()),
-            Message::ToggleMenu => self.user.show_menu = Some(!self.show_menu()),
-            Message::ToggleToolbar => self.user.show_toolbar = Some(!self.show_toolbar()),
+            Message::ToggleMenu => {
+                self.user.show_menu = Some(!self.show_menu());
+                self.log_command(&"toggle_menu".to_string())
+            }
+            Message::ToggleToolbar => {
+                self.user.show_toolbar = Some(!self.show_toolbar());
+                self.log_command(&"toggle_toolbar".to_string())
+            }
             Message::ToggleEmptyScopes => {
                 self.user.show_empty_scopes = Some(!self.show_empty_scopes())
             }
