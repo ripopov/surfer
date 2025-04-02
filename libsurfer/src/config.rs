@@ -15,6 +15,7 @@ use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
+use crate::mousegestures::GestureZones;
 use crate::time::TimeFormat;
 use crate::{clock_highlighting::ClockHighlightType, variable_name_type::VariableNameType};
 
@@ -206,6 +207,12 @@ pub struct SurferGesture {
     pub size: f32,
     /// (Squared) minimum distance to move to remove the overlay help and perform gesture
     pub deadzone: f32,
+    /// Circle radius for background as a factor of size/2
+    pub background_radius: f32,
+    /// Gamma factor for background circle, between 0 (opaque) and 1 (transparent)
+    pub background_gamma: f32,
+    /// Mapping between the eight directions and actions
+    pub mapping: GestureZones,
 }
 
 #[derive(Debug, Deserialize)]
@@ -219,6 +226,7 @@ pub struct SurferLineStyle {
 pub struct SurferTicks {
     /// 0 to 1, where 1 means as many ticks that can fit without overlap
     pub density: f32,
+    /// Line style to use for ticks
     pub style: SurferLineStyle,
 }
 
