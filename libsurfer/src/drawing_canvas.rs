@@ -1,11 +1,9 @@
 use color_eyre::eyre::WrapErr;
 use ecolor::Color32;
-use egui::{PointerButton, Response, Sense, Ui};
+use egui::{FontId, PointerButton, Response, Sense, Ui};
 use egui_extras::{Column, TableBuilder};
 use emath::{Align2, Pos2, Rect, RectTransform, Vec2};
-use epaint::{
-    CornerRadiusF32, CubicBezierShape, FontId, PathShape, PathStroke, RectShape, Shape, Stroke,
-};
+use epaint::{CornerRadiusF32, CubicBezierShape, PathShape, PathStroke, RectShape, Shape, Stroke};
 use ftr_parser::types::{Transaction, TxGenerator};
 use itertools::Itertools;
 use log::{error, warn};
@@ -1134,8 +1132,9 @@ impl State {
         text_color: Color32,
     ) {
         if let Some(prev_result) = &prev_region.inner {
+            let color = prev_result.kind.color(user_color, ctx.theme);
             let stroke = Stroke {
-                color: prev_result.kind.color(user_color, ctx.theme),
+                color,
                 width: self.config.theme.linewidth,
             };
 
@@ -1143,18 +1142,25 @@ impl State {
 
             let trace_coords = |x, y| (ctx.to_screen)(x, y * ctx.cfg.line_height + offset);
 
-            ctx.painter.add(PathShape::line(
-                vec![
-                    trace_coords(*old_x, 0.5),
-                    trace_coords(old_x + transition_width / 2., 1.0),
-                    trace_coords(new_x - transition_width / 2., 1.0),
-                    trace_coords(*new_x, 0.5),
-                    trace_coords(new_x - transition_width / 2., 0.0),
-                    trace_coords(old_x + transition_width / 2., 0.0),
-                    trace_coords(*old_x, 0.5),
-                ],
-                stroke,
+            let points = vec![
+                trace_coords(*old_x, 0.5),
+                trace_coords(old_x + transition_width / 2., 0.0),
+                trace_coords(new_x - transition_width / 2., 0.0),
+                trace_coords(*new_x, 0.5),
+                trace_coords(new_x - transition_width / 2., 1.0),
+                trace_coords(old_x + transition_width / 2., 1.0),
+                trace_coords(*old_x, 0.5),
+            ];
+
+            // For performance, it might be nice to draw both the background and line with this
+            // call, but using convex_polygon on our polygons create artefacts on thin transitions.
+            ctx.painter.add(PathShape::convex_polygon(
+                points.clone(),
+                color.gamma_multiply(self.config.theme.wide_opacity),
+                PathStroke::NONE,
             ));
+
+            ctx.painter.add(PathShape::line(points, stroke));
 
             let text_size = ctx.cfg.text_size;
             let char_width = text_size * (20. / 31.);
@@ -1284,7 +1290,7 @@ impl State {
             points: [start, anchor1, anchor2, end],
             closed: false,
             fill: Default::default(),
-            stroke: stroke,
+            stroke,
         }));
 
         let stroke = Stroke::new(1.3, color);

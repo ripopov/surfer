@@ -285,6 +285,9 @@ pub struct SurferTheme {
     /// Opacity with which variable backgrounds are drawn. 0 is fully transparent and 1 is fully
     /// opaque.
     pub waveform_opacity: f32,
+    /// Opacity of variable backgrounds for wide signals (signals with more than one bit)
+    #[serde(default)]
+    pub wide_opacity: f32,
 
     #[serde(default = "default_colors", deserialize_with = "deserialize_color_map")]
     pub colors: HashMap<String, Color32>,
