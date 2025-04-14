@@ -17,6 +17,7 @@ variable_highimp = "46175e"
 variable_dontcare = "17265e"
 variable_weak = "808080"
 waveform_opacity = 0.5
+wide_opacity = 0.2
 cursor = { color="b63935", width=2 }
 linewidth = 2
 highlight_background = "DAE8FF"
