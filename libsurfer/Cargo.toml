@@ -27,6 +27,7 @@ eframe.workspace = true
 egui.workspace = true
 egui_extras.workspace = true
 egui_plot = { workspace = true, optional = true }
+egui-file-dialog.workspace = true
 egui-remixicon.workspace = true
 emath.workspace = true
 enum-iterator.workspace = true

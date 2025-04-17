@@ -158,6 +158,7 @@ impl SystemState {
                 drag_source_idx: None,
                 drag_target_idx: None,
                 sidepanel_width: None,
+                file_dialog: egui_file_dialog::FileDialog::new(),
             },
             translators,
             channels,
