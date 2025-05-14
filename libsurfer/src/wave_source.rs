@@ -776,6 +776,8 @@ impl SystemState {
             OpenMode::Switch => true,
         };
 
+        self.user.file_dialog.pick_file();
+
         #[cfg(not(target_arch = "wasm32"))]
         let message = move |file: PathBuf| {
             Message::LoadFile(

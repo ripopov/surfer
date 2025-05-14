@@ -1,4 +1,5 @@
 use crate::fzcmd::expand_command;
+use camino::Utf8PathBuf;
 use color_eyre::eyre::Context;
 use ecolor::Color32;
 #[cfg(not(target_arch = "wasm32"))]
@@ -352,6 +353,17 @@ impl SystemState {
             if self.show_overview() && !waves.items_tree.is_empty() {
                 self.add_overview_panel(ctx, waves, &mut msgs);
             }
+        }
+
+        self.user.file_dialog.update(ctx);
+        if let Some(path) = self.user.file_dialog.take_picked() {
+            msgs.push(Message::LoadFile(
+                Utf8PathBuf::from_path_buf(path.to_path_buf()).unwrap(),
+                LoadOptions {
+                    keep_variables: false,
+                    keep_unavailable: false,
+                },
+            ));
         }
 
         if self.show_hierarchy() {

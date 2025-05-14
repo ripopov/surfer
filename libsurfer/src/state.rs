@@ -32,6 +32,7 @@ use egui::{
     style::{Selection, WidgetVisuals, Widgets},
     CornerRadius, Stroke, Visuals,
 };
+use egui_file_dialog::FileDialog;
 use itertools::Itertools;
 use log::{error, info, trace, warn};
 use ron::ser::PrettyConfig;
@@ -108,6 +109,9 @@ pub struct UserState {
     // - Sequencing issue in serialization, due to us having to run that async
     #[serde(skip)]
     pub state_file: Option<PathBuf>,
+
+    #[serde(skip)]
+    pub(crate) file_dialog: FileDialog,
 }
 
 // Impl needed since for loading we need to put State into a Message
