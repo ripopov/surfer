@@ -5,9 +5,9 @@ use emath::{Align, Vec2};
 
 use crate::wave_container::SimulationStatus;
 use crate::{
+    file_dialog::OpenMode,
     message::Message,
     wave_data::{PER_SCROLL_EVENT, SCROLL_EVENTS_PER_PAGE},
-    wave_source::OpenMode,
     SystemState,
 };
 
@@ -102,7 +102,6 @@ impl SystemState {
                 Message::SetUrlEntryVisible(true),
                 true,
             );
-            #[cfg(not(target_arch = "wasm32"))]
             add_toolbar_button(
                 ui,
                 msgs,
