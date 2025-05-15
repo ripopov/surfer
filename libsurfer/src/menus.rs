@@ -14,10 +14,10 @@ use crate::{
     clock_highlighting::clock_highlight_type_menu,
     config::ArrowKeyBindings,
     displayed_item::{DisplayedFieldRef, DisplayedItem},
+    file_dialog::OpenMode,
     message::Message,
     time::{timeformat_menu, timeunit_menu},
     variable_name_type::VariableNameType,
-    wave_source::OpenMode,
     SystemState,
 };
 
@@ -95,16 +95,13 @@ impl SystemState {
             b("Open file...", Message::OpenFileDialog(OpenMode::Open)).add_closing_menu(msgs, ui);
             b("Switch file...", Message::OpenFileDialog(OpenMode::Switch))
                 .add_closing_menu(msgs, ui);
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                b(
-                    "Reload",
-                    Message::ReloadWaveform(self.user.config.behavior.keep_during_reload),
-                )
-                .shortcut("r")
-                .enabled(self.user.waves.is_some())
-                .add_closing_menu(msgs, ui);
-            }
+            b(
+                "Reload",
+                Message::ReloadWaveform(self.user.config.behavior.keep_during_reload),
+            )
+            .shortcut("r")
+            .enabled(self.user.waves.is_some())
+            .add_closing_menu(msgs, ui);
 
             b("Load state...", Message::LoadStateFile(None)).add_closing_menu(msgs, ui);
             #[cfg(not(target_arch = "wasm32"))]
