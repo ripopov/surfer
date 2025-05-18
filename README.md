@@ -9,6 +9,11 @@ A waveform viewer with a focus on a snappy usable interface, and extensibility.
 
 ![A screenshot of surfer](snapshots/render_readme_screenshot.png)
 
+## Documentation
+
+There is automatically generated documentation of the source at https://docs.surfer-project.org/surfer/
+and an extremely early version of user documentation at https://docs.surfer-project.org/book/.
+
 ## Development Discussion
 
 Contributions are more than welcome! The easiest way is to just create an issue
