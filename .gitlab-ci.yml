@@ -66,6 +66,15 @@ cargo_about:
     script:
         - cargo about generate about.hbs -o /dev/null
 
+build_book:
+    stage: test
+    extends: .build-dependencies
+    before_script:
+        - cargo install --locked mdbook
+        - cp snapshots/theme_*.png docs/configuration/themes
+    script:
+        - mdbook build
+
 test:
     stage: test
     extends: .snapshots
