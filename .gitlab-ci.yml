@@ -28,6 +28,8 @@ default:
 workflow:
   rules:
     - when: always
+  auto_cancel:
+    on_new_commit: interruptible
 
 .build-dependencies:
   before_script:
@@ -73,7 +75,7 @@ build_book:
         - cargo install --no-default-features --features search --locked mdbook
     script:
         - cp snapshots/theme_*.png docs/configuration/themes
-        - /builds/surfer-project/surfer/cargo/bin/mdbook build
+        - /builds/${CI_PROJECT_PATH}/cargo/bin/mdbook build
 
 
 test:
@@ -161,6 +163,10 @@ test-macos-aarch64:
     allow_failure: true
 
 coverage:
+    rules:
+        - if: $CI_MERGE_REQUEST_EVENT_TYPE != "merge_train"
+          when: always
+        - when: never
     image: xd009642/tarpaulin
     stage: test
     extends: .build-dependencies
