@@ -89,6 +89,7 @@ pub enum Message {
     ItemSelectRange(VisibleItemIndex),
     /// Select all waves/items.
     ItemSelectAll,
+    SetItemSelected(VisibleItemIndex, bool),
     /// Unfocus a wave/item.
     UnfocusItem,
     RenameItem(Option<VisibleItemIndex>),
