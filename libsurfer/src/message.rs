@@ -76,6 +76,7 @@ pub enum Message {
     FocusItem(VisibleItemIndex),
     ItemSelectRange(VisibleItemIndex),
     ItemSelectAll,
+    SetItemSelected(VisibleItemIndex, bool),
     UnfocusItem,
     RenameItem(Option<VisibleItemIndex>),
     MoveFocus(MoveDir, CommandCount, bool),

@@ -436,6 +436,10 @@ impl SystemState {
                 let waves = self.user.waves.as_mut()?;
                 waves.items_tree.xselect_all_visible(true);
             }
+            Message::SetItemSelected(vidx, selected) => {
+                let waves = self.user.waves.as_mut()?;
+                waves.items_tree.xselect(vidx, selected);
+            }
             Message::ToggleItemSelected(vidx) => {
                 let waves = self.user.waves.as_mut()?;
                 let node = vidx
