@@ -1393,10 +1393,16 @@ impl SystemState {
         msgs: &mut Vec<Message>,
         vidx: VisibleItemIndex,
         item_response: &egui::Response,
+        modifiers: egui::Modifiers,
     ) {
         if item_response.dragged_by(egui::PointerButton::Primary)
             && item_response.drag_delta().length() > self.user.config.theme.drag_threshold
         {
+            if !modifiers.ctrl {
+                msgs.push(Message::FocusItem(vidx));
+                msgs.push(Message::ItemSelectionClear);
+            }
+            msgs.push(Message::SetItemSelected(vidx, true));
             msgs.push(Message::VariableDragStarted(vidx));
         }
 
@@ -1606,7 +1612,7 @@ impl SystemState {
                         )
                     })
                     .inner;
-                self.draw_drag_source(msgs, vidx, &label);
+                self.draw_drag_source(msgs, vidx, &label, ctx.input(|e| e.modifiers));
                 drawing_infos.push(ItemDrawingInfo::Variable(VariableDrawingInfo {
                     displayed_field_ref,
                     field_ref: field.clone(),
@@ -1761,7 +1767,7 @@ impl SystemState {
         };
 
         let label = draw_label(ui);
-        self.draw_drag_source(msgs, vidx, &label);
+        self.draw_drag_source(msgs, vidx, &label, ui.ctx().input(|e| e.modifiers));
         match displayed_item {
             DisplayedItem::Divider(_) => {
                 drawing_infos.push(ItemDrawingInfo::Divider(DividerDrawingInfo {
