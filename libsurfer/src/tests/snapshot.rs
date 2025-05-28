@@ -564,7 +564,7 @@ snapshot_empty_state_with_msgs! {
         Message::ToggleToolbar,
         Message::ToggleOverview,
         Message::CloseOpenSiblingStateFileDialog {load_state: false, do_not_show_again: true},
-        Message::SetUrlEntryVisible(true),
+        Message::SetUrlEntryVisible(true, None),  // No need to provide callback
         Message::SetKeyHelpVisible(true),
         Message::SetGestureHelpVisible(true),
         Message::SetLicenseVisible(true),
@@ -2537,3 +2537,34 @@ snapshot_ui_with_file_and_msgs! {default_timeline_works, "examples/counter.vcd",
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::ToggleDefaultTimeline,
 ]}
+
+snapshot_ui!(command_file_loading_works, || {
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+    state.update(Message::LoadCommandFile(
+        get_project_root()
+            .unwrap()
+            .join("examples/counter.sucl")
+            .try_into()
+            .unwrap(),
+    ));
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state
+});
+
+// Failing as the run_command_file command inserts commands after the ones in the current command file
+snapshot_ui!(command_file_in_command_file_works, || {
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+    state.update(Message::LoadCommandFile(
+        get_project_root()
+            .unwrap()
+            .join("examples/script_running_script.sucl")
+            .try_into()
+            .unwrap(),
+    ));
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state
+});

@@ -427,7 +427,7 @@ impl SystemState {
         }
     }
 
-    pub(crate) fn load_state(&mut self, mut loaded_state: UserState, path: Option<PathBuf>) {
+    pub(crate) fn load_state(&mut self, mut loaded_state: Box<UserState>, path: Option<PathBuf>) {
         // first swap everything, fix special cases afterwards
         mem::swap(&mut self.user, &mut loaded_state);
 

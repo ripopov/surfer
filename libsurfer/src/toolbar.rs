@@ -5,6 +5,7 @@ use emath::{Align, Vec2};
 
 use crate::message::MessageTarget;
 use crate::wave_container::SimulationStatus;
+use crate::wave_source::LoadOptions;
 use crate::{
     file_dialog::OpenMode,
     message::Message,
@@ -100,7 +101,12 @@ impl SystemState {
                 msgs,
                 icons::DOWNLOAD_CLOUD_FILL,
                 "Open URL...",
-                Message::SetUrlEntryVisible(true),
+                Message::SetUrlEntryVisible(
+                    true,
+                    Some(Box::new(|url: String| {
+                        Message::LoadWaveformFileFromUrl(url.clone(), LoadOptions::clean())
+                    })),
+                ),
                 true,
             );
             add_toolbar_button(
@@ -110,6 +116,14 @@ impl SystemState {
                 "Reload",
                 Message::ReloadWaveform(self.user.config.behavior.keep_during_reload),
                 wave_loaded,
+            );
+            add_toolbar_button(
+                ui,
+                msgs,
+                icons::RUN_LINE,
+                "Run command file...",
+                Message::OpenCommandFileDialog,
+                true,
             );
             ui.separator();
             add_toolbar_button(
