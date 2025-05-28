@@ -1,0 +1,5 @@
+variable_add tb.dut.clk
+variable_add tb.dut.reset
+item_focus a_tb.dut.clk
+scope_select tb.dut
+item_set_background_color Gray

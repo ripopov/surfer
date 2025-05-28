@@ -66,6 +66,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
 
+use batch_commands::read_command_bytes;
+use batch_commands::read_command_file;
 use camino::Utf8PathBuf;
 #[cfg(target_arch = "wasm32")]
 use channels::{GlobalChannelTx, IngressHandler, IngressReceiver};
@@ -951,6 +953,12 @@ impl SystemState {
                     );
                 }
             }
+            Message::LoadCommandFile(path) => {
+                self.add_batch_commands(read_command_file(&path));
+            }
+            Message::LoadCommandFromData(bytes) => {
+                self.add_batch_commands(read_command_bytes(bytes));
+            }
             Message::SetupCxxrtl(kind) => self.connect_to_cxxrtl(kind, false),
             Message::SurferServerStatus(_start, server, status) => {
                 self.server_status_to_progress(server, status);
@@ -1160,6 +1168,10 @@ impl SystemState {
             }
             Message::FileDownloaded(url, bytes, load_options) => {
                 self.load_from_bytes(WaveSource::Url(url), bytes.to_vec(), load_options)
+            }
+            Message::CommandFileDownloaded(_url, bytes) => {
+                self.add_batch_commands(read_command_bytes(bytes.to_vec()));
+                self.progress_tracker = None;
             }
             Message::SetConfigFromString(s) => {
                 // FIXME think about a structured way to collect errors
@@ -1372,6 +1384,9 @@ impl SystemState {
             }
             Message::OpenFileDialog(mode) => {
                 self.open_file_dialog(mode);
+            }
+            Message::OpenCommandFileDialog => {
+                self.open_command_file_dialog();
             }
             #[cfg(feature = "python")]
             Message::OpenPythonPluginDialog => {
