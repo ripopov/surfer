@@ -39,7 +39,6 @@ use crate::wave_container::{
     FieldRef, FieldRefExt, ScopeRef, ScopeRefExt, VariableRef, VariableRefExt, WaveContainer,
 };
 use crate::wave_data::ScopeType;
-use crate::wave_source::LoadOptions;
 use crate::{
     command_prompt::show_command_prompt, hierarchy, hierarchy::HierarchyStyle, wave_data::WaveData,
     Message, MoveDir, SystemState,
@@ -568,20 +567,19 @@ impl SystemState {
                             || (response.lost_focus()
                                 && ui.input(|i| i.key_pressed(egui::Key::Enter)))
                         {
-                            msgs.push(Message::LoadWaveformFileFromUrl(
-                                url.clone(),
-                                LoadOptions::clean(),
-                            ));
-                            msgs.push(Message::SetUrlEntryVisible(false));
+                            if let Some(callback) = &self.url_callback {
+                                msgs.push(callback(url.clone()));
+                            }
+                            msgs.push(Message::SetUrlEntryVisible(false, None));
                         }
                         if ui.button("Cancel").clicked() {
-                            msgs.push(Message::SetUrlEntryVisible(false));
+                            msgs.push(Message::SetUrlEntryVisible(false, None));
                         }
                     });
                 });
             });
         if !open {
-            msgs.push(Message::SetUrlEntryVisible(false));
+            msgs.push(Message::SetUrlEntryVisible(false, None));
         }
     }
 

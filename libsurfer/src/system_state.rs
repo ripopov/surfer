@@ -91,6 +91,8 @@ pub struct SystemState {
     pub(crate) undo_stack: Vec<CanvasState>,
     pub(crate) redo_stack: Vec<CanvasState>,
 
+    pub(crate) url_callback: Option<Box<dyn Fn(String) -> Message + Send + 'static>>,
+
     // Only used for testing
     pub(crate) expand_parameter_section: bool,
 }
@@ -191,6 +193,7 @@ impl SystemState {
             char_to_add_to_prompt: RefCell::new(None),
             expand_parameter_section: false,
 
+            url_callback: None,
             continuous_redraw: false,
             #[cfg(feature = "performance_plot")]
             rendering_cpu_times: VecDeque::new(),

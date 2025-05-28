@@ -232,7 +232,7 @@ impl SystemState {
                     WcpCommand::load { source } => {
                         match string_to_wavesource(source) {
                             WaveSource::Url(url) => {
-                                self.update(Message::LoadWaveformFileFromUrl(
+                                self.update(Message::LoadWaveformFileFromURL(
                                     url,
                                     LoadOptions::clean(),
                                 ));

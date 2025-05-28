@@ -141,7 +141,7 @@ impl SystemState {
 
         match args.waves {
             Some(WaveSource::Url(url)) => {
-                self.add_batch_message(Message::LoadWaveformFileFromUrl(url, LoadOptions::clean()));
+                self.add_batch_message(Message::LoadWaveformFileFromURL(url, LoadOptions::clean()));
             }
             Some(WaveSource::File(file)) => {
                 self.add_batch_message(Message::LoadFile(file, LoadOptions::clean()));
@@ -427,7 +427,7 @@ impl SystemState {
         }
     }
 
-    pub(crate) fn load_state(&mut self, mut loaded_state: UserState, path: Option<PathBuf>) {
+    pub(crate) fn load_state(&mut self, mut loaded_state: Box<UserState>, path: Option<PathBuf>) {
         // first swap everything, fix special cases afterwards
         mem::swap(&mut self.user, &mut loaded_state);
 
