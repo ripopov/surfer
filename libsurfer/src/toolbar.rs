@@ -110,6 +110,14 @@ impl SystemState {
                 Message::ReloadWaveform(self.user.config.behavior.keep_during_reload),
                 wave_loaded,
             );
+            add_toolbar_button(
+                ui,
+                msgs,
+                icons::RUN_LINE,
+                "Run command file...",
+                Message::OpenCommandFileDialog,
+                true,
+            );
             ui.separator();
             add_toolbar_button(
                 ui,
