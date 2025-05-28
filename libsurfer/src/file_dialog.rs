@@ -19,34 +19,28 @@ pub enum OpenMode {
 
 impl SystemState {
     #[cfg(not(target_arch = "wasm32"))]
-    fn file_dialog<F>(&mut self, filter: (String, Vec<String>), message: F)
+    fn file_dialog<F>(&mut self, title: &'static str, filter: (String, Vec<String>), message: F)
     where
         F: FnOnce(PathBuf) -> Message + Send + 'static,
     {
         let sender = self.channels.msg_sender.clone();
 
         perform_async_work(async move {
-            if let Some(file) = create_file_dialog(filter, "Open waveform file")
-                .pick_file()
-                .await
-            {
+            if let Some(file) = create_file_dialog(filter, title).pick_file().await {
                 sender.send(message(file.path().to_path_buf())).unwrap();
             }
         });
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn file_dialog<F>(&mut self, filter: (String, Vec<String>), message: F)
+    fn file_dialog<F>(&mut self, title: &'static str, filter: (String, Vec<String>), message: F)
     where
         F: FnOnce(Vec<u8>) -> Message + Send + 'static,
     {
         let sender = self.channels.msg_sender.clone();
 
         perform_async_work(async move {
-            if let Some(file) = create_file_dialog(filter, "Open waveform file")
-                .pick_file()
-                .await
-            {
+            if let Some(file) = create_file_dialog(filter, title).pick_file().await {
                 sender.send(message(file.read().await)).unwrap();
             }
         });
@@ -82,6 +76,7 @@ impl SystemState {
         };
 
         self.file_dialog(
+            "Open waveform file",
             (
                 "Waveform/Transaction-files (*.vcd, *.fst, *.ghw, *.ftr)".to_string(),
                 vec![
@@ -95,9 +90,29 @@ impl SystemState {
         );
     }
 
+    pub fn open_command_file_dialog(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        let message = move |file: PathBuf| {
+            Message::LoadCommandFile(Utf8PathBuf::from_path_buf(file).unwrap())
+        };
+
+        #[cfg(target_arch = "wasm32")]
+        let message = move |file: Vec<u8>| Message::LoadCommandFromData(file);
+
+        self.file_dialog(
+            "Open command file",
+            (
+                "Command-file (*.sucl)".to_string(),
+                vec!["sucl".to_string()],
+            ),
+            message,
+        );
+    }
+
     #[cfg(feature = "python")]
     pub fn open_python_file_dialog(&mut self) {
         self.file_dialog(
+            "Open Python translator file",
             ("Python files (*.py)".to_string(), vec!["py".to_string()]),
             |file| Message::LoadPythonTranslator(Utf8PathBuf::from_path_buf(file).unwrap()),
         );
