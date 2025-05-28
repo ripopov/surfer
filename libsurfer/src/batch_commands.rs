@@ -59,7 +59,10 @@ impl SystemState {
         self.add_batch_messages([msg]);
     }
 
-    fn parse_batch_commands<I: IntoIterator<Item = String>>(&mut self, cmds: I) -> Vec<Message> {
+    pub fn parse_batch_commands<I: IntoIterator<Item = String>>(
+        &mut self,
+        cmds: I,
+    ) -> Vec<Message> {
         trace!("Parsing batch commands");
         let parsed = cmds
             .into_iter()
@@ -82,12 +85,28 @@ impl SystemState {
                     .collect::<Vec<_>>()
             })
             .filter_map(|(no, command)| {
-                parse_command(&command, get_parser(self))
-                    .map_err(|e| {
-                        error!("Error on batch commands line {no}: {e:#?}");
-                        e
-                    })
-                    .ok()
+                if command.starts_with("run_command_file") {
+                    // Load commands from other file in place, otherwise they will be
+                    // loaded when the corresponding message is processed, leading to
+                    // a different position in the processing than expected.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    self.add_batch_commands(read_command_file(
+                        &Utf8PathBuf::from_path_buf(
+                            command.split_ascii_whitespace().nth(1).unwrap().into(),
+                        )
+                        .unwrap(),
+                    ));
+                    #[cfg(target_arch = "wasm32")]
+                    error!("Cannot use run_command_file in command files running on WASM");
+                    None
+                } else {
+                    parse_command(&command, get_parser(self))
+                        .map_err(|e| {
+                            error!("Error on batch commands line {no}: {e:#?}");
+                            e
+                        })
+                        .ok()
+                }
             })
             .collect::<Vec<_>>();
 
@@ -98,6 +117,19 @@ impl SystemState {
 pub fn read_command_file(cmd_file: &Utf8PathBuf) -> Vec<String> {
     std::fs::read_to_string(cmd_file)
         .map_err(|e| error!("Failed to read commands from {cmd_file}. {e:#?}"))
+        .ok()
+        .map(|file_content| {
+            file_content
+                .lines()
+                .map(std::string::ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn read_command_bytes(bytes: Vec<u8>) -> Vec<String> {
+    String::from_utf8(bytes)
+        .map_err(|e| error!("Failed to read commands from file. {e:#?}"))
         .ok()
         .map(|file_content| {
             file_content

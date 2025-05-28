@@ -120,6 +120,13 @@ impl SystemState {
             }
             b("Save state as...", Message::SaveStateFile(None)).add_closing_menu(msgs, ui);
             b("Open URL...", Message::SetUrlEntryVisible(true)).add_closing_menu(msgs, ui);
+            #[cfg(target_arch = "wasm32")]
+            b("Run command file...", Message::OpenCommandFileDialog)
+                .enabled(waves_loaded)
+                .add_closing_menu(msgs, ui);
+            #[cfg(not(target_arch = "wasm32"))]
+            b("Run command file...", Message::OpenCommandFileDialog).add_closing_menu(msgs, ui);
+
             #[cfg(feature = "python")]
             {
                 b("Add Python translator", Message::OpenPythonPluginDialog)
@@ -132,44 +139,52 @@ impl SystemState {
         });
         ui.menu_button("View", |ui: &mut Ui| {
             ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-            if waves_loaded {
-                b(
-                    "Zoom in",
-                    Message::CanvasZoom {
-                        mouse_ptr: None,
-                        delta: 0.5,
-                        viewport_idx: 0,
-                    },
-                )
-                .shortcut("+")
-                .add_leave_menu(msgs, ui);
+            b(
+                "Zoom in",
+                Message::CanvasZoom {
+                    mouse_ptr: None,
+                    delta: 0.5,
+                    viewport_idx: 0,
+                },
+            )
+            .shortcut("+")
+            .enabled(waves_loaded)
+            .add_leave_menu(msgs, ui);
 
-                b(
-                    "Zoom out",
-                    Message::CanvasZoom {
-                        mouse_ptr: None,
-                        delta: 2.0,
-                        viewport_idx: 0,
-                    },
-                )
-                .shortcut("-")
-                .add_leave_menu(msgs, ui);
+            b(
+                "Zoom out",
+                Message::CanvasZoom {
+                    mouse_ptr: None,
+                    delta: 2.0,
+                    viewport_idx: 0,
+                },
+            )
+            .shortcut("-")
+            .enabled(waves_loaded)
+            .add_leave_menu(msgs, ui);
 
-                b("Zoom to fit", Message::ZoomToFit { viewport_idx: 0 }).add_closing_menu(msgs, ui);
+            b("Zoom to fit", Message::ZoomToFit { viewport_idx: 0 })
+                .enabled(waves_loaded)
+                .add_closing_menu(msgs, ui);
 
-                ui.separator();
+            ui.separator();
 
-                b("Go to start", Message::GoToStart { viewport_idx: 0 })
-                    .shortcut("s")
-                    .add_closing_menu(msgs, ui);
-                b("Go to end", Message::GoToEnd { viewport_idx: 0 })
-                    .shortcut("e")
-                    .add_closing_menu(msgs, ui);
-                ui.separator();
-                b("Add viewport", Message::AddViewport).add_closing_menu(msgs, ui);
-                b("Remove viewport", Message::RemoveViewport).add_closing_menu(msgs, ui);
-                ui.separator();
-            }
+            b("Go to start", Message::GoToStart { viewport_idx: 0 })
+                .shortcut("s")
+                .enabled(waves_loaded)
+                .add_closing_menu(msgs, ui);
+            b("Go to end", Message::GoToEnd { viewport_idx: 0 })
+                .shortcut("e")
+                .enabled(waves_loaded)
+                .add_closing_menu(msgs, ui);
+            ui.separator();
+            b("Add viewport", Message::AddViewport)
+                .enabled(waves_loaded)
+                .add_closing_menu(msgs, ui);
+            b("Remove viewport", Message::RemoveViewport)
+                .enabled(waves_loaded)
+                .add_closing_menu(msgs, ui);
+            ui.separator();
 
             b("Toggle side panel", Message::ToggleSidePanel)
                 .shortcut("b")
