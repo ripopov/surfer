@@ -66,6 +66,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
 
+use batch_commands::read_command_bytes;
+use batch_commands::read_command_file;
 use camino::Utf8PathBuf;
 #[cfg(target_arch = "wasm32")]
 use channels::{GlobalChannelTx, IngressHandler, IngressReceiver};
@@ -920,7 +922,10 @@ impl SystemState {
                 self.expand_parameter_section = true;
             }
             Message::LoadFile(filename, load_options) => {
+                #[cfg(not(target_arch = "wasm32"))]
                 self.load_from_file(filename, load_options).ok();
+                #[cfg(target_arch = "wasm32")]
+                error!("Cannot load file from path in WASM");
             }
             Message::LoadWaveformFileFromUrl(url, load_options) => {
                 self.load_wave_from_url(url, load_options);
@@ -950,6 +955,15 @@ impl SystemState {
                         "Surfer is not compiled with spade support, ignoring LoadSpadeTranslator"
                     );
                 }
+            }
+            Message::LoadCommandFile(path) => {
+                self.add_batch_commands(read_command_file(&path));
+            }
+            Message::LoadCommandFileFromUrl(url) => {
+                self.load_commands_from_url(url);
+            }
+            Message::LoadCommandFromData(bytes) => {
+                self.add_batch_commands(read_command_bytes(bytes));
             }
             Message::SetupCxxrtl(kind) => self.connect_to_cxxrtl(kind, false),
             Message::SurferServerStatus(_start, server, status) => {
@@ -1160,6 +1174,10 @@ impl SystemState {
             }
             Message::FileDownloaded(url, bytes, load_options) => {
                 self.load_from_bytes(WaveSource::Url(url), bytes.to_vec(), load_options)
+            }
+            Message::CommandFileDownloaded(_url, bytes) => {
+                self.add_batch_commands(read_command_bytes(bytes.to_vec()));
+                self.progress_tracker = None;
             }
             Message::SetConfigFromString(s) => {
                 // FIXME think about a structured way to collect errors
@@ -1373,6 +1391,9 @@ impl SystemState {
             Message::OpenFileDialog(mode) => {
                 self.open_file_dialog(mode);
             }
+            Message::OpenCommandFileDialog => {
+                self.open_command_file_dialog();
+            }
             #[cfg(feature = "python")]
             Message::OpenPythonPluginDialog => {
                 self.open_python_file_dialog();
@@ -1402,7 +1423,10 @@ impl SystemState {
             Message::SetAboutVisible(s) => self.user.show_about = s,
             Message::SetKeyHelpVisible(s) => self.user.show_keys = s,
             Message::SetGestureHelpVisible(s) => self.user.show_gestures = s,
-            Message::SetUrlEntryVisible(s) => self.user.show_url_entry = s,
+            Message::SetUrlEntryVisible(s, f) => {
+                self.user.show_url_entry = s;
+                self.url_callback = f;
+            }
             Message::SetLicenseVisible(s) => self.user.show_license = s,
             Message::SetQuickStartVisible(s) => self.user.show_quick_start = s,
             Message::SetRenameItemVisible(_) => self.user.rename_target = None,
