@@ -120,6 +120,8 @@ impl SystemState {
             }
             b("Save state as...", Message::SaveStateFile(None)).add_closing_menu(msgs, ui);
             b("Open URL...", Message::SetUrlEntryVisible(true)).add_closing_menu(msgs, ui);
+            b("Run command file...", Message::OpenCommandFileDialog).add_closing_menu(msgs, ui);
+
             #[cfg(feature = "python")]
             {
                 b("Add Python translator", Message::OpenPythonPluginDialog)
