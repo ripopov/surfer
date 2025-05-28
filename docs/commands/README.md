@@ -1,9 +1,8 @@
 # Commands
 
-There are two ways to invoke commands in Surfer.
+To execute a command, press space and type the command. There is fuzzy match support, so it is enough to type parts of the command name and it will display options that matches.
 
-* Load a file one start-up using the ``--command-file`` argument.
-* Press space and type the command (with fuzzy matching)
+It is also possible to create a command file, extension `.sucl`, and run that. Running a command file can be done from within Surfer using the menu option in the File menu, through the toolbar button, or by typing the command ``run_command_file``. It can also be done using the ``--command-file`` argument when starting Surfer.
 
 Not all commands are available unless a file is loaded. Also, some commands are not available in the WASM-build (browser/VS Code extension).
 
@@ -11,16 +10,25 @@ Not all commands are available unless a file is loaded. Also, some commands are 
 
 * ``load_file <FILE_NAME>``
 
-    Load a file.
+    Load a file. Note that it works to load a waveform file from a command file.
+
 * ``switch_file <FILE_NAME>``
 
     Load file, but keep waveform view.
+
 * ``load_url <FILE_NAME>``
 
-    Loads an URL.
-* ``reload`` (not on WASM)
+    Load a URL.
+
+* ``reload``
+
+    Reload the current file. Does not work in a web browser.
+
 * ``config_reload``
+
 * ``remove_unavailable``
+
+    Remove variables that are not longer present in the reloaded file.
 
 ## State files
 
@@ -28,11 +36,23 @@ Not all commands are available unless a file is loaded. Also, some commands are 
 * ``save_state``
 * ``save_state_as``
 
+## Command files
+
+* ``run_command_file <FILE_NAME>`` (not on WASM)
+
+    Run the commands in the given file.
+
+    <div class="warning">Currently, if used in a command file, the commands in the other file will be executed AFTER the commands in the current file. This may or not be a problem.</div>
+
 ## Add variable/transaction items
 
 * ``scope_select``
 * ``stream_select``
 * ``variable_add <VARIABLE_NAME>``, ``generator_add  <GENERATOR_NAME>``
+* ``scope_add``, ``stream_add``
+* ``scope_add_recursive``
+* ``variable_add_from_scope``
+* ``generator_add_from_stream``
 
 ## Add other items
 
@@ -58,11 +78,7 @@ Not all commands are available unless a file is loaded. Also, some commands are 
   Remove focus from currently focused item.
 
 * ``item_rename``
-* ``scope_add``, ``stream_add``
-* ``scope_add_recursive``
 * ``theme_select <THEME_NAME>``
-* ``variable_add_from_scope``
-* ``generator_add_from_stream``
 
 ## Navigation
 
