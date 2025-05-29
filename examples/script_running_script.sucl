@@ -1,0 +1,4 @@
+# Currently not working as the commands from
+# run_command_file is added after the variable_add
+run_command_file ../examples/counter.sucl
+variable_add tb.dut.overflow
