@@ -123,6 +123,10 @@ pub enum Message {
         #[debug(skip)]
         state: String,
     },
+    /// Load command file from file path.
+    LoadCommandFile(Utf8PathBuf),
+    /// Load commands from data.
+    LoadCommandFromData(Vec<u8>),
     SetupCxxrtl(CxxrtlKind),
     #[serde(skip)]
     /// Message sent when waveform file header is loaded.
@@ -232,6 +236,7 @@ pub enum Message {
     SelectPrevCommand,
     SelectNextCommand,
     OpenFileDialog(OpenMode),
+    OpenCommandFileDialog,
     #[cfg(feature = "python")]
     OpenPythonPluginDialog,
     #[cfg(feature = "python")]

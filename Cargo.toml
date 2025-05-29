@@ -60,7 +60,7 @@ pure-rust-locales = "0.8.1"
 pyo3 = { version = "0.24", features = ["auto-initialize", "abi3"] }
 rayon = "1.10.0"
 regex = "1.11.1"
-reqwest = { version = "0.12.12", features = ["stream"] }
+reqwest = { version = "0.12.18", features = ["stream"] }
 rfd = { version = "0.15.3", default-features = false, features = ["tokio", "xdg-portal"] }
 ron = { version = "0.10.1", features = ["integer128"] }
 serde = { version = "1.0.218", features = ["derive"] }
