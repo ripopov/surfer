@@ -206,7 +206,7 @@ pub enum WaveContainer {
     /// A wave container that contains nothing. Currently, the only practical use for this is
     /// a placehodler when serializing and deserializing wave state.
     Empty,
-    Cxxrtl(Mutex<CxxrtlContainer>),
+    Cxxrtl(Box<Mutex<CxxrtlContainer>>),
 }
 
 impl WaveContainer {

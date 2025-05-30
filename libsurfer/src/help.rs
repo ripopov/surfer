@@ -32,7 +32,7 @@ impl SystemState {
                 if ui.link("here").clicked() {
                     self.channels
                         .msg_sender
-                        .send(Message::LoadWaveformFileFromUrl(
+                        .send(Message::LoadWaveformFileFromURL(
                             "https://app.surfer-project.org/picorv32.vcd".to_string(),
                             LoadOptions::clean(),
                         ))

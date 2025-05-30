@@ -23,8 +23,14 @@ use log::warn;
 
 type RestCommand = Box<dyn Fn(&str) -> Option<Command<Message>>>;
 
+/// Match str with wave file extensions, currently: vcd, fst, ghw
 fn is_wave_file_extension(ext: &str) -> bool {
     ext == "vcd" || ext == "fst" || ext == "ghw"
+}
+
+/// Match str with command file extensions, currently: sucl
+fn is_command_file_extension(ext: &str) -> bool {
+    ext == "sucl"
 }
 
 /// Split part of a query at whitespace
@@ -170,6 +176,10 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
         files_with_ext(is_wave_file_extension)
     }
 
+    fn all_command_files() -> Vec<String> {
+        files_with_ext(is_command_file_extension)
+    }
+
     let markers = if let Some(waves) = &state.user.waves {
         waves
             .items_tree
@@ -228,6 +238,8 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
             "load_url",
             #[cfg(not(target_arch = "wasm32"))]
             "load_state",
+            "run_command_file",
+            "run_command_file_from_url",
             "switch_file",
             "variable_add",
             "generator_add",
@@ -248,7 +260,6 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
             "divider_add",
             "config_reload",
             "theme_select",
-            #[cfg(not(target_arch = "wasm32"))]
             "reload",
             "remove_unavailable",
             "show_controls",
@@ -312,6 +323,8 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
             "load_url",
             #[cfg(not(target_arch = "wasm32"))]
             "load_state",
+            "run_command_file",
+            "run_command_file_from_url",
             "config_reload",
             "theme_select",
             "toggle_menu",
@@ -367,9 +380,22 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                     ParamGreed::Rest,
                     vec![],
                     Box::new(|query, _| {
-                        Some(Command::Terminal(Message::LoadWaveformFileFromUrl(
+                        Some(Command::Terminal(Message::LoadWaveformFileFromURL(
                             query.to_string(),
                             LoadOptions::clean(), // load_url does not indicate any format restrictions
+                        )))
+                    }),
+                )),
+                "run_command_file" => single_word_delayed_suggestions(
+                    Box::new(all_command_files),
+                    Box::new(|word| Some(Command::Terminal(Message::LoadCommandFile(word.into())))),
+                ),
+                "run_command_file_from_url" => Some(Command::NonTerminal(
+                    ParamGreed::Rest,
+                    vec![],
+                    Box::new(|query, _| {
+                        Some(Command::Terminal(Message::LoadCommandFileFromUrl(
+                            query.to_string(),
                         )))
                     }),
                 )),

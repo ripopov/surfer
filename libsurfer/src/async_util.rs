@@ -73,3 +73,13 @@ pub async fn sleep_ms(delay: u64) {
 pub async fn sleep_ms(delay_ms: u64) {
     tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
 }
+
+#[macro_export]
+macro_rules! spawn {
+    ($task:expr) => {
+        #[cfg(not(target_arch = "wasm32"))]
+        tokio::spawn($task);
+        #[cfg(target_arch = "wasm32")]
+        wasm_bindgen_futures::spawn_local($task);
+    };
+}

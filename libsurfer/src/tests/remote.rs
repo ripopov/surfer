@@ -53,7 +53,7 @@ fn run_with_server(
 
     let msgs = vec![
         // connect to server
-        Message::LoadWaveformFileFromUrl(url, LoadOptions::clean()),
+        Message::LoadWaveformFileFromURL(url, LoadOptions::clean()),
         // hide GUI elements
         Message::ToggleMenu,
         Message::ToggleSidePanel,
