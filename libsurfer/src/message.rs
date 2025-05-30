@@ -123,6 +123,12 @@ pub enum Message {
         #[debug(skip)]
         state: String,
     },
+    /// Load command file from file path.
+    LoadCommandFile(Utf8PathBuf),
+    /// Load commands from data.
+    LoadCommandFromData(Vec<u8>),
+    /// Load command file from URL.
+    LoadCommandFileFromUrl(String),
     SetupCxxrtl(CxxrtlKind),
     #[serde(skip)]
     /// Message sent when waveform file header is loaded.
@@ -164,6 +170,9 @@ pub enum Message {
     #[serde(skip)]
     /// Message sent when download of a waveform file is complete.
     FileDownloaded(String, Bytes, LoadOptions),
+    #[serde(skip)]
+    /// Message sent when download of a command file is complete.
+    CommandFileDownloaded(String, Bytes),
     ReloadConfig,
     ReloadWaveform(bool),
     /// Suggest reloading the current waveform as the file on disk has changed.
@@ -232,19 +241,24 @@ pub enum Message {
     SelectPrevCommand,
     SelectNextCommand,
     OpenFileDialog(OpenMode),
+    OpenCommandFileDialog,
     #[cfg(feature = "python")]
     OpenPythonPluginDialog,
     #[cfg(feature = "python")]
     ReloadPythonPlugin,
     SaveStateFile(Option<PathBuf>),
     LoadStateFile(Option<PathBuf>),
-    LoadState(UserState, Option<PathBuf>),
+    LoadState(Box<UserState>, Option<PathBuf>),
     SetStateFile(PathBuf),
     SetAboutVisible(bool),
     SetKeyHelpVisible(bool),
     SetGestureHelpVisible(bool),
     SetQuickStartVisible(bool),
-    SetUrlEntryVisible(bool),
+    #[serde(skip)]
+    SetUrlEntryVisible(
+        bool,
+        #[debug(skip)] Option<Box<dyn Fn(String) -> Message + Send + 'static>>,
+    ),
     SetLicenseVisible(bool),
     SetRenameItemVisible(bool),
     SetLogsVisible(bool),
