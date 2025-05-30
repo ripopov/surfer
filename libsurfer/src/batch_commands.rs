@@ -107,3 +107,16 @@ pub fn read_command_file(cmd_file: &Utf8PathBuf) -> Vec<String> {
         })
         .unwrap_or_default()
 }
+
+pub fn read_command_bytes(bytes: Vec<u8>) -> Vec<String> {
+    String::from_utf8(bytes)
+        .map_err(|e| error!("Failed to read commands from file. {e:#?}"))
+        .ok()
+        .map(|file_content| {
+            file_content
+                .lines()
+                .map(std::string::ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
