@@ -8,6 +8,7 @@ use std::sync::Mutex;
 
 use crate::async_util::{perform_async_work, perform_work, sleep_ms};
 use crate::cxxrtl_container::CxxrtlContainer;
+use crate::spawn;
 use crate::util::get_multi_extension;
 use camino::{Utf8Path, Utf8PathBuf};
 use color_eyre::eyre::{anyhow, WrapErr};
@@ -189,15 +190,6 @@ pub enum LoadProgressStatus {
     ReadingHeader(WaveSource),
     ReadingBody(WaveSource, u64, Arc<AtomicU64>),
     LoadingVariables(u64),
-}
-
-macro_rules! spawn {
-    ($task:expr) => {
-        #[cfg(not(target_arch = "wasm32"))]
-        tokio::spawn($task);
-        #[cfg(target_arch = "wasm32")]
-        wasm_bindgen_futures::spawn_local($task);
-    };
 }
 
 impl SystemState {
@@ -567,7 +559,7 @@ impl SystemState {
                 Ok(c) => sender.send(Message::WavesLoaded(
                     WaveSource::Cxxrtl(kind),
                     WaveFormat::CxxRtl,
-                    Box::new(WaveContainer::Cxxrtl(Mutex::new(c))),
+                    Box::new(WaveContainer::Cxxrtl(Box::new(Mutex::new(c)))),
                     LoadOptions {
                         keep_variables,
                         keep_unavailable: false,

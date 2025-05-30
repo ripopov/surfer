@@ -1,0 +1,3 @@
+# Used to check that running things in correct order works
+run_command_file ../examples/counter.sucl
+variable_add tb.dut.overflow
