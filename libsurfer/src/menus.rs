@@ -8,6 +8,7 @@ use surfer_translation_types::{TranslationPreference, Translator};
 
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::hierarchy::HierarchyStyle;
+use crate::message::MessageVar;
 use crate::wave_container::{FieldRef, VariableRefExt};
 use crate::wcp::{proto::WcpEvent, proto::WcpSCMessage};
 use crate::{
@@ -401,7 +402,7 @@ impl SystemState {
                     .then(|| {
                         ui.close_menu();
                         msgs.push(Message::ItemColorChange(
-                            affected_vidxs,
+                            affected_vidxs.into(),
                             Some(color_name.clone()),
                         ));
                     });
@@ -411,7 +412,7 @@ impl SystemState {
                 .clicked()
                 .then(|| {
                     ui.close_menu();
-                    msgs.push(Message::ItemColorChange(Some(vidx), None));
+                    msgs.push(Message::ItemColorChange(MessageVar::Single(vidx), None));
                 });
         });
 
@@ -423,7 +424,7 @@ impl SystemState {
                     .then(|| {
                         ui.close_menu();
                         msgs.push(Message::ItemBackgroundColorChange(
-                            affected_vidxs,
+                            affected_vidxs.into(),
                             Some(color_name.clone()),
                         ));
                     });
@@ -433,7 +434,10 @@ impl SystemState {
                 .clicked()
                 .then(|| {
                     ui.close_menu();
-                    msgs.push(Message::ItemBackgroundColorChange(Some(vidx), None));
+                    msgs.push(Message::ItemBackgroundColorChange(
+                        MessageVar::Single(vidx),
+                        None,
+                    ));
                 });
         });
 
@@ -445,7 +449,10 @@ impl SystemState {
                         .clicked()
                         .then(|| {
                             ui.close_menu();
-                            msgs.push(Message::ChangeVariableNameType(Some(vidx), name_type));
+                            msgs.push(Message::ChangeVariableNameType(
+                                MessageVar::Single(vidx),
+                                name_type,
+                            ));
                         });
                 }
             });
@@ -458,7 +465,7 @@ impl SystemState {
                         .then(|| {
                             ui.close_menu();
                             msgs.push(Message::ItemHeightScalingFactorChange(
-                                affected_vidxs,
+                                affected_vidxs.into(),
                                 *size,
                             ));
                         });
@@ -701,9 +708,9 @@ impl SystemState {
                             .map(|node| node.item_ref)
                             .contains(&displayed_field_ref.item)
                         {
-                            None
+                            MessageVar::Selected
                         } else {
-                            Some(displayed_field_ref.clone())
+                            MessageVar::Single(displayed_field_ref.clone())
                         },
                         name.to_string(),
                     ));

@@ -705,6 +705,9 @@ impl SystemState {
 
                 let mut redraw = false;
 
+                //TODO: this is hacky
+                let displayed_field_ref: Option<DisplayedFieldRef> = displayed_field_ref.into();
+
                 if let Some(id @ DisplayedItemRef(_)) =
                     displayed_field_ref.as_ref().map(|r| r.item).or(focused)
                 {
@@ -746,14 +749,14 @@ impl SystemState {
                 ));
                 self.invalidate_draw_commands();
                 let waves = self.user.waves.as_mut()?;
-                if let Some(vidx) = vidx.or(waves.focused_item) {
+                if let Some(vidx) = Option::<VisibleItemIndex>::from(vidx).or(waves.focused_item) {
                     let node = waves.items_tree.get_visible(vidx)?;
                     waves
                         .displayed_items
                         .entry(node.item_ref)
                         .and_modify(|item| item.set_color(color_name.clone()));
                 }
-                if vidx.is_none() {
+                if Option::<VisibleItemIndex>::from(vidx).is_none() {
                     for node in waves.items_tree.iter_visible_selected() {
                         waves
                             .displayed_items
@@ -781,14 +784,14 @@ impl SystemState {
                     color_name.clone().unwrap_or("default".into())
                 ));
                 let waves = self.user.waves.as_mut()?;
-                if let Some(vidx) = vidx.or(waves.focused_item) {
+                if let Some(vidx) = Option::<VisibleItemIndex>::from(vidx).or(waves.focused_item) {
                     let node = waves.items_tree.get_visible(vidx)?;
                     waves
                         .displayed_items
                         .entry(node.item_ref)
                         .and_modify(|item| item.set_background_color(color_name.clone()));
                 }
-                if vidx.is_none() {
+                if Option::<VisibleItemIndex>::from(vidx).is_none() {
                     for node in waves.items_tree.iter_visible_selected() {
                         waves
                             .displayed_items
@@ -800,7 +803,7 @@ impl SystemState {
             Message::ItemHeightScalingFactorChange(vidx, scale) => {
                 self.save_current_canvas(format!("Change item height scaling factor to {}", scale));
                 let waves = self.user.waves.as_mut()?;
-                let vidx = vidx.or(waves.focused_item)?;
+                let vidx = Option::<VisibleItemIndex>::from(vidx).or(waves.focused_item)?;
                 let node = waves.items_tree.get_visible(vidx)?;
                 waves
                     .displayed_items
@@ -1319,7 +1322,7 @@ impl SystemState {
             Message::ChangeVariableNameType(vidx, name_type) => {
                 let waves = self.user.waves.as_mut()?;
                 // checks if vidx is Some then use that, else try focused variable
-                let vidx = vidx.or(waves.focused_item)?;
+                let vidx = Option::<VisibleItemIndex>::from(vidx).or(waves.focused_item)?;
                 let item_ref = waves
                     .items_tree
                     .get_visible(vidx)

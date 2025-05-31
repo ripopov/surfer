@@ -6,6 +6,7 @@ use crate::displayed_item_tree::{Node, VisibleItemIndex};
 use crate::fzcmd::{Command, ParamGreed};
 use crate::hierarchy::HierarchyStyle;
 use crate::lazy_static;
+use crate::message::MessageVar;
 use crate::transaction_container::StreamScopeRef;
 use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, VariableRefExt};
 use crate::wave_data::ScopeType;
@@ -504,7 +505,7 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                     color_names.clone(),
                     Box::new(|word| {
                         Some(Command::Terminal(Message::ItemColorChange(
-                            None,
+                            MessageVar::Selected,
                             Some(word.to_string()),
                         )))
                     }),
@@ -513,23 +514,26 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                     color_names.clone(),
                     Box::new(|word| {
                         Some(Command::Terminal(Message::ItemBackgroundColorChange(
-                            None,
+                            MessageVar::Selected,
                             Some(word.to_string()),
                         )))
                     }),
                 ),
-                "item_unset_color" => Some(Command::Terminal(Message::ItemColorChange(None, None))),
+                "item_unset_color" => Some(Command::Terminal(Message::ItemColorChange(
+                    MessageVar::Selected,
+                    None,
+                ))),
                 "item_set_format" => single_word(
                     format_names.clone(),
                     Box::new(|word| {
                         Some(Command::Terminal(Message::VariableFormatChange(
-                            None,
+                            MessageVar::Selected,
                             word.to_string(),
                         )))
                     }),
                 ),
                 "item_unset_background_color" => Some(Command::Terminal(
-                    Message::ItemBackgroundColorChange(None, None),
+                    Message::ItemBackgroundColorChange(MessageVar::Selected, None),
                 )),
                 "item_rename" => Some(Command::Terminal(Message::RenameItem(None))),
                 "variable_set_name_type" => single_word(
@@ -540,7 +544,7 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                     ],
                     Box::new(|word| {
                         Some(Command::Terminal(Message::ChangeVariableNameType(
-                            None,
+                            MessageVar::Selected,
                             VariableNameType::from_str(word).unwrap_or(VariableNameType::Local),
                         )))
                     }),

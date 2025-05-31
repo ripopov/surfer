@@ -37,6 +37,33 @@ use crate::{
 
 type CommandCount = usize;
 
+/// Encapsulates either a specific variable or all selected variables
+#[derive(Debug, Deserialize, Clone)]
+pub enum MessageVar<T> {
+    Single(T),
+    Selected,
+}
+
+impl<T> From<MessageVar<T>> for Option<T> {
+    fn from(value: MessageVar<T>) -> Self {
+        match value {
+            MessageVar::Single(val) => Some(val),
+            MessageVar::Selected => None,
+        }
+    }
+}
+
+impl<T> From<Option<T>> for MessageVar<T> {
+    fn from(value: Option<T>) -> Self {
+        match value {
+            Some(val) => Self::Single(val),
+            None => Self::Selected,
+        }
+    }
+}
+
+impl<T: Copy> Copy for MessageVar<T> {}
+
 #[derive(Debug, Deserialize)]
 /// The design of Surfer relies on sending messages to trigger actions.
 pub enum Message {
@@ -71,17 +98,17 @@ pub enum Message {
     ScrollToItem(usize),
     SetScrollOffset(f32),
     /// Change format (translator) of a variable. Passing None as first element means all selected variables.
-    VariableFormatChange(Option<DisplayedFieldRef>, String),
+    VariableFormatChange(MessageVar<DisplayedFieldRef>, String),
     ItemSelectionClear,
     /// Change color of waves/items. If first argument is None, change for selected items. If second argument is None, change to default value.
-    ItemColorChange(Option<VisibleItemIndex>, Option<String>),
+    ItemColorChange(MessageVar<VisibleItemIndex>, Option<String>),
     /// Change background color of waves/items. If first argument is None, change for selected items. If second argument is None, change to default value.
-    ItemBackgroundColorChange(Option<VisibleItemIndex>, Option<String>),
+    ItemBackgroundColorChange(MessageVar<VisibleItemIndex>, Option<String>),
     ItemNameChange(Option<VisibleItemIndex>, Option<String>),
     /// Change scaling factor/height of waves/items. If first argument is None, change for selected items.
-    ItemHeightScalingFactorChange(Option<VisibleItemIndex>, f32),
+    ItemHeightScalingFactorChange(MessageVar<VisibleItemIndex>, f32),
     /// Change variable name type of waves/items. If first argument is None, change for selected items.
-    ChangeVariableNameType(Option<VisibleItemIndex>, VariableNameType),
+    ChangeVariableNameType(MessageVar<VisibleItemIndex>, VariableNameType),
     ForceVariableNameTypes(VariableNameType),
     /// Set or unset right alignment of names
     SetNameAlignRight(bool),
