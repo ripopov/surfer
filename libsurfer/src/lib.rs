@@ -712,8 +712,8 @@ impl SystemState {
                             waves.displayed_items.get_mut(&item)
                         {
                             update_format(displayed_variable, DisplayedFieldRef::from(item));
+                            redraw = true;
                         }
-                        redraw = true;
                     }
                     MessageTarget::CurrentSelection => {
                         //If an item is focused, update its format too
@@ -722,6 +722,7 @@ impl SystemState {
                                 waves.displayed_items.get_mut(&focused)
                             {
                                 update_format(displayed_variable, DisplayedFieldRef::from(focused));
+                                redraw = true;
                             }
                         }
                         for item in waves
@@ -736,8 +737,8 @@ impl SystemState {
                             {
                                 update_format(variable, field_ref);
                             }
+                            redraw = true;
                         }
-                        redraw = true;
                     }
                 }
 
