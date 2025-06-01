@@ -8,7 +8,7 @@ use surfer_translation_types::{TranslationPreference, Translator};
 
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::hierarchy::HierarchyStyle;
-use crate::message::MessageVar;
+use crate::message::MessageTarget;
 use crate::wave_container::{FieldRef, VariableRefExt};
 use crate::wcp::{proto::WcpEvent, proto::WcpSCMessage};
 use crate::{
@@ -412,7 +412,10 @@ impl SystemState {
                 .clicked()
                 .then(|| {
                     ui.close_menu();
-                    msgs.push(Message::ItemColorChange(MessageVar::Single(vidx), None));
+                    msgs.push(Message::ItemColorChange(
+                        MessageTarget::Explicit(vidx),
+                        None,
+                    ));
                 });
         });
 
@@ -435,7 +438,7 @@ impl SystemState {
                 .then(|| {
                     ui.close_menu();
                     msgs.push(Message::ItemBackgroundColorChange(
-                        MessageVar::Single(vidx),
+                        MessageTarget::Explicit(vidx),
                         None,
                     ));
                 });
@@ -450,7 +453,7 @@ impl SystemState {
                         .then(|| {
                             ui.close_menu();
                             msgs.push(Message::ChangeVariableNameType(
-                                MessageVar::Single(vidx),
+                                MessageTarget::Explicit(vidx),
                                 name_type,
                             ));
                         });
@@ -538,18 +541,22 @@ impl SystemState {
                 if waves.cursor.is_some() {
                     if ui.button("Value").clicked() {
                         ui.close_menu();
-                        msgs.push(Message::VariableValueToClipbord(MessageVar::Single(vidx)));
+                        msgs.push(Message::VariableValueToClipbord(MessageTarget::Explicit(
+                            vidx,
+                        )));
                     }
                 }
                 if ui.button("Name").clicked() {
                     ui.close_menu();
-                    msgs.push(Message::VariableNameToClipboard(MessageVar::Single(vidx)));
+                    msgs.push(Message::VariableNameToClipboard(MessageTarget::Explicit(
+                        vidx,
+                    )));
                 }
                 if ui.button("Full name").clicked() {
                     ui.close_menu();
-                    msgs.push(Message::VariableFullNameToClipboard(MessageVar::Single(
-                        vidx,
-                    )));
+                    msgs.push(Message::VariableFullNameToClipboard(
+                        MessageTarget::Explicit(vidx),
+                    ));
                 }
             });
         }
@@ -710,9 +717,9 @@ impl SystemState {
                             .map(|node| node.item_ref)
                             .contains(&displayed_field_ref.item)
                         {
-                            MessageVar::Selected
+                            MessageTarget::CurrentSelection
                         } else {
-                            MessageVar::Single(displayed_field_ref.clone())
+                            MessageTarget::Explicit(displayed_field_ref.clone())
                         },
                         name.to_string(),
                     ));

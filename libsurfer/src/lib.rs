@@ -81,7 +81,7 @@ use futures::executor::block_on;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use log::{error, info, warn};
-use message::MessageVar;
+use message::MessageTarget;
 use num::BigInt;
 use serde::Deserialize;
 use surfer_translation_types::Translator;
@@ -707,7 +707,7 @@ impl SystemState {
                 let mut redraw = false;
 
                 match displayed_field_ref {
-                    MessageVar::Single(DisplayedFieldRef { item, .. }) => {
+                    MessageTarget::Explicit(DisplayedFieldRef { item, .. }) => {
                         if let Some(DisplayedItem::Variable(displayed_variable)) =
                             waves.displayed_items.get_mut(&item)
                         {
@@ -715,7 +715,7 @@ impl SystemState {
                         }
                         redraw = true;
                     }
-                    MessageVar::Selected => {
+                    MessageTarget::CurrentSelection => {
                         //If an item is focused, update its format too
                         if let Some(focused) = focused {
                             if let Some(DisplayedItem::Variable(displayed_variable)) =
@@ -758,14 +758,14 @@ impl SystemState {
                 let waves = self.user.waves.as_mut()?;
 
                 match vidx {
-                    MessageVar::Single(vidx) => {
+                    MessageTarget::Explicit(vidx) => {
                         let node = waves.items_tree.get_visible(vidx)?;
                         waves
                             .displayed_items
                             .entry(node.item_ref)
                             .and_modify(|item| item.set_color(color_name.clone()));
                     }
-                    MessageVar::Selected => {
+                    MessageTarget::CurrentSelection => {
                         if let Some(focused) = waves.focused_item {
                             let node = waves.items_tree.get_visible(focused)?;
                             waves
@@ -804,14 +804,14 @@ impl SystemState {
                 let waves = self.user.waves.as_mut()?;
 
                 match vidx {
-                    MessageVar::Single(vidx) => {
+                    MessageTarget::Explicit(vidx) => {
                         let node = waves.items_tree.get_visible(vidx)?;
                         waves
                             .displayed_items
                             .entry(node.item_ref)
                             .and_modify(|item| item.set_background_color(color_name.clone()));
                     }
-                    MessageVar::Selected => {
+                    MessageTarget::CurrentSelection => {
                         if let Some(focused) = waves.focused_item {
                             let node = waves.items_tree.get_visible(focused)?;
                             waves
@@ -833,8 +833,8 @@ impl SystemState {
                 self.save_current_canvas(format!("Change item height scaling factor to {}", scale));
                 let waves = self.user.waves.as_mut()?;
                 let vidx = match vidx {
-                    MessageVar::Single(vidx) => vidx,
-                    MessageVar::Selected => waves.focused_item?,
+                    MessageTarget::Explicit(vidx) => vidx,
+                    MessageTarget::CurrentSelection => waves.focused_item?,
                 };
                 let node = waves.items_tree.get_visible(vidx)?;
                 waves
@@ -1355,8 +1355,8 @@ impl SystemState {
                 let waves = self.user.waves.as_mut()?;
                 // checks if vidx is Some then use that, else try focused variable
                 let vidx = match vidx {
-                    MessageVar::Single(vidx) => vidx,
-                    MessageVar::Selected => waves.focused_item?,
+                    MessageTarget::Explicit(vidx) => vidx,
+                    MessageTarget::CurrentSelection => waves.focused_item?,
                 };
                 let item_ref = waves
                     .items_tree
@@ -1893,7 +1893,7 @@ impl SystemState {
 
     fn handle_variable_clipboard_operation<F>(
         &self,
-        vidx: MessageVar<VisibleItemIndex>,
+        vidx: MessageTarget<VisibleItemIndex>,
         get_text: F,
     ) where
         F: FnOnce(&WaveData, DisplayedItemRef) -> Option<String>,
@@ -1901,7 +1901,7 @@ impl SystemState {
         let Some(waves) = &self.user.waves else {
             return;
         };
-        let vidx = if let MessageVar::Single(vidx) = vidx {
+        let vidx = if let MessageTarget::Explicit(vidx) = vidx {
             vidx
         } else if let Some(focused) = waves.focused_item {
             focused

@@ -1,6 +1,6 @@
 use crate::{
     displayed_item::{DisplayedItem, DisplayedItemRef},
-    message::{Message, MessageVar},
+    message::{Message, MessageTarget},
     wave_container::{ScopeRefExt, VariableRef, VariableRefExt},
     wave_data::WaveData,
     wave_source::{string_to_wavesource, LoadOptions, WaveSource},
@@ -183,7 +183,7 @@ impl SystemState {
 
                         if let Some(idx) = waves.get_displayed_item_index(&id.into()) {
                             self.update(Message::ItemColorChange(
-                                MessageVar::Single(idx),
+                                MessageTarget::Explicit(idx),
                                 Some(color.clone()),
                             ));
                             self.send_response(WcpResponse::ack);
