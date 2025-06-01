@@ -319,9 +319,9 @@ pub enum Message {
     MoveTransaction {
         next: bool,
     },
-    VariableValueToClipbord(Option<VisibleItemIndex>),
-    VariableNameToClipboard(Option<VisibleItemIndex>),
-    VariableFullNameToClipboard(Option<VisibleItemIndex>),
+    VariableValueToClipbord(MessageVar<VisibleItemIndex>),
+    VariableNameToClipboard(MessageVar<VisibleItemIndex>),
+    VariableFullNameToClipboard(MessageVar<VisibleItemIndex>),
     InvalidateDrawCommands,
     AddGraphic(GraphicId, Graphic),
     RemoveGraphic(GraphicId),

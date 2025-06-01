@@ -1891,14 +1891,21 @@ impl SystemState {
         Some(())
     }
 
-    fn handle_variable_clipboard_operation<F>(&self, vidx: Option<VisibleItemIndex>, get_text: F)
-    where
+    fn handle_variable_clipboard_operation<F>(
+        &self,
+        vidx: MessageVar<VisibleItemIndex>,
+        get_text: F,
+    ) where
         F: FnOnce(&WaveData, DisplayedItemRef) -> Option<String>,
     {
         let Some(waves) = &self.user.waves else {
             return;
         };
-        let Some(vidx) = vidx.or(waves.focused_item) else {
+        let vidx = if let MessageVar::Single(vidx) = vidx {
+            vidx
+        } else if let Some(focused) = waves.focused_item {
+            focused
+        } else {
             return;
         };
         let Some(item_ref) = waves.items_tree.get_visible(vidx).map(|node| node.item_ref) else {

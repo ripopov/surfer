@@ -538,16 +538,18 @@ impl SystemState {
                 if waves.cursor.is_some() {
                     if ui.button("Value").clicked() {
                         ui.close_menu();
-                        msgs.push(Message::VariableValueToClipbord(Some(vidx)));
+                        msgs.push(Message::VariableValueToClipbord(MessageVar::Single(vidx)));
                     }
                 }
                 if ui.button("Name").clicked() {
                     ui.close_menu();
-                    msgs.push(Message::VariableNameToClipboard(Some(vidx)));
+                    msgs.push(Message::VariableNameToClipboard(MessageVar::Single(vidx)));
                 }
                 if ui.button("Full name").clicked() {
                     ui.close_menu();
-                    msgs.push(Message::VariableFullNameToClipboard(Some(vidx)));
+                    msgs.push(Message::VariableFullNameToClipboard(MessageVar::Single(
+                        vidx,
+                    )));
                 }
             });
         }

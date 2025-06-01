@@ -610,7 +610,9 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                         // split off the idx which is always followed by an underscore
                         let alpha_idx: String = word.chars().take_while(|c| *c != '_').collect();
                         alpha_idx_to_uint_idx(alpha_idx).map(|idx| {
-                            Command::Terminal(Message::VariableValueToClipbord(Some(idx)))
+                            Command::Terminal(Message::VariableValueToClipbord(MessageVar::Single(
+                                idx,
+                            )))
                         })
                     }),
                 ),
