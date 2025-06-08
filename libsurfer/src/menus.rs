@@ -155,8 +155,9 @@ impl SystemState {
                 b("Reload Python translator", Message::ReloadPythonPlugin)
                     .enabled(self.translators.has_python_translator())
                     .add_closing_menu(msgs, ui);
-                b("Exit", Message::Exit).add_closing_menu(msgs, ui);
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            b("Exit", Message::Exit).add_closing_menu(msgs, ui);
         });
         ui.menu_button("View", |ui: &mut Ui| {
             ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
