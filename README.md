@@ -254,7 +254,7 @@ As an indication of the status of the project, here is an incomplete list of sup
   - [ ] Remote control of Surfer
 - [x] Scripting
   - [x] Loading of commands on startup
-  - [ ] Loading of script file/commands in running instance
+  - [x] Loading of script file/commands in running instance
   - [ ] Logging of commands (generation of log file to be executed later)
 - [ ] Grouping of variables
 - [ ] Computed variables, e.g., `a >= 100`
