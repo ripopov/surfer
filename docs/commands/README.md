@@ -12,6 +12,9 @@ Not all commands are available unless a file is loaded. Also, some commands are 
 
     Load a file. Note that it works to load a waveform file from a command file.
 
+    <div class="warning">In WASM-builds (web browser/VS Code plugin) it is not possible to open a file due to file access restrictions. Use <tt>load_url</tt>.</div>
+
+
 * ``switch_file <FILE_NAME>``
 
     Load file, but keep waveform view.
@@ -24,11 +27,9 @@ Not all commands are available unless a file is loaded. Also, some commands are 
 
     Reload the current file. Does not work in a web browser.
 
-* ``config_reload``
-
 * ``remove_unavailable``
 
-    Remove variables that are not longer present in the reloaded file.
+    Remove variables that are not longer present in the reloaded/switched file.
 
 ## State files
 
@@ -140,6 +141,7 @@ Not all commands are available unless a file is loaded. Also, some commands are 
 * ``preference_set_clock_highlight``
 * ``preference_set_hierarchy_style``
 * ``preference_set_arrow_key_bindings``
+* ``config_reload``
 
 ## Cursor and markers
 

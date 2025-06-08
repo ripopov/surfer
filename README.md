@@ -112,10 +112,10 @@ These are the suggested solutions if it does not work for you:
 
 1. There is a script, `surfer.sh` in the repository, that can be used to start the Windows version from WSL, avoiding the second caveat mentioned below. Read the instructions in the script. This is the preferred way as the Windows version is faster.
 2. Start Surfer in (experimental) server mode, see below, in WSL and open the Windows version using the URL provided from running the previous command.
-3. Compile Surfer with a change in `Cargo.toml` as below (replace the line defining `eframe` version, using the current version if the line below has an older version).  Installing `libgtk-3-dev` may be required if errors remain (although most likely it is a dependency of that package that is really required).
+3. Compile Surfer with a change in `Cargo.toml` as below (replace the line defining `eframe` version, using the current version if the line below has an older version).  Installing `libgtk-3-dev` and/or `zenity` may be required if errors remain (although most likely it is a dependency of that package that is really required).
 
 ```toml
-  eframe = { version="0.28.1",  features = ["glow", "x11", "default_fonts"], default-features = false}
+  eframe = { version="0.31.1",  features = ["glow", "x11", "default_fonts"], default-features = false}
 ```
 
 4. Install the VS Code [extension](https://marketplace.visualstudio.com/items?itemName=surfer-project.surfer). This will allow you to just write `code filename.vcd`  and
