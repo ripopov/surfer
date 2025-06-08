@@ -178,10 +178,8 @@ coverage:
         - >
           cargo tarpaulin --out Xml --root . --manifest-path Cargo.toml --skip-clean --color Always
           --exclude-files
-          fzcmd/**/*
           f128/**/*
           instruction-decoder/**/*
-          ftr_parser/**/*
 
     coverage: '/^\d+.\d+% coverage/'
     artifacts:

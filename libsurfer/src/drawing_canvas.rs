@@ -1200,13 +1200,15 @@ impl SystemState {
                 trace_coords(*old_x, 0.5),
             ];
 
-            // For performance, it might be nice to draw both the background and line with this
-            // call, but using convex_polygon on our polygons create artefacts on thin transitions.
-            ctx.painter.add(PathShape::convex_polygon(
-                points.clone(),
-                color.gamma_multiply(self.user.config.theme.wide_opacity),
-                PathStroke::NONE,
-            ));
+            if self.user.config.theme.wide_opacity != 0.0 {
+                // For performance, it might be nice to draw both the background and line with this
+                // call, but using convex_polygon on our polygons create artefacts on thin transitions.
+                ctx.painter.add(PathShape::convex_polygon(
+                    points.clone(),
+                    color.gamma_multiply(self.user.config.theme.wide_opacity),
+                    PathStroke::NONE,
+                ));
+            }
 
             ctx.painter.add(PathShape::line(points, stroke));
 
