@@ -212,7 +212,7 @@ impl SystemState {
         let viewports = [viewport].to_vec();
 
         for translator in self.translators.all_translators() {
-            translator.set_wave_source(filename.into_translation_type());
+            translator.set_wave_source(Some(filename.into_translation_type()));
         }
 
         let ((new_wave, load_commands), is_reload) =

@@ -110,7 +110,7 @@ mod main_impl {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn main() -> Result<()> {
-        use libsurfer::state::UserState;
+        use libsurfer::{state::UserState, translation::wasm_translator::discover_wasm_translators};
 
         logs::start_logging()?;
 
@@ -171,6 +171,13 @@ mod main_impl {
             None => SystemState::new()?,
         }
         .with_params(startup_params);
+
+        // Not using batch commands here as we want to start processing wasm plugins
+        // as soon as we start up, no need to wait for the waveform to load
+        let sender = state.channels.msg_sender.clone();
+        for message in discover_wasm_translators() {
+            sender.send(message).unwrap();
+        }
 
         // install a file watcher that emits a `SuggestReloadWaveform` message
         // whenever the user-provided file changes.

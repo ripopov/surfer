@@ -984,14 +984,15 @@ impl SystemState {
                 )
             }
             Message::LoadWasmTranslator(path) => {
-                match PluginTranslator::new(path.into_std_path_buf(), HashMap::new()) {
-                    Ok(t) => self
-                        .translators
-                        .add_or_replace(AnyTranslator::Full(Box::new(t))),
-                    Err(e) => {
-                        error!("Failed to load wasm translator\n{e:#}")
+                let sender = self.channels.msg_sender.clone();
+                perform_work(move || {
+                    match PluginTranslator::new(path.into_std_path_buf(), HashMap::new()) {
+                        Ok(t) => sender.send(Message::TranslatorLoaded(Box::new(t))).unwrap(),
+                        Err(e) => {
+                            error!("Failed to load wasm translator {e:#}")
+                        }
                     }
-                }
+                })
             }
             Message::LoadSpadeTranslator { top, state } => {
                 #[cfg(feature = "spade")]
@@ -1182,6 +1183,13 @@ impl SystemState {
             }
             Message::TranslatorLoaded(t) => {
                 info!("Translator {} loaded", t.name());
+                t.set_wave_source(
+                    self.user
+                        .waves
+                        .as_ref()
+                        .map(|waves| waves.source.into_translation_type()),
+                );
+
                 self.translators.add_or_replace(AnyTranslator::Full(t));
             }
             Message::ToggleSidePanel => self.user.show_hierarchy = Some(!self.show_hierarchy()),
