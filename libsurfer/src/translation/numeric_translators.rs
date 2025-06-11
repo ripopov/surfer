@@ -115,6 +115,41 @@ impl BasicTranslator<VarId, ScopeId> for SinglePrecisionTranslator {
     }
 }
 
+pub struct HardFloat33 {}
+
+impl BasicTranslator<VarId, ScopeId> for HardFloat33 {
+    fn name(&self) -> String {
+        String::from("FP: HardFloat33")
+    }
+
+    fn basic_translate(&self, _: u64, v: &VariableValue) -> (String, ValueKind) {
+        translate_numeric(
+            |v| {
+                let bits = v.iter_u64_digits().next().unwrap_or(0);
+
+                let ones = 0xffff_ffff_ffff_ffffu64;
+                let sign = bits >> 32;
+                let rec_exp = (bits >> 23) & !(ones << 9);
+                let significand = bits & !(ones << 23);
+
+                let k = 7;
+                let exp = rec_exp - (1 << k) - 1;
+
+                let data = significand | exp << 23 | sign << 31;
+
+                shortest_float_representation(f32::from_bits(
+                    data as u32
+                ))
+            },
+            v,
+        )
+    }
+
+    fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
+        check_single_wordlength(variable.num_bits, 33)
+    }
+}
+
 pub struct DoublePrecisionTranslator {}
 
 impl BasicTranslator<VarId, ScopeId> for DoublePrecisionTranslator {

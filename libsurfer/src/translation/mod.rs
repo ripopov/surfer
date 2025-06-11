@@ -247,6 +247,7 @@ pub fn all_translators() -> TranslatorList {
         Box::new(UnsignedTranslator {}),
         Box::new(SignedTranslator {}),
         Box::new(SinglePrecisionTranslator {}),
+        Box::new(HardFloat33 {}),
         Box::new(DoublePrecisionTranslator {}),
         Box::new(HalfPrecisionTranslator {}),
         Box::new(BFloat16Translator {}),
