@@ -2539,3 +2539,29 @@ snapshot_ui!(command_file_in_command_file_works, || {
     wait_for_waves_fully_loaded(&mut state, 10);
     state
 });
+
+snapshot_ui_with_file_and_msgs! {wasm_translator_works, "examples/picorv32.vcd", [
+    Message::LoadWasmTranslator(
+        get_project_root()
+            .unwrap()
+            .join("examples/wasm_example_translator.wasm")
+            .try_into()
+            .unwrap()
+    ),
+    Message::AddVariables(vec![VariableRef::from_hierarchy_string("testbench.top.uut.pcpi_insn")]),
+    Message::VariableFormatChange(
+        MessageTarget::Explicit(DisplayedFieldRef {
+            item: DisplayedItemRef(1),
+            field: vec![],
+        }),
+        String::from("Wasm Example Translator"),
+    ),
+    Message::VariableFormatChange(
+        MessageTarget::Explicit(DisplayedFieldRef {
+            item: DisplayedItemRef(1),
+            field: vec!["[6]".to_string()],
+        }),
+        String::from("Binary"),
+    ),
+    Message::ExpandDrawnItem { item: DisplayedItemRef(1), levels: 1 }
+]}
