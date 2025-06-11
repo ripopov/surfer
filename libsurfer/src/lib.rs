@@ -709,11 +709,11 @@ impl SystemState {
                 let mut redraw = false;
 
                 match displayed_field_ref {
-                    MessageTarget::Explicit(DisplayedFieldRef { item, .. }) => {
+                    MessageTarget::Explicit(field_ref) => {
                         if let Some(DisplayedItem::Variable(displayed_variable)) =
-                            waves.displayed_items.get_mut(&item)
+                            waves.displayed_items.get_mut(&field_ref.item)
                         {
-                            update_format(displayed_variable, DisplayedFieldRef::from(item));
+                            update_format(displayed_variable, field_ref);
                             redraw = true;
                         }
                     }
