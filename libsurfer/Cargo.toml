@@ -71,6 +71,7 @@ web-time.workspace = true
 wellen.workspace = true
 leb128.workspace = true
 tokio-stream = "0.1.17"
+extism = "1.11.1"
 
 [features]
 default = ["spade", "performance_plot"]

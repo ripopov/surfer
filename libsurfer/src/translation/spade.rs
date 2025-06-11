@@ -25,7 +25,7 @@ use surfer_translation_types::{
     SubFieldTranslationResult, TranslationResult, Translator, ValueRepr,
 };
 
-use crate::wave_container::{ScopeId, VarId, VariableRefExt};
+use crate::wave_container::{ScopeId, VarId};
 use crate::{async_util::perform_work, message::Message, wave_container::VariableMeta, WaveSource};
 
 use super::{TranslationPreference, ValueKind, VariableInfo, VariableValue};

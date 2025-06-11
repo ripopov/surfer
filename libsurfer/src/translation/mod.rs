@@ -22,6 +22,7 @@ pub mod numeric_translators;
 mod python_translators;
 #[cfg(feature = "spade")]
 pub mod spade;
+pub mod wasm_translator;
 
 pub use basic_translators::*;
 use clock::ClockTranslator;

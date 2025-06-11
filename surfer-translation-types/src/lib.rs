@@ -1,4 +1,5 @@
 mod field_ref;
+pub mod plugin_types;
 #[cfg(feature = "pyo3")]
 pub mod python;
 mod result;
@@ -9,7 +10,9 @@ mod variable_ref;
 
 use derive_more::Display;
 use ecolor::Color32;
+use extism_convert::{FromBytes, Json, ToBytes};
 use num::BigUint;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub use crate::field_ref::FieldRef;
@@ -22,7 +25,11 @@ pub use crate::translator::{translates_all_bit_types, BasicTranslator, Translato
 pub use crate::variable_index::VariableIndex;
 pub use crate::variable_ref::VariableRef;
 
-#[derive(Debug, PartialEq, Clone, Display)]
+#[derive(Deserialize, Serialize, FromBytes, ToBytes)]
+#[encoding(Json)]
+pub struct PluginConfig(pub HashMap<String, String>);
+
+#[derive(Debug, PartialEq, Clone, Display, Serialize, Deserialize)]
 pub enum VariableValue {
     #[display("{_0}")]
     BigUint(BigUint),
@@ -30,7 +37,7 @@ pub enum VariableValue {
     String(String),
 }
 
-#[derive(Clone, PartialEq, Copy, Debug)]
+#[derive(Clone, PartialEq, Copy, Debug, Serialize, Deserialize)]
 pub enum ValueKind {
     Normal,
     Undef,
@@ -41,7 +48,8 @@ pub enum ValueKind {
     Weak,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Deserialize, Serialize, FromBytes, ToBytes)]
+#[encoding(Json)]
 pub enum TranslationPreference {
     /// This translator prefers translating the variable, so it will be selected
     /// as the default translator for the variable
@@ -53,7 +61,8 @@ pub enum TranslationPreference {
 }
 
 /// Static information about the structure of a variable.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, FromBytes, ToBytes)]
+#[encoding(Json)]
 pub enum VariableInfo {
     Compound {
         subfields: Vec<(String, VariableInfo)>,
@@ -67,7 +76,7 @@ pub enum VariableInfo {
     Real,
 }
 
-#[derive(Debug, Display, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 pub enum VariableType {
     // VCD-specific types
     #[display("event")]
@@ -148,7 +157,7 @@ pub enum VariableType {
     StdULogicVector,
 }
 
-#[derive(Clone, Display, Copy, PartialOrd, Debug, Eq, PartialEq)]
+#[derive(Clone, Display, Copy, PartialOrd, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum VariableDirection {
     // Ordering is used for sorting variable list
     #[display("input")]
@@ -167,7 +176,8 @@ pub enum VariableDirection {
     Unknown,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, FromBytes, ToBytes)]
+#[encoding(Json)]
 pub struct VariableMeta<VarId, ScopeId> {
     pub var: VariableRef<VarId, ScopeId>,
     pub num_bits: Option<u32>,
@@ -183,9 +193,29 @@ pub struct VariableMeta<VarId, ScopeId> {
     pub encoding: VariableEncoding,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum VariableEncoding {
     String,
     Real,
     BitVector,
 }
+
+impl<VarId1, ScopeId1> VariableMeta<VarId1, ScopeId1> {
+    pub fn map_ids<VarId2, ScopeId2>(
+        self,
+        var_fn: impl FnMut(VarId1) -> VarId2,
+        scope_fn: impl FnMut(ScopeId1) -> ScopeId2,
+    ) -> VariableMeta<VarId2, ScopeId2> {
+        VariableMeta {
+            var: self.var.map_ids(var_fn, scope_fn),
+            num_bits: self.num_bits,
+            variable_type: self.variable_type,
+            index: self.index,
+            direction: self.direction,
+            enum_map: self.enum_map,
+            encoding: self.encoding,
+            variable_type_name: self.variable_type_name,
+        }
+    }
+}
+
