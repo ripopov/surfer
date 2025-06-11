@@ -81,7 +81,7 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
         }
     }
 
-    fn set_wave_source(&self, wave_source: surfer_translation_types::WaveSource) {
+    fn set_wave_source(&self, wave_source: Option<surfer_translation_types::WaveSource>) {
         match self {
             AnyTranslator::Full(translator) => translator.set_wave_source(wave_source),
             AnyTranslator::Basic(_) => {},
@@ -292,22 +292,15 @@ pub fn all_translators() -> TranslatorList {
     #[cfg(not(target_arch = "wasm32"))]
     basic_translators.append(&mut find_user_decoders());
 
-    let wasm_translators = wasm_translator::discover_wasm_translators()
-        .into_iter()
-        .map(|t| Box::new(t) as Box<DynTranslator>);
-
     TranslatorList::new(
         basic_translators,
         vec![
-            Box::new(ClockTranslator::new()) as Box<DynTranslator>,
-            Box::new(StringTranslator {}) as Box<DynTranslator>,
-            Box::new(EnumTranslator {}) as Box<DynTranslator>,
-            Box::new(UnsignedFixedPointTranslator) as Box<DynTranslator>,
-            Box::new(SignedFixedPointTranslator) as Box<DynTranslator>,
+            Box::new(ClockTranslator::new()),
+            Box::new(StringTranslator {}),
+            Box::new(EnumTranslator {}),
+            Box::new(UnsignedFixedPointTranslator),
+            Box::new(SignedFixedPointTranslator),
         ]
-        .into_iter()
-        .chain(wasm_translators)
-        .collect(),
     )
 }
 

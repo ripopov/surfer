@@ -3222,6 +3222,7 @@ dependencies = [
  "enum-iterator",
  "epaint",
  "extism",
+ "extism-manifest",
  "f128",
  "fern",
  "ftr_parser",
