@@ -90,6 +90,7 @@ use surfer_translation_types::Translator;
 pub use system_state::SystemState;
 #[cfg(target_arch = "wasm32")]
 use tokio_stream as _;
+use translation::wasm_translator::PluginTranslator;
 use wcp::{proto::WcpCSMessage, proto::WcpEvent, proto::WcpSCMessage};
 
 use crate::async_util::perform_work;
@@ -981,6 +982,16 @@ impl SystemState {
                     self.translators.load_python_translator(filename),
                     "Error loading Python translator",
                 )
+            }
+            Message::LoadWasmTranslator(path) => {
+                match PluginTranslator::new(path.into_std_path_buf(), HashMap::new()) {
+                    Ok(t) => self
+                        .translators
+                        .add_or_replace(AnyTranslator::Full(Box::new(t))),
+                    Err(e) => {
+                        error!("Failed to load wasm translator\n{e:#}")
+                    }
+                }
             }
             Message::LoadSpadeTranslator { top, state } => {
                 #[cfg(feature = "spade")]

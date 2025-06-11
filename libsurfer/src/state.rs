@@ -32,6 +32,7 @@ use egui::{
 use itertools::Itertools;
 use log::{error, info, trace, warn};
 use serde::{Deserialize, Serialize};
+use surfer_translation_types::Translator;
 
 /// The parts of the program state that need to be serialized when loading/saving state
 #[derive(Serialize, Deserialize)]
@@ -210,6 +211,10 @@ impl SystemState {
         let viewport = Viewport::new();
         let viewports = [viewport].to_vec();
 
+        for translator in self.translators.all_translators() {
+            translator.set_wave_source(filename.into_translation_type());
+        }
+
         let ((new_wave, load_commands), is_reload) =
             if load_options.keep_variables && self.user.waves.is_some() {
                 (
@@ -263,54 +268,14 @@ impl SystemState {
                     false,
                 )
             };
-        // let (new_wave, load_commands) =
-        // if load_options.keep_variables && self.shared.waves.is_some() {
-        //     self.shared.waves.take().unwrap().update_with_waves(
-        //         new_waves,
-        //         filename,
-        //         format,
-        //         &self.translators,
-        //         load_options.keep_unavailable,
-        //     )
-        // } else if let Some(old) = self.shared.previous_waves.take() {
-        //     old.update_with_waves(
-        //         new_waves,
-        //         filename,
-        //         format,
-        //         &self.translators,
-        //         load_options.keep_unavailable,
-        //     )
-        // } else {
-        //     (
-        //         WaveData {
-        //             inner: DataContainer::Waves(*new_waves),
-        //             source: filename,
-        //             format,
-        //             active_scope: None,
-        //             items_tree: DisplayedItemTree::default(),
-        //             displayed_items: HashMap::new(),
-        //             viewports,
-        //             cursor: None,
-        //             markers: HashMap::new(),
-        //             focused_item: None,
-        //             focused_transaction: (None, None),
-        //             default_variable_name_type: self.shared.config.default_variable_name_type,
-        //             display_variable_indices: self.show_variable_indices(),
-        //             scroll_offset: 0.,
-        //             drawing_infos: vec![],
-        //             top_item_draw_offset: 0.,
-        //             total_height: 0.,
-        //             display_item_ref_counter: 0,
-        //             old_num_timestamps: None,
-        //             graphics: HashMap::new(),
-        //         },
-        //         None,
+
         if let Some(cmd) = load_commands {
             self.load_variables(cmd);
         }
         self.invalidate_draw_commands();
 
         self.user.waves = Some(new_wave);
+
 
         if !is_reload {
             if let Some(waves) = &mut self.user.waves {

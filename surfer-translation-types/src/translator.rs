@@ -1,7 +1,9 @@
 //! Definition of the main [`Translator`] trait and the simplified version
 //! [`BasicTranslator`].
 use color_eyre::Result;
+use extism_convert::{FromBytes, Json, ToBytes};
 use num::BigUint;
+use serde::{Deserialize, Serialize};
 use std::sync::mpsc::Sender;
 
 use crate::result::TranslationResult;
@@ -48,9 +50,23 @@ pub struct VariableNameInfo {
     pub priority: Option<i32>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromBytes, ToBytes)]
+#[encoding(Json)]
+pub enum WaveSource {
+    File(String),
+    Data,
+    DragAndDrop(Option<String>),
+    Url(String),
+    Cxxrtl,
+}
+
+
 /// The most general translator trait.
 pub trait Translator<VarId, ScopeId, Message>: Send + Sync {
     fn name(&self) -> String;
+
+    /// Notify the translator that the wave source has changed to the specified source
+    fn set_wave_source(&self, _wave_source: WaveSource) {}
 
     fn translate(
         &self,
