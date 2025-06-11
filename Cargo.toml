@@ -82,4 +82,4 @@ lto = true
 # Optimize all dependencies even in debug builds:
 [profile.dev.package."*"]
 opt-level = 3
-debug = false
+debug = true

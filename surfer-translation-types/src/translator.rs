@@ -66,7 +66,7 @@ pub trait Translator<VarId, ScopeId, Message>: Send + Sync {
     fn name(&self) -> String;
 
     /// Notify the translator that the wave source has changed to the specified source
-    fn set_wave_source(&self, _wave_source: WaveSource) {}
+    fn set_wave_source(&self, _wave_source: Option<WaveSource>) {}
 
     fn translate(
         &self,

@@ -1,14 +1,15 @@
 use std::collections::HashMap;
-use std::env::current_dir;
 use std::ffi::OsString;
 use std::fs::read_dir;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use camino::Utf8PathBuf;
 use color_eyre::eyre::{anyhow, Context};
 use directories::ProjectDirs;
-use extism::{Manifest, Plugin, Wasm};
-use log::{error, info, warn};
+use extism::{host_fn, Manifest, Plugin, PluginBuilder, Wasm, PTR};
+use extism_manifest::MemoryOptions;
+use log::{error, warn};
 use surfer_translation_types::plugin_types::TranslateParams;
 use surfer_translation_types::{
     PluginConfig, TranslationPreference, TranslationResult, Translator, VariableInfo, VariableMeta,
@@ -18,9 +19,9 @@ use surfer_translation_types::{
 use crate::message::Message;
 use crate::wave_container::{ScopeId, VarId};
 
-pub fn discover_wasm_translators() -> Vec<PluginTranslator> {
+pub fn discover_wasm_translators() -> Vec<Message> {
     let search_dirs = [
-        current_dir()
+        std::env::current_dir()
             .ok()
             .map(|dir| dir.join(".surfer").join("translators")),
         ProjectDirs::from("org", "surfer-project", "surfer")
@@ -29,8 +30,6 @@ pub fn discover_wasm_translators() -> Vec<PluginTranslator> {
     .into_iter()
     .filter_map(|x| x)
     .collect::<Vec<_>>(); // TODO
-
-    info!("Searching for files in {search_dirs:?}"); // TODO
 
     let plugin_files = search_dirs
         .into_iter()
@@ -65,16 +64,21 @@ pub fn discover_wasm_translators() -> Vec<PluginTranslator> {
                 })
                 .unwrap_or_else(|_| vec![])
         })
-        .flatten();
+        .flatten()
+        .filter_map(|file| {
+            file.clone()
+                .try_into()
+                .map_err(|_| {
+                    format!(
+                        "{} is not a valid UTF8 path, ignoring this translator",
+                        file.to_string_lossy()
+                    )
+                })
+                .ok()
+        });
 
     plugin_files
-        .filter_map(|file| match PluginTranslator::new(file, HashMap::new()) {
-            Ok(plugin) => Some(plugin),
-            Err(e) => {
-                warn!("{e:#?}");
-                None
-            }
-        })
+        .map(|file| Message::LoadWasmTranslator(file))
         .collect()
 }
 
@@ -88,8 +92,25 @@ impl PluginTranslator {
         let data = std::fs::read(&file)
             .with_context(|| format!("Failed to read {}", file.to_string_lossy()))?;
 
-        let manifest = Manifest::new([Wasm::data(data)]);
-        let mut plugin = Plugin::new(manifest, [], true)
+        let manifest = Manifest::new([Wasm::data(data)]).with_memory_options(
+            MemoryOptions::new().with_max_var_bytes(1024*1024*10)
+        );
+        let mut plugin = PluginBuilder::new(manifest)
+            .with_function(
+                "read_file",
+                [PTR],
+                [PTR],
+                extism::UserData::new(()),
+                read_file,
+            )
+            .with_function(
+                "file_exists",
+                [PTR],
+                [PTR],
+                extism::UserData::new(()),
+                file_exists,
+            )
+            .build()
             .map_err(|e| anyhow!("Failed to load plugin from {} {e}", file.to_string_lossy()))?;
 
         plugin
@@ -124,9 +145,9 @@ impl Translator<VarId, ScopeId, Message> for PluginTranslator {
             .unwrap_or_default()
     }
 
-    fn set_wave_source(&self, wave_source: surfer_translation_types::WaveSource) {
+    fn set_wave_source(&self, wave_source: Option<surfer_translation_types::WaveSource>) {
         let mut plugin = self.plugin.lock().unwrap();
-        if plugin.function_exists("reload") {
+        if plugin.function_exists("set_wave_source") {
             plugin
                 .call::<_, ()>("set_wave_source", wave_source)
                 .map_err(|e| {
@@ -209,3 +230,24 @@ impl Translator<VarId, ScopeId, Message> for PluginTranslator {
         }
     }
 }
+
+host_fn!(current_dir() -> String {
+    std::env::current_dir()
+        .with_context(|| format!("Failed to get current dir"))
+        .and_then(|dir| {
+            dir.to_str().ok_or_else(|| {
+                anyhow!("{} is not valid utf8", dir.to_string_lossy())
+            }).map(|s| s.to_string())
+        })
+        .map_err(|e| extism::Error::msg(format!("{e:#}")))
+});
+
+host_fn!(read_file(filename: String) -> Vec<u8> {
+    std::fs::read(Utf8PathBuf::from(&filename))
+        .with_context(|| format!("Failed to read {filename}"))
+        .map_err(|e| extism::Error::msg(format!("{e:#}")))
+});
+
+host_fn!(file_exists(filename: String) -> bool {
+    Ok(Utf8PathBuf::from(&filename).exists())
+});
