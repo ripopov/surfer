@@ -132,6 +132,7 @@ test-nightly:
     stage: test
     extends: .snapshots
     script:
+        - apt install -y ninja
         - rustc -V
         - cargo -V
         - cargo test --features python --color=always --locked -- --include-ignored
