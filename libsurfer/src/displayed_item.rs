@@ -337,11 +337,14 @@ impl DisplayedItem {
     ) {
         match self {
             DisplayedItem::Variable(_) => {
-                let name = if field.map(|f| f.field.is_empty()).unwrap_or_default() {
-                    self.name()
+                let name = if let Some(field) = field {
+                    if let Some(last) = field.field.last() {
+                        last.clone()
+                    } else {
+                        self.name()
+                    }
                 } else {
-                    // NOTE: Safe unwrap, we've checked that the field exists and is non-empty
-                    field.unwrap().field.last().unwrap().clone()
+                    self.name()
                 };
                 RichText::new(name)
                     .color(*color)
