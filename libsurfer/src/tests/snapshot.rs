@@ -204,53 +204,23 @@ macro_rules! snapshot_empty_state_with_msgs {
 }
 
 macro_rules! snapshot_ui_with_file_and_msgs {
-    ($name:ident, $file:expr, state_mods: $initial_state_mods:expr, $msgs:expr) => {
-        snapshot_ui_with_file_spade_and_msgs!($name, $file, None, None, $initial_state_mods, $msgs);
+    ($name:ident, $file:expr,state_mods: $initial_state_mods:expr, $msgs:expr) => {
+        snapshot_ui_with_file_and_msgs!($name, $file, $initial_state_mods, $msgs);
     };
     ($name:ident, $file:expr, $msgs:expr) => {
-        snapshot_ui_with_file_spade_and_msgs!($name, $file, None, None, (|_state| {}), $msgs);
+        snapshot_ui_with_file_and_msgs!($name, $file, (|_state| {}), $msgs);
     };
-}
-
-macro_rules! snapshot_ui_with_file_spade_and_msgs {
-    ($name:ident, $file:expr, $spade_top:expr, $spade_state:expr, $msgs:expr) => {
-        snapshot_ui_with_file_spade_and_msgs!(
-            $name,
-            $file,
-            $spade_top,
-            $spade_state,
-            (|_state| {}),
-            $msgs
-        );
+    ($name:ident, $file:expr, $initial_state_mod:expr, $msgs:expr) => {
+        snapshot_ui_with_file_and_msgs!($name, $file, $initial_state_mod, $msgs, []);
     };
-    ($name:ident, $file:expr, $spade_top:expr, $spade_state:expr, $initial_state_mod:expr, $msgs:expr) => {
-        snapshot_ui_with_file_spade_and_msgs!(
-            $name,
-            $file,
-            $spade_top,
-            $spade_state,
-            $initial_state_mod,
-            $msgs,
-            []
-        );
-    };
-    ($name:ident, $file:expr, $spade_top:expr, $spade_state:expr, $initial_state_mod:expr, $msgs:expr, $late_msgs:expr) => {
+    ($name:ident, $file:expr, $initial_state_mod:expr, $msgs:expr, $late_msgs:expr) => {
         snapshot_ui!($name, || {
-            use camino::Utf8PathBuf;
-
-            let project_root: Utf8PathBuf = get_project_root().unwrap().try_into().unwrap();
-            let spade_state: Option<Utf8PathBuf> = $spade_state;
-            let spade_state = spade_state.map(|state| project_root.join(state));
-            let spade_top = $spade_top;
-
             let mut state = SystemState::new_default_config()
                 .unwrap()
                 .with_params(StartupParams {
                     waves: Some(WaveSource::File(
                         get_project_root().unwrap().join($file).try_into().unwrap(),
                     )),
-                    spade_top: spade_top.clone(),
-                    spade_state,
                     startup_commands: vec![],
                     ..Default::default()
                 });
@@ -262,17 +232,7 @@ macro_rules! snapshot_ui_with_file_spade_and_msgs {
             loop {
                 state.handle_async_messages();
                 state.handle_batch_commands();
-                let spade_loaded = if spade_top.is_some() {
-                    state
-                        .translators
-                        .all_translator_names()
-                        .iter()
-                        .any(|n| *n == "spade")
-                } else {
-                    true
-                };
-
-                if state.waves_fully_loaded() && spade_loaded {
+                if state.waves_fully_loaded() {
                     break;
                 }
 
@@ -1982,8 +1942,6 @@ snapshot_ui!(save_and_start_with_state, || {
 
     // overwrite with startup params
     let mut state = state.with_params(StartupParams {
-        spade_state: None,
-        spade_top: None,
         waves: Some(WaveSource::File(
             get_project_root()
                 .unwrap()
