@@ -1,0 +1,12 @@
+[package]
+name = "translator-docs"
+version.workspace = true
+license.workspace = true
+categories.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+extism-pdk = { version = "1.4.1", default-features = false }
+surfer-translation-types = { version = "0.4.0-dev", path = "../surfer-translation-types" }

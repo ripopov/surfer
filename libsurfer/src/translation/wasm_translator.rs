@@ -134,7 +134,7 @@ impl Translator<VarId, ScopeId, Message> for PluginTranslator {
         self.plugin
             .lock()
             .unwrap()
-            .call::<_, String>("name", ())
+            .call::<_, &str>("name", ())
             .map_err(|e| {
                 error!(
                     "Failed to get translator name from {}. {e}",
