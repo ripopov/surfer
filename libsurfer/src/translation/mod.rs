@@ -84,9 +84,9 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
     fn set_wave_source(&self, wave_source: Option<surfer_translation_types::WaveSource>) {
         match self {
             AnyTranslator::Full(translator) => translator.set_wave_source(wave_source),
-            AnyTranslator::Basic(_) => {},
+            AnyTranslator::Basic(_) => {}
             #[cfg(feature = "python")]
-            AnyTranslator::Python(t) => {},
+            AnyTranslator::Python(t) => {}
         }
     }
 
@@ -300,7 +300,7 @@ pub fn all_translators() -> TranslatorList {
             Box::new(EnumTranslator {}),
             Box::new(UnsignedFixedPointTranslator),
             Box::new(SignedFixedPointTranslator),
-        ]
+        ],
     )
 }
 

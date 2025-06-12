@@ -276,7 +276,6 @@ impl SystemState {
 
         self.user.waves = Some(new_wave);
 
-
         if !is_reload {
             if let Some(waves) = &mut self.user.waves {
                 // Set time unit

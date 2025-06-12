@@ -8,4 +8,3 @@ pub struct TranslateParams {
     pub variable: VariableMeta<(), ()>,
     pub value: VariableValue,
 }
-

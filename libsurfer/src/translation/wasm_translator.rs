@@ -92,9 +92,8 @@ impl PluginTranslator {
         let data = std::fs::read(&file)
             .with_context(|| format!("Failed to read {}", file.to_string_lossy()))?;
 
-        let manifest = Manifest::new([Wasm::data(data)]).with_memory_options(
-            MemoryOptions::new().with_max_var_bytes(1024*1024*10)
-        );
+        let manifest = Manifest::new([Wasm::data(data)])
+            .with_memory_options(MemoryOptions::new().with_max_var_bytes(1024 * 1024 * 10));
         let mut plugin = PluginBuilder::new(manifest)
             .with_function(
                 "read_file",
@@ -134,7 +133,7 @@ impl Translator<VarId, ScopeId, Message> for PluginTranslator {
         self.plugin
             .lock()
             .unwrap()
-            .call::<_, String>("name", ())
+            .call::<_, &str>("name", ())
             .map_err(|e| {
                 error!(
                     "Failed to get translator name from {}. {e}",
