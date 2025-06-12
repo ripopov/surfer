@@ -890,7 +890,12 @@ impl SystemState {
                                     icons::MAP_PIN_2_LINE
                                 } else {
                                     // Align other items (can be improved)
-                                    "  "
+                                    // The padding depends on if we will render monospace or not
+                                    if name_info.is_some() {
+                                        "  "
+                                    } else {
+                                        "    "
+                                    }
                                 }
                             })
                         )
@@ -914,48 +919,66 @@ impl SystemState {
             ui.with_layout(
                 Layout::top_down(Align::LEFT).with_cross_justify(true),
                 |ui| {
-                    // NOTE: Safe unwrap, we know that egui has its own built-in font
-                    let font = ui.style().text_styles.get(&TextStyle::Monospace).unwrap();
-                    let char_width = ui.fonts(|fonts| {
-                        fonts
-                            .layout_no_wrap(
-                                " ".to_string(),
-                                font.clone(),
-                                Color32::from_rgb(0, 0, 0),
-                            )
-                            .size()
-                            .x
-                    });
-
-                    let direction_size = direction.chars().count();
-                    let index_size = index.chars().count();
-                    let value_size = value.chars().count();
-                    let used_space = (direction_size + index_size + value_size) as f32 * char_width;
-                    // The button padding is added by egui on selectable labels
-                    let available_space = ui.available_width() - ui.spacing().button_padding.x * 2.;
-                    let space_for_name = available_space - used_space;
-
                     let mut label = LayoutJob::default();
-                    let text_format = TextFormat {
-                        font_id: font.clone(),
-                        color: self.user.config.theme.foreground,
-                        ..Default::default()
-                    };
-                    label.append(&direction, 0.0, text_format.clone());
 
                     match name_info.and_then(|info| info.true_name) {
-                        Some(name) => draw_true_name(
-                            &name,
-                            &mut label,
-                            font.clone(),
-                            self.user.config.theme.foreground,
-                            char_width,
-                            space_for_name,
-                        ),
-                        None => label.append(&variable.name, 0.0, text_format.clone()),
+                        Some(name) => {
+                            // NOTE: Safe unwrap, we know that egui has its own built-in font
+                            let font = ui.style().text_styles.get(&TextStyle::Monospace).unwrap();
+                            let char_width = ui.fonts(|fonts| {
+                                fonts
+                                    .layout_no_wrap(
+                                        " ".to_string(),
+                                        font.clone(),
+                                        Color32::from_rgb(0, 0, 0),
+                                    )
+                                    .size()
+                                    .x
+                            });
+
+                            let direction_size = direction.chars().count();
+                            let index_size = index.chars().count();
+                            let value_size = value.chars().count();
+                            let used_space =
+                                (direction_size + index_size + value_size) as f32 * char_width;
+                            // The button padding is added by egui on selectable labels
+                            let available_space =
+                                ui.available_width() - ui.spacing().button_padding.x * 2.;
+                            let space_for_name = available_space - used_space;
+
+                            let text_format = TextFormat {
+                                font_id: font.clone(),
+                                color: self.user.config.theme.foreground,
+                                ..Default::default()
+                            };
+
+                            label.append(&direction, 0.0, text_format.clone());
+
+                            draw_true_name(
+                                &name,
+                                &mut label,
+                                font.clone(),
+                                self.user.config.theme.foreground,
+                                char_width,
+                                space_for_name,
+                            );
+
+                            label.append(&index, 0.0, text_format.clone());
+                            label.append(&value, 0.0, text_format.clone());
+                        }
+                        None => {
+                            let font = ui.style().text_styles.get(&TextStyle::Body).unwrap();
+                            let text_format = TextFormat {
+                                font_id: font.clone(),
+                                color: self.user.config.theme.foreground,
+                                ..Default::default()
+                            };
+                            label.append(&direction, 0.0, text_format.clone());
+                            label.append(&variable.name, 0.0, text_format.clone());
+                            label.append(&index, 0.0, text_format.clone());
+                            label.append(&value, 0.0, text_format.clone());
+                        }
                     }
-                    label.append(&index, 0.0, text_format.clone());
-                    label.append(&value, 0.0, text_format.clone());
 
                     let mut response = ui.add(egui::SelectableLabel::new(false, label));
 
@@ -1556,15 +1579,13 @@ impl SystemState {
                             available_space,
                         )
                     } else {
-                        RichText::new(displayed_item.name())
-                            .color(text_color)
-                            .line_height(Some(self.user.config.layout.waveforms_line_height))
-                            .append_to(
-                                &mut layout_job,
-                                style,
-                                FontSelection::Default,
-                                Align::Center,
-                            );
+                        displayed_item.add_to_layout_job(
+                            &text_color,
+                            style,
+                            &mut layout_job,
+                            Some(&field),
+                            &self.user.config,
+                        )
                     }
                 } else {
                     // NOTE: Safe unwrap, we've checked that the field exists and is non-empty
@@ -1579,27 +1600,13 @@ impl SystemState {
                         );
                 };
             }
-            DisplayedItem::TimeLine(_) | DisplayedItem::Divider(_) => {
-                RichText::new(displayed_item.name())
-                    .color(text_color)
-                    .italics()
-                    .append_to(
-                        &mut layout_job,
-                        style,
-                        FontSelection::Default,
-                        Align::Center,
-                    );
-            }
-            DisplayedItem::Marker(marker) => {
-                marker.rich_text(&text_color, style, &mut layout_job);
-            }
-            DisplayedItem::Placeholder(placeholder) => {
-                placeholder.rich_text(text_color, style, &mut layout_job)
-            }
-            DisplayedItem::Stream(stream) => {
-                stream.rich_text(text_color, style, &self.user.config, &mut layout_job)
-            }
-            DisplayedItem::Group(g) => g.rich_text(text_color, style, &mut layout_job),
+            _ => displayed_item.add_to_layout_job(
+                &text_color,
+                style,
+                &mut layout_job,
+                None,
+                &self.user.config,
+            ),
         }
 
         let mut variable_label = ui
