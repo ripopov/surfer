@@ -2199,6 +2199,10 @@ snapshot_ui!(save_and_load, || {
 
     wait_for_waves_fully_loaded(&mut state, 10);
 
+    // NOTE: This test in prticular is affected user config for the show_menu
+    // attribute. This seems to make it consistent.
+    state.update(Message::ToggleMenu);
+
     state.update(Message::AddVariables(
         [
             VariableRef::from_hierarchy_string("logic.data"),
