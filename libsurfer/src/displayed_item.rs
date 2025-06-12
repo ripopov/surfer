@@ -154,7 +154,8 @@ impl DisplayedMarker {
         self.rich_text(color, &style, &mut layout_job);
         WidgetText::LayoutJob(layout_job)
     }
-    fn rich_text(&self, color: &Color32, style: &Style, layout_job: &mut LayoutJob) {
+
+    pub fn rich_text(&self, color: &Color32, style: &Style, layout_job: &mut LayoutJob) {
         RichText::new(format!("{idx}: ", idx = self.idx))
             .color(*color)
             .append_to(layout_job, style, FontSelection::Default, Align::Center);
@@ -211,6 +212,14 @@ impl DisplayedPlaceholder {
             height_scaling_factor: self.height_scaling_factor,
         }
     }
+
+    pub fn rich_text(&self, text_color: Color32, style: &Style, layout_job: &mut LayoutJob) {
+        let s = self.manual_name.as_ref().unwrap_or(&self.display_name);
+        RichText::new("Not available: ".to_owned() + s)
+            .color(text_color)
+            .italics()
+            .append_to(layout_job, style, FontSelection::Default, Align::Center);
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -223,6 +232,26 @@ pub struct DisplayedStream {
     pub rows: usize,
 }
 
+impl DisplayedStream {
+    pub fn rich_text(
+        &self,
+        text_color: Color32,
+        style: &Style,
+        config: &SurferConfig,
+        layout_job: &mut LayoutJob,
+    ) {
+        RichText::new(format!(
+            "{}{}",
+            self.manual_name.as_ref().unwrap_or(&self.display_name),
+            "\n".repeat(self.rows - 1)
+        ))
+        .color(text_color)
+        // TODO: What does setting this do? Is it for the multi-line transactions?
+        .line_height(Some(config.layout.transactions_line_height))
+        .append_to(layout_job, style, FontSelection::Default, Align::Center);
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct DisplayedGroup {
     pub name: String,
@@ -230,6 +259,14 @@ pub struct DisplayedGroup {
     pub background_color: Option<String>,
     pub content: Vec<DisplayedItemRef>,
     pub is_open: bool,
+}
+
+impl DisplayedGroup {
+    pub fn rich_text(&self, text_color: Color32, style: &Style, layout_job: &mut LayoutJob) {
+        RichText::new(self.name.clone())
+            .color(text_color)
+            .append_to(layout_job, style, FontSelection::Default, Align::Center);
+    }
 }
 
 impl DisplayedItem {
@@ -339,12 +376,7 @@ impl DisplayedItem {
                     .append_to(layout_job, style, FontSelection::Default, Align::Center);
             }
             DisplayedItem::Group(group) => {
-                RichText::new(group.name.clone()).color(*color).append_to(
-                    layout_job,
-                    style,
-                    FontSelection::Default,
-                    Align::Center,
-                );
+                group.rich_text(*color, style, layout_job);
             }
         }
     }
