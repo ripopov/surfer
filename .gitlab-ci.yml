@@ -35,6 +35,7 @@ workflow:
   before_script:
     - apt update -y
     - apt install -y python3-dev
+  interruptible: true
 
 .snapshots:
   extends: .build-dependencies
@@ -98,6 +99,7 @@ test-windows:
         - rustc -V
         - cargo -V
         - cargo test --color=always --locked -- --include-ignored
+    interruptible: true
 
 test-no-default-features:
     stage: test
@@ -210,6 +212,7 @@ pre-commit:
         - git fetch origin ${CI_DEFAULT_BRANCH}
     script:
         - SKIP=cargo-test,cargo-check pre-commit run --from-ref origin/${CI_DEFAULT_BRANCH} --to-ref HEAD
+    interruptible: true
 
 typos-and-todos:
     stage: test
@@ -234,6 +237,7 @@ typos-and-todos:
               ./typos surfer || echo ""
               set -e; find surfer -name "*.rs" | xargs grep -Ei "// *TODO" || echo ""
             fi
+    interruptible: true
 
 linux_build:
     stage: deploy
@@ -255,6 +259,7 @@ linux_build:
             - surfer_linux.zip
             - target/cargo-timings/*.html
         expire_in: 1 week
+    interruptible: true
 
 rocky_build:
     image: rockylinux:8
@@ -283,6 +288,7 @@ rocky_build:
     # Do not run this in user repos as it tends to give errors
     rules:
         - if: '$CI_PROJECT_NAMESPACE == "surfer-project"'
+    interruptible: true
 
 windows_build:
     stage: deploy
@@ -305,6 +311,7 @@ windows_build:
             - surfer_win.zip
             - target/cargo-timings/*.html
         expire_in: 1 week
+    interruptible: true
 
 macos-aarch64_build:
     stage: deploy
@@ -340,6 +347,7 @@ macos-aarch64_build:
   # part of the open source program.
     rules:
         - if: '$CI_PROJECT_NAMESPACE == "surfer-project"'
+    interruptible: true
 
 trigger-docs:
     stage: deploy
@@ -374,7 +382,7 @@ pages_build:
             - pages_build
             - surfer_wasm
         expire_in: 1h
-
+    interruptible: true
 
 
 # https://k33g.gitlab.io/articles/2020-07-23-GITLAB-PAGES-EN.html
