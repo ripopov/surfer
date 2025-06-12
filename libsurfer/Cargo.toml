@@ -105,8 +105,10 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 image-compare = "0.4.2"
 port_check = "0.2.1"
 project-root = "0.2.2"
-tempfile = "3.20.0"
 test-log = "0.2.15"
+
+[target.'cfg(not(target_os = "unknown"))'.dev-dependencies]
+tempfile = "3.20.0"
 
 [build-dependencies]
 vergen-gitcl = { version = "1.0", features = ["build"] }
