@@ -38,7 +38,6 @@ impl<VarId, ScopeId> VariableRef<VarId, ScopeId> {
     }
 }
 
-
 impl<VarId, ScopeId> AsRef<VariableRef<VarId, ScopeId>> for VariableRef<VarId, ScopeId> {
     fn as_ref(&self) -> &VariableRef<VarId, ScopeId> {
         self

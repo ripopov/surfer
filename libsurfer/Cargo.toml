@@ -71,8 +71,6 @@ web-time.workspace = true
 wellen.workspace = true
 leb128.workspace = true
 tokio-stream = "0.1.17"
-extism = "1.11.1"
-extism-manifest = "1.11.1"
 
 [features]
 default = ["spade", "performance_plot"]
@@ -97,6 +95,8 @@ notify = "8.0"
 directories = "6.0"
 futures = { workspace = true, features = ["executor"] }
 tokio.workspace = true
+extism = { version = "1.11.1", default-features = false }
+extism-manifest = "1.11.1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 futures.workspace = true

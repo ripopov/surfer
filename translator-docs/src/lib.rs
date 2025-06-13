@@ -1,12 +1,12 @@
 /*!
     # Writing a Surfer Translator Plugin
 
-    Surfer translators are web-asssembly bianries that are loaded at runtime by Surfer.
+    Surfer translators are web-asssembly binaries that are loaded at runtime by Surfer.
     They can be written in any language that has an `extism` plugin
     development kit
     [https://extism.org/docs/concepts/pdk/](https://extism.org/docs/concepts/pdk/).
 
-    For this example we will use Rust since that is what the rest of Surfer is written in, which allows us to re-use type definitions between Surfer itself and the plugin.
+    For this example we will use Rust since that is what the rest of Surfer is written in, which allows us to reuse type definitions between Surfer itself and the plugin.
 
     To create a plugin, create a new project
     ```bash
@@ -34,7 +34,7 @@
     In addition, there are a few [optional] functions that can be implemented for additional
     functionality
     - [reload]: Called when Surfer reloads the waveform
-    - [set_wave_source]: Called when the curren waveform changes
+    - [set_wave_source]: Called when the current waveform changes
 
     ## Accessing Files
 
@@ -88,8 +88,10 @@
 */
 
 use extism_pdk::FnResult;
-use surfer_translation_types::{TranslationPreference, TranslationResult, ValueKind, VariableInfo, VariableMeta};
 use surfer_translation_types::plugin_types::TranslateParams;
+use surfer_translation_types::{
+    TranslationPreference, TranslationResult, ValueKind, VariableInfo, VariableMeta,
+};
 
 /// The new function is used to initialize a plugin. It is called once when the
 /// plugin is loaded
@@ -122,7 +124,6 @@ pub fn name() -> FnResult<&'static str> {
 pub fn translates(_variable: VariableMeta<(), ()>) -> FnResult<TranslationPreference> {
     Ok(TranslationPreference::Yes)
 }
-
 
 /// Returns information about the hierarchical structure of the signal. For translators
 /// which simply want to do bit vector to string and/or color translation, returning
@@ -162,7 +163,10 @@ pub fn variable_info(variable: VariableMeta<(), ()>) -> FnResult<VariableInfo> {
 /// ```
 ///
 pub fn translate(
-    TranslateParams { variable: _, value: _ }: TranslateParams,
+    TranslateParams {
+        variable: _,
+        value: _,
+    }: TranslateParams,
 ) -> FnResult<TranslationResult> {
     Ok(TranslationResult {
         val: surfer_translation_types::ValueRepr::Tuple,
@@ -189,10 +193,11 @@ pub mod optional {
 
     /// This is called whenever the wave source changes and can be used by the plugin to change
     /// its behaviour depending on the currently loaded waveform.
-    pub fn set_wave_source(Json(_wave_source): Json<Option<surfer_translation_types::WaveSource>>) -> FnResult<()> {
+    pub fn set_wave_source(
+        Json(_wave_source): Json<Option<surfer_translation_types::WaveSource>>,
+    ) -> FnResult<()> {
         Ok(())
     }
-
 }
 
 #[doc(hidden)]

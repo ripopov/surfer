@@ -110,7 +110,9 @@ mod main_impl {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn main() -> Result<()> {
-        use libsurfer::{state::UserState, translation::wasm_translator::discover_wasm_translators};
+        use libsurfer::{
+            state::UserState, translation::wasm_translator::discover_wasm_translators,
+        };
 
         logs::start_logging()?;
 
