@@ -347,8 +347,6 @@ impl StartupParams {
     #[allow(dead_code)] // NOTE: Only used in wasm version
     pub fn from_url(url: UrlArgs) -> Self {
         Self {
-            spade_state: None,
-            spade_top: None,
             waves: url.load_url.map(WaveSource::Url),
             wcp_initiate: None,
             startup_commands: url.startup_commands.map(|c| vec![c]).unwrap_or_default(),

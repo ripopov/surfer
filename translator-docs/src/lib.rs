@@ -35,6 +35,7 @@
     functionality
     - [reload]: Called when Surfer reloads the waveform
     - [set_wave_source]: Called when the current waveform changes
+    - [variable_name_info]: Translate signal names
 
     ## Accessing Files
 
@@ -179,6 +180,7 @@ pub fn translate(
 /// advanced things.
 pub mod optional {
     use extism_pdk::Json;
+    use surfer_translation_types::translator::{TrueName, VariableNameInfo};
 
     use super::*;
 
@@ -197,6 +199,26 @@ pub mod optional {
         Json(_wave_source): Json<Option<surfer_translation_types::WaveSource>>,
     ) -> FnResult<()> {
         Ok(())
+    }
+
+    /// Can be used to convert a variable name into a name that is more descriptive.
+    /// See [VariableNameInfo] and [TrueName] for details on the possible output.
+    ///
+    /// **NOTE** The user has no way to opt out of a translator that specifies a true name,
+    /// which means this feature should be used with caution and only on signals which
+    /// are likely to mean very little to the user in their original form. The original use
+    /// case for the feature is for translators for HDLs to translate temporary variables
+    /// into something more descriptive.
+    pub fn variable_name_info(
+        Json(_variable): Json<VariableMeta<(), ()>>,
+    ) -> FnResult<Option<VariableNameInfo>> {
+        let _ = TrueName::SourceCode {
+            line_number: 0,
+            before: String::new(),
+            this: String::new(),
+            after: String::new(),
+        };
+        Ok(None)
     }
 }
 
