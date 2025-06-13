@@ -1,12 +1,13 @@
 use color_eyre::eyre::{Context, Result};
 use std::{
     cell::RefCell,
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{atomic::AtomicBool, Arc},
 };
 use tokio::task::JoinHandle;
 
 use egui::{Pos2, Rect};
+use surfer_translation_types::translator::VariableNameInfo;
 
 use crate::{
     command_prompt,
@@ -17,6 +18,7 @@ use crate::{
     time::TimeUnit,
     translation::{all_translators, TranslatorList},
     variable_filter::VariableFilter,
+    wave_container::VariableRef,
     wave_source::LoadProgress,
     CachedDrawData, CanvasState, Channels, WcpClientCapabilities,
 };
@@ -61,6 +63,8 @@ pub struct SystemState {
     // For performance reasons, these need caching so we have them in a RefCell for interior
     // mutability
     pub(crate) draw_data: RefCell<Vec<Option<CachedDrawData>>>,
+
+    pub(crate) variable_name_info_cache: RefCell<HashMap<VariableRef, Option<VariableNameInfo>>>,
 
     pub(crate) gesture_start_location: Option<Pos2>,
 
@@ -186,6 +190,7 @@ impl SystemState {
             url: RefCell::new(String::new()),
             command_prompt_text: RefCell::new(String::new()),
             draw_data: RefCell::new(vec![None]),
+            variable_name_info_cache: RefCell::new(HashMap::new()),
             last_canvas_rect: RefCell::new(None),
             item_renaming_string: RefCell::new(String::new()),
 
