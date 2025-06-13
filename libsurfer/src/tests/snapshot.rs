@@ -2507,6 +2507,7 @@ snapshot_ui!(command_file_in_command_file_works, || {
 });
 
 snapshot_ui_with_file_and_msgs! {wasm_translator_works, "examples/picorv32.vcd", [
+    Message::ToggleSidePanel,
     Message::LoadWasmTranslator(
         get_project_root()
             .unwrap()
@@ -2515,6 +2516,8 @@ snapshot_ui_with_file_and_msgs! {wasm_translator_works, "examples/picorv32.vcd",
             .unwrap()
     ),
     Message::AddVariables(vec![VariableRef::from_hierarchy_string("testbench.top.uut.pcpi_insn")]),
+    Message::AddScope(ScopeRef::from_hierarchy_string("testbench"), false),
+    Message::SetActiveScope(ScopeType::WaveScope(ScopeRef::from_hierarchy_string("testbench"))),
     Message::VariableFormatChange(
         MessageTarget::Explicit(DisplayedFieldRef {
             item: DisplayedItemRef(1),
