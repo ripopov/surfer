@@ -1460,8 +1460,8 @@ impl SystemState {
         if let Some(utimestamp) = timestamp.to_biguint() {
             if let Some(vidx) = waves.get_item_at_y(pos.y) {
                 if let Some(node) = waves.items_tree.get_visible(vidx) {
-                    if let DisplayedItem::Variable(variable) =
-                        &waves.displayed_items[&node.item_ref]
+                    if let Some(DisplayedItem::Variable(variable)) =
+                        &waves.displayed_items.get(&node.item_ref)
                     {
                         if let Ok(Some(res)) = waves
                             .inner
