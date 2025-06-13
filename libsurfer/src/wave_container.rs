@@ -84,11 +84,11 @@ impl ScopeRefExt for ScopeRef {
         Self { strs, id }
     }
 
-    fn with_subscope(&self, subscope: String) -> Self {
+    fn with_subscope(&self, subscope: String, id: ScopeId) -> Self {
         let mut result = self.clone();
         result.strs.push(subscope);
         // the result refers to a different scope, which we do not know the ID of
-        result.id = ScopeId::default();
+        result.id = id;
         result
     }
 

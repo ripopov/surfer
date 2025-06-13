@@ -544,7 +544,7 @@ impl WellenContainer {
         };
         Ok(scope
             .scopes(h)
-            .map(|id| scope_ref.with_subscope(h[id].name(h).to_string()))
+            .map(|id| scope_ref.with_subscope(h[id].name(h).to_string(), ScopeId::Wellen(id)))
             .collect::<Vec<_>>())
     }
 
