@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs::read_dir;
 use std::path::PathBuf;
@@ -12,8 +11,7 @@ use extism_manifest::MemoryOptions;
 use log::{error, warn};
 use surfer_translation_types::plugin_types::TranslateParams;
 use surfer_translation_types::{
-    PluginConfig, TranslationPreference, TranslationResult, Translator, VariableInfo, VariableMeta,
-    VariableValue,
+    TranslationPreference, TranslationResult, Translator, VariableInfo, VariableMeta, VariableValue,
 };
 
 use crate::message::Message;
@@ -29,7 +27,7 @@ pub fn discover_wasm_translators() -> Vec<Message> {
     ]
     .into_iter()
     .filter_map(|x| x)
-    .collect::<Vec<_>>(); // TODO
+    .collect::<Vec<_>>();
 
     let plugin_files = search_dirs
         .into_iter()
@@ -88,7 +86,7 @@ pub struct PluginTranslator {
 }
 
 impl PluginTranslator {
-    pub fn new(file: PathBuf, config: HashMap<String, String>) -> color_eyre::Result<Self> {
+    pub fn new(file: PathBuf) -> color_eyre::Result<Self> {
         let data = std::fs::read(&file)
             .with_context(|| format!("Failed to read {}", file.to_string_lossy()))?;
 
@@ -112,14 +110,12 @@ impl PluginTranslator {
             .build()
             .map_err(|e| anyhow!("Failed to load plugin from {} {e}", file.to_string_lossy()))?;
 
-        plugin
-            .call::<_, ()>("new", PluginConfig(config))
-            .map_err(|e| {
-                anyhow!(
-                    "Failed to call `new` on plugin from {}. {e}",
-                    file.to_string_lossy()
-                )
-            })?;
+        plugin.call::<_, ()>("new", ()).map_err(|e| {
+            anyhow!(
+                "Failed to call `new` on plugin from {}. {e}",
+                file.to_string_lossy()
+            )
+        })?;
 
         Ok(Self {
             plugin: Arc::new(Mutex::new(plugin)),

@@ -1,12 +1,12 @@
 /*!
     # Writing a Surfer Translator Plugin
 
-    Surfer translators are web-asssembly bianries that are loaded at runtime by Surfer.
+    Surfer translators are web-asssembly binaries that are loaded at runtime by Surfer.
     They can be written in any language that has an `extism` plugin
     development kit
     [https://extism.org/docs/concepts/pdk/](https://extism.org/docs/concepts/pdk/).
 
-    For this example we will use Rust since that is what the rest of Surfer is written in, which allows us to re-use type definitions between Surfer itself and the plugin.
+    For this example we will use Rust since that is what the rest of Surfer is written in, which allows us to reuse type definitions between Surfer itself and the plugin.
 
     To create a plugin, create a new project
     ```bash
@@ -34,7 +34,7 @@
     In addition, there are a few [optional] functions that can be implemented for additional
     functionality
     - [reload]: Called when Surfer reloads the waveform
-    - [set_wave_source]: Called when the curren waveform changes
+    - [set_wave_source]: Called when the current waveform changes
 
     ## Accessing Files
 

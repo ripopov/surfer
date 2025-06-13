@@ -90,6 +90,7 @@ use surfer_translation_types::Translator;
 pub use system_state::SystemState;
 #[cfg(target_arch = "wasm32")]
 use tokio_stream as _;
+#[cfg(not(target_arch = "wasm32"))]
 use translation::wasm_translator::PluginTranslator;
 use wcp::{proto::WcpCSMessage, proto::WcpEvent, proto::WcpSCMessage};
 
@@ -983,16 +984,17 @@ impl SystemState {
                     "Error loading Python translator",
                 )
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Message::LoadWasmTranslator(path) => {
                 let sender = self.channels.msg_sender.clone();
-                perform_work(move || {
-                    match PluginTranslator::new(path.into_std_path_buf(), HashMap::new()) {
+                perform_work(
+                    move || match PluginTranslator::new(path.into_std_path_buf()) {
                         Ok(t) => sender.send(Message::TranslatorLoaded(Box::new(t))).unwrap(),
                         Err(e) => {
                             error!("Failed to load wasm translator {e:#}")
                         }
-                    }
-                })
+                    },
+                )
             }
             Message::LoadSpadeTranslator { top, state } => {
                 #[cfg(feature = "spade")]

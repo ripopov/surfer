@@ -1,2 +1,3 @@
 [codespell]
 ignore-words-list = inout, inouts, ser
+skip = Cargo.lock

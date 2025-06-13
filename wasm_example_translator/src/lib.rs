@@ -1,12 +1,12 @@
 use extism_pdk::{plugin_fn, FnResult};
 pub use surfer_translation_types::plugin_types::TranslateParams;
 use surfer_translation_types::{
-    PluginConfig, SubFieldTranslationResult, TranslationPreference, TranslationResult, ValueKind,
-    VariableInfo, VariableMeta, VariableValue,
+    SubFieldTranslationResult, TranslationPreference, TranslationResult, ValueKind, VariableInfo,
+    VariableMeta, VariableValue,
 };
 
 #[plugin_fn]
-pub fn new(PluginConfig(_config): PluginConfig) -> FnResult<()> {
+pub fn new() -> FnResult<()> {
     Ok(())
 }
 
