@@ -112,6 +112,7 @@ fn draw_variables(state: &mut SystemState, msgs: &mut Vec<Message>, ui: &mut Ui)
                                         wave_container,
                                         ui,
                                         &parameters,
+                                        None,
                                         filter,
                                     );
                                 });
@@ -120,14 +121,16 @@ fn draw_variables(state: &mut SystemState, msgs: &mut Vec<Message>, ui: &mut Ui)
                                     wave_container,
                                     ui,
                                     &variables,
+                                    None,
                                 );
                             });
                         return; // Early exit
                     }
                 }
                 // Parameters not shown here or no parameters: use fast approach only drawing visible rows
-                let text_style = egui::TextStyle::Body;
-                let row_height = ui.text_style_height(&text_style);
+                let row_height = ui
+                    .text_style_height(&egui::TextStyle::Monospace)
+                    .max(ui.text_style_height(&egui::TextStyle::Body));
                 ScrollArea::both()
                     .auto_shrink([false; 2])
                     .id_salt("variables")
@@ -136,7 +139,8 @@ fn draw_variables(state: &mut SystemState, msgs: &mut Vec<Message>, ui: &mut Ui)
                             msgs,
                             wave_container,
                             ui,
-                            &variables[row_range],
+                            &variables,
+                            Some(row_range),
                         );
                     });
             }

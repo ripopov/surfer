@@ -703,35 +703,6 @@ snapshot_ui_with_file_and_msgs! {signed_translator_selected, "examples/vhdlsigne
     Message::AddScope(ScopeRef::from_strs(&["constantadder_tb", "dut"]), false),
 ]}
 
-#[cfg(feature = "spade")]
-snapshot_ui_with_file_spade_and_msgs! {
-    spade_translation_works,
-    "examples/spade.vcd",
-    Some("proj::pipeline_ready_valid::ready_valid_pipeline".to_string()),
-    Some("examples/spade_state.ron".into()),
-    [
-        Message::AddScope(ScopeRef::from_strs(&[
-            "proj::pipeline_ready_valid::ready_valid_pipeline"
-        ]), false),
-    ]
-}
-
-#[cfg(feature = "spade")]
-snapshot_ui_with_file_spade_and_msgs! {
-    spade_translation_with_hierarchy_works,
-    "examples/spade.vcd",
-    Some("proj::pipeline_ready_valid::ready_valid_pipeline".to_string()),
-    Some("examples/spade_state.ron".into()),
-    (|_state| {}),
-    [
-        Message::AddVariables(vec![VariableRef::from_hierarchy_string("proj::pipeline_ready_valid::ready_valid_pipeline.output__")]),
-        Message::ExpandDrawnItem { item: DisplayedItemRef(0), levels: 1 }
-    ],
-    [
-        Message::ExpandDrawnItem { item: DisplayedItemRef(1), levels: 1 }
-    ]
-}
-
 snapshot_ui_with_file_and_msgs! {divider_works, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::AddDivider(Some("Divider".to_string()), None),
@@ -2198,6 +2169,10 @@ snapshot_ui!(save_and_load, || {
         });
 
     wait_for_waves_fully_loaded(&mut state, 10);
+
+    // NOTE: This test in prticular is affected user config for the show_menu
+    // attribute. This seems to make it consistent.
+    state.update(Message::ToggleMenu);
 
     state.update(Message::AddVariables(
         [

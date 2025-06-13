@@ -120,6 +120,18 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
             AnyTranslator::Python(_) => (),
         }
     }
+
+    fn variable_name_info(
+        &self,
+        variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+    ) -> Option<surfer_translation_types::translator::VariableNameInfo> {
+        match self {
+            AnyTranslator::Full(translator) => translator.variable_name_info(variable),
+            AnyTranslator::Basic(_) => None,
+            #[cfg(feature = "python")]
+            AnyTranslator::Python(t) => None,
+        }
+    }
 }
 
 /// Look inside the config directory and inside "$(cwd)/.surfer" for user-defined decoders
