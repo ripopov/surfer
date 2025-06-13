@@ -21,7 +21,6 @@ impl<ScopeId1> ScopeRef<ScopeId1> {
     }
 }
 
-
 impl<ScopeId> AsRef<ScopeRef<ScopeId>> for ScopeRef<ScopeId> {
     fn as_ref(&self) -> &ScopeRef<ScopeId> {
         self

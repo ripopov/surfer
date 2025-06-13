@@ -60,7 +60,6 @@ pub enum WaveSource {
     Cxxrtl,
 }
 
-
 /// The most general translator trait.
 pub trait Translator<VarId, ScopeId, Message>: Send + Sync {
     fn name(&self) -> String;

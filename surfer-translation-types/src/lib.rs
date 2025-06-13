@@ -218,4 +218,3 @@ impl<VarId1, ScopeId1> VariableMeta<VarId1, ScopeId1> {
         }
     }
 }
-

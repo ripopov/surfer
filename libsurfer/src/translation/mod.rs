@@ -22,6 +22,7 @@ pub mod numeric_translators;
 mod python_translators;
 #[cfg(feature = "spade")]
 pub mod spade;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod wasm_translator;
 
 pub use basic_translators::*;
@@ -84,9 +85,9 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
     fn set_wave_source(&self, wave_source: Option<surfer_translation_types::WaveSource>) {
         match self {
             AnyTranslator::Full(translator) => translator.set_wave_source(wave_source),
-            AnyTranslator::Basic(_) => {},
+            AnyTranslator::Basic(_) => {}
             #[cfg(feature = "python")]
-            AnyTranslator::Python(t) => {},
+            AnyTranslator::Python(t) => {}
         }
     }
 
@@ -300,7 +301,7 @@ pub fn all_translators() -> TranslatorList {
             Box::new(EnumTranslator {}),
             Box::new(UnsignedFixedPointTranslator),
             Box::new(SignedFixedPointTranslator),
-        ]
+        ],
     )
 }
 

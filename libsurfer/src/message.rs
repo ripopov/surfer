@@ -146,6 +146,7 @@ pub enum Message {
     LoadPythonTranslator(Utf8PathBuf),
     /// Load a web assembly translator from file. This is loaded in addition to the
     /// translators loaded on startup.
+    #[cfg(not(target_arch = "wasm32"))]
     LoadWasmTranslator(Utf8PathBuf),
     /// Load a spade translator using the specified top and the specified state encoded as ron.
     LoadSpadeTranslator {
