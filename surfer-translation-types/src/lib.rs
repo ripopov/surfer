@@ -3,7 +3,7 @@ mod field_ref;
 pub mod python;
 mod result;
 mod scope_ref;
-mod translator;
+pub mod translator;
 pub mod variable_index;
 mod variable_ref;
 
