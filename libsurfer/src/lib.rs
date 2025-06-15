@@ -713,9 +713,9 @@ impl SystemState {
                             variable.info = new_info;
                         } else {
                             variable
-                                .field_formats
+                                .user_field_formats
                                 .retain(|ff| ff.field != field_ref.field);
-                            variable.field_formats.push(FieldFormat {
+                            variable.user_field_formats.push(FieldFormat {
                                 field: field_ref.field,
                                 format: format.clone(),
                             });
@@ -966,7 +966,7 @@ impl SystemState {
                         displayed_variable.format = None;
                     } else {
                         displayed_variable
-                            .field_formats
+                            .user_field_formats
                             .retain(|ff| ff.field != displayed_field_ref.field);
                     }
                     self.invalidate_draw_commands();

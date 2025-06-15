@@ -372,7 +372,7 @@ impl TranslatorList {
         self.inner
             .get(name)
             .or_else(python_translator)
-            .unwrap_or_else(|| panic!("No translator called {name}"))
+            .unwrap_or_else(|| self.inner.get(&self.default).unwrap())
     }
 
     pub fn add_or_replace(&mut self, t: AnyTranslator) {
@@ -584,7 +584,7 @@ impl VariableInfoExt for VariableInfo {
                     .unwrap()
                     .1
                     .get_subinfo(rest),
-                VariableInfo::Bits => panic!(),
+                VariableInfo::Bits | VariableInfo::SuggestedSubtranslator(_) => panic!(),
                 VariableInfo::Bool => panic!(),
                 VariableInfo::Clock => panic!(),
                 VariableInfo::String => panic!(),

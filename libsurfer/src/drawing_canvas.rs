@@ -202,7 +202,7 @@ fn variable_draw_commands(
 
         let fields = translation_result.format_flat(
             &displayed_variable.format,
-            &displayed_variable.field_formats,
+            &displayed_variable.field_formats(),
             translators,
         );
 

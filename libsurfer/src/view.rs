@@ -1769,6 +1769,7 @@ impl SystemState {
             }
             VariableInfo::Bool
             | VariableInfo::Bits
+            | VariableInfo::SuggestedSubtranslator(_)
             | VariableInfo::Clock
             | VariableInfo::String
             | VariableInfo::Real => {
@@ -2172,7 +2173,7 @@ impl SystemState {
             if let Some(Ok(s)) = translation_result {
                 let fields = s.format_flat(
                     &displayed_variable.format,
-                    &displayed_variable.field_formats,
+                    &displayed_variable.field_formats(),
                     &self.translators,
                 );
 

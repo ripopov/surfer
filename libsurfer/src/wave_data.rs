@@ -240,17 +240,19 @@ impl WaveData {
                 .unwrap()
                 .variable_meta(&displayed_variable.variable_ref.clone())
                 .unwrap();
-            let translator =
-                variable_translator(displayed_variable.get_format(&[]), &[], translators, || {
-                    Ok(meta.clone())
-                });
+            let translator = variable_translator(
+                displayed_variable.get_format(&[]).as_ref(),
+                &[],
+                translators,
+                || Ok(meta.clone()),
+            );
             let info = translator.variable_info(&meta).ok();
 
             match info {
                 Some(info) => displayed_variable
-                    .field_formats
+                    .user_field_formats
                     .retain(|ff| info.has_subpath(&ff.field)),
-                _ => displayed_variable.field_formats.clear(),
+                _ => displayed_variable.user_field_formats.clear(),
             }
         }
     }
@@ -368,7 +370,7 @@ impl WaveData {
         };
 
         variable_translator(
-            displayed_variable.get_format(&field.field),
+            displayed_variable.get_format(&field.field).as_ref(),
             &field.field,
             translators,
             || {
@@ -430,7 +432,7 @@ impl WaveData {
                 display_name_type: self.default_variable_name_type,
                 manual_name: None,
                 format: None,
-                field_formats: vec![],
+                user_field_formats: vec![],
                 height_scaling_factor: None,
             });
 
