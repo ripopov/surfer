@@ -6,7 +6,6 @@ use std::hash::{Hash, Hasher};
 /// are the recursive path to the fields inside the (translated) root
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldRef<VarId, ScopeId> {
-    #[serde(bound(deserialize = "VarId: Default + Deserialize<'de>, ScopeId: Default"))]
     pub root: VariableRef<VarId, ScopeId>,
     pub field: Vec<String>,
 }

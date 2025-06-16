@@ -95,6 +95,8 @@ notify = "8.0"
 directories = "6.0"
 futures = { workspace = true, features = ["executor"] }
 tokio.workspace = true
+extism = { version = "1.11.1", default-features = false }
+extism-manifest = "1.11.1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 futures.workspace = true
