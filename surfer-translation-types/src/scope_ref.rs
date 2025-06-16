@@ -2,16 +2,23 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 
-#[derive(Clone, Debug, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Serialize, Deserialize, Default)]
 pub struct ScopeRef<ScopeId> {
     pub strs: Vec<String>,
     /// Backend specific numeric ID. Performance optimization.
-    #[serde(
-        skip,
-        default = "ScopeId::default",
-        bound(deserialize = "ScopeId: Default")
-    )]
     pub id: ScopeId,
+}
+
+impl<ScopeId1> ScopeRef<ScopeId1> {
+    pub fn map_id<ScopeId2>(
+        self,
+        mut scope_fn: impl FnMut(ScopeId1) -> ScopeId2,
+    ) -> ScopeRef<ScopeId2> {
+        ScopeRef {
+            strs: self.strs,
+            id: scope_fn(self.id),
+        }
+    }
 }
 
 impl<ScopeId> AsRef<ScopeRef<ScopeId>> for ScopeRef<ScopeId> {

@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use chrono::prelude::{DateTime, Utc};
 use color_eyre::{eyre::bail, Result};
 use num::BigUint;
+use serde::{Deserialize, Serialize};
 use surfer_translation_types::VariableValue;
 
 use crate::cxxrtl_container::CxxrtlContainer;
@@ -28,7 +29,7 @@ pub struct MetaData {
 }
 
 /// A backend-specific, numeric reference for fast access to the associated scope.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScopeId {
     None,
     Wellen(wellen::ScopeRef),
@@ -41,7 +42,7 @@ impl Default for ScopeId {
 }
 
 /// A backend-specific, numeric reference for fast access to the associated variable.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VarId {
     None,
     Wellen(wellen::VarRef),
