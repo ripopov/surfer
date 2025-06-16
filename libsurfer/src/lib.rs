@@ -90,6 +90,8 @@ use surfer_translation_types::Translator;
 pub use system_state::SystemState;
 #[cfg(target_arch = "wasm32")]
 use tokio_stream as _;
+#[cfg(not(target_arch = "wasm32"))]
+use translation::wasm_translator::PluginTranslator;
 use wcp::{proto::WcpCSMessage, proto::WcpEvent, proto::WcpSCMessage};
 
 use crate::async_util::perform_work;
@@ -982,6 +984,18 @@ impl SystemState {
                     "Error loading Python translator",
                 )
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::LoadWasmTranslator(path) => {
+                let sender = self.channels.msg_sender.clone();
+                perform_work(
+                    move || match PluginTranslator::new(path.into_std_path_buf()) {
+                        Ok(t) => sender.send(Message::TranslatorLoaded(Box::new(t))).unwrap(),
+                        Err(e) => {
+                            error!("Failed to load wasm translator {e:#}")
+                        }
+                    },
+                )
+            }
             Message::LoadSpadeTranslator { top, state } => {
                 #[cfg(feature = "spade")]
                 {
@@ -1171,6 +1185,13 @@ impl SystemState {
             }
             Message::TranslatorLoaded(t) => {
                 info!("Translator {} loaded", t.name());
+                t.set_wave_source(
+                    self.user
+                        .waves
+                        .as_ref()
+                        .map(|waves| waves.source.into_translation_type()),
+                );
+
                 self.translators.add_or_replace(AnyTranslator::Full(t));
             }
             Message::ToggleSidePanel => self.user.show_hierarchy = Some(!self.show_hierarchy()),

@@ -87,6 +87,17 @@ impl WaveSource {
 
         None
     }
+
+    pub fn into_translation_type(&self) -> surfer_translation_types::WaveSource {
+        use surfer_translation_types::WaveSource as Ws;
+        match self {
+            WaveSource::File(file) => Ws::File(file.to_string()),
+            WaveSource::Data => Ws::Data,
+            WaveSource::DragAndDrop(file) => Ws::DragAndDrop(file.as_ref().map(|f| f.to_string())),
+            WaveSource::Url(u) => Ws::Url(u.clone()),
+            WaveSource::Cxxrtl(_) => Ws::Cxxrtl,
+        }
+    }
 }
 
 pub fn url_to_wavesource(url: &str) -> Option<WaveSource> {

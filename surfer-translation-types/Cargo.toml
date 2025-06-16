@@ -10,6 +10,7 @@ categories.workspace = true
 color-eyre.workspace = true
 derive_more.workspace = true
 ecolor.workspace = true
+extism-convert = "1.11.1"
 num.workspace = true
 pyo3 = { workspace = true, optional = true }
 serde.workspace = true
