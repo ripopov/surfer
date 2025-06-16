@@ -8,10 +8,7 @@ use num::ToPrimitive;
 use serde::Deserialize;
 use spade::compiler_state::CompilerState;
 
-use color_eyre::{
-    eyre::{anyhow, bail, Context, ContextCompat},
-    Result,
-};
+use eyre::{anyhow, bail, Context, ContextCompat, Result};
 use spade_common::{
     location_info::{Loc, WithLocation},
     name::{Identifier, NameID, Path},

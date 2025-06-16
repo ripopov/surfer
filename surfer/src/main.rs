@@ -4,9 +4,9 @@
 mod main_impl {
     use camino::Utf8PathBuf;
     use clap::Parser;
-    use color_eyre::eyre::Context;
-    use color_eyre::Result;
     use egui::Vec2;
+    use eyre::Context;
+    use eyre::Result;
     use libsurfer::{
         batch_commands::read_command_file,
         file_watcher::FileWatcher,
@@ -111,6 +111,7 @@ mod main_impl {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn main() -> Result<()> {
         use libsurfer::state::UserState;
+        simple_eyre::install()?;
 
         logs::start_logging()?;
 
@@ -216,7 +217,8 @@ mod main_impl {
 
     // Calling main is not the intended way to start surfer, instead, it should be
     // started by `wasm_api::WebHandle`
-    pub(crate) fn main() -> color_eyre::Result<()> {
+    pub(crate) fn main() -> eyre::Result<()> {
+        simple_eyre::install()?;
         let document = web_sys::window()
             .expect("No window")
             .document()
@@ -236,6 +238,6 @@ mod main_impl {
     }
 }
 
-fn main() -> color_eyre::Result<()> {
+fn main() -> eyre::Result<()> {
     main_impl::main()
 }

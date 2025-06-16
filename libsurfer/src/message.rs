@@ -185,7 +185,7 @@ pub enum Message {
         LoadOptions,
     ),
     #[serde(skip)]
-    Error(color_eyre::eyre::Error),
+    Error(eyre::Error),
     #[serde(skip)]
     TranslatorLoaded(#[debug(skip)] Box<DynTranslator>),
     /// Take note that the specified translator errored on a `translates` call on the

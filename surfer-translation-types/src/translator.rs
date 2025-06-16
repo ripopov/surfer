@@ -1,6 +1,6 @@
 //! Definition of the main [`Translator`] trait and the simplified version
 //! [`BasicTranslator`].
-use color_eyre::Result;
+use eyre::Result;
 use num::BigUint;
 use std::sync::mpsc::Sender;
 
