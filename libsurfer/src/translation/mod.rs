@@ -21,6 +21,8 @@ pub mod numeric_translators;
 #[cfg(feature = "python")]
 mod python_translators;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod wasm_basic_translator;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod wasm_translator;
 
 pub use basic_translators::*;
