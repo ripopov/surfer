@@ -2,7 +2,7 @@ use crate::message::Message;
 use crate::translation::fixed_point::{big_uint_to_sfixed, big_uint_to_ufixed};
 use crate::variable_type::INTEGER_TYPES;
 use crate::wave_container::{ScopeId, VarId};
-use color_eyre::Result;
+use eyre::Result;
 use half::{bf16, f16};
 use num::BigUint;
 use softposit::{P16E1, P32E2, P8E0, Q16E1, Q8E0};

@@ -1,7 +1,7 @@
 use super::{TranslationPreference, ValueKind, VariableInfo};
 use crate::wave_container::{ScopeId, VarId, VariableMeta};
 
-use color_eyre::Result;
+use eyre::Result;
 use itertools::Itertools;
 use num::Zero;
 use surfer_translation_types::{BasicTranslator, VariableValue};

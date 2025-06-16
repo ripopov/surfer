@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use color_eyre::eyre::Context;
+use eyre::Context;
 
 use crate::{
     async_util::{perform_async_work, AsyncJob},

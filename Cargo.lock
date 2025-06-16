@@ -2657,7 +2657,6 @@ dependencies = [
  "bytesize",
  "camino",
  "chrono",
- "color-eyre",
  "config",
  "derive_more",
  "directories",
@@ -2671,6 +2670,7 @@ dependencies = [
  "emath",
  "enum-iterator",
  "epaint",
+ "eyre",
  "f128",
  "fern",
  "ftr_parser",
@@ -4483,6 +4483,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
 
 [[package]]
+name = "simple-eyre"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b561532e8ffe7ecf09108c4f662896a9ec3eac4999eba84015ec3dcb8cc630a"
+dependencies = [
+ "eyre",
+ "indenter",
+]
+
+[[package]]
 name = "skia-bindings"
 version = "0.86.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4883,12 +4893,13 @@ version = "0.4.0-dev"
 dependencies = [
  "camino",
  "clap",
- "color-eyre",
  "eframe",
  "egui",
+ "eyre",
  "libsurfer",
  "log",
  "ron 0.10.1",
+ "simple-eyre",
  "surver",
  "tokio",
  "wasm-bindgen-futures",
@@ -4898,9 +4909,9 @@ dependencies = [
 name = "surfer-translation-types"
 version = "0.4.0-dev"
 dependencies = [
- "color-eyre",
  "derive_more",
  "ecolor",
+ "eyre",
  "num",
  "pyo3",
  "serde",
@@ -4913,7 +4924,7 @@ dependencies = [
  "bincode",
  "bytesize",
  "clap",
- "color-eyre",
+ "eyre",
  "fastrand",
  "fern",
  "http-body-util",
@@ -4925,6 +4936,7 @@ dependencies = [
  "lz4_flex",
  "serde",
  "serde_json",
+ "simple-eyre",
  "tokio",
  "web-time",
  "wellen",

@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::mpsc::Sender;
 
-use color_eyre::Result;
 #[cfg(not(target_arch = "wasm32"))]
 use directories::ProjectDirs;
 use ecolor::Color32;
+use eyre::Result;
 #[cfg(not(target_arch = "wasm32"))]
 use log::warn;
 #[cfg(not(target_arch = "wasm32"))]
@@ -383,7 +383,7 @@ impl TranslatorList {
         let code = std::ffi::CString::new(std::fs::read_to_string(&filename)?)?;
         let mut translators = python_translators::PythonTranslator::new(&code.as_c_str())?;
         if translators.len() != 1 {
-            color_eyre::eyre::bail!("Only one Python translator per file is supported for now");
+            eyre::bail!("Only one Python translator per file is supported for now");
         }
         let translator = translators.pop().unwrap();
         self.python_translator = Some((

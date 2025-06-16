@@ -1,6 +1,6 @@
 //! Code for the `surver` executable.
 use clap::Parser;
-use color_eyre::Result;
+use eyre::Result;
 use fern::colors::ColoredLevelConfig;
 use fern::Dispatch;
 
@@ -41,7 +41,7 @@ pub fn start_logging() -> Result<()> {
 
     Dispatch::new().chain(stdout_config).apply()?;
 
-    color_eyre::install()?;
+    simple_eyre::install()?;
 
     Ok(())
 }
