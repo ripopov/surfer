@@ -385,6 +385,7 @@ impl WaveData {
         translators: &TranslatorList,
         variables: Vec<VariableRef>,
         target_position: Option<TargetPosition>,
+        update_display_names: bool,
     ) -> (Option<LoadSignalsCmd>, Vec<DisplayedItemRef>) {
         let mut indices = vec![];
         // load variables from waveform
@@ -440,7 +441,9 @@ impl WaveData {
             }
         }
 
-        self.compute_variable_display_names();
+        if update_display_names {
+            self.compute_variable_display_names();
+        }
         (res, indices)
     }
 

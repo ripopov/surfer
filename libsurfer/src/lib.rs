@@ -296,7 +296,9 @@ impl SystemState {
                     };
                     self.save_current_canvas(undo_msg);
                     if let Some(waves) = self.user.waves.as_mut() {
-                        if let (Some(cmd), _) = waves.add_variables(&self.translators, vars, None) {
+                        if let (Some(cmd), _) =
+                            waves.add_variables(&self.translators, vars, None, true)
+                        {
                             self.load_variables(cmd);
                         }
                         self.invalidate_draw_commands();
@@ -322,7 +324,7 @@ impl SystemState {
                 let waves = self.user.waves.as_mut()?;
 
                 // TODO add parameter to add_variables, insert to (self.drag_target_idx, self.drag_source_idx)
-                if let (Some(cmd), _) = waves.add_variables(&self.translators, vars, None) {
+                if let (Some(cmd), _) = waves.add_variables(&self.translators, vars, None, true) {
                     self.load_variables(cmd);
                 }
 
@@ -336,8 +338,9 @@ impl SystemState {
                 let target = passed_or_focused.unwrap_or_else(|| waves.end_insert_position());
 
                 self.add_scope_as_group(scope, target, recursive);
-
                 self.invalidate_draw_commands();
+
+                self.user.waves.as_mut()?.compute_variable_display_names();
             }
             Message::AddCount(digit) => {
                 if let Some(count) = &mut self.user.count {
@@ -1585,7 +1588,9 @@ impl SystemState {
                 self.user.drag_source_idx = None;
                 let target = self.user.drag_target_idx.take();
 
-                if let (Some(cmd), _) = waves.add_variables(&self.translators, variables, target) {
+                if let (Some(cmd), _) =
+                    waves.add_variables(&self.translators, variables, target, true)
+                {
                     self.load_variables(cmd);
                 }
                 self.invalidate_draw_commands();
@@ -1975,7 +1980,7 @@ impl SystemState {
 
         let group_ref = waves.add_group(scope.name(), Some(pos));
 
-        let (cmd, variable_refs) = waves.add_variables(&self.translators, variables, None);
+        let (cmd, variable_refs) = waves.add_variables(&self.translators, variables, None, false);
 
         let variable_idxs = waves
             .items_tree
