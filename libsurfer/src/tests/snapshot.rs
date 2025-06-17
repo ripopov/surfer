@@ -648,6 +648,14 @@ snapshot_ui_with_file_and_msgs! {recursive_add_scope, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), true),
 ]}
 
+snapshot_ui_with_file_and_msgs! {add_scope_as_group, "examples/picorv32.vcd", [
+    Message::AddScopeAsGroup(ScopeRef::from_strs(&["testbench"]), false),
+]}
+
+snapshot_ui_with_file_and_msgs! {add_scope_as_group_recursively, "examples/picorv32.vcd", [
+    Message::AddScopeAsGroup(ScopeRef::from_strs(&["testbench"]), true),
+]}
+
 snapshot_ui_with_file_and_msgs! {vertical_scrolling_works, "examples/picorv32.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["testbench", "top", "mem"]), false),
     Message::VerticalScroll(crate::MoveDir::Down, 5),

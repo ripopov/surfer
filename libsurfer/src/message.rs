@@ -73,6 +73,8 @@ pub enum Message {
     AddVariables(Vec<VariableRef>),
     /// Add scope to wave view. If second argument is true, add subscopes recursively.
     AddScope(ScopeRef, bool),
+    /// Add scope to wave view as a group. If second argument is true, add subscopes recursively.
+    AddScopeAsGroup(ScopeRef, bool),
     /// Add a character to the repeat command counter.
     AddCount(char),
     AddStreamOrGenerator(TransactionStreamRef),

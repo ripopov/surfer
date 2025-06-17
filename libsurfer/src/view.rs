@@ -695,6 +695,14 @@ impl SystemState {
                 msgs.push(Message::AddScope(scope.clone(), true));
                 ui.close_menu();
             }
+            if ui.button("Add scope as group").clicked() {
+                msgs.push(Message::AddScopeAsGroup(scope.clone(), false));
+                ui.close_menu();
+            }
+            if ui.button("Add scope as group recursively").clicked() {
+                msgs.push(Message::AddScopeAsGroup(scope.clone(), true));
+                ui.close_menu();
+            }
         });
         response
             .clicked()

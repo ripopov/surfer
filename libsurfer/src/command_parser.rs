@@ -255,6 +255,8 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
             "zoom_fit",
             "scope_add",
             "scope_add_recursive",
+            "scope_add_as_group",
+            "scope_add_as_group_recursive",
             "scope_select",
             "stream_add",
             "stream_select",
@@ -450,6 +452,23 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                             scopes,
                             Box::new(move |word| {
                                 Some(Command::Terminal(Message::AddScope(
+                                    ScopeRef::from_hierarchy_string(word),
+                                    recursive,
+                                )))
+                            }),
+                        )
+                    }
+                }
+                "scope_add_as_group" | "scope_add_as_group_recursive" => {
+                    let recursive = query == "scope_add_as_group_recursive";
+                    if is_transaction_container {
+                        warn!("Cannot add transaction containers as group");
+                        None
+                    } else {
+                        single_word(
+                            scopes,
+                            Box::new(move |word| {
+                                Some(Command::Terminal(Message::AddScopeAsGroup(
                                     ScopeRef::from_hierarchy_string(word),
                                     recursive,
                                 )))

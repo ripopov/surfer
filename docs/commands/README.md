@@ -49,11 +49,29 @@ Not all commands are available unless a file is loaded. Also, some commands are 
 
 ## Add variable/transaction items
 
+* ``scope_add <SCOPE_NAME>``, ``stream_add``
+
+    Add all signals in the specified scope to the waveform display.
+
+* ``scope_add_recursive <SCOPE_NAME>``
+
+    Add all signals in the specified scope and from all sub-scopes to the waveform display.
+
+    <div class="warning">Adding large hierarchies with a large number of signals can freeze surfer for a significant amount of time.</div>
+
+* ``scope_add_as_group <SCOPE_NAME>``
+
+    Add all signals in the specified scope to the waveform display in a newly created group of the same name.
+
+* ``scope_add_as_group_recursive <SCOPE_NAME>``
+
+    Add all signals in the specified scope and all sub-scopes to the waveform display in a newly created groups nested.
+
+    <div class="warning">Adding large hierarchies with a large number of signals can freeze surfer for a significant amount of time.</div>
+
 * ``scope_select``
 * ``stream_select``
 * ``variable_add <VARIABLE_NAME>``, ``generator_add  <GENERATOR_NAME>``
-* ``scope_add``, ``stream_add``
-* ``scope_add_recursive``
 * ``variable_add_from_scope``
 * ``generator_add_from_stream``
 
