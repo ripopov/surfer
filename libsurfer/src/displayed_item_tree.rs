@@ -233,7 +233,7 @@ impl DisplayedItemTree {
     }
 
     /// Return the index past the end of the subtree started by `idx`
-    fn subtree_end(&self, start_idx: usize) -> usize {
+    pub fn subtree_end(&self, start_idx: usize) -> usize {
         let level = self.items[start_idx].level;
         self.items
             .iter()

@@ -92,6 +92,7 @@ pub use system_state::SystemState;
 use tokio_stream as _;
 #[cfg(not(target_arch = "wasm32"))]
 use translation::wasm_translator::PluginTranslator;
+use wave_container::ScopeRef;
 use wcp::{proto::WcpCSMessage, proto::WcpEvent, proto::WcpSCMessage};
 
 use crate::async_util::perform_work;
@@ -324,6 +325,17 @@ impl SystemState {
                 if let (Some(cmd), _) = waves.add_variables(&self.translators, vars, None) {
                     self.load_variables(cmd);
                 }
+
+                self.invalidate_draw_commands();
+            }
+            Message::AddScopeAsGroup(scope, recursive) => {
+                self.save_current_canvas(format!("Add scope {} as group", scope.name()));
+
+                let waves = self.user.waves.as_mut()?;
+                let passed_or_focused = waves.focused_insert_position();
+                let target = passed_or_focused.unwrap_or_else(|| waves.end_insert_position());
+
+                self.add_scope_as_group(scope, target, recursive);
 
                 self.invalidate_draw_commands();
             }
@@ -1942,6 +1954,75 @@ impl SystemState {
             Message::AddCharToPrompt(c) => *self.char_to_add_to_prompt.borrow_mut() = Some(c),
         }
         Some(())
+    }
+
+    pub fn add_scope_as_group(&mut self, scope: ScopeRef, pos: TargetPosition, recursive: bool) {
+        let Some(waves) = self.user.waves.as_mut() else {
+            return;
+        };
+        let Some(wave_cont) = waves.inner.as_waves() else {
+            return;
+        };
+
+        let children = wave_cont.child_scopes(&scope);
+
+        let variables = wave_cont
+            .variables_in_scope(&scope)
+            .iter()
+            .sorted_by(|a, b| numeric_sort::cmp(&a.name, &b.name))
+            .cloned()
+            .collect_vec();
+
+        let group_ref = waves.add_group(scope.name(), Some(pos));
+
+        let (cmd, variable_refs) = waves.add_variables(&self.translators, variables, None);
+
+        let variable_idxs = waves
+            .items_tree
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, node)| {
+                variable_refs
+                    .contains(&node.item_ref)
+                    .then_some(crate::displayed_item_tree::ItemIndex(idx))
+            })
+            .collect::<Vec<_>>();
+
+        if let Err(e) = waves.items_tree.move_items(
+            variable_idxs,
+            crate::displayed_item_tree::TargetPosition {
+                before: ItemIndex(pos.before.0 + 1),
+                level: pos.level.saturating_add(1),
+            },
+        ) {
+            dump_tree(waves);
+            waves.remove_displayed_item(group_ref);
+            error!("failed to move items into group: {e:?}");
+            return;
+        }
+
+        if recursive {
+            if let Ok(children) = children {
+                // Calculate the position at the end of the group we just created
+                let group_end_pos =
+                    if let Some(group_idx) = waves.index_for_ref_or_focus(Some(group_ref)) {
+                        let group_end_idx = waves.items_tree.subtree_end(group_idx.0);
+                        TargetPosition {
+                            before: ItemIndex(group_end_idx),
+                            level: pos.level + 1,
+                        }
+                    } else {
+                        // Fallback to the original position if we can't find the group
+                        pos
+                    };
+                for child in children {
+                    self.add_scope_as_group(child, group_end_pos, recursive);
+                }
+            }
+        }
+        if let Some(cmd) = cmd {
+            self.load_variables(cmd);
+        }
     }
 
     fn handle_variable_clipboard_operation<F>(
