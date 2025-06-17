@@ -1778,6 +1778,19 @@ impl SystemState {
                 let group_ref =
                     waves.add_group(name.unwrap_or("Group".to_owned()), Some(final_target));
 
+                if !self
+                    .wcp_running_signal
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    if let Some(new_group_idx) = waves
+                        .displayed_items
+                        .iter()
+                        .position(|(key, _val)| *key == group_ref)
+                    {
+                        self.user.rename_target = Some(VisibleItemIndex(new_group_idx));
+                    }
+                }
+
                 let item_idxs = waves
                     .items_tree
                     .iter()
