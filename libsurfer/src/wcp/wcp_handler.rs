@@ -131,7 +131,7 @@ impl SystemState {
                                 .map(|n| VariableRef::from_hierarchy_string(n))
                                 .collect_vec();
                             let (cmd, ids) =
-                                waves.add_variables(&self.translators, variable_refs, None);
+                                waves.add_variables(&self.translators, variable_refs, None, true);
                             if let Some(cmd) = cmd {
                                 self.load_variables(cmd);
                             }
@@ -155,7 +155,7 @@ impl SystemState {
                         let variables = self.get_scope(scope, *recursive);
                         if let Some(waves) = self.user.waves.as_mut() {
                             let (cmd, ids) =
-                                waves.add_variables(&self.translators, variables, None);
+                                waves.add_variables(&self.translators, variables, None, true);
                             if let Some(cmd) = cmd {
                                 self.load_variables(cmd);
                             }
