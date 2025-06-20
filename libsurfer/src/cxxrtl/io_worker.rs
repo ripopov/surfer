@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, io::Write};
 
-use color_eyre::{eyre::Context, Result};
+use eyre::{Context, Result};
 use log::{error, info, trace};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},

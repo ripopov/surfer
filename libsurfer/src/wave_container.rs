@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
 use chrono::prelude::{DateTime, Utc};
-use color_eyre::{eyre::bail, Result};
+use eyre::{bail, Result};
 use num::BigUint;
 use serde::{Deserialize, Serialize};
 use surfer_translation_types::VariableValue;

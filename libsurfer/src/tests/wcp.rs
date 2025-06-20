@@ -6,8 +6,8 @@ use crate::wcp::proto::{self, WcpCSMessage, WcpCommand, WcpEvent, WcpResponse, W
 use crate::SystemState;
 use itertools::Itertools;
 
-use color_eyre::eyre::bail;
-use color_eyre::Result;
+use eyre::bail;
+use eyre::Result;
 use futures::Future;
 use num::BigInt;
 use std::sync::atomic::Ordering;
@@ -120,7 +120,7 @@ macro_rules! wcp_test {
     ($test_name:ident, ($tx:ident, $rx:ident) $body:tt) => {
         #[test]
         fn $test_name() {
-            async fn client($tx: Sender<WcpCSMessage>, mut $rx: Receiver<WcpSCMessage>) -> color_eyre::Result<()> $body
+            async fn client($tx: Sender<WcpCSMessage>, mut $rx: Receiver<WcpSCMessage>) -> eyre::Result<()> $body
 
             run_wcp_test(stringify!($test_name).to_string(), client)
         }
