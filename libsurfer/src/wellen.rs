@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-use color_eyre::{eyre::anyhow, eyre::bail, Result};
 use derive_more::Debug;
+use eyre::{anyhow, bail, Result};
 use log::warn;
 use num::{BigUint, ToPrimitive};
 use surfer_translation_types::{

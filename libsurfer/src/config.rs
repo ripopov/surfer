@@ -1,5 +1,3 @@
-use color_eyre::eyre::{Context, Result};
-use color_eyre::Report;
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
 #[cfg(not(target_arch = "wasm32"))]
@@ -9,6 +7,8 @@ use derive_more::Display;
 use directories::ProjectDirs;
 use ecolor::Color32;
 use enum_iterator::Sequence;
+use eyre::Report;
+use eyre::{Context, Result};
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
@@ -443,7 +443,7 @@ impl SurferTheme {
 
     #[cfg(target_arch = "wasm32")]
     pub fn new(theme_name: Option<String>) -> Result<Self> {
-        use color_eyre::eyre::anyhow;
+        use eyre::anyhow;
 
         let (theme, _) = Self::generate_defaults(&theme_name);
 
@@ -456,10 +456,10 @@ impl SurferTheme {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn new(theme_name: Option<String>) -> color_eyre::Result<Self> {
+    pub fn new(theme_name: Option<String>) -> eyre::Result<Self> {
         use std::fs::ReadDir;
 
-        use color_eyre::eyre::anyhow;
+        use eyre::anyhow;
 
         let (mut theme, mut theme_names) = Self::generate_defaults(&theme_name);
 
@@ -584,8 +584,8 @@ impl SurferConfig {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn new(force_default_config: bool) -> color_eyre::Result<Self> {
-        use color_eyre::eyre::anyhow;
+    pub fn new(force_default_config: bool) -> eyre::Result<Self> {
+        use eyre::anyhow;
         use log::warn;
 
         let default_config = String::from(include_str!("../../default_config.toml"));
@@ -655,7 +655,7 @@ fn hex_string_to_color32(mut str: String) -> Result<Color32> {
             .with_context(|| format!("'{str}' is not a valid RGB hex color"))?;
         Ok(Color32::from_rgb(r, g, b))
     } else {
-        color_eyre::Result::Err(Report::msg(format!("'{str}' is not a valid RGB hex color")))
+        eyre::Result::Err(Report::msg(format!("'{str}' is not a valid RGB hex color")))
     }
 }
 

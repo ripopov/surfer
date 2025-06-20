@@ -77,7 +77,7 @@ impl FileWatcher {
 // systems
 #[cfg(windows)]
 impl FileWatcher {
-    pub fn new<F>(_path: &Utf8Path, _on_change: F) -> color_eyre::Result<FileWatcher>
+    pub fn new<F>(_path: &Utf8Path, _on_change: F) -> eyre::Result<FileWatcher>
     where
         F: Fn() + Send + Sync + 'static,
     {

@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use color_eyre::{eyre::Context, Result};
+use eyre::{Context, Result};
 use num::{BigUint, Zero};
 use serde::{Deserialize, Deserializer, Serialize};
 

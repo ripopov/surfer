@@ -32,18 +32,15 @@ impl Translator<VarId, ScopeId, Message> for ClockTranslator {
         &self,
         variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
         value: &VariableValue,
-    ) -> color_eyre::Result<TranslationResult> {
+    ) -> eyre::Result<TranslationResult> {
         self.inner.translate(variable, value)
     }
 
-    fn variable_info(&self, _variable: &VariableMeta) -> color_eyre::Result<VariableInfo> {
+    fn variable_info(&self, _variable: &VariableMeta) -> eyre::Result<VariableInfo> {
         Ok(VariableInfo::Clock)
     }
 
-    fn translates(
-        &self,
-        variable: &VariableMeta,
-    ) -> color_eyre::Result<super::TranslationPreference> {
+    fn translates(&self, variable: &VariableMeta) -> eyre::Result<super::TranslationPreference> {
         if variable.num_bits == Some(1) {
             Ok(super::TranslationPreference::Yes)
         } else {

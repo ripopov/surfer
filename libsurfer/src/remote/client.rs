@@ -1,7 +1,7 @@
 use super::HierarchyResponse;
 use bincode::Options;
-use color_eyre::eyre::{bail, eyre};
-use color_eyre::Result;
+use eyre::Result;
+use eyre::{bail, eyre};
 use log::info;
 use wellen::CompressedTimeTable;
 

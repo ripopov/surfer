@@ -7,7 +7,7 @@ repository.workspace = true
 categories.workspace = true
 
 [dependencies]
-color-eyre.workspace = true
+eyre.workspace = true
 derive_more.workspace = true
 ecolor.workspace = true
 extism-convert = "1.11.1"
