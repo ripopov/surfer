@@ -3,7 +3,7 @@ use super::{
 };
 use crate::wave_container::{ScopeId, VarId, VariableMeta};
 
-use color_eyre::Result;
+use eyre::Result;
 use instruction_decoder::Decoder;
 use surfer_translation_types::{BasicTranslator, VariableValue};
 

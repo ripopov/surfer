@@ -1,7 +1,6 @@
 use std::ops::Range;
 
 use crate::fzcmd::expand_command;
-use color_eyre::eyre::Context;
 use ecolor::Color32;
 #[cfg(not(target_arch = "wasm32"))]
 use egui::ViewportCommand;
@@ -16,6 +15,7 @@ use epaint::{
     text::{LayoutJob, TextWrapMode},
     CornerRadiusF32, Margin, Stroke,
 };
+use eyre::Context;
 use itertools::Itertools;
 use log::{info, warn};
 
