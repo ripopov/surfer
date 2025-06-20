@@ -79,7 +79,7 @@ tokio = { version = "1.43", features = ["rt", "time", "macros"] }
 toml = { version = "0.8.20", default-features = false, features = ["parse"] }
 wasm-bindgen-futures = "0.4.50"
 web-time = "1.1.0"
-wellen = { version = "0.15.0", features = ["serde1"] }
+wellen = { version = "0.16.0", features = ["serde1"] }
 
 [profile.release]
 opt-level = 3 # fast and small wasm
