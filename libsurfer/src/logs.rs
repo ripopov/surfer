@@ -1,9 +1,9 @@
 use std::{borrow::Cow, sync::Mutex};
 
-use color_eyre::Result;
 use ecolor::Color32;
 use egui::{self, RichText, TextWrapMode};
 use egui_extras::{Column, TableBuilder, TableRow};
+use eyre::Result;
 use log::{Level, Log, Record};
 
 use crate::{message::Message, SystemState};
@@ -156,6 +156,5 @@ pub fn start_logging() -> Result<()> {
         .chain(std::io::stdout());
     setup_logging(stdout_config)?;
 
-    color_eyre::install()?;
     Ok(())
 }

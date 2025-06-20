@@ -1,4 +1,4 @@
-use color_eyre::eyre::{Context, Result};
+use eyre::{Context, Result};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet, VecDeque},

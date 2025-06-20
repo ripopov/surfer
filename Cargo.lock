@@ -965,33 +965,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "color-eyre"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5920befb47832a6d61ee3a3a846565cfa39b331331e68a3b1d1116630f2f26d"
-dependencies = [
- "backtrace",
- "color-spantrace",
- "eyre",
- "indenter",
- "once_cell",
- "owo-colors",
- "tracing-error",
-]
-
-[[package]]
-name = "color-spantrace"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8b88ea9df13354b55bc7234ebcce36e6ef896aca2e42a15de9e10edce01b427"
-dependencies = [
- "once_cell",
- "owo-colors",
- "tracing-core",
- "tracing-error",
-]
-
-[[package]]
 name = "colorchoice"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2176,9 +2149,9 @@ dependencies = [
 
 [[package]]
 name = "fst-reader"
-version = "0.13.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f187509f09b312b0239939850a736190d5244086dcf39ed4bcf6785edf625a4"
+checksum = "db49202e746e752746ed40ba8ba5398e3f434f5729a2e84df847c3fd235b9aa7"
 dependencies = [
  "lz4_flex",
  "miniz_oxide",
@@ -3171,7 +3144,6 @@ dependencies = [
  "bytesize",
  "camino",
  "chrono",
- "color-eyre",
  "config",
  "derive_more",
  "directories",
@@ -3187,6 +3159,7 @@ dependencies = [
  "epaint",
  "extism",
  "extism-manifest",
+ "eyre",
  "f128",
  "fern",
  "ftr_parser",
@@ -4104,12 +4077,6 @@ checksum = "22ec719bbf3b2a81c109a4e20b1f129b5566b7dce654bc3872f6a05abf82b2c4"
 dependencies = [
  "ttf-parser",
 ]
-
-[[package]]
-name = "owo-colors"
-version = "4.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26995317201fa17f3656c36716aed4a7c81743a9634ac4c99c0eeda495db0cec"
 
 [[package]]
 name = "parking"
@@ -5089,6 +5056,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
 
 [[package]]
+name = "simple-eyre"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b561532e8ffe7ecf09108c4f662896a9ec3eac4999eba84015ec3dcb8cc630a"
+dependencies = [
+ "eyre",
+ "indenter",
+]
+
+[[package]]
 name = "skia-bindings"
 version = "0.86.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5287,12 +5264,13 @@ version = "0.4.0-dev"
 dependencies = [
  "camino",
  "clap",
- "color-eyre",
  "eframe",
  "egui",
+ "eyre",
  "libsurfer",
  "log",
  "ron",
+ "simple-eyre",
  "surver",
  "tokio",
  "wasm-bindgen-futures",
@@ -5302,10 +5280,10 @@ dependencies = [
 name = "surfer-translation-types"
 version = "0.4.0-dev"
 dependencies = [
- "color-eyre",
  "derive_more",
  "ecolor",
  "extism-convert",
+ "eyre",
  "num",
  "pyo3",
  "serde",
@@ -5318,7 +5296,7 @@ dependencies = [
  "bincode",
  "bytesize",
  "clap",
- "color-eyre",
+ "eyre",
  "fastrand",
  "fern",
  "http-body-util",
@@ -5330,6 +5308,7 @@ dependencies = [
  "lz4_flex",
  "serde",
  "serde_json",
+ "simple-eyre",
  "tokio",
  "web-time",
  "wellen",
@@ -5768,16 +5747,6 @@ checksum = "b9d12581f227e93f094d3af2ae690a574abb8a2b9b7a96e7cfe9647b2b617678"
 dependencies = [
  "once_cell",
  "valuable",
-]
-
-[[package]]
-name = "tracing-error"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b1581020d7a273442f5b45074a6a57d5757ad0a47dac0e9f0bd57b81936f3db"
-dependencies = [
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
