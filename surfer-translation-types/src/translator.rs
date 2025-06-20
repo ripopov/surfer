@@ -1,7 +1,7 @@
 //! Definition of the main [`Translator`] trait and the simplified version
 //! [`BasicTranslator`].
-use color_eyre::Result;
 use extism_convert::{FromBytes, Json, ToBytes};
+use eyre::Result;
 use num::BigUint;
 use serde::{Deserialize, Serialize};
 use std::sync::mpsc::Sender;
