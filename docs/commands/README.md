@@ -33,7 +33,7 @@ Not all commands are available unless a file is loaded. Also, some commands are 
 
 ## State files
 
-* ``load_state``
+* ``load_state <FILE_NAME>``
 * ``save_state``
 * ``save_state_as``
 
@@ -51,38 +51,50 @@ Not all commands are available unless a file is loaded. Also, some commands are 
 
 * ``scope_add <SCOPE_NAME>``, ``stream_add``
 
-    Add all signals in the specified scope to the waveform display.
+    Add all variables in the specified scope to the waveform display.
 
 * ``scope_add_recursive <SCOPE_NAME>``
 
-    Add all signals in the specified scope and from all sub-scopes to the waveform display.
+    Add all variables in the specified scope and from all sub-scopes to the waveform display.
 
-    <div class="warning">Adding large hierarchies with a large number of signals can freeze surfer for a significant amount of time.</div>
+    <div class="warning">Adding large hierarchies with a large number of variables can freeze surfer for a significant amount of time.</div>
 
 * ``scope_add_as_group <SCOPE_NAME>``
 
-    Add all signals in the specified scope to the waveform display in a newly created group of the same name.
+    Add all variables in the specified scope to the waveform display in a newly created group of the same name.
 
 * ``scope_add_as_group_recursive <SCOPE_NAME>``
 
-    Add all signals in the specified scope and all sub-scopes to the waveform display in a newly created groups nested.
+    Add all variables in the specified scope and all sub-scopes to the waveform display in a newly created groups nested.
 
-    <div class="warning">Adding large hierarchies with a large number of signals can freeze surfer for a significant amount of time.</div>
+    <div class="warning">Adding large hierarchies with a large number of variables can freeze surfer for a significant amount of time.</div>
 
-* ``scope_select``
-* ``stream_select``
-* ``variable_add <VARIABLE_NAME>``, ``generator_add  <GENERATOR_NAME>``
-* ``variable_add_from_scope``
-* ``generator_add_from_stream``
+* ``variable_add <FULL_VARIABLE_NAME>``, ``generator_add  <FULL_GENERATOR_NAME>``
+
+    Add a variable/generator using the full path, including scopes/streams.
+
+* ``scope_select <SCOPE_NAME>``, ``stream_select <STREAM_NAME>``
+
+    Select a scope/stream to be active (shown in the side panel).
+
+* ``variable_add_from_scope <VARIABLE_NAME>``, ``generator_add_from_stream <GENERATOR_NAME>``
+
+    Add variable/generator from currently selected scope/stream.
 
 ## Add other items
 
 * ``divider_add <NAME>``
+
+  Add a divider with the given name.
+
 * ``timeline_add``
 
 ## Groups
 
 * ``group_marked``
+
+    Add selected variables/items to a new group.
+
 * ``group_dissolve``
 * ``group_fold_recursive``
 * ``group_unfold_recursive``
@@ -149,16 +161,24 @@ Not all commands are available unless a file is loaded. Also, some commands are 
 
 * ``toggle_side_panel``
 
+Toggle visibility of the side panel, i.e., where the scopes and variables are shown.
+
 * ``toggle_fullscreen``
 
   Toggle fullscreen view.
 
 * ``toggle_tick_lines``
-* ``variable_set_name_type``
-* ``variable_force_name_type``
-* ``preference_set_clock_highlight``
-* ``preference_set_hierarchy_style``
-* ``preference_set_arrow_key_bindings``
+* ``variable_set_name_type <Local | Unique | Global>``
+* ``variable_force_name_type <Local | Unique | Global>``
+* ``preference_set_clock_highlight <Line | Cycle | None>``
+
+
+* ``preference_set_hierarchy_style <Separate | Tree>``
+
+Set if the design hierarchy is shown with scopes and variables separated or as a tree.
+
+* ``preference_set_arrow_key_bindings <Edge | Scroll>``
+
 * ``config_reload``
 
 ## Cursor and markers
@@ -169,7 +189,7 @@ Not all commands are available unless a file is loaded. Also, some commands are 
 
 * ``goto_marker <MARKER_NAME> | #<MARKER_NUMBER>``
 
-  Go to the location of the main cursor. If off screen, scroll to it.
+  Go to the location of the given marker. If off screen, scroll to it.
 
 * ``cursor_set <TIME>``
 
@@ -199,12 +219,22 @@ Not all commands are available unless a file is loaded. Also, some commands are 
 
 ## Waveform control protocol (WCP)
 
-* ``wcp_server_stop`` (not WASM)
 * ``wcp_server_start`` (not WASM)
+
+Start the [WCP](https://gitlab.com/waveform-control-protocol/wcp/) server.
+Typically, this is using port 54321 at address 127.0.0.1, but this can be changed
+using the `address` setting in the `wcp` part of the config file.
+
+* ``wcp_server_stop`` (not WASM)
+
+Stop the WCP server.
 
 ## Other
 
 * ``copy_value``
+
+Copy the variable name and value at cursor to the clipboard.
+
 * ``undo``
 * ``redo``
 * ``exit`` (not WASM)
