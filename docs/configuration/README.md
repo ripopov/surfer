@@ -24,15 +24,15 @@ After changing the configuration, run the `config_reload` command to update the 
 
 ## Themes
 
-To add additional themes to Surfer, create a `themes` directory in Surfer's config directory and add your themes inside there. For example, themes [look here](https://gitlab.com/surfer-project/surfer/-/tree/main/themes?ref_type=heads).
+To add additional themes to Surfer, create a `themes` directory in Surfer's config directory and add your themes inside there. That is
+| Os      | Path                                                                  |
+|---------|-----------------------------------------------------------------------|
+| Linux   | `~/.config/surfer/themes/`                                     |
+| Windows | `C:\Users\<Name>\AppData\Roaming\surfer-project\surfer\config\themes\`  |
+| macOS   | `/Users/<Name>/Library/Application Support/org.surfer-project.surfer/themes/` |
+
 You can also add project-specific themes to `.surfer/themes` directories.
 Additionally, configurations can be loaded using the Menubar option `View/Theme` or using the `theme_select` command.
+
 For a list of all possible style options, please look at the [default theme](https://gitlab.com/surfer-project/surfer/-/blob/main/default_theme.toml?ref_type=heads).
-
-## Decoders
-
-Decoders allow translating n-bit signals into nice text representations.
-They are based on [the instruction-decoder](https://github.com/ics-jku/instruction-decoder) crate.
-To add additional decoders to Surfer, create a `decoders` directory in Surfer's config directory and add your decoders inside there.
-To add a new decoder, create a subdirectory and add the required toml files.
-You can also add project-specific decoders to `.surfer/decoders` directories.
+For example of existing themes [look here](https://gitlab.com/surfer-project/surfer/-/tree/main/themes?ref_type=heads).
