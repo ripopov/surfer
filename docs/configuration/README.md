@@ -25,6 +25,7 @@ After changing the configuration, run the `config_reload` command to update the 
 ## Themes
 
 To add additional themes to Surfer, create a `themes` directory in Surfer's config directory and add your themes inside there. That is
+
 | Os      | Path                                                                  |
 |---------|-----------------------------------------------------------------------|
 | Linux   | `~/.config/surfer/themes/`                                     |

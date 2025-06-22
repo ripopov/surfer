@@ -3,6 +3,7 @@
 Decoders allow translating n-bit signals into nice text representations.
 They are based on the [instruction-decoder](https://github.com/ics-jku/instruction-decoder) crate.
 To add additional decoders to Surfer, create a `decoders` directory in Surfer's config directory and add your decoders inside there.
+
 | Os      | Path                                                                  |
 |---------|-----------------------------------------------------------------------|
 | Linux   | `~/.config/surfer/decoders/`                                        |
