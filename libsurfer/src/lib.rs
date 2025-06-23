@@ -17,6 +17,7 @@ pub mod displayed_item;
 pub mod displayed_item_tree;
 pub mod drawing_canvas;
 pub mod file_dialog;
+pub mod file_history;
 pub mod file_watcher;
 pub mod fzcmd;
 pub mod graphics;
@@ -978,11 +979,16 @@ impl SystemState {
             }
             Message::LoadFile(filename, load_options) => {
                 #[cfg(not(target_arch = "wasm32"))]
-                self.load_from_file(filename, load_options).ok();
+                {
+                    self.file_history.push(WaveSource::File(filename.clone()));
+                    self.load_from_file(filename, load_options).ok();
+                }
                 #[cfg(target_arch = "wasm32")]
                 error!("Cannot load file from path in WASM");
             }
             Message::LoadWaveformFileFromUrl(url, load_options) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                self.file_history.push(WaveSource::Url(url.clone()));
                 self.load_wave_from_url(url, load_options);
             }
             Message::LoadFromData(data, load_options) => {
@@ -1020,11 +1026,22 @@ impl SystemState {
             Message::LoadCommandFromData(bytes) => {
                 self.add_batch_commands(read_command_bytes(bytes));
             }
-            Message::SetupCxxrtl(kind) => self.connect_to_cxxrtl(kind, false),
+            Message::SetupCxxrtl(kind) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                self.file_history.push(WaveSource::Cxxrtl(kind.clone()));
+                self.connect_to_cxxrtl(kind, false)
+            }
             Message::SurferServerStatus(_start, server, status) => {
                 self.server_status_to_progress(server, status);
             }
             Message::FileDropped(dropped_file) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(path) = dropped_file.clone().path {
+                    if let Ok(path) = camino::Utf8PathBuf::from_path_buf(path) {
+                        self.file_history.push(WaveSource::File(path));
+                    }
+                }
+
                 self.load_from_dropped(dropped_file)
                     .map_err(|e| error!("{e:#?}"))
                     .ok();
