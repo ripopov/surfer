@@ -27,7 +27,7 @@ use crate::wellen::{
 use crate::{message::Message, SystemState};
 use surver::{Status, HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, WELLEN_SURFER_DEFAULT_OPTIONS};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Hash, Eq)]
 pub enum CxxrtlKind {
     Tcp { url: String },
     Mailbox,
@@ -41,7 +41,7 @@ impl std::fmt::Display for CxxrtlKind {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Hash, Eq)]
 pub enum WaveSource {
     File(Utf8PathBuf),
     Data,
