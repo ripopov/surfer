@@ -13,6 +13,7 @@ use crate::{
     command_prompt,
     config::SurferConfig,
     displayed_item::DisplayedItemRef,
+    file_history::FileHistory,
     message::Message,
     state::UserState,
     time::TimeUnit,
@@ -96,6 +97,8 @@ pub struct SystemState {
     pub(crate) redo_stack: Vec<CanvasState>,
 
     pub(crate) url_callback: Option<Box<dyn Fn(String) -> Message + Send + 'static>>,
+
+    pub(crate) file_history: FileHistory,
 
     // Only used for testing
     pub(crate) expand_parameter_section: bool,
@@ -206,6 +209,7 @@ impl SystemState {
             timing: RefCell::new(Timing::new()),
             undo_stack: vec![],
             redo_stack: vec![],
+            file_history: FileHistory::load_from_ron(),
         };
 
         Ok(result)
