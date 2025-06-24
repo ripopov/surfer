@@ -2210,10 +2210,11 @@ impl SystemState {
             .entry(var.clone())
             .or_insert_with(|| {
                 meta.as_ref().and_then(|meta| {
-                    let info = self.translators.all_translators().iter().find_map(|t| {
-                        let info = t.variable_name_info(meta);
-                        info
-                    });
+                    let info = self
+                        .translators
+                        .all_translators()
+                        .iter()
+                        .find_map(|t| t.variable_name_info(meta));
                     info
                 })
             })
@@ -2442,7 +2443,7 @@ pub fn draw_true_name(
                 },
             );
             layout_job.append(
-                &format!("{}", after.trim_end()),
+                after.trim_end(),
                 0.0,
                 TextFormat {
                     font_id: font.clone(),
