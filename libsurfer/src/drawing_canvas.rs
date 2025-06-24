@@ -674,7 +674,7 @@ impl SystemState {
 
         let modifiers = egui_ctx.input(|i| i.modifiers);
         if !modifiers.command
-            && ((response.dragged_by(PointerButton::Primary) && modifiers.shift)
+            && ((response.dragged_by(PointerButton::Primary) && !self.do_measure(&modifiers))
                 || response.clicked_by(PointerButton::Primary))
         {
             if let Some(snap_point) =
@@ -700,7 +700,7 @@ impl SystemState {
         }
 
         // Check for measure drag starting
-        if response.drag_started_by(PointerButton::Primary) {
+        if response.drag_started_by(PointerButton::Primary) && self.do_measure(&modifiers) {
             msgs.push(Message::SetMeasureDragStart(
                 ui.input(|i| i.pointer.press_origin())
                     .map(|p| self.transform_pos(to_screen, p, ui)),
