@@ -87,6 +87,21 @@ test:
         - cargo -V
         - cargo test --features python --color=always --locked -- --include-ignored
 
+test-musl:
+    image: rust:alpine
+    stage: test
+    script:
+        - apk update
+        - apk add python3-dev musl-dev openssl openssl-dev
+        - rustc -V
+        - cargo -V
+        - cargo test --features python --color=always --locked
+    artifacts:
+        paths:
+            - snapshots
+        expire_in: 1h
+        when: on_failure
+
 test-windows:
     tags:
         - saas-windows-medium-amd64
@@ -260,6 +275,27 @@ linux_build:
             - target/cargo-timings/*.html
         expire_in: 1 week
     interruptible: true
+
+musl_build:
+    image: rust:alpine
+    stage: test
+    # extends: .if-release
+    script:
+        - apk update
+        - apk add openssl openssl-dev zip musl-dev git openssl-libs-static
+        - git fetch --tags
+        - rustc -V
+        - cargo -V
+        - cargo build --release --locked --features accesskit
+        - mkdir dist
+        - cp target/release/surfer dist/surfer
+        - cp target/release/surver dist/surver
+        - cd dist
+        - zip ../surfer_musl_linux.zip surfer surver
+    artifacts:
+        paths:
+            - surfer_musl_linux.zip
+        expire_in: 1 week
 
 rocky_build:
     image: rockylinux:8
