@@ -597,6 +597,10 @@ impl SystemState {
         let (response, mut painter) =
             ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
 
+        if response.rect.size().x < 1. {
+            return;
+        }
+
         let cfg = match waves.inner {
             DataContainer::Waves(_) => DrawConfig::new(
                 response.rect.size().y,
@@ -618,12 +622,6 @@ impl SystemState {
             *self.last_canvas_rect.borrow_mut() = Some(response.rect);
         }
 
-        let Some(waves) = &self.user.waves else {
-            return;
-        };
-        if response.rect.size().x < 1. {
-            return;
-        }
         let container_rect = Rect::from_min_size(Pos2::ZERO, response.rect.size());
         let to_screen = RectTransform::from_to(container_rect, response.rect);
         let frame_width = response.rect.width();
@@ -673,6 +671,7 @@ impl SystemState {
         });
 
         let modifiers = egui_ctx.input(|i| i.modifiers);
+        // Handle cursor
         if !modifiers.command
             && ((response.dragged_by(PointerButton::Primary) && !self.do_measure(&modifiers))
                 || response.clicked_by(PointerButton::Primary))
@@ -683,6 +682,8 @@ impl SystemState {
                 msgs.push(Message::CursorSet(snap_point));
             }
         }
+
+        // Draw background
         painter.rect_filled(
             response.rect,
             CornerRadiusF32::ZERO,
