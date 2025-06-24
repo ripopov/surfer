@@ -26,12 +26,12 @@ pub fn discover_wasm_translators() -> Vec<Message> {
             .map(|dirs| dirs.data_dir().join("translators")),
     ]
     .into_iter()
-    .filter_map(|x| x)
+    .flatten()
     .collect::<Vec<_>>();
 
     let plugin_files = search_dirs
         .into_iter()
-        .map(|dir| {
+        .flat_map(|dir| {
             if !dir.exists() {
                 return vec![];
             }
@@ -62,7 +62,6 @@ pub fn discover_wasm_translators() -> Vec<Message> {
                 })
                 .unwrap_or_else(|_| vec![])
         })
-        .flatten()
         .filter_map(|file| {
             file.clone()
                 .try_into()
@@ -75,9 +74,7 @@ pub fn discover_wasm_translators() -> Vec<Message> {
                 .ok()
         });
 
-    plugin_files
-        .map(|file| Message::LoadWasmTranslator(file))
-        .collect()
+    plugin_files.map(Message::LoadWasmTranslator).collect()
 }
 
 pub struct PluginTranslator {
@@ -228,7 +225,7 @@ impl Translator<VarId, ScopeId, Message> for PluginTranslator {
 
 host_fn!(current_dir() -> String {
     std::env::current_dir()
-        .with_context(|| format!("Failed to get current dir"))
+        .with_context(|| "Failed to get current dir".to_string())
         .and_then(|dir| {
             dir.to_str().ok_or_else(|| {
                 anyhow!("{} is not valid utf8", dir.to_string_lossy())
