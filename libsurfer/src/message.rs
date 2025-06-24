@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use surver::Status;
 
 use crate::async_util::AsyncJob;
+use crate::config::PrimaryMouseDrag;
 use crate::displayed_item_tree::{ItemIndex, VisibleItemIndex};
 use crate::graphics::{Graphic, GraphicId};
 use crate::state::UserState;
@@ -309,6 +310,7 @@ pub enum Message {
     SetCursorWindowVisible(bool),
     SetHierarchyStyle(HierarchyStyle),
     SetArrowKeyBindings(ArrowKeyBindings),
+    SetPrimaryMouseDragBehavior(PrimaryMouseDrag),
     // Second argument is position to insert after, None inserts after focused item,
     // or last if no focused item
     AddDivider(Option<String>, Option<VisibleItemIndex>),
