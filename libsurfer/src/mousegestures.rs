@@ -5,7 +5,7 @@ use emath::{Align2, Pos2, Rect, RectTransform, Vec2};
 use epaint::{FontId, Stroke};
 use serde::Deserialize;
 
-use crate::config::{SurferConfig, SurferTheme};
+use crate::config::{PrimaryMouseDrag, SurferConfig, SurferTheme};
 use crate::time::time_string;
 use crate::view::DrawingContext;
 use crate::{wave_data::WaveData, Message, SystemState};
@@ -364,7 +364,12 @@ impl SystemState {
     ) {
         if let Some(start_location) = self.measure_start_location {
             let modifiers = egui_ctx.input(|i| i.modifiers);
-            if !modifiers.shift && !modifiers.command && response.dragged_by(PointerButton::Primary)
+            if ((self.primary_button_drag_measures() == PrimaryMouseDrag::Measure
+                && !modifiers.shift)
+                || (self.primary_button_drag_measures() == PrimaryMouseDrag::Cursor
+                    && modifiers.shift))
+                && !modifiers.command
+                && response.dragged_by(PointerButton::Primary)
             {
                 let current_location = pointer_pos_canvas.unwrap();
                 self.draw_zoom_in_gesture(

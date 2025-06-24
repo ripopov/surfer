@@ -6,6 +6,7 @@ use itertools::Itertools;
 use std::sync::atomic::Ordering;
 use surfer_translation_types::{TranslationPreference, Translator};
 
+use crate::config::PrimaryMouseDrag;
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::hierarchy::HierarchyStyle;
 use crate::message::MessageTarget;
@@ -313,6 +314,20 @@ impl SystemState {
                     .then(|| {
                         ui.close_menu();
                         msgs.push(Message::SetArrowKeyBindings(binding));
+                    });
+                }
+            });
+
+            ui.menu_button("Primary mouse button drag", |ui| {
+                for behavior in enum_iterator::all::<PrimaryMouseDrag>() {
+                    ui.radio(
+                        self.primary_button_drag_measures() == behavior,
+                        behavior.to_string(),
+                    )
+                    .clicked()
+                    .then(|| {
+                        ui.close_menu();
+                        msgs.push(Message::SetPrimaryMouseDragBehavior(behavior));
                     });
                 }
             });
