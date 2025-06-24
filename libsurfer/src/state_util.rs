@@ -2,7 +2,7 @@
 
 use ecolor::Color32;
 
-use crate::{displayed_item::DisplayedItem, SystemState};
+use crate::{config::PrimaryMouseDrag, displayed_item::DisplayedItem, SystemState};
 
 impl SystemState {
     #[inline]
@@ -123,5 +123,12 @@ impl SystemState {
         self.user
             .fill_high_values
             .unwrap_or_else(|| self.user.config.layout.fill_high_values())
+    }
+
+    #[inline]
+    pub fn primary_button_drag_measures(&self) -> PrimaryMouseDrag {
+        self.user
+            .primary_button_drag_measures
+            .unwrap_or_else(|| self.user.config.behavior.primary_button_drag_measures())
     }
 }

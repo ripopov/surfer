@@ -4,7 +4,6 @@ use std::{
     path::PathBuf,
 };
 
-use crate::displayed_item_tree::VisibleItemIndex;
 #[cfg(feature = "spade")]
 use crate::translation::spade::SpadeTranslator;
 use crate::{
@@ -25,6 +24,7 @@ use crate::{
     wave_source::{LoadOptions, WaveFormat, WaveSource},
     CanvasState, StartupParams,
 };
+use crate::{config::PrimaryMouseDrag, displayed_item_tree::VisibleItemIndex};
 use egui::{
     style::{Selection, WidgetVisuals, Widgets},
     CornerRadius, Stroke, Visuals,
@@ -59,6 +59,8 @@ pub struct UserState {
     pub(crate) highlight_focused: Option<bool>,
     #[serde(default)]
     pub(crate) fill_high_values: Option<bool>,
+    #[serde(default)]
+    pub(crate) primary_button_drag_measures: Option<PrimaryMouseDrag>,
 
     pub(crate) waves: Option<WaveData>,
     pub(crate) drag_started: bool,

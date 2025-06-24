@@ -18,7 +18,7 @@ use surfer_translation_types::{
 };
 
 use crate::clock_highlighting::draw_clock_edge;
-use crate::config::SurferTheme;
+use crate::config::{PrimaryMouseDrag, SurferTheme};
 use crate::data_container::DataContainer;
 use crate::displayed_item::{DisplayedFieldRef, DisplayedItemRef, DisplayedVariable};
 use crate::displayed_item_tree::VisibleItemIndex;
@@ -674,7 +674,11 @@ impl SystemState {
 
         let modifiers = egui_ctx.input(|i| i.modifiers);
         if !modifiers.command
-            && ((response.dragged_by(PointerButton::Primary) && modifiers.shift)
+            && ((response.dragged_by(PointerButton::Primary)
+                && ((modifiers.shift
+                    && self.primary_button_drag_measures() == PrimaryMouseDrag::Measure)
+                    || (!modifiers.shift
+                        && self.primary_button_drag_measures() == PrimaryMouseDrag::Cursor)))
                 || response.clicked_by(PointerButton::Primary))
         {
             if let Some(snap_point) =
@@ -700,7 +704,12 @@ impl SystemState {
         }
 
         // Check for measure drag starting
-        if response.drag_started_by(PointerButton::Primary) {
+        if response.drag_started_by(PointerButton::Primary)
+            && ((self.primary_button_drag_measures() == PrimaryMouseDrag::Measure
+                && !modifiers.shift)
+                || (self.primary_button_drag_measures() == PrimaryMouseDrag::Cursor
+                    && modifiers.shift))
+        {
             msgs.push(Message::SetMeasureDragStart(
                 ui.input(|i| i.pointer.press_origin())
                     .map(|p| self.transform_pos(to_screen, p, ui)),
