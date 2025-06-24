@@ -56,7 +56,7 @@ southwest = "GoToStart"
 [behavior]
 keep_during_reload = true
 arrow_key_bindings = "Edge"
-primary_button_drag_measures = "Measure"
+primary_button_drag_measures = "Cursor"
 
 [wcp]
 autostart = false
