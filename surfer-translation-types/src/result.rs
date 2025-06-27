@@ -11,6 +11,16 @@ pub struct TranslationResult {
     pub kind: ValueKind,
 }
 
+impl TranslationResult {
+    pub fn single_string(s: impl Into<String>, kind: ValueKind) -> Self {
+        TranslationResult {
+            val: ValueRepr::String(s.into()),
+            subfields: vec![],
+            kind,
+        }
+    }
+}
+
 /// The representation of the value, compound values can be
 /// be represented by the repr of their subfields
 #[derive(Clone, Serialize, Deserialize)]
