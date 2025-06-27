@@ -4,7 +4,9 @@ use crate::wave_container::{ScopeId, VarId, VariableMeta};
 use color_eyre::Result;
 use itertools::Itertools;
 use num::Zero;
-use surfer_translation_types::{BasicTranslator, VariableValue};
+use surfer_translation_types::{
+    check_vector_variable, extend_string, BasicTranslator, VariableValue,
+};
 
 // Forms groups of n chars from from a string. If the string size is
 // not divisible by n, the first group will be smaller than n
@@ -33,48 +35,6 @@ pub fn no_of_digits(num_bits: u64, digit_size: u64) -> usize {
         (num_bits / digit_size) as usize
     } else {
         (num_bits / digit_size + 1) as usize
-    }
-}
-
-/// VCD bit extension
-fn extend_string(val: &str, num_bits: u64) -> String {
-    if num_bits > val.len() as u64 {
-        let extra_count = num_bits - val.len() as u64;
-        let extra_value = match val.chars().next() {
-            Some('0') => "0",
-            Some('1') => "0",
-            Some('x') => "x",
-            Some('z') => "z",
-            // If we got weird characters, this is probably a string, so we don't
-            // do the extension
-            // We may have to add extensions for std_logic values though if simulators save without extension
-            _ => "",
-        };
-        extra_value.repeat(extra_count as usize)
-    } else {
-        String::new()
-    }
-}
-
-/// Turn vector variable string into name and corresponding color if it
-/// includes values other than 0 and 1. If only 0 and 1, return None.
-pub fn check_vector_variable(s: &str) -> Option<(String, ValueKind)> {
-    if s.contains('x') {
-        Some(("UNDEF".to_string(), ValueKind::Undef))
-    } else if s.contains('z') {
-        Some(("HIGHIMP".to_string(), ValueKind::HighImp))
-    } else if s.contains('-') {
-        Some(("DON'T CARE".to_string(), ValueKind::DontCare))
-    } else if s.contains('u') {
-        Some(("UNDEF".to_string(), ValueKind::Undef))
-    } else if s.contains('w') {
-        Some(("UNDEF WEAK".to_string(), ValueKind::Undef))
-    } else if s.contains('h') || s.contains('l') {
-        Some(("WEAK".to_string(), ValueKind::Weak))
-    } else if s.chars().all(|c| c == '0' || c == '1') {
-        None
-    } else {
-        Some(("UNKNOWN VALUES".to_string(), ValueKind::Undef))
     }
 }
 
