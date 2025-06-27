@@ -1551,7 +1551,7 @@ impl SystemState {
                 self.user.config.behavior.arrow_key_bindings = bindings;
             }
             Message::SetPrimaryMouseDragBehavior(behavior) => {
-                self.user.primary_button_drag_measures = Some(behavior);
+                self.user.primary_button_drag_behavior = Some(behavior);
             }
             Message::InvalidateDrawCommands => self.invalidate_draw_commands(),
             Message::UnpauseSimulation => {

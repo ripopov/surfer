@@ -208,12 +208,12 @@ pub struct SurferBehavior {
     pub arrow_key_bindings: ArrowKeyBindings,
     /// Whether dragging with primary mouse button will measure time or move cursor
     /// (press shift for the other)
-    primary_button_drag_measures: PrimaryMouseDrag,
+    primary_button_drag_behavior: PrimaryMouseDrag,
 }
 
 impl SurferBehavior {
-    pub fn primary_button_drag_measures(&self) -> PrimaryMouseDrag {
-        self.primary_button_drag_measures
+    pub fn primary_button_drag_behavior(&self) -> PrimaryMouseDrag {
+        self.primary_button_drag_behavior
     }
 }
 

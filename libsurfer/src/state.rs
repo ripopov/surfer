@@ -56,7 +56,7 @@ pub struct UserState {
     #[serde(default)]
     pub(crate) fill_high_values: Option<bool>,
     #[serde(default)]
-    pub(crate) primary_button_drag_measures: Option<PrimaryMouseDrag>,
+    pub(crate) primary_button_drag_behavior: Option<PrimaryMouseDrag>,
 
     pub(crate) waves: Option<WaveData>,
     pub(crate) drag_started: bool,

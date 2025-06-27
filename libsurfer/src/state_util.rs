@@ -127,17 +127,17 @@ impl SystemState {
     }
 
     #[inline]
-    pub fn primary_button_drag_measures(&self) -> PrimaryMouseDrag {
+    pub fn primary_button_drag_behavior(&self) -> PrimaryMouseDrag {
         self.user
-            .primary_button_drag_measures
-            .unwrap_or_else(|| self.user.config.behavior.primary_button_drag_measures())
+            .primary_button_drag_behavior
+            .unwrap_or_else(|| self.user.config.behavior.primary_button_drag_behavior())
     }
 
     #[inline]
-    /// Return true if the combination of `primary_button_drag_measures` and
+    /// Return true if the combination of `primary_button_drag_behavior` and
     /// `modifiers` results in a measure, false otherwise.
     pub fn do_measure(&self, modifiers: &Modifiers) -> bool {
-        let drag_behavior = self.primary_button_drag_measures();
+        let drag_behavior = self.primary_button_drag_behavior();
         (drag_behavior == PrimaryMouseDrag::Measure && !modifiers.shift)
             || (drag_behavior == PrimaryMouseDrag::Cursor && modifiers.shift)
     }

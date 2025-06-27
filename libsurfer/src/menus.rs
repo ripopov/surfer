@@ -321,7 +321,7 @@ impl SystemState {
             ui.menu_button("Primary mouse button drag", |ui| {
                 for behavior in enum_iterator::all::<PrimaryMouseDrag>() {
                     ui.radio(
-                        self.primary_button_drag_measures() == behavior,
+                        self.primary_button_drag_behavior() == behavior,
                         behavior.to_string(),
                     )
                     .clicked()

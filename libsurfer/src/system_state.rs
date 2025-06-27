@@ -164,7 +164,7 @@ impl SystemState {
                 drag_source_idx: None,
                 drag_target_idx: None,
                 sidepanel_width: None,
-                primary_button_drag_measures: None,
+                primary_button_drag_behavior: None,
             },
             translators,
             channels,
