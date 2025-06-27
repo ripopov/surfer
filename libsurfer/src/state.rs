@@ -4,13 +4,12 @@ use std::{
     path::PathBuf,
 };
 
-use crate::displayed_item_tree::VisibleItemIndex;
 use crate::{
-    config::SurferConfig,
+    config::{PrimaryMouseDrag, SurferConfig},
     data_container::DataContainer,
     dialog::OpenSiblingStateFileDialog,
     dialog::ReloadWaveformDialog,
-    displayed_item_tree::DisplayedItemTree,
+    displayed_item_tree::{DisplayedItemTree, VisibleItemIndex},
     message::Message,
     system_state::SystemState,
     time::{TimeStringFormatting, TimeUnit},
@@ -56,6 +55,8 @@ pub struct UserState {
     pub(crate) highlight_focused: Option<bool>,
     #[serde(default)]
     pub(crate) fill_high_values: Option<bool>,
+    #[serde(default)]
+    pub(crate) primary_button_drag_behavior: Option<PrimaryMouseDrag>,
 
     pub(crate) waves: Option<WaveData>,
     pub(crate) drag_started: bool,

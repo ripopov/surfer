@@ -10,7 +10,7 @@ use directories::ProjectDirs;
 use ecolor::Color32;
 use enum_iterator::Sequence;
 use serde::de;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
@@ -20,7 +20,7 @@ use crate::mousegestures::GestureZones;
 use crate::time::TimeFormat;
 use crate::{clock_highlighting::ClockHighlightType, variable_name_type::VariableNameType};
 
-/// Selects the function of the arrow keys
+/// Select the function of the arrow keys
 #[derive(Debug, Deserialize, Display, PartialEq, Eq, Sequence)]
 pub enum ArrowKeyBindings {
     /// The left/right arrow keys step to the next edge
@@ -40,6 +40,18 @@ impl From<String> for ArrowKeyBindings {
             _ => Self::Edge,
         }
     }
+}
+
+/// Select the function when dragging with primary mouse button
+#[derive(Debug, Deserialize, Display, PartialEq, Eq, Sequence, Serialize, Clone, Copy)]
+pub enum PrimaryMouseDrag {
+    /// The left/right arrow keys step to the next edge
+    #[display("Measure time")]
+    Measure,
+
+    /// The left/right arrow keys scroll the viewport left/right
+    #[display("Move cursor")]
+    Cursor,
 }
 
 #[derive(Debug, Deserialize)]
@@ -194,6 +206,15 @@ pub struct SurferBehavior {
     pub keep_during_reload: bool,
     /// Select the functionality bound to the arrow keys
     pub arrow_key_bindings: ArrowKeyBindings,
+    /// Whether dragging with primary mouse button will measure time or move cursor
+    /// (press shift for the other)
+    primary_button_drag_behavior: PrimaryMouseDrag,
+}
+
+impl SurferBehavior {
+    pub fn primary_button_drag_behavior(&self) -> PrimaryMouseDrag {
+        self.primary_button_drag_behavior
+    }
 }
 
 #[derive(Debug, Deserialize)]

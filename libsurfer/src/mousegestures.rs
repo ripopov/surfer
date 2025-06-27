@@ -364,7 +364,9 @@ impl SystemState {
     ) {
         if let Some(start_location) = self.measure_start_location {
             let modifiers = egui_ctx.input(|i| i.modifiers);
-            if !modifiers.shift && !modifiers.command && response.dragged_by(PointerButton::Primary)
+            if !modifiers.command
+                && response.dragged_by(PointerButton::Primary)
+                && self.do_measure(&modifiers)
             {
                 let current_location = pointer_pos_canvas.unwrap();
                 self.draw_zoom_in_gesture(
