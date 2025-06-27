@@ -1,8 +1,9 @@
 //! Utility functions, typically inlined, for more readable code
 
 use ecolor::Color32;
+use egui::Modifiers;
 
-use crate::{displayed_item::DisplayedItem, SystemState};
+use crate::{config::PrimaryMouseDrag, displayed_item::DisplayedItem, SystemState};
 
 impl SystemState {
     #[inline]
@@ -123,5 +124,21 @@ impl SystemState {
         self.user
             .fill_high_values
             .unwrap_or_else(|| self.user.config.layout.fill_high_values())
+    }
+
+    #[inline]
+    pub fn primary_button_drag_behavior(&self) -> PrimaryMouseDrag {
+        self.user
+            .primary_button_drag_behavior
+            .unwrap_or_else(|| self.user.config.behavior.primary_button_drag_behavior())
+    }
+
+    #[inline]
+    /// Return true if the combination of `primary_button_drag_behavior` and
+    /// `modifiers` results in a measure, false otherwise.
+    pub fn do_measure(&self, modifiers: &Modifiers) -> bool {
+        let drag_behavior = self.primary_button_drag_behavior();
+        (drag_behavior == PrimaryMouseDrag::Measure && !modifiers.shift)
+            || (drag_behavior == PrimaryMouseDrag::Cursor && modifiers.shift)
     }
 }

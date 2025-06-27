@@ -1550,6 +1550,9 @@ impl SystemState {
             Message::SetArrowKeyBindings(bindings) => {
                 self.user.config.behavior.arrow_key_bindings = bindings;
             }
+            Message::SetPrimaryMouseDragBehavior(behavior) => {
+                self.user.primary_button_drag_behavior = Some(behavior);
+            }
             Message::InvalidateDrawCommands => self.invalidate_draw_commands(),
             Message::UnpauseSimulation => {
                 let waves = self.user.waves.as_ref()?;
