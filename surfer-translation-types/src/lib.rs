@@ -73,9 +73,6 @@ pub fn extend_string(val: &str, num_bits: u64) -> String {
     }
 }
 
-
-
-
 #[derive(Debug, PartialEq, Clone, Display, Serialize, Deserialize)]
 pub enum VariableValue {
     #[display("{_0}")]
@@ -103,11 +100,11 @@ impl VariableValue {
                         val: ValueRepr::String(val),
                         subfields: vec![],
                         kind,
-                    })
+                    });
                 } else {
                     v
                 }
-            },
+            }
         };
 
         handler(value)

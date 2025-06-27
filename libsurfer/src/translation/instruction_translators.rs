@@ -1,6 +1,4 @@
-use super::{
-    check_single_wordlength, no_of_digits, TranslationPreference, ValueKind,
-};
+use super::{check_single_wordlength, no_of_digits, TranslationPreference, ValueKind};
 use crate::wave_container::{ScopeId, VarId, VariableMeta};
 
 use color_eyre::Result;

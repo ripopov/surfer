@@ -4,7 +4,9 @@ use crate::wave_container::{ScopeId, VarId, VariableMeta};
 use color_eyre::Result;
 use itertools::Itertools;
 use num::Zero;
-use surfer_translation_types::{check_vector_variable, extend_string, BasicTranslator, VariableValue};
+use surfer_translation_types::{
+    check_vector_variable, extend_string, BasicTranslator, VariableValue,
+};
 
 // Forms groups of n chars from from a string. If the string size is
 // not divisible by n, the first group will be smaller than n

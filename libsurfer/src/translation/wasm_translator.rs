@@ -108,12 +108,14 @@ impl PluginTranslator {
             .build()
             .map_err(|e| anyhow!("Failed to load plugin from {} {e}", file.to_string_lossy()))?;
 
-        plugin.call::<_, ()>("new", ()).map_err(|e| {
-            anyhow!(
-                "Failed to call `new` on plugin from {}. {e}",
-                file.to_string_lossy()
-            )
-        })?;
+        if plugin.function_exists("new") {
+            plugin.call::<_, ()>("new", ()).map_err(|e| {
+                anyhow!(
+                    "Failed to call `new` on plugin from {}. {e}",
+                    file.to_string_lossy()
+                )
+            })?;
+        }
 
         Ok(Self {
             plugin: Arc::new(Mutex::new(plugin)),
