@@ -11,7 +11,8 @@ use extism_manifest::MemoryOptions;
 use log::{error, warn};
 use surfer_translation_types::plugin_types::TranslateParams;
 use surfer_translation_types::{
-    TranslationPreference, TranslationResult, Translator, VariableInfo, VariableMeta, VariableValue,
+    TranslationPreference, TranslationResult, Translator, VariableInfo, VariableMeta,
+    VariableNameInfo, VariableValue,
 };
 
 use crate::message::Message;
@@ -107,12 +108,14 @@ impl PluginTranslator {
             .build()
             .map_err(|e| anyhow!("Failed to load plugin from {} {e}", file.to_string_lossy()))?;
 
-        plugin.call::<_, ()>("new", ()).map_err(|e| {
-            anyhow!(
-                "Failed to call `new` on plugin from {}. {e}",
-                file.to_string_lossy()
-            )
-        })?;
+        if plugin.function_exists("new") {
+            plugin.call::<_, ()>("new", ()).map_err(|e| {
+                anyhow!(
+                    "Failed to call `new` on plugin from {}. {e}",
+                    file.to_string_lossy()
+                )
+            })?;
+        }
 
         Ok(Self {
             plugin: Arc::new(Mutex::new(plugin)),
@@ -219,6 +222,27 @@ impl Translator<VarId, ScopeId, Message> for PluginTranslator {
                 Ok(()) => (),
                 Err(e) => error!("{e:#}"),
             }
+        }
+    }
+
+    fn variable_name_info(
+        &self,
+        variable: &VariableMeta<VarId, ScopeId>,
+    ) -> Option<VariableNameInfo> {
+        let mut plugin = self.plugin.lock().unwrap();
+        if plugin.function_exists("variable_name_info") {
+            match plugin.call(
+                "variable_name_info",
+                variable.clone().map_ids(|_| (), |_| ()),
+            ) {
+                Ok(result) => result,
+                Err(e) => {
+                    error!("{e:#}");
+                    None
+                }
+            }
+        } else {
+            None
         }
     }
 }

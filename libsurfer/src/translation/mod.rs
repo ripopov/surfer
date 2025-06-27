@@ -20,8 +20,6 @@ mod instruction_translators;
 pub mod numeric_translators;
 #[cfg(feature = "python")]
 mod python_translators;
-#[cfg(feature = "spade")]
-pub mod spade;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod wasm_translator;
 

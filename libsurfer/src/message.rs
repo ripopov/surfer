@@ -151,12 +151,6 @@ pub enum Message {
     /// translators loaded on startup.
     #[cfg(not(target_arch = "wasm32"))]
     LoadWasmTranslator(Utf8PathBuf),
-    /// Load a spade translator using the specified top and the specified state encoded as ron.
-    LoadSpadeTranslator {
-        top: String,
-        #[debug(skip)]
-        state: String,
-    },
     /// Load command file from file path.
     LoadCommandFile(Utf8PathBuf),
     /// Load commands from data.

@@ -57,13 +57,7 @@ serde.workspace = true
 serde_json.workspace = true
 serde_stacker = { version = "0.1", optional = true }
 softposit.workspace = true
-spade-lang = { git = "https://gitlab.com/spade-lang/spade.git", rev = "105e12cbd3d12c4c00e30a1a8d3b054f881ada1a", optional = true }
-spade-common = { git = "https://gitlab.com/spade-lang/spade.git", rev = "105e12cbd3d12c4c00e30a1a8d3b054f881ada1a", optional = true }
-spade-hir = { git = "https://gitlab.com/spade-lang/spade.git", rev = "105e12cbd3d12c4c00e30a1a8d3b054f881ada1a", optional = true }
-spade-hir-lowering = { git = "https://gitlab.com/spade-lang/spade.git", rev = "105e12cbd3d12c4c00e30a1a8d3b054f881ada1a", optional = true }
-spade-types = { git = "https://gitlab.com/spade-lang/spade.git", rev = "105e12cbd3d12c4c00e30a1a8d3b054f881ada1a", optional = true }
 surfer-translation-types = { path = "../surfer-translation-types" }
-spade-codespan = { version = "0.12.0", optional = true }
 surver.workspace = true
 sys-locale.workspace = true
 toml.workspace = true
@@ -73,20 +67,11 @@ leb128.workspace = true
 tokio-stream = "0.1.17"
 
 [features]
-default = ["spade", "performance_plot"]
+default = ["performance_plot"]
 accesskit = ["eframe/accesskit", "eframe/web_screen_reader"]
 f128 = ["dep:f128"]
 performance_plot = ["dep:egui_plot"]
 python = ["pyo3", "surfer-translation-types/pyo3"]
-spade = [
-    "dep:spade-lang",
-    "dep:spade-common",
-    "dep:spade-hir-lowering",
-    "dep:spade-types",
-    "dep:serde_stacker",
-    "dep:spade-hir",
-    "dep:spade-codespan",
-]
 
 [target.'cfg(all(not(windows), not(target_arch = "wasm32")))'.dependencies]
 notify = "8.0"

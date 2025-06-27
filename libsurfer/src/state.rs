@@ -5,10 +5,7 @@ use std::{
 };
 
 use crate::displayed_item_tree::VisibleItemIndex;
-#[cfg(feature = "spade")]
-use crate::translation::spade::SpadeTranslator;
 use crate::{
-    async_util::perform_work,
     config::SurferConfig,
     data_container::DataContainer,
     dialog::OpenSiblingStateFileDialog,
@@ -119,23 +116,6 @@ impl SystemState {
     pub fn with_params(mut self, args: StartupParams) -> Self {
         self.user.previous_waves = self.user.waves;
         self.user.waves = None;
-
-        // Long running translators which we load in a thread
-        {
-            #[cfg(feature = "spade")]
-            let sender = self.channels.msg_sender.clone();
-            #[cfg(not(feature = "spade"))]
-            let _ = self.channels.msg_sender.clone();
-            let waves = args.waves.clone();
-            perform_work(move || {
-                #[cfg(feature = "spade")]
-                SpadeTranslator::load(&waves, &args.spade_top, &args.spade_state, sender);
-                #[cfg(not(feature = "spade"))]
-                if let (Some(_), Some(_)) = (args.spade_top, args.spade_state) {
-                    info!("Surfer is not compiled with spade support, ignoring spade_top and spade_state");
-                }
-            });
-        }
 
         // we turn the waveform argument and any startup command file into batch commands
         self.batch_messages = VecDeque::new();

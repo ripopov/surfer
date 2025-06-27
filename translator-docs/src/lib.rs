@@ -25,7 +25,6 @@
     In your new project, you now need to define a few functions which must all
     be annotated with `#[plugin_fn]` and have the right type signature. Click on each function to learn more
 
-    - [new]: initializes the plugin
     - [name]: sets the name of the plugin in the format selection list
     - [translates]: allows the plugin to opt in or out of translating certain signals
     - [variable_info]: specifies the hierarchical structure of the signal
@@ -33,8 +32,10 @@
 
     In addition, there are a few [optional] functions that can be implemented for additional
     functionality
+    - [new]: Called once on plugin load
     - [reload]: Called when Surfer reloads the waveform
     - [set_wave_source]: Called when the current waveform changes
+    - [variable_name_info]: Translate signal names
 
     ## Accessing Files
 
@@ -92,12 +93,6 @@ use surfer_translation_types::plugin_types::TranslateParams;
 use surfer_translation_types::{
     TranslationPreference, TranslationResult, ValueKind, VariableInfo, VariableMeta,
 };
-
-/// The new function is used to initialize a plugin. It is called once when the
-/// plugin is loaded
-pub fn new() -> FnResult<()> {
-    Ok(())
-}
 
 /// Returns the name of the plugin as shown to the user. This needs to be unique, so
 /// do not set it to a translator name that is already present in Surfer.
@@ -179,8 +174,15 @@ pub fn translate(
 /// advanced things.
 pub mod optional {
     use extism_pdk::Json;
+    use surfer_translation_types::translator::{TrueName, VariableNameInfo};
 
     use super::*;
+
+    /// The new function is used to initialize a plugin. It is called once when the
+    /// plugin is loaded
+    pub fn new() -> FnResult<()> {
+        Ok(())
+    }
 
     /// Called every time Surfer reloads the waveform. This can be used to
     /// re-run any initialization that depends on which waveform is loaded.
@@ -197,6 +199,26 @@ pub mod optional {
         Json(_wave_source): Json<Option<surfer_translation_types::WaveSource>>,
     ) -> FnResult<()> {
         Ok(())
+    }
+
+    /// Can be used to convert a variable name into a name that is more descriptive.
+    /// See [VariableNameInfo] and [TrueName] for details on the possible output.
+    ///
+    /// **NOTE** The user has no way to opt out of a translator that specifies a true name,
+    /// which means this feature should be used with caution and only on signals which
+    /// are likely to mean very little to the user in their original form. The original use
+    /// case for the feature is for translators for HDLs to translate temporary variables
+    /// into something more descriptive.
+    pub fn variable_name_info(
+        Json(_variable): Json<VariableMeta<(), ()>>,
+    ) -> FnResult<Option<VariableNameInfo>> {
+        let _ = TrueName::SourceCode {
+            line_number: 0,
+            before: String::new(),
+            this: String::new(),
+            after: String::new(),
+        };
+        Ok(None)
     }
 }
 

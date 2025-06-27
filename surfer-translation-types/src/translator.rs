@@ -11,7 +11,8 @@ use crate::{
     TranslationPreference, ValueKind, VariableEncoding, VariableInfo, VariableMeta, VariableValue,
 };
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromBytes, ToBytes)]
+#[encoding(Json)]
 pub enum TrueName {
     /// The variable's true name is best represented as part of a line of code
     /// for example if line 100 is
@@ -34,7 +35,8 @@ pub enum TrueName {
 /// generated subexpression back into names that a human can understand. In this use case,
 /// it is _very_ unlikely that the user wants to see the raw anonymous name that the compiler
 /// emitted, so performing this translation globally makes sense.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, FromBytes, ToBytes)]
+#[encoding(Json)]
 pub struct VariableNameInfo {
     /// A more human-undesrstandable name for a signal. This should only be used by translators
     /// which
