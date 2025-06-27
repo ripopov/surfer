@@ -16,7 +16,7 @@ use crate::state::UserState;
 use crate::transaction_container::{
     StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
 };
-use crate::translation::DynTranslator;
+use crate::translation::AnyTranslator;
 use crate::viewport::ViewportStrategy;
 use crate::wave_data::ScopeType;
 use crate::{
@@ -188,7 +188,7 @@ pub enum Message {
     #[serde(skip)]
     Error(color_eyre::eyre::Error),
     #[serde(skip)]
-    TranslatorLoaded(#[debug(skip)] Box<DynTranslator>),
+    TranslatorLoaded(#[debug(skip)] Box<AnyTranslator>),
     /// Take note that the specified translator errored on a `translates` call on the
     /// specified variable
     BlacklistTranslator(VariableRef, String),

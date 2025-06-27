@@ -80,20 +80,38 @@ pub struct DisplayedVariable {
     pub display_name_type: VariableNameType,
     pub manual_name: Option<String>,
     pub format: Option<String>,
-    pub field_formats: Vec<FieldFormat>,
+    pub user_field_formats: Vec<FieldFormat>,
     pub height_scaling_factor: Option<f32>,
 }
 
 impl DisplayedVariable {
-    pub fn get_format(&self, field: &[String]) -> Option<&String> {
+    pub fn get_format(&self, field: &[String]) -> Option<String> {
         if field.is_empty() {
-            self.format.as_ref()
+            self.format.clone()
         } else {
-            self.field_formats
+            self.field_formats()
                 .iter()
                 .find(|ff| ff.field == field)
                 .map(|ff| &ff.format)
+                .cloned()
         }
+    }
+
+    pub fn field_formats(&self) -> Vec<FieldFormat> {
+        self.user_field_formats
+            .clone()
+            .into_iter()
+            .chain(
+                self.info
+                    .collect_translator_suggestions()
+                    .into_iter()
+                    // User selected formats should override the translator specified formats
+                    .filter(|(field, _)| {
+                        !self.user_field_formats.iter().any(|ff| &ff.field == field)
+                    })
+                    .map(|(field, format)| FieldFormat { field, format }),
+            )
+            .collect()
     }
 
     /// Updates the variable after a new waveform has been loaded.
@@ -126,7 +144,7 @@ impl DisplayedVariable {
             display_name_type: self.display_name_type,
             manual_name: self.manual_name,
             format: self.format,
-            field_formats: self.field_formats,
+            user_field_formats: self.user_field_formats,
             height_scaling_factor: self.height_scaling_factor,
         }
     }
@@ -189,8 +207,8 @@ pub struct DisplayedPlaceholder {
     pub display_name_type: VariableNameType,
     pub manual_name: Option<String>,
     pub format: Option<String>,
-    pub field_formats: Vec<FieldFormat>,
     pub height_scaling_factor: Option<f32>,
+    pub user_field_formats: Vec<FieldFormat>,
 }
 
 impl DisplayedPlaceholder {
@@ -208,7 +226,7 @@ impl DisplayedPlaceholder {
             display_name_type: self.display_name_type,
             manual_name: self.manual_name,
             format: self.format,
-            field_formats: self.field_formats,
+            user_field_formats: self.user_field_formats,
             height_scaling_factor: self.height_scaling_factor,
         }
     }

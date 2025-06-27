@@ -742,24 +742,27 @@ impl SystemState {
         .and_then(|displayed_variable| displayed_variable.get_format(&displayed_field_ref.field));
 
         let mut menu_entry = |ui: &mut Ui, name: &str| {
-            ui.radio(selected_translator.is_some_and(|st| st == name), name)
-                .clicked()
-                .then(|| {
-                    ui.close_menu();
-                    msgs.push(Message::VariableFormatChange(
-                        if waves
-                            .items_tree
-                            .iter_visible_selected()
-                            .map(|node| node.item_ref)
-                            .contains(&displayed_field_ref.item)
-                        {
-                            MessageTarget::CurrentSelection
-                        } else {
-                            MessageTarget::Explicit(displayed_field_ref.clone())
-                        },
-                        name.to_string(),
-                    ));
-                });
+            ui.radio(
+                selected_translator.as_ref().is_some_and(|st| st == name),
+                name,
+            )
+            .clicked()
+            .then(|| {
+                ui.close_menu();
+                msgs.push(Message::VariableFormatChange(
+                    if waves
+                        .items_tree
+                        .iter_visible_selected()
+                        .map(|node| node.item_ref)
+                        .contains(&displayed_field_ref.item)
+                    {
+                        MessageTarget::CurrentSelection
+                    } else {
+                        MessageTarget::Explicit(displayed_field_ref.clone())
+                    },
+                    name.to_string(),
+                ));
+            });
         };
 
         ui.menu_button("Format", |ui| {

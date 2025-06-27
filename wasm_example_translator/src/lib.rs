@@ -60,7 +60,19 @@ pub fn translate(
 pub fn variable_info(variable: VariableMeta<(), ()>) -> FnResult<VariableInfo> {
     Ok(VariableInfo::Compound {
         subfields: (0..(variable.num_bits.unwrap_or_default() / 4 + 1))
-            .map(|i| (format!("[{i}]"), VariableInfo::Bits))
+            .map(|i| {
+                (
+                    format!("[{i}]"),
+                    if i == 2 {
+                        // Non-existing translator does not panic
+                        VariableInfo::SuggestedSubtranslator("not a translator".to_string())
+                    } else if i == 3 {
+                        VariableInfo::SuggestedSubtranslator("Binary".to_string())
+                    } else {
+                        VariableInfo::Bits
+                    },
+                )
+            })
             .collect(),
     })
 }

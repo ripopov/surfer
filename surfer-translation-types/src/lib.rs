@@ -148,6 +148,35 @@ pub enum VariableInfo {
     #[default]
     String,
     Real,
+    /// The subfield should use the specified translator as the default translator. Other behaviour
+    /// is exactly like [VariableInfo::Bits]
+    SuggestedSubtranslator(String),
+}
+
+impl VariableInfo {
+    pub fn collect_translator_suggestions(&self) -> Vec<(Vec<String>, String)> {
+        match self {
+            VariableInfo::Compound { subfields } => subfields
+                .iter()
+                .flat_map(|(field, sub)| {
+                    sub.collect_translator_suggestions()
+                        .into_iter()
+                        .map(|(mut subfields, translator)| {
+                            let mut fields = vec![field.clone()];
+                            fields.append(&mut subfields);
+                            (fields, translator)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect(),
+            VariableInfo::Bits => vec![],
+            VariableInfo::Bool => vec![],
+            VariableInfo::Clock => vec![],
+            VariableInfo::String => vec![],
+            VariableInfo::Real => vec![],
+            VariableInfo::SuggestedSubtranslator(translator) => vec![(vec![], translator.clone())],
+        }
+    }
 }
 
 #[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
