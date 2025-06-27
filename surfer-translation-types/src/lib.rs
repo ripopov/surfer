@@ -21,7 +21,9 @@ pub use crate::result::{
     TranslationResult, ValueRepr,
 };
 pub use crate::scope_ref::ScopeRef;
-pub use crate::translator::{translates_all_bit_types, BasicTranslator, Translator, WaveSource};
+pub use crate::translator::{
+    translates_all_bit_types, BasicTranslator, Translator, VariableNameInfo, WaveSource,
+};
 pub use crate::variable_index::VariableIndex;
 pub use crate::variable_ref::VariableRef;
 

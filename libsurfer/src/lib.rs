@@ -68,7 +68,6 @@ use std::sync::{Arc, RwLock};
 
 use batch_commands::read_command_bytes;
 use batch_commands::read_command_file;
-use camino::Utf8PathBuf;
 #[cfg(target_arch = "wasm32")]
 use channels::{GlobalChannelTx, IngressHandler, IngressReceiver};
 use color_eyre::eyre::Context;
@@ -103,8 +102,6 @@ use crate::displayed_item_tree::VisibleItemIndex;
 use crate::drawing_canvas::TxDrawingCommands;
 use crate::message::Message;
 use crate::transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef};
-#[cfg(feature = "spade")]
-use crate::translation::spade::SpadeTranslator;
 use crate::translation::{all_translators, AnyTranslator};
 use crate::variable_filter::{VariableIOFilterType, VariableNameFilterType};
 use crate::viewport::Viewport;
@@ -134,8 +131,6 @@ lazy_static! {
 
 #[derive(Default)]
 pub struct StartupParams {
-    pub spade_state: Option<Utf8PathBuf>,
-    pub spade_top: Option<String>,
     pub waves: Option<WaveSource>,
     pub wcp_initiate: Option<u16>,
     pub startup_commands: Vec<String>,
@@ -1014,22 +1009,6 @@ impl SystemState {
                         }
                     },
                 )
-            }
-            Message::LoadSpadeTranslator { top, state } => {
-                #[cfg(feature = "spade")]
-                {
-                    let sender = self.channels.msg_sender.clone();
-                    perform_work(move || {
-                        #[cfg(feature = "spade")]
-                        SpadeTranslator::init(&top, &state, sender);
-                    });
-                };
-                #[cfg(not(feature = "spade"))]
-                {
-                    info!(
-                        "Surfer is not compiled with spade support, ignoring LoadSpadeTranslator"
-                    );
-                }
             }
             Message::LoadCommandFile(path) => {
                 self.add_batch_commands(read_command_file(&path));

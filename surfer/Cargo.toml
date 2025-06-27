@@ -24,9 +24,8 @@ wasm-bindgen-futures.workspace = true
 
 
 [features]
-default = ["spade", "performance_plot"]
+default = ["performance_plot"]
 accesskit = ["libsurfer/accesskit"]
-spade = ["libsurfer/spade"]
 f128 = ["libsurfer/f128"]
 performance_plot = ["libsurfer/performance_plot"]
 python = ["libsurfer/python"]
