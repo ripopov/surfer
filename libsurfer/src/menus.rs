@@ -303,15 +303,12 @@ impl SystemState {
 
             ui.menu_button("Arrow keys", |ui| {
                 for binding in enum_iterator::all::<ArrowKeyBindings>() {
-                    ui.radio(
-                        self.user.config.behavior.arrow_key_bindings == binding,
-                        binding.to_string(),
-                    )
-                    .clicked()
-                    .then(|| {
-                        ui.close_menu();
-                        msgs.push(Message::SetArrowKeyBindings(binding));
-                    });
+                    ui.radio(self.arrow_key_bindings() == binding, binding.to_string())
+                        .clicked()
+                        .then(|| {
+                            ui.close_menu();
+                            msgs.push(Message::SetArrowKeyBindings(binding));
+                        });
                 }
             });
 

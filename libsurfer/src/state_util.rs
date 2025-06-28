@@ -5,7 +5,7 @@ use egui::Modifiers;
 
 use crate::{
     clock_highlighting::ClockHighlightType,
-    config::{ArrowKeyBindings, PrimaryMouseDrag},
+    config::{ArrowKeyBindings, AutoLoad, PrimaryMouseDrag},
     displayed_item::DisplayedItem,
     hierarchy::HierarchyStyle,
     SystemState,
@@ -167,5 +167,19 @@ impl SystemState {
         self.user
             .hierarchy_style
             .unwrap_or_else(|| self.user.config.layout.hierarchy_style())
+    }
+
+    #[inline]
+    pub fn autoreload_files(&self) -> AutoLoad {
+        self.user
+            .autoreload_files
+            .unwrap_or_else(|| self.user.config.autoreload_files())
+    }
+
+    #[inline]
+    pub fn autoload_sibling_state_files(&self) -> AutoLoad {
+        self.user
+            .autoload_sibling_state_files
+            .unwrap_or_else(|| self.user.config.autoload_sibling_state_files())
     }
 }

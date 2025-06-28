@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     clock_highlighting::ClockHighlightType,
-    config::{ArrowKeyBindings, PrimaryMouseDrag, SurferConfig},
+    config::{ArrowKeyBindings, AutoLoad, PrimaryMouseDrag, SurferConfig},
     data_container::DataContainer,
     dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog},
     displayed_item_tree::{DisplayedItemTree, VisibleItemIndex},
@@ -64,6 +64,10 @@ pub struct UserState {
     pub(crate) clock_highlight_type: Option<ClockHighlightType>,
     #[serde(default)]
     pub(crate) hierarchy_style: Option<HierarchyStyle>,
+    #[serde(default)]
+    pub(crate) autoload_sibling_state_files: Option<AutoLoad>,
+    #[serde(default)]
+    pub(crate) autoreload_files: Option<AutoLoad>,
 
     pub(crate) waves: Option<WaveData>,
     pub(crate) drag_started: bool,
