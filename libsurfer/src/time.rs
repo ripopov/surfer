@@ -1,6 +1,4 @@
 //! Time handling and formatting.
-use std::str::FromStr;
-
 use derive_more::Display;
 use ecolor::Color32;
 use egui::Ui;
@@ -188,32 +186,14 @@ pub fn timeformat_menu(ui: &mut Ui, msgs: &mut Vec<Message>, current_timeformat:
 #[derive(Debug, Clone, Copy, Display, Eq, PartialEq, Serialize, Deserialize, Sequence)]
 pub enum TimeStringFormatting {
     /// No additional formatting.
-    #[display("No")]
     No,
 
     /// Use the current locale to determine decimal separator, thousands separator, and grouping
-    #[display("Locale")]
     Locale,
 
     /// Use the SI standard: split into groups of three digits, unless there are exactly four
     /// for both integer and fractional part. Use space as group separator.
-    #[display("SI")]
     SI,
-}
-
-impl FromStr for TimeStringFormatting {
-    type Err = String;
-
-    fn from_str(input: &str) -> Result<TimeStringFormatting, Self::Err> {
-        match input {
-            "No" => Ok(TimeStringFormatting::No),
-            "Locale" => Ok(TimeStringFormatting::Locale),
-            "SI" => Ok(TimeStringFormatting::SI),
-            _ => Err(format!(
-                "'{input}' is not a valid TimeFormat (Valid options: No|Locale|SI)"
-            )),
-        }
-    }
 }
 
 /// Get rid of trailing zeros if the string contains a ., i.e., being fractional
