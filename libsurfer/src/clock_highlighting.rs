@@ -1,7 +1,5 @@
 //! Drawing and handling of clock highlighting.
-use std::str::FromStr;
-
-use derive_more::Display;
+use derive_more::{Display, FromStr};
 use egui::Ui;
 use emath::{Pos2, Rect};
 use enum_iterator::Sequence;
@@ -10,34 +8,16 @@ use serde::Deserialize;
 
 use crate::{config::SurferConfig, message::Message, view::DrawingContext};
 
-#[derive(PartialEq, Copy, Clone, Debug, Deserialize, Display, Sequence)]
+#[derive(PartialEq, Copy, Clone, Debug, Deserialize, Display, FromStr, Sequence)]
 pub enum ClockHighlightType {
     /// Draw a line at every posedge of the clocks
-    #[display("Line")]
     Line,
 
     /// Highlight every other cycle
-    #[display("Cycle")]
     Cycle,
 
     /// No highlighting
-    #[display("None")]
     None,
-}
-
-impl FromStr for ClockHighlightType {
-    type Err = String;
-
-    fn from_str(input: &str) -> Result<ClockHighlightType, Self::Err> {
-        match input {
-            "Line" => Ok(ClockHighlightType::Line),
-            "Cycle" => Ok(ClockHighlightType::Cycle),
-            "None" => Ok(ClockHighlightType::None),
-            _ => Err(format!(
-                "'{input}' is not a valid ClockHighlightType (Valid options: Line|Cycle|None)"
-            )),
-        }
-    }
 }
 
 pub fn draw_clock_edge_marks(
