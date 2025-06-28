@@ -59,6 +59,7 @@ pub mod wave_source;
 pub mod wcp;
 pub mod wellen;
 
+use crate::config::AutoLoad;
 use crate::displayed_item_tree::ItemIndex;
 use crate::displayed_item_tree::TargetPosition;
 use std::collections::HashMap;
@@ -1289,19 +1290,21 @@ impl SystemState {
                 }
                 self.variable_name_info_cache.borrow_mut().clear();
             }
-            Message::SuggestReloadWaveform => match self.user.config.autoreload_files {
-                Some(true) => self.update(Message::ReloadWaveform(true))?,
-                Some(false) => (),
-                None => self.user.show_reload_suggestion = Some(ReloadWaveformDialog::default()),
+            Message::SuggestReloadWaveform => match self.autoreload_files() {
+                AutoLoad::Always => self.update(Message::ReloadWaveform(true))?,
+                AutoLoad::Never => (),
+                AutoLoad::Ask => {
+                    self.user.show_reload_suggestion = Some(ReloadWaveformDialog::default())
+                }
             },
             Message::CloseReloadWaveformDialog {
                 reload_file,
                 do_not_show_again,
             } => {
                 if do_not_show_again {
-                    // FIXME: This is currently for one session only, but could be persisted in
+                    // FIXME: This is currently saved in state, but could be persisted in
                     // some setting.
-                    self.user.config.autoreload_files = Some(reload_file);
+                    self.user.autoreload_files = Some(AutoLoad::Never);
                 }
                 self.user.show_reload_suggestion = None;
                 if reload_file {
@@ -1319,24 +1322,22 @@ impl SystemState {
                 let state_file_path = waves.source.sibling_state_file()?;
                 self.load_state_file(Some(state_file_path.clone().into_std_path_buf()));
             }
-            Message::SuggestOpenSiblingStateFile => {
-                match self.user.config.autoload_sibling_state_files {
-                    Some(true) => {
-                        self.update(Message::OpenSiblingStateFile(true));
-                    }
-                    Some(false) => {}
-                    None => {
-                        self.user.show_open_sibling_state_file_suggestion =
-                            Some(OpenSiblingStateFileDialog::default())
-                    }
+            Message::SuggestOpenSiblingStateFile => match self.autoload_sibling_state_files() {
+                AutoLoad::Always => {
+                    self.update(Message::OpenSiblingStateFile(true));
                 }
-            }
+                AutoLoad::Never => {}
+                AutoLoad::Ask => {
+                    self.user.show_open_sibling_state_file_suggestion =
+                        Some(OpenSiblingStateFileDialog::default())
+                }
+            },
             Message::CloseOpenSiblingStateFileDialog {
                 load_state,
                 do_not_show_again,
             } => {
                 if do_not_show_again {
-                    self.user.config.autoload_sibling_state_files = Some(load_state);
+                    self.user.autoload_sibling_state_files = Some(AutoLoad::Never);
                 }
                 self.user.show_open_sibling_state_file_suggestion = None;
                 if load_state {
@@ -1351,7 +1352,7 @@ impl SystemState {
                 waves.remove_placeholders();
             }
             Message::SetClockHighlightType(new_type) => {
-                self.user.config.default_clock_highlight_type = new_type;
+                self.user.clock_highlight_type = Some(new_type);
             }
             Message::SetFillHighValues(fill) => self.user.fill_high_values = Some(fill),
             Message::AddMarker {
@@ -1546,9 +1547,9 @@ impl SystemState {
                         .min(self.command_prompt.suggestions.len().saturating_sub(1)),
                 );
             }
-            Message::SetHierarchyStyle(style) => self.user.config.layout.hierarchy_style = style,
+            Message::SetHierarchyStyle(style) => self.user.hierarchy_style = Some(style),
             Message::SetArrowKeyBindings(bindings) => {
-                self.user.config.behavior.arrow_key_bindings = bindings;
+                self.user.arrow_key_bindings = Some(bindings);
             }
             Message::SetPrimaryMouseDragBehavior(behavior) => {
                 self.user.primary_button_drag_behavior = Some(behavior);

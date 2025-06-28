@@ -866,8 +866,16 @@ impl SystemState {
         if draw_clock_edges {
             let mut last_edge = 0.0;
             let mut cycle = false;
+            let clock_highlight_type = self.clock_highlight_type();
             for current_edge in clock_edges {
-                draw_clock_edge(last_edge, *current_edge, cycle, ctx, &self.user.config);
+                draw_clock_edge(
+                    last_edge,
+                    *current_edge,
+                    cycle,
+                    ctx,
+                    &self.user.config,
+                    clock_highlight_type,
+                );
                 cycle = !cycle;
                 last_edge = *current_edge;
             }

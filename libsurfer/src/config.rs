@@ -4,7 +4,7 @@ use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
 #[cfg(not(target_arch = "wasm32"))]
 use config::{Environment, File};
-use derive_more::Display;
+use derive_more::{Display, FromStr};
 #[cfg(not(target_arch = "wasm32"))]
 use directories::ProjectDirs;
 use ecolor::Color32;
@@ -21,25 +21,13 @@ use crate::time::TimeFormat;
 use crate::{clock_highlighting::ClockHighlightType, variable_name_type::VariableNameType};
 
 /// Select the function of the arrow keys
-#[derive(Debug, Deserialize, Display, PartialEq, Eq, Sequence)]
+#[derive(Clone, Copy, Debug, Deserialize, Display, FromStr, PartialEq, Eq, Sequence, Serialize)]
 pub enum ArrowKeyBindings {
     /// The left/right arrow keys step to the next edge
-    #[display("Edge")]
     Edge,
 
     /// The left/right arrow keys scroll the viewport left/right
-    #[display("Scroll")]
     Scroll,
-}
-
-impl From<String> for ArrowKeyBindings {
-    fn from(string: String) -> Self {
-        match string.as_str() {
-            "Edge" => Self::Edge,
-            "Scroll" => Self::Scroll,
-            _ => Self::Edge,
-        }
-    }
 }
 
 /// Select the function when dragging with primary mouse button
@@ -54,6 +42,13 @@ pub enum PrimaryMouseDrag {
     Cursor,
 }
 
+#[derive(Debug, Deserialize, Display, PartialEq, Eq, Sequence, Serialize, Clone, Copy)]
+pub enum AutoLoad {
+    Always,
+    Never,
+    Ask,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SurferConfig {
     pub layout: SurferLayout,
@@ -64,21 +59,32 @@ pub struct SurferConfig {
     pub behavior: SurferBehavior,
     /// Time stamp format
     pub default_time_format: TimeFormat,
-    // #[serde(deserialize_with = "deserialize_variable_name_type")]
     pub default_variable_name_type: VariableNameType,
-    pub default_clock_highlight_type: ClockHighlightType,
+    default_clock_highlight_type: ClockHighlightType,
     /// Distance in pixels for cursor snap
     pub snap_distance: f32,
     /// Maximum size of the undo stack
     pub undo_stack_size: usize,
-    /// Some(true) - always auto reload changed files
-    /// Some(false) - never auto reload changed files
-    /// None - ask for confirmation before auto reloading files
-    pub autoreload_files: Option<bool>,
-    // Same as for autoreload_files for the options
-    pub autoload_sibling_state_files: Option<bool>,
+    /// Reload changed waves
+    autoreload_files: AutoLoad,
+    /// Load state file
+    autoload_sibling_state_files: AutoLoad,
     /// WCP Configuration
     pub wcp: WcpConfig,
+}
+
+impl SurferConfig {
+    pub fn default_clock_highlight_type(&self) -> ClockHighlightType {
+        self.default_clock_highlight_type
+    }
+
+    pub fn autoload_sibling_state_files(&self) -> AutoLoad {
+        self.autoload_sibling_state_files
+    }
+
+    pub fn autoreload_files(&self) -> AutoLoad {
+        self.autoreload_files
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -116,7 +122,7 @@ pub struct SurferLayout {
     /// Align variable names right
     align_names_right: bool,
     /// Set style of hierarchy
-    pub hierarchy_style: HierarchyStyle,
+    hierarchy_style: HierarchyStyle,
     /// Text size in points for values in waves
     pub waveforms_text_size: f32,
     /// Line height in points for waves
@@ -198,6 +204,9 @@ impl SurferLayout {
     pub fn fill_high_values(&self) -> bool {
         self.fill_high_values
     }
+    pub fn hierarchy_style(&self) -> HierarchyStyle {
+        self.hierarchy_style
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -214,6 +223,10 @@ pub struct SurferBehavior {
 impl SurferBehavior {
     pub fn primary_button_drag_behavior(&self) -> PrimaryMouseDrag {
         self.primary_button_drag_behavior
+    }
+
+    pub fn arrow_key_bindings(&self) -> ArrowKeyBindings {
+        self.arrow_key_bindings
     }
 }
 
