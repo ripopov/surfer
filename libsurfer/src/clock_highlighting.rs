@@ -40,45 +40,50 @@ impl FromStr for ClockHighlightType {
     }
 }
 
-pub fn draw_clock_edge(
-    x_start: f32,
-    x_end: f32,
-    cycle: bool,
+pub fn draw_clock_edge_marks(
+    clock_edges: &Vec<f32>,
     ctx: &mut DrawingContext,
     config: &SurferConfig,
 ) {
     match config.default_clock_highlight_type {
         ClockHighlightType::Line => {
-            let Pos2 {
-                x: x_pos,
-                y: y_start,
-            } = (ctx.to_screen)(x_start, 0.);
-            ctx.painter.vline(
-                x_pos,
-                (y_start)..=(y_start + ctx.cfg.canvas_height),
-                Stroke {
-                    color: config.theme.clock_highlight_line.color,
-                    width: config.theme.clock_highlight_line.width,
-                },
-            );
+            let stroke = Stroke {
+                color: config.theme.clock_highlight_line.color,
+                width: config.theme.clock_highlight_line.width,
+            };
+
+            for x in clock_edges {
+                let Pos2 {
+                    x: x_pos,
+                    y: y_start,
+                } = (ctx.to_screen)(*x, 0.);
+                ctx.painter
+                    .vline(x_pos, (y_start)..=(y_start + ctx.cfg.canvas_height), stroke);
+            }
         }
         ClockHighlightType::Cycle => {
-            if cycle {
-                let Pos2 {
-                    x: x_end,
-                    y: y_start,
-                } = (ctx.to_screen)(x_end, 0.);
-                ctx.painter.rect_filled(
-                    Rect {
-                        min: (ctx.to_screen)(x_start, 0.),
-                        max: Pos2 {
-                            x: x_end,
-                            y: ctx.cfg.canvas_height + y_start,
+            let mut x_start = 0.0;
+            let mut cycle = false;
+            for x_tmp in clock_edges {
+                if cycle {
+                    let Pos2 {
+                        x: x_end,
+                        y: y_start,
+                    } = (ctx.to_screen)(*x_tmp, 0.);
+                    ctx.painter.rect_filled(
+                        Rect {
+                            min: (ctx.to_screen)(x_start, 0.),
+                            max: Pos2 {
+                                x: x_end,
+                                y: ctx.cfg.canvas_height + y_start,
+                            },
                         },
-                    },
-                    0.0,
-                    config.theme.clock_highlight_cycle,
-                );
+                        0.0,
+                        config.theme.clock_highlight_cycle,
+                    );
+                }
+                cycle = !cycle;
+                x_start = *x_tmp;
             }
         }
         ClockHighlightType::None => (),
