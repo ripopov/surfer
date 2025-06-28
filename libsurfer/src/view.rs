@@ -369,7 +369,7 @@ impl SystemState {
                 })
                 .show(ctx, |ui| {
                     self.user.sidepanel_width = Some(ui.clip_rect().width());
-                    match self.user.config.layout.hierarchy_style {
+                    match self.hierarchy_style() {
                         HierarchyStyle::Separate => hierarchy::separate(self, ui, &mut msgs),
                         HierarchyStyle::Tree => hierarchy::tree(self, ui, &mut msgs),
                     }

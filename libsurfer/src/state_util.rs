@@ -3,7 +3,13 @@
 use ecolor::Color32;
 use egui::Modifiers;
 
-use crate::{config::PrimaryMouseDrag, displayed_item::DisplayedItem, SystemState};
+use crate::{
+    clock_highlighting::ClockHighlightType,
+    config::{ArrowKeyBindings, AutoLoad, PrimaryMouseDrag},
+    displayed_item::DisplayedItem,
+    hierarchy::HierarchyStyle,
+    SystemState,
+};
 
 impl SystemState {
     #[inline]
@@ -140,5 +146,40 @@ impl SystemState {
         let drag_behavior = self.primary_button_drag_behavior();
         (drag_behavior == PrimaryMouseDrag::Measure && !modifiers.shift)
             || (drag_behavior == PrimaryMouseDrag::Cursor && modifiers.shift)
+    }
+
+    #[inline]
+    pub fn arrow_key_bindings(&self) -> ArrowKeyBindings {
+        self.user
+            .arrow_key_bindings
+            .unwrap_or_else(|| self.user.config.behavior.arrow_key_bindings())
+    }
+
+    #[inline]
+    pub fn clock_highlight_type(&self) -> ClockHighlightType {
+        self.user
+            .clock_highlight_type
+            .unwrap_or_else(|| self.user.config.default_clock_highlight_type())
+    }
+
+    #[inline]
+    pub fn hierarchy_style(&self) -> HierarchyStyle {
+        self.user
+            .hierarchy_style
+            .unwrap_or_else(|| self.user.config.layout.hierarchy_style())
+    }
+
+    #[inline]
+    pub fn autoreload_files(&self) -> AutoLoad {
+        self.user
+            .autoreload_files
+            .unwrap_or_else(|| self.user.config.autoreload_files())
+    }
+
+    #[inline]
+    pub fn autoload_sibling_state_files(&self) -> AutoLoad {
+        self.user
+            .autoload_sibling_state_files
+            .unwrap_or_else(|| self.user.config.autoload_sibling_state_files())
     }
 }
