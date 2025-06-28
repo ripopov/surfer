@@ -1351,7 +1351,7 @@ impl SystemState {
                 waves.remove_placeholders();
             }
             Message::SetClockHighlightType(new_type) => {
-                self.user.config.default_clock_highlight_type = new_type;
+                self.user.clock_highlight_type = Some(new_type);
             }
             Message::SetFillHighValues(fill) => self.user.fill_high_values = Some(fill),
             Message::AddMarker {
@@ -1546,9 +1546,9 @@ impl SystemState {
                         .min(self.command_prompt.suggestions.len().saturating_sub(1)),
                 );
             }
-            Message::SetHierarchyStyle(style) => self.user.config.layout.hierarchy_style = style,
+            Message::SetHierarchyStyle(style) => self.user.hierarchy_style = Some(style),
             Message::SetArrowKeyBindings(bindings) => {
-                self.user.config.behavior.arrow_key_bindings = bindings;
+                self.user.arrow_key_bindings = Some(bindings);
             }
             Message::SetPrimaryMouseDragBehavior(behavior) => {
                 self.user.primary_button_drag_behavior = Some(behavior);

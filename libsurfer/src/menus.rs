@@ -251,7 +251,7 @@ impl SystemState {
 
         ui.menu_button("Settings", |ui| {
             ui.menu_button("Clock highlighting", |ui| {
-                clock_highlight_type_menu(ui, msgs, self.user.config.default_clock_highlight_type);
+                clock_highlight_type_menu(ui, msgs, self.clock_highlight_type());
             });
             ui.menu_button("Time unit", |ui| {
                 timeunit_menu(ui, msgs, &self.user.wanted_timeunit);
@@ -292,15 +292,12 @@ impl SystemState {
 
             ui.menu_button("Hierarchy", |ui| {
                 for style in enum_iterator::all::<HierarchyStyle>() {
-                    ui.radio(
-                        self.user.config.layout.hierarchy_style == style,
-                        style.to_string(),
-                    )
-                    .clicked()
-                    .then(|| {
-                        ui.close_menu();
-                        msgs.push(Message::SetHierarchyStyle(style));
-                    });
+                    ui.radio(self.hierarchy_style() == style, style.to_string())
+                        .clicked()
+                        .then(|| {
+                            ui.close_menu();
+                            msgs.push(Message::SetHierarchyStyle(style));
+                        });
                 }
             });
 
