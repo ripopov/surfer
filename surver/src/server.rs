@@ -1,7 +1,6 @@
 //! Handling of external communication in Surver.
 use bincode::Options;
-use color_eyre::eyre::{anyhow, bail, Context};
-use color_eyre::Result;
+use eyre::{anyhow, bail, Context, Result};
 use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::server::conn::http1;

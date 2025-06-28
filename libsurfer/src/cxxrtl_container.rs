@@ -5,7 +5,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-use color_eyre::Result;
+use eyre::Result;
 use log::{error, info};
 use num::{
     bigint::{ToBigInt, ToBigUint},
@@ -233,7 +233,7 @@ impl CxxrtlContainer {
         addr: &str,
         msg_channel: std::sync::mpsc::Sender<Message>,
     ) -> Result<Self> {
-        use color_eyre::eyre::Context;
+        use eyre::Context;
 
         use crate::channels::IngressSender;
         use crate::cxxrtl::io_worker;
@@ -263,7 +263,7 @@ impl CxxrtlContainer {
 
     #[cfg(target_arch = "wasm32")]
     pub async fn new_wasm_mailbox(msg_channel: std::sync::mpsc::Sender<Message>) -> Result<Self> {
-        use color_eyre::eyre::anyhow;
+        use eyre::anyhow;
 
         use crate::wasm_api::{CXXRTL_CS_HANDLER, CXXRTL_SC_HANDLER};
 

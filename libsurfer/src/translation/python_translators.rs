@@ -1,5 +1,5 @@
-use color_eyre::eyre::anyhow;
-use color_eyre::Result;
+use eyre::anyhow;
+use eyre::Result;
 use log::{error, info};
 use pyo3::types::{PyAnyMethods, PyDict, PyModule, PyStringMethods};
 use pyo3::{Bound, Py, Python};
