@@ -49,6 +49,16 @@ pub enum AutoLoad {
     Ask,
 }
 
+impl AutoLoad {
+    pub fn from_bool(auto_load: bool) -> Self {
+        if auto_load {
+            AutoLoad::Always
+        } else {
+            AutoLoad::Never
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SurferConfig {
     pub layout: SurferLayout,
