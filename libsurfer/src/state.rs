@@ -10,6 +10,7 @@ use crate::{
     data_container::DataContainer,
     dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog},
     displayed_item_tree::{DisplayedItemTree, VisibleItemIndex},
+    hierarchy::HierarchyStyle,
     message::Message,
     system_state::SystemState,
     time::{TimeStringFormatting, TimeUnit},
@@ -61,6 +62,8 @@ pub struct UserState {
     pub(crate) arrow_key_bindings: Option<ArrowKeyBindings>,
     #[serde(default)]
     pub(crate) clock_highlight_type: Option<ClockHighlightType>,
+    #[serde(default)]
+    pub(crate) hierarchy_style: Option<HierarchyStyle>,
 
     pub(crate) waves: Option<WaveData>,
     pub(crate) drag_started: bool,
