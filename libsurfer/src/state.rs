@@ -5,10 +5,10 @@ use std::{
 };
 
 use crate::{
-    config::{PrimaryMouseDrag, SurferConfig},
+    clock_highlighting::ClockHighlightType,
+    config::{ArrowKeyBindings, PrimaryMouseDrag, SurferConfig},
     data_container::DataContainer,
-    dialog::OpenSiblingStateFileDialog,
-    dialog::ReloadWaveformDialog,
+    dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog},
     displayed_item_tree::{DisplayedItemTree, VisibleItemIndex},
     message::Message,
     system_state::SystemState,
@@ -57,6 +57,10 @@ pub struct UserState {
     pub(crate) fill_high_values: Option<bool>,
     #[serde(default)]
     pub(crate) primary_button_drag_behavior: Option<PrimaryMouseDrag>,
+    #[serde(default)]
+    pub(crate) arrow_key_bindings: Option<ArrowKeyBindings>,
+    #[serde(default)]
+    pub(crate) clock_highlight_type: Option<ClockHighlightType>,
 
     pub(crate) waves: Option<WaveData>,
     pub(crate) drag_started: bool,

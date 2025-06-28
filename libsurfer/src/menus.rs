@@ -251,7 +251,7 @@ impl SystemState {
 
         ui.menu_button("Settings", |ui| {
             ui.menu_button("Clock highlighting", |ui| {
-                clock_highlight_type_menu(ui, msgs, self.user.config.default_clock_highlight_type);
+                clock_highlight_type_menu(ui, msgs, self.clock_highlight_type());
             });
             ui.menu_button("Time unit", |ui| {
                 timeunit_menu(ui, msgs, &self.user.wanted_timeunit);

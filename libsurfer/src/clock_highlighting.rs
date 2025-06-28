@@ -4,11 +4,11 @@ use egui::Ui;
 use emath::{Pos2, Rect};
 use enum_iterator::Sequence;
 use epaint::Stroke;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{config::SurferConfig, message::Message, view::DrawingContext};
 
-#[derive(PartialEq, Copy, Clone, Debug, Deserialize, Display, FromStr, Sequence)]
+#[derive(PartialEq, Copy, Clone, Debug, Deserialize, Display, FromStr, Sequence, Serialize)]
 pub enum ClockHighlightType {
     /// Draw a line at every posedge of the clocks
     Line,
@@ -26,8 +26,9 @@ pub fn draw_clock_edge(
     cycle: bool,
     ctx: &mut DrawingContext,
     config: &SurferConfig,
+    clock_highlight_type: ClockHighlightType,
 ) {
-    match config.default_clock_highlight_type {
+    match clock_highlight_type {
         ClockHighlightType::Line => {
             let Pos2 {
                 x: x_pos,

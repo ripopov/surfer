@@ -691,7 +691,7 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                         .collect_vec(),
                     Box::new(|word| {
                         Some(Command::Terminal(Message::SetArrowKeyBindings(
-                            ArrowKeyBindings::from(word.to_string()),
+                            ArrowKeyBindings::from_str(word).unwrap_or(ArrowKeyBindings::Edge),
                         )))
                     }),
                 ),
