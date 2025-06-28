@@ -17,7 +17,7 @@ use surfer_translation_types::{
     SubFieldFlatTranslationResult, TranslatedValue, ValueKind, VariableInfo, VariableType,
 };
 
-use crate::clock_highlighting::draw_clock_edge;
+use crate::clock_highlighting::draw_clock_edge_marks;
 use crate::config::SurferTheme;
 use crate::data_container::DataContainer;
 use crate::displayed_item::{DisplayedFieldRef, DisplayedItemRef, DisplayedVariable};
@@ -864,13 +864,7 @@ impl SystemState {
         }
 
         if draw_clock_edges {
-            let mut last_edge = 0.0;
-            let mut cycle = false;
-            for current_edge in clock_edges {
-                draw_clock_edge(last_edge, *current_edge, cycle, ctx, &self.user.config);
-                cycle = !cycle;
-                last_edge = *current_edge;
-            }
+            draw_clock_edge_marks(clock_edges, ctx, &self.user.config);
         }
         let zero_y = (ctx.to_screen)(0., 0.).y;
         for (vidx, drawing_info) in waves.drawing_infos.iter().enumerate() {
