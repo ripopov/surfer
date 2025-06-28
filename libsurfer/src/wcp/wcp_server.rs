@@ -1,6 +1,6 @@
 use bytes::{Buf, BytesMut};
-use color_eyre::eyre::Result;
 use eframe::egui::Context;
+use eyre::Result;
 use serde::Serialize;
 use serde_json::Error as serde_Error;
 use std::sync::{

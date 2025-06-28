@@ -70,13 +70,13 @@ use batch_commands::read_command_bytes;
 use batch_commands::read_command_file;
 #[cfg(target_arch = "wasm32")]
 use channels::{GlobalChannelTx, IngressHandler, IngressReceiver};
-use color_eyre::eyre::Context;
-use color_eyre::Result;
 use derive_more::Display;
 use displayed_item::DisplayedVariable;
 use displayed_item_tree::DisplayedItemTree;
 use eframe::{App, CreationContext};
 use egui::{FontData, FontDefinitions, FontFamily};
+use eyre::Context;
+use eyre::Result;
 use ftr_parser::types::Transaction;
 use futures::executor::block_on;
 use itertools::Itertools;

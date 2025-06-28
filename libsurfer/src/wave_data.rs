@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use color_eyre::eyre::{Result, WrapErr};
+use eyre::{Result, WrapErr};
 use log::{error, info, warn};
 use num::bigint::ToBigInt as _;
 use num::{BigInt, BigUint, Zero};
