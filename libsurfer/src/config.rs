@@ -42,6 +42,13 @@ pub enum PrimaryMouseDrag {
     Cursor,
 }
 
+#[derive(Debug, Deserialize, Display, PartialEq, Eq, Sequence, Serialize, Clone, Copy)]
+pub enum AutoLoad {
+    Always,
+    Never,
+    Ask,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SurferConfig {
     pub layout: SurferLayout,
@@ -58,12 +65,10 @@ pub struct SurferConfig {
     pub snap_distance: f32,
     /// Maximum size of the undo stack
     pub undo_stack_size: usize,
-    /// Some(true) - always auto reload changed files
-    /// Some(false) - never auto reload changed files
-    /// None - ask for confirmation before auto reloading files
-    pub autoreload_files: Option<bool>,
-    // Same as for autoreload_files for the options
-    pub autoload_sibling_state_files: Option<bool>,
+    /// Reload changed waves
+    autoreload_files: AutoLoad,
+    /// Load state file
+    autoload_sibling_state_files: AutoLoad,
     /// WCP Configuration
     pub wcp: WcpConfig,
 }
@@ -71,6 +76,14 @@ pub struct SurferConfig {
 impl SurferConfig {
     pub fn default_clock_highlight_type(&self) -> ClockHighlightType {
         self.default_clock_highlight_type
+    }
+
+    pub fn autoload_sibling_state_files(&self) -> AutoLoad {
+        self.autoload_sibling_state_files
+    }
+
+    pub fn autoreload_files(&self) -> AutoLoad {
+        self.autoreload_files
     }
 }
 
@@ -195,6 +208,7 @@ impl SurferLayout {
         self.hierarchy_style
     }
 }
+
 #[derive(Debug, Deserialize)]
 pub struct SurferBehavior {
     /// Keep or remove variables if unavailable during reload
