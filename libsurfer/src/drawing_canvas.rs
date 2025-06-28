@@ -864,7 +864,12 @@ impl SystemState {
         }
 
         if draw_clock_edges {
-            draw_clock_edge_marks(clock_edges, ctx, &self.user.config);
+            draw_clock_edge_marks(
+                clock_edges,
+                ctx,
+                &self.user.config,
+                self.clock_highlight_type(),
+            );
         }
         let zero_y = (ctx.to_screen)(0., 0.).y;
         for (vidx, drawing_info) in waves.drawing_infos.iter().enumerate() {

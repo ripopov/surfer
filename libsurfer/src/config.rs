@@ -4,7 +4,7 @@ use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
 #[cfg(not(target_arch = "wasm32"))]
 use config::{Environment, File};
-use derive_more::Display;
+use derive_more::{Display, FromStr};
 #[cfg(not(target_arch = "wasm32"))]
 use directories::ProjectDirs;
 use ecolor::Color32;
@@ -21,25 +21,13 @@ use crate::time::TimeFormat;
 use crate::{clock_highlighting::ClockHighlightType, variable_name_type::VariableNameType};
 
 /// Select the function of the arrow keys
-#[derive(Debug, Deserialize, Display, PartialEq, Eq, Sequence)]
+#[derive(Clone, Copy, Debug, Deserialize, Display, FromStr, PartialEq, Eq, Sequence, Serialize)]
 pub enum ArrowKeyBindings {
     /// The left/right arrow keys step to the next edge
-    #[display("Edge")]
     Edge,
 
     /// The left/right arrow keys scroll the viewport left/right
-    #[display("Scroll")]
     Scroll,
-}
-
-impl From<String> for ArrowKeyBindings {
-    fn from(string: String) -> Self {
-        match string.as_str() {
-            "Edge" => Self::Edge,
-            "Scroll" => Self::Scroll,
-            _ => Self::Edge,
-        }
-    }
 }
 
 /// Select the function when dragging with primary mouse button
@@ -64,9 +52,8 @@ pub struct SurferConfig {
     pub behavior: SurferBehavior,
     /// Time stamp format
     pub default_time_format: TimeFormat,
-    // #[serde(deserialize_with = "deserialize_variable_name_type")]
     pub default_variable_name_type: VariableNameType,
-    pub default_clock_highlight_type: ClockHighlightType,
+    default_clock_highlight_type: ClockHighlightType,
     /// Distance in pixels for cursor snap
     pub snap_distance: f32,
     /// Maximum size of the undo stack
@@ -79,6 +66,12 @@ pub struct SurferConfig {
     pub autoload_sibling_state_files: Option<bool>,
     /// WCP Configuration
     pub wcp: WcpConfig,
+}
+
+impl SurferConfig {
+    pub fn default_clock_highlight_type(&self) -> ClockHighlightType {
+        self.default_clock_highlight_type
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -199,7 +192,6 @@ impl SurferLayout {
         self.fill_high_values
     }
 }
-
 #[derive(Debug, Deserialize)]
 pub struct SurferBehavior {
     /// Keep or remove variables if unavailable during reload
@@ -214,6 +206,10 @@ pub struct SurferBehavior {
 impl SurferBehavior {
     pub fn primary_button_drag_behavior(&self) -> PrimaryMouseDrag {
         self.primary_button_drag_behavior
+    }
+
+    pub fn arrow_key_bindings(&self) -> ArrowKeyBindings {
+        self.arrow_key_bindings
     }
 }
 
