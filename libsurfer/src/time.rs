@@ -52,7 +52,7 @@ pub enum TimeUnit {
 }
 
 pub const DEFAULT_TIMELINE_NAME: &str = "Time";
-pub const THIN_SPACE: &str = "\u{2009}";
+const THIN_SPACE: &str = "\u{2009}";
 
 impl From<wellen::TimescaleUnit> for TimeUnit {
     fn from(timescale: wellen::TimescaleUnit) -> Self {

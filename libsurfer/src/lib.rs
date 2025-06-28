@@ -1304,11 +1304,7 @@ impl SystemState {
                 if do_not_show_again {
                     // FIXME: This is currently saved in state, but could be persisted in
                     // some setting.
-                    self.user.autoreload_files = Some(if reload_file {
-                        AutoLoad::Always
-                    } else {
-                        AutoLoad::Never
-                    });
+                    self.user.autoreload_files = Some(AutoLoad::from_bool(reload_file));
                 }
                 self.user.show_reload_suggestion = None;
                 if reload_file {
@@ -1341,11 +1337,7 @@ impl SystemState {
                 do_not_show_again,
             } => {
                 if do_not_show_again {
-                    self.user.autoload_sibling_state_files = Some(if load_state {
-                        AutoLoad::Always
-                    } else {
-                        AutoLoad::Never
-                    });
+                    self.user.autoload_sibling_state_files = Some(AutoLoad::from_bool(load_state));
                 }
                 self.user.show_open_sibling_state_file_suggestion = None;
                 if load_state {

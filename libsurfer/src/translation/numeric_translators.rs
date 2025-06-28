@@ -1,6 +1,5 @@
 use crate::message::Message;
 use crate::translation::fixed_point::{big_uint_to_sfixed, big_uint_to_ufixed};
-use crate::variable_type::INTEGER_TYPES;
 use crate::wave_container::{ScopeId, VarId};
 use color_eyre::Result;
 use half::{bf16, f16};
@@ -8,10 +7,44 @@ use num::BigUint;
 use softposit::{P16E1, P32E2, P8E0, Q16E1, Q8E0};
 use surfer_translation_types::{
     translates_all_bit_types, BasicTranslator, TranslationResult, Translator, ValueKind, ValueRepr,
-    VariableInfo, VariableMeta, VariableValue,
+    VariableInfo, VariableMeta, VariableType, VariableValue,
 };
 
-use super::{check_single_wordlength, match_variable_type_name, TranslationPreference};
+use super::{check_single_wordlength, TranslationPreference};
+
+/// Types that should default to signed integer conversion
+pub const INTEGER_TYPES: &[Option<VariableType>] = &[
+    Some(VariableType::VCDInteger),
+    Some(VariableType::Int),
+    Some(VariableType::ShortInt),
+    Some(VariableType::LongInt),
+];
+
+/// Type names that should default to signed integer conversion
+pub static SIGNED_INTEGER_TYPE_NAMES: &[&str] = &["unresolved_signed", "signed"];
+
+/// Type names that should default to signed fixed-point conversion
+pub static SIGNED_FIXEDPOINT_TYPE_NAMES: &[&str] = &["unresolved_sfixed", "sfixed"];
+
+/// Type names that should default to unsigned integer conversion
+pub static UNSIGNED_INTEGER_TYPE_NAMES: &[&str] = &["unresolved_unsigned", "unsigned"];
+
+/// Type names that should default to unsigned fixed-point conversion
+pub static UNSIGNED_FIXEDPOINT_TYPE_NAMES: &[&str] = &["unresolved_ufixed", "ufixed"];
+
+fn match_variable_type_name(
+    variable_type_name: &Option<String>,
+    candidates: &'static [&'static str],
+) -> bool {
+    if let Some(type_name) = variable_type_name {
+        for candidate in candidates {
+            if type_name.eq_ignore_ascii_case(candidate) {
+                return true;
+            }
+        }
+    }
+    false
+}
 
 #[inline]
 fn shortest_float_representation<T: std::fmt::LowerExp + std::fmt::Display>(v: T) -> String {
@@ -49,8 +82,7 @@ impl BasicTranslator<VarId, ScopeId> for UnsignedTranslator {
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        let candidates = ["unresolved_unsigned".to_string(), "unsigned".to_string()];
-        if match_variable_type_name(&variable.variable_type_name, &candidates) {
+        if match_variable_type_name(&variable.variable_type_name, UNSIGNED_INTEGER_TYPE_NAMES) {
             Ok(TranslationPreference::Prefer)
         } else {
             translates_all_bit_types(variable)
@@ -81,9 +113,8 @@ impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        let candidates = ["unresolved_signed".to_string(), "signed".to_string()];
         if INTEGER_TYPES.contains(&variable.variable_type)
-            | match_variable_type_name(&variable.variable_type_name, &candidates)
+            | match_variable_type_name(&variable.variable_type_name, SIGNED_INTEGER_TYPE_NAMES)
         {
             Ok(TranslationPreference::Prefer)
         } else {
@@ -445,8 +476,7 @@ impl Translator<VarId, ScopeId, Message> for UnsignedFixedPointTranslator {
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        let candidates = ["unresolved_ufixed".to_string(), "ufixed".to_string()];
-        if match_variable_type_name(&variable.variable_type_name, &candidates) {
+        if match_variable_type_name(&variable.variable_type_name, UNSIGNED_FIXEDPOINT_TYPE_NAMES) {
             Ok(TranslationPreference::Prefer)
         } else {
             translates_all_bit_types(variable)
@@ -486,8 +516,7 @@ impl Translator<VarId, ScopeId, Message> for SignedFixedPointTranslator {
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        let candidates = ["unresolved_sfixed".to_string(), "sfixed".to_string()];
-        if match_variable_type_name(&variable.variable_type_name, &candidates) {
+        if match_variable_type_name(&variable.variable_type_name, SIGNED_FIXEDPOINT_TYPE_NAMES) {
             Ok(TranslationPreference::Prefer)
         } else {
             translates_all_bit_types(variable)
