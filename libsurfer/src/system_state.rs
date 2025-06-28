@@ -168,6 +168,8 @@ impl SystemState {
                 arrow_key_bindings: None,
                 clock_highlight_type: None,
                 hierarchy_style: None,
+                autoload_sibling_state_files: None,
+                autoreload_files: None,
             },
             translators,
             channels,
