@@ -292,15 +292,12 @@ impl SystemState {
 
             ui.menu_button("Hierarchy", |ui| {
                 for style in enum_iterator::all::<HierarchyStyle>() {
-                    ui.radio(
-                        self.user.config.layout.hierarchy_style == style,
-                        style.to_string(),
-                    )
-                    .clicked()
-                    .then(|| {
-                        ui.close_menu();
-                        msgs.push(Message::SetHierarchyStyle(style));
-                    });
+                    ui.radio(self.hierarchy_style() == style, style.to_string())
+                        .clicked()
+                        .then(|| {
+                            ui.close_menu();
+                            msgs.push(Message::SetHierarchyStyle(style));
+                        });
                 }
             });
 

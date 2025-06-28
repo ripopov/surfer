@@ -109,7 +109,7 @@ pub struct SurferLayout {
     /// Align variable names right
     align_names_right: bool,
     /// Set style of hierarchy
-    pub hierarchy_style: HierarchyStyle,
+    hierarchy_style: HierarchyStyle,
     /// Text size in points for values in waves
     pub waveforms_text_size: f32,
     /// Line height in points for waves
@@ -190,6 +190,9 @@ impl SurferLayout {
     }
     pub fn fill_high_values(&self) -> bool {
         self.fill_high_values
+    }
+    pub fn hierarchy_style(&self) -> HierarchyStyle {
+        self.hierarchy_style
     }
 }
 #[derive(Debug, Deserialize)]

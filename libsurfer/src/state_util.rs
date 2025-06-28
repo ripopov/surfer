@@ -7,6 +7,7 @@ use crate::{
     clock_highlighting::ClockHighlightType,
     config::{ArrowKeyBindings, PrimaryMouseDrag},
     displayed_item::DisplayedItem,
+    hierarchy::HierarchyStyle,
     SystemState,
 };
 
@@ -159,5 +160,12 @@ impl SystemState {
         self.user
             .clock_highlight_type
             .unwrap_or_else(|| self.user.config.default_clock_highlight_type())
+    }
+
+    #[inline]
+    pub fn hierarchy_style(&self) -> HierarchyStyle {
+        self.user
+            .hierarchy_style
+            .unwrap_or_else(|| self.user.config.layout.hierarchy_style())
     }
 }

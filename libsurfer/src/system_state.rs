@@ -167,6 +167,7 @@ impl SystemState {
                 primary_button_drag_behavior: None,
                 arrow_key_bindings: None,
                 clock_highlight_type: None,
+                hierarchy_style: None,
             },
             translators,
             channels,
