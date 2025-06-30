@@ -1,7 +1,7 @@
 use crate::message::Message;
 use crate::translation::{TranslationPreference, ValueKind, VariableInfo};
 use crate::wave_container::{ScopeId, VarId, VariableMeta};
-use color_eyre::Result;
+use eyre::Result;
 use std::borrow::Cow;
 use surfer_translation_types::{TranslationResult, Translator, ValueRepr, VariableValue};
 
@@ -32,7 +32,7 @@ impl Translator<VarId, ScopeId, Message> for EnumTranslator {
         })
     }
 
-    fn variable_info(&self, _variable: &VariableMeta) -> color_eyre::Result<VariableInfo> {
+    fn variable_info(&self, _variable: &VariableMeta) -> eyre::Result<VariableInfo> {
         Ok(VariableInfo::Bits)
     }
 

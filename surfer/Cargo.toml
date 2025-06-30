@@ -10,13 +10,14 @@ repository.workspace = true
 [dependencies]
 clap.workspace = true
 camino.workspace = true
-color-eyre.workspace = true
+eyre.workspace = true
 eframe.workspace = true
 egui.workspace = true
 libsurfer = { path = "../libsurfer", default-features = false }
 log.workspace = true
 tokio.workspace = true
 ron.workspace = true
+simple-eyre.workspace = true
 surver.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

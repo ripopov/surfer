@@ -1,9 +1,9 @@
-use color_eyre::eyre::WrapErr;
 use ecolor::Color32;
 use egui::{FontId, PointerButton, Response, Sense, Ui};
 use egui_extras::{Column, TableBuilder};
 use emath::{Align2, Pos2, Rect, RectTransform, Vec2};
 use epaint::{CornerRadiusF32, CubicBezierShape, PathShape, PathStroke, RectShape, Shape, Stroke};
+use eyre::WrapErr;
 use ftr_parser::types::{Transaction, TxGenerator};
 use itertools::Itertools;
 use log::{error, warn};

@@ -4,10 +4,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use camino::Utf8PathBuf;
-use color_eyre::eyre::{anyhow, Context};
 use directories::ProjectDirs;
 use extism::{host_fn, Manifest, Plugin, PluginBuilder, Wasm, PTR};
 use extism_manifest::MemoryOptions;
+use eyre::{anyhow, Context};
 use log::{error, warn};
 use surfer_translation_types::plugin_types::TranslateParams;
 use surfer_translation_types::{
@@ -84,7 +84,7 @@ pub struct PluginTranslator {
 }
 
 impl PluginTranslator {
-    pub fn new(file: PathBuf) -> color_eyre::Result<Self> {
+    pub fn new(file: PathBuf) -> eyre::Result<Self> {
         let data = std::fs::read(&file)
             .with_context(|| format!("Failed to read {}", file.to_string_lossy()))?;
 
@@ -159,7 +159,7 @@ impl Translator<VarId, ScopeId, Message> for PluginTranslator {
         &self,
         variable: &VariableMeta<VarId, ScopeId>,
         value: &VariableValue,
-    ) -> color_eyre::Result<TranslationResult> {
+    ) -> eyre::Result<TranslationResult> {
         let result = self
             .plugin
             .lock()
@@ -181,10 +181,7 @@ impl Translator<VarId, ScopeId, Message> for PluginTranslator {
         Ok(result)
     }
 
-    fn variable_info(
-        &self,
-        variable: &VariableMeta<VarId, ScopeId>,
-    ) -> color_eyre::Result<VariableInfo> {
+    fn variable_info(&self, variable: &VariableMeta<VarId, ScopeId>) -> eyre::Result<VariableInfo> {
         let result = self
             .plugin
             .lock()
@@ -203,7 +200,7 @@ impl Translator<VarId, ScopeId, Message> for PluginTranslator {
     fn translates(
         &self,
         variable: &VariableMeta<VarId, ScopeId>,
-    ) -> color_eyre::Result<TranslationPreference> {
+    ) -> eyre::Result<TranslationPreference> {
         match self
             .plugin
             .lock()

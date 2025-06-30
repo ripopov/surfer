@@ -1,5 +1,5 @@
 use camino::Utf8PathBuf;
-use color_eyre::eyre::Context as _;
+use eyre::Context as _;
 use futures::FutureExt as _;
 use log::{error, info, trace};
 

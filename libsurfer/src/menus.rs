@@ -1,6 +1,6 @@
 //! Menu handling.
-use color_eyre::eyre::WrapErr;
 use egui::{menu, Button, Context, TextWrapMode, TopBottomPanel, Ui};
+use eyre::WrapErr;
 use futures::executor::block_on;
 use itertools::Itertools;
 use std::sync::atomic::Ordering;
