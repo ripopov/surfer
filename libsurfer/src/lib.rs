@@ -90,7 +90,7 @@ pub use system_state::SystemState;
 #[cfg(target_arch = "wasm32")]
 use tokio_stream as _;
 #[cfg(not(target_arch = "wasm32"))]
-use translation::wasm_translator::PluginTranslator;
+use translation::wasm_translator::load_wasm_translator;
 use wave_container::ScopeRef;
 use wcp::{proto::WcpCSMessage, proto::WcpEvent, proto::WcpSCMessage};
 
@@ -102,7 +102,7 @@ use crate::displayed_item_tree::VisibleItemIndex;
 use crate::drawing_canvas::TxDrawingCommands;
 use crate::message::Message;
 use crate::transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef};
-use crate::translation::{all_translators, AnyTranslator};
+use crate::translation::all_translators;
 use crate::variable_filter::{VariableIOFilterType, VariableNameFilterType};
 use crate::viewport::Viewport;
 use crate::wave_container::VariableRefExt;
@@ -713,9 +713,9 @@ impl SystemState {
                             variable.info = new_info;
                         } else {
                             variable
-                                .field_formats
+                                .user_field_formats
                                 .retain(|ff| ff.field != field_ref.field);
-                            variable.field_formats.push(FieldFormat {
+                            variable.user_field_formats.push(FieldFormat {
                                 field: field_ref.field,
                                 format: format.clone(),
                             });
@@ -966,7 +966,7 @@ impl SystemState {
                         displayed_variable.format = None;
                     } else {
                         displayed_variable
-                            .field_formats
+                            .user_field_formats
                             .retain(|ff| ff.field != displayed_field_ref.field);
                     }
                     self.invalidate_draw_commands();
@@ -1001,14 +1001,12 @@ impl SystemState {
             #[cfg(not(target_arch = "wasm32"))]
             Message::LoadWasmTranslator(path) => {
                 let sender = self.channels.msg_sender.clone();
-                perform_work(
-                    move || match PluginTranslator::new(path.into_std_path_buf()) {
-                        Ok(t) => sender.send(Message::TranslatorLoaded(Box::new(t))).unwrap(),
-                        Err(e) => {
-                            error!("Failed to load wasm translator {e:#}")
-                        }
-                    },
-                )
+                perform_work(move || match load_wasm_translator(path) {
+                    Ok(t) => sender.send(Message::TranslatorLoaded(Box::new(t))).unwrap(),
+                    Err(e) => {
+                        error!("Failed to load wasm translator {e:#}")
+                    }
+                })
             }
             Message::LoadCommandFile(path) => {
                 self.add_batch_commands(read_command_file(&path));
@@ -1190,7 +1188,7 @@ impl SystemState {
                         .map(|waves| waves.source.into_translation_type()),
                 );
 
-                self.translators.add_or_replace(AnyTranslator::Full(t));
+                self.translators.add_or_replace(*t);
             }
             Message::ToggleSidePanel => self.user.show_hierarchy = Some(!self.show_hierarchy()),
             Message::ToggleMenu => self.user.show_menu = Some(!self.show_menu()),

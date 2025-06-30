@@ -1,6 +1,5 @@
 use std::ffi::OsString;
 use std::fs::read_dir;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use camino::Utf8PathBuf;
@@ -17,6 +16,9 @@ use surfer_translation_types::{
 
 use crate::message::Message;
 use crate::wave_container::{ScopeId, VarId};
+
+use super::wasm_basic_translator::PluginBasicTranslator;
+use super::AnyTranslator;
 
 pub fn discover_wasm_translators() -> Vec<Message> {
     let search_dirs = [
@@ -78,15 +80,46 @@ pub fn discover_wasm_translators() -> Vec<Message> {
     plugin_files.map(Message::LoadWasmTranslator).collect()
 }
 
+pub fn load_wasm_translator(file: Utf8PathBuf) -> color_eyre::Result<AnyTranslator> {
+    let data = std::fs::read(&file).with_context(|| format!("Failed to read {file}"))?;
+
+    let manifest = Manifest::new([Wasm::data(data)])
+        .with_memory_options(MemoryOptions::new().with_max_var_bytes(1024 * 1024 * 10));
+    let plugin = PluginBuilder::new(manifest)
+        .with_function(
+            "read_file",
+            [PTR],
+            [PTR],
+            extism::UserData::new(()),
+            read_file,
+        )
+        .with_function(
+            "file_exists",
+            [PTR],
+            [PTR],
+            extism::UserData::new(()),
+            file_exists,
+        )
+        .build()
+        .map_err(|e| anyhow!("Failed to load plugin from {file} {e}"))?;
+
+    if plugin.function_exists("basic_translate") {
+        Ok(AnyTranslator::Basic(Box::new(PluginBasicTranslator::new(
+            file, plugin,
+        )?)))
+    } else {
+        Ok(AnyTranslator::Full(Box::new(PluginTranslator::new(file)?)))
+    }
+}
+
 pub struct PluginTranslator {
     plugin: Arc<Mutex<Plugin>>,
-    file: PathBuf,
+    file: Utf8PathBuf,
 }
 
 impl PluginTranslator {
-    pub fn new(file: PathBuf) -> color_eyre::Result<Self> {
-        let data = std::fs::read(&file)
-            .with_context(|| format!("Failed to read {}", file.to_string_lossy()))?;
+    pub fn new(file: Utf8PathBuf) -> color_eyre::Result<Self> {
+        let data = std::fs::read(&file).with_context(|| format!("Failed to read {file}"))?;
 
         let manifest = Manifest::new([Wasm::data(data)])
             .with_memory_options(MemoryOptions::new().with_max_var_bytes(1024 * 1024 * 10));
@@ -106,15 +139,12 @@ impl PluginTranslator {
                 file_exists,
             )
             .build()
-            .map_err(|e| anyhow!("Failed to load plugin from {} {e}", file.to_string_lossy()))?;
+            .map_err(|e| anyhow!("Failed to load plugin from {file} {e}"))?;
 
         if plugin.function_exists("new") {
-            plugin.call::<_, ()>("new", ()).map_err(|e| {
-                anyhow!(
-                    "Failed to call `new` on plugin from {}. {e}",
-                    file.to_string_lossy()
-                )
-            })?;
+            plugin
+                .call::<_, ()>("new", ())
+                .map_err(|e| anyhow!("Failed to call `new` on plugin from {file}. {e}",))?;
         }
 
         Ok(Self {
@@ -131,10 +161,7 @@ impl Translator<VarId, ScopeId, Message> for PluginTranslator {
             .unwrap()
             .call::<_, &str>("name", ())
             .map_err(|e| {
-                error!(
-                    "Failed to get translator name from {}. {e}",
-                    self.file.to_string_lossy()
-                );
+                error!("Failed to get translator name from {}. {e}", self.file);
             })
             .map(|s| s.to_string())
             .unwrap_or_default()
@@ -145,12 +172,7 @@ impl Translator<VarId, ScopeId, Message> for PluginTranslator {
         if plugin.function_exists("set_wave_source") {
             plugin
                 .call::<_, ()>("set_wave_source", wave_source)
-                .map_err(|e| {
-                    error!(
-                        "Failed to set_wave_source on {}. {e}",
-                        self.file.to_string_lossy()
-                    )
-                })
+                .map_err(|e| error!("Failed to set_wave_source on {}. {e}", self.file))
                 .ok();
         }
     }
@@ -175,7 +197,7 @@ impl Translator<VarId, ScopeId, Message> for PluginTranslator {
                 anyhow!(
                     "Failed to translate {} with {}. {e}",
                     variable.var.name,
-                    self.file.to_string_lossy()
+                    self.file
                 )
             })?;
         Ok(result)
@@ -194,7 +216,7 @@ impl Translator<VarId, ScopeId, Message> for PluginTranslator {
                 anyhow!(
                     "Failed to get variable info for {} with {}. {e}",
                     variable.var.name,
-                    self.file.to_string_lossy()
+                    self.file
                 )
             })?;
         Ok(result)
