@@ -1,51 +1,32 @@
 //! Drawing and handling of clock highlighting.
-use std::str::FromStr;
-
-use derive_more::Display;
+use derive_more::{Display, FromStr};
 use egui::Ui;
 use emath::{Pos2, Rect};
 use enum_iterator::Sequence;
 use epaint::Stroke;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{config::SurferConfig, message::Message, view::DrawingContext};
 
-#[derive(PartialEq, Copy, Clone, Debug, Deserialize, Display, Sequence)]
+#[derive(PartialEq, Copy, Clone, Debug, Deserialize, Display, FromStr, Sequence, Serialize)]
 pub enum ClockHighlightType {
     /// Draw a line at every posedge of the clocks
-    #[display("Line")]
     Line,
 
     /// Highlight every other cycle
-    #[display("Cycle")]
     Cycle,
 
     /// No highlighting
-    #[display("None")]
     None,
-}
-
-impl FromStr for ClockHighlightType {
-    type Err = String;
-
-    fn from_str(input: &str) -> Result<ClockHighlightType, Self::Err> {
-        match input {
-            "Line" => Ok(ClockHighlightType::Line),
-            "Cycle" => Ok(ClockHighlightType::Cycle),
-            "None" => Ok(ClockHighlightType::None),
-            _ => Err(format!(
-                "'{input}' is not a valid ClockHighlightType (Valid options: Line|Cycle|None)"
-            )),
-        }
-    }
 }
 
 pub fn draw_clock_edge_marks(
     clock_edges: &Vec<f32>,
     ctx: &mut DrawingContext,
     config: &SurferConfig,
+    clock_highlight_type: ClockHighlightType,
 ) {
-    match config.default_clock_highlight_type {
+    match clock_highlight_type {
         ClockHighlightType::Line => {
             let stroke = Stroke {
                 color: config.theme.clock_highlight_line.color,

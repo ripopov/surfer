@@ -1,7 +1,6 @@
-use derive_more::Display;
+use derive_more::{Display, FromStr};
 use enum_iterator::Sequence;
 use itertools::Itertools;
-use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
@@ -9,34 +8,16 @@ use crate::displayed_item_tree::Node;
 use crate::wave_container::{ScopeRefExt, VariableRefExt};
 use crate::{displayed_item::DisplayedItem, wave_container::VariableRef, wave_data::WaveData};
 
-#[derive(PartialEq, Copy, Clone, Debug, Deserialize, Display, Serialize, Sequence)]
+#[derive(PartialEq, Copy, Clone, Debug, Deserialize, Display, FromStr, Serialize, Sequence)]
 pub enum VariableNameType {
     /// Local variable name only (i.e. for tb.dut.clk => clk)
-    #[display("Local")]
     Local,
 
     /// Add unique prefix, prefix + local
-    #[display("Unique")]
     Unique,
 
     /// Full variable name (i.e. tb.dut.clk => tb.dut.clk)
-    #[display("Global")]
     Global,
-}
-
-impl FromStr for VariableNameType {
-    type Err = String;
-
-    fn from_str(input: &str) -> Result<VariableNameType, Self::Err> {
-        match input {
-            "Local" => Ok(VariableNameType::Local),
-            "Unique" => Ok(VariableNameType::Unique),
-            "Global" => Ok(VariableNameType::Global),
-            _ => Err(format!(
-                "'{input}' is not a valid VariableNameType (Valid options: Local|Unique|Global)"
-            )),
-        }
-    }
 }
 
 impl WaveData {

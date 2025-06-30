@@ -43,11 +43,3 @@ impl VariableTypeExt for VariableType {
         }
     }
 }
-
-/// Types that should default to signed conversion
-pub const INTEGER_TYPES: &[Option<VariableType>] = &[
-    Some(VariableType::VCDInteger),
-    Some(VariableType::Int),
-    Some(VariableType::ShortInt),
-    Some(VariableType::LongInt),
-];
