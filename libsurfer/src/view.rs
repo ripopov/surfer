@@ -1562,12 +1562,9 @@ impl SystemState {
         }
 
         if variable_label.clicked() {
-            if self
-                .user
-                .waves
-                .as_ref()
-                .is_some_and(|w| w.focused_item.is_some_and(|f| f == vidx))
-            {
+            let focused = self.user.waves.as_ref().and_then(|w| w.focused_item);
+            let was_focused = focused == Some(vidx);
+            if was_focused {
                 msgs.push(Message::UnfocusItem);
             } else {
                 let modifiers = ctx.input(|i| i.modifiers);
