@@ -1511,7 +1511,12 @@ impl SystemState {
         if item_response.dragged_by(egui::PointerButton::Primary)
             && item_response.drag_delta().length() > self.user.config.theme.drag_threshold
         {
-            if !modifiers.ctrl {
+            if !modifiers.ctrl
+                && !(self.user.waves.as_ref())
+                    .and_then(|w| w.items_tree.get_visible(vidx))
+                    .map(|i| i.selected)
+                    .unwrap_or(false)
+            {
                 msgs.push(Message::FocusItem(vidx));
                 msgs.push(Message::ItemSelectionClear);
             }
