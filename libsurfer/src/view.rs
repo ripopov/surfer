@@ -1208,6 +1208,7 @@ impl SystemState {
                                             displayed_item,
                                             &mut item_offsets,
                                             ui,
+                                            ctx,
                                         )
                                     },
                                 )
@@ -1545,8 +1546,15 @@ impl SystemState {
         ui: &mut egui::Ui,
         ctx: &egui::Context,
     ) -> egui::Response {
-        let mut variable_label =
-            self.draw_item_label(vidx, displayed_id, displayed_item, Some(&field), msgs, ui);
+        let mut variable_label = self.draw_item_label(
+            vidx,
+            displayed_id,
+            displayed_item,
+            Some(&field),
+            msgs,
+            ui,
+            ctx,
+        );
 
         if self.show_tooltip() {
             variable_label = variable_label.on_hover_ui(|ui| {
@@ -1564,32 +1572,6 @@ impl SystemState {
                 ui.set_max_width(ui.spacing().tooltip_width);
                 ui.add(egui::Label::new(tooltip));
             });
-        }
-
-        if variable_label.clicked() {
-            if self
-                .user
-                .waves
-                .as_ref()
-                .is_some_and(|w| w.focused_item.is_some_and(|f| f == vidx))
-            {
-                msgs.push(Message::UnfocusItem);
-            } else {
-                let modifiers = ctx.input(|i| i.modifiers);
-                if modifiers.ctrl {
-                    msgs.push(Message::ToggleItemSelected(Some(vidx)));
-                } else if modifiers.shift {
-                    msgs.push(Message::Batch(vec![
-                        Message::ItemSelectionClear,
-                        Message::ItemSelectRange(vidx),
-                    ]));
-                } else {
-                    msgs.push(Message::Batch(vec![
-                        Message::ItemSelectionClear,
-                        Message::FocusItem(vidx),
-                    ]));
-                }
-            }
         }
 
         variable_label
@@ -1803,6 +1785,7 @@ impl SystemState {
         ));
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_item_label(
         &self,
         vidx: VisibleItemIndex,
@@ -1811,6 +1794,7 @@ impl SystemState {
         field: Option<&FieldRef>,
         msgs: &mut Vec<Message>,
         ui: &mut egui::Ui,
+        ctx: &egui::Context,
     ) -> egui::Response {
         let text_color = {
             let style = ui.style_mut();
@@ -1903,9 +1887,34 @@ impl SystemState {
         item_label.context_menu(|ui| {
             self.item_context_menu(field, msgs, ui, vidx);
         });
+
+        if item_label.clicked() {
+            let focused = self.user.waves.as_ref().and_then(|w| w.focused_item);
+            let was_focused = focused == Some(vidx);
+            if was_focused {
+                msgs.push(Message::UnfocusItem);
+            } else {
+                let modifiers = ctx.input(|i| i.modifiers);
+                if modifiers.ctrl {
+                    msgs.push(Message::ToggleItemSelected(Some(vidx)));
+                } else if modifiers.shift {
+                    msgs.push(Message::Batch(vec![
+                        Message::ItemSelectionClear,
+                        Message::ItemSelectRange(vidx),
+                    ]));
+                } else {
+                    msgs.push(Message::Batch(vec![
+                        Message::ItemSelectionClear,
+                        Message::FocusItem(vidx),
+                    ]));
+                }
+            }
+        }
+
         item_label
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_plain_item(
         &self,
         msgs: &mut Vec<Message>,
@@ -1914,11 +1923,10 @@ impl SystemState {
         displayed_item: &DisplayedItem,
         drawing_infos: &mut Vec<ItemDrawingInfo>,
         ui: &mut egui::Ui,
+        ctx: &egui::Context,
     ) -> Rect {
-        let label = self.draw_item_label(vidx, displayed_id, displayed_item, None, msgs, ui);
-        if label.clicked() {
-            msgs.push(Message::FocusItem(vidx));
-        }
+        let label = self.draw_item_label(vidx, displayed_id, displayed_item, None, msgs, ui, ctx);
+
         self.draw_drag_source(msgs, vidx, &label, ui.ctx().input(|e| e.modifiers));
         match displayed_item {
             DisplayedItem::Divider(_) => {
