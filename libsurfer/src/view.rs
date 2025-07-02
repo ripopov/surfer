@@ -1208,6 +1208,7 @@ impl SystemState {
                                             displayed_item,
                                             &mut item_offsets,
                                             ui,
+                                            ctx,
                                         )
                                     },
                                 )
@@ -1545,99 +1546,15 @@ impl SystemState {
         ui: &mut egui::Ui,
         ctx: &egui::Context,
     ) -> egui::Response {
-        let wave_container = self.user.waves.as_ref().unwrap().inner.as_waves().unwrap();
-
-        let text_color: Color32;
-        {
-            let style = ui.style_mut();
-            if self.item_is_focused(vidx) {
-                style.visuals.selection.bg_fill = self.user.config.theme.accent_info.background;
-                text_color = self.user.config.theme.accent_info.foreground;
-            } else if self.item_is_selected(displayed_id) {
-                style.visuals.selection.bg_fill =
-                    self.user.config.theme.selected_elements_colors.background;
-                text_color = self.user.config.theme.selected_elements_colors.foreground;
-            } else {
-                style.visuals.selection.bg_fill =
-                    self.user.config.theme.primary_ui_color.background;
-                text_color = self.user.config.theme.primary_ui_color.foreground;
-            }
-        }
-        let style = ui.style();
-
-        // For rendering source code, we want to strategically hide parts of the code,
-        // and to do so we need to compute the width of a monospace character
-        let monospace_font = ui.style().text_styles.get(&TextStyle::Monospace).unwrap();
-        let monospace_width = {
-            ui.fonts(|fonts| {
-                fonts
-                    .layout_no_wrap(
-                        " ".to_string(),
-                        monospace_font.clone(),
-                        Color32::from_rgb(0, 0, 0),
-                    )
-                    .size()
-                    .x
-            })
-        };
-        let available_space = ui.available_width();
-
-        let mut layout_job = LayoutJob::default();
-        match displayed_item {
-            DisplayedItem::Variable(var) => {
-                if field.field.is_empty() {
-                    let name_info = self.get_variable_name_info(wave_container, &var.variable_ref);
-
-                    if let Some(true_name) = name_info.and_then(|info| info.true_name) {
-                        draw_true_name(
-                            &true_name,
-                            &mut layout_job,
-                            monospace_font.clone(),
-                            text_color,
-                            monospace_width,
-                            available_space,
-                        )
-                    } else {
-                        displayed_item.add_to_layout_job(
-                            &text_color,
-                            style,
-                            &mut layout_job,
-                            Some(&field),
-                            &self.user.config,
-                        )
-                    }
-                } else {
-                    // NOTE: Safe unwrap, we've checked that the field exists and is non-empty
-                    RichText::new(field.field.last().unwrap().clone())
-                        .color(text_color)
-                        .line_height(Some(self.user.config.layout.waveforms_line_height))
-                        .append_to(
-                            &mut layout_job,
-                            style,
-                            FontSelection::Default,
-                            Align::Center,
-                        );
-                };
-            }
-            _ => displayed_item.add_to_layout_job(
-                &text_color,
-                style,
-                &mut layout_job,
-                None,
-                &self.user.config,
-            ),
-        }
-
-        let mut variable_label = ui
-            .selectable_label(
-                self.item_is_selected(displayed_id) || self.item_is_focused(vidx),
-                WidgetText::LayoutJob(layout_job),
-            )
-            .interact(Sense::drag());
-
-        variable_label.context_menu(|ui| {
-            self.item_context_menu(Some(&field), msgs, ui, vidx);
-        });
+        let mut variable_label = self.draw_item_label(
+            vidx,
+            displayed_id,
+            displayed_item,
+            Some(&field),
+            msgs,
+            ui,
+            ctx,
+        );
 
         if self.show_tooltip() {
             variable_label = variable_label.on_hover_ui(|ui| {
@@ -1655,32 +1572,6 @@ impl SystemState {
                 ui.set_max_width(ui.spacing().tooltip_width);
                 ui.add(egui::Label::new(tooltip));
             });
-        }
-
-        if variable_label.clicked() {
-            if self
-                .user
-                .waves
-                .as_ref()
-                .is_some_and(|w| w.focused_item.is_some_and(|f| f == vidx))
-            {
-                msgs.push(Message::UnfocusItem);
-            } else {
-                let modifiers = ctx.input(|i| i.modifiers);
-                if modifiers.ctrl {
-                    msgs.push(Message::ToggleItemSelected(Some(vidx)));
-                } else if modifiers.shift {
-                    msgs.push(Message::Batch(vec![
-                        Message::ItemSelectionClear,
-                        Message::ItemSelectRange(vidx),
-                    ]));
-                } else {
-                    msgs.push(Message::Batch(vec![
-                        Message::ItemSelectionClear,
-                        Message::FocusItem(vidx),
-                    ]));
-                }
-            }
         }
 
         variable_label
@@ -1894,6 +1785,136 @@ impl SystemState {
         ));
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn draw_item_label(
+        &self,
+        vidx: VisibleItemIndex,
+        displayed_id: DisplayedItemRef,
+        displayed_item: &DisplayedItem,
+        field: Option<&FieldRef>,
+        msgs: &mut Vec<Message>,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+    ) -> egui::Response {
+        let text_color = {
+            let style = ui.style_mut();
+            if self.item_is_focused(vidx) {
+                style.visuals.selection.bg_fill = self.user.config.theme.accent_info.background;
+                self.user.config.theme.accent_info.foreground
+            } else if self.item_is_selected(displayed_id) {
+                style.visuals.selection.bg_fill =
+                    self.user.config.theme.selected_elements_colors.background;
+                self.user.config.theme.selected_elements_colors.foreground
+            } else if matches!(
+                displayed_item,
+                DisplayedItem::Variable(_) | DisplayedItem::Placeholder(_)
+            ) {
+                style.visuals.selection.bg_fill =
+                    self.user.config.theme.primary_ui_color.background;
+                self.user.config.theme.primary_ui_color.foreground
+            } else {
+                style.visuals.selection.bg_fill =
+                    self.user.config.theme.primary_ui_color.background;
+                *self.get_item_text_color(displayed_item)
+            }
+        };
+
+        let monospace_font = ui.style().text_styles.get(&TextStyle::Monospace).unwrap();
+        let monospace_width = {
+            ui.fonts(|fonts| {
+                fonts
+                    .layout_no_wrap(" ".to_string(), monospace_font.clone(), Color32::BLACK)
+                    .size()
+                    .x
+            })
+        };
+        let available_space = ui.available_width();
+
+        let mut layout_job = LayoutJob::default();
+        match displayed_item {
+            DisplayedItem::Variable(var) if field.is_some() => {
+                let field = field.unwrap();
+                if field.field.is_empty() {
+                    let wave_container =
+                        self.user.waves.as_ref().unwrap().inner.as_waves().unwrap();
+                    let name_info = self.get_variable_name_info(wave_container, &var.variable_ref);
+
+                    if let Some(true_name) = name_info.and_then(|info| info.true_name) {
+                        draw_true_name(
+                            &true_name,
+                            &mut layout_job,
+                            monospace_font.clone(),
+                            text_color,
+                            monospace_width,
+                            available_space,
+                        )
+                    } else {
+                        displayed_item.add_to_layout_job(
+                            &text_color,
+                            ui.style(),
+                            &mut layout_job,
+                            Some(field),
+                            &self.user.config,
+                        )
+                    }
+                } else {
+                    RichText::new(field.field.last().unwrap().clone())
+                        .color(text_color)
+                        .line_height(Some(self.user.config.layout.waveforms_line_height))
+                        .append_to(
+                            &mut layout_job,
+                            ui.style(),
+                            FontSelection::Default,
+                            Align::Center,
+                        )
+                }
+            }
+            _ => displayed_item.add_to_layout_job(
+                &text_color,
+                ui.style(),
+                &mut layout_job,
+                field,
+                &self.user.config,
+            ),
+        }
+
+        let item_label = ui
+            .selectable_label(
+                self.item_is_selected(displayed_id) || self.item_is_focused(vidx),
+                WidgetText::LayoutJob(layout_job),
+            )
+            .interact(Sense::drag());
+        item_label.context_menu(|ui| {
+            self.item_context_menu(field, msgs, ui, vidx);
+        });
+
+        if item_label.clicked() {
+            let focused = self.user.waves.as_ref().and_then(|w| w.focused_item);
+            let was_focused = focused == Some(vidx);
+            if was_focused {
+                msgs.push(Message::UnfocusItem);
+            } else {
+                let modifiers = ctx.input(|i| i.modifiers);
+                if modifiers.ctrl {
+                    msgs.push(Message::ToggleItemSelected(Some(vidx)));
+                } else if modifiers.shift {
+                    msgs.push(Message::Batch(vec![
+                        Message::ItemSelectionClear,
+                        Message::ItemSelectRange(vidx),
+                    ]));
+                } else {
+                    msgs.push(Message::Batch(vec![
+                        Message::ItemSelectionClear,
+                        Message::FocusItem(vidx),
+                    ]));
+                }
+            }
+        }
+
+        item_label
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn draw_plain_item(
         &self,
         msgs: &mut Vec<Message>,
@@ -1902,49 +1923,10 @@ impl SystemState {
         displayed_item: &DisplayedItem,
         drawing_infos: &mut Vec<ItemDrawingInfo>,
         ui: &mut egui::Ui,
+        ctx: &egui::Context,
     ) -> Rect {
-        let mut draw_label = |ui: &mut egui::Ui| {
-            let style = ui.style_mut();
-            let mut layout_job = LayoutJob::default();
-            let text_color: Color32;
+        let label = self.draw_item_label(vidx, displayed_id, displayed_item, None, msgs, ui, ctx);
 
-            if self.item_is_focused(vidx) {
-                style.visuals.selection.bg_fill = self.user.config.theme.accent_info.background;
-                text_color = self.user.config.theme.accent_info.foreground;
-            } else if self.item_is_selected(displayed_id) {
-                style.visuals.selection.bg_fill =
-                    self.user.config.theme.selected_elements_colors.background;
-                text_color = self.user.config.theme.selected_elements_colors.foreground;
-            } else {
-                style.visuals.selection.bg_fill =
-                    self.user.config.theme.primary_ui_color.background;
-                text_color = *self.get_item_text_color(displayed_item);
-            }
-
-            displayed_item.add_to_layout_job(
-                &text_color,
-                style,
-                &mut layout_job,
-                None,
-                &self.user.config,
-            );
-
-            let item_label = ui
-                .selectable_label(
-                    self.item_is_selected(displayed_id) || self.item_is_focused(vidx),
-                    WidgetText::LayoutJob(layout_job),
-                )
-                .interact(Sense::drag());
-            item_label.context_menu(|ui| {
-                self.item_context_menu(None, msgs, ui, vidx);
-            });
-            if item_label.clicked() {
-                msgs.push(Message::FocusItem(vidx));
-            }
-            item_label
-        };
-
-        let label = draw_label(ui);
         self.draw_drag_source(msgs, vidx, &label, ui.ctx().input(|e| e.modifiers));
         match displayed_item {
             DisplayedItem::Divider(_) => {
