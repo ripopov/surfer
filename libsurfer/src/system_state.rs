@@ -18,7 +18,7 @@ use crate::{
     time::TimeUnit,
     translation::{all_translators, TranslatorList},
     variable_filter::VariableFilter,
-    wave_container::VariableRef,
+    wave_container::{ScopeRef, VariableRef},
     wave_source::LoadProgress,
     CachedDrawData, CanvasState, Channels, WcpClientCapabilities,
 };
@@ -82,6 +82,8 @@ pub struct SystemState {
     /// Character to add to the command prompt if it is visible. This is only needed for
     /// presentations at them moment.
     pub(crate) char_to_add_to_prompt: RefCell<Option<char>>,
+    // This item works with the expand scope feature to determine what hierarchys to open
+    pub scope_ref_to_expand: RefCell<Option<ScopeRef>>,
 
     // Benchmarking stuff
     /// Invalidate draw commands every frame to make performance comparison easier
@@ -202,6 +204,7 @@ impl SystemState {
 
             items_to_expand: RefCell::new(vec![]),
             char_to_add_to_prompt: RefCell::new(None),
+            scope_ref_to_expand: RefCell::new(None),
             expand_parameter_section: false,
 
             url_callback: None,

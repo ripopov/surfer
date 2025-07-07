@@ -4,13 +4,14 @@ use eyre::WrapErr;
 use futures::executor::block_on;
 use itertools::Itertools;
 use std::sync::atomic::Ordering;
-use surfer_translation_types::{TranslationPreference, Translator};
+use surfer_translation_types::{TranslationPreference, Translator, VariableType};
 
 use crate::config::PrimaryMouseDrag;
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::hierarchy::HierarchyStyle;
 use crate::message::MessageTarget;
 use crate::wave_container::{FieldRef, VariableRefExt};
+use crate::wave_data::ScopeType;
 use crate::wave_source::LoadOptions;
 use crate::wcp::{proto::WcpEvent, proto::WcpSCMessage};
 use crate::{
@@ -546,6 +547,21 @@ impl SystemState {
                     });
                     ui.close_menu();
                 }
+            }
+        }
+
+        if let Some(path) = path {
+            let wave_container = waves.inner.as_waves().unwrap();
+            let meta = wave_container.variable_meta(&path.root).ok();
+            let is_parameter = meta
+                .as_ref()
+                .is_some_and(|meta| meta.variable_type == Some(VariableType::VCDParameter));
+            if !is_parameter && ui.button("Expand scope").clicked() {
+                ui.close_menu();
+                let scope_path = path.root.path.clone();
+                let scope_type = ScopeType::WaveScope(scope_path.clone());
+                msgs.push(Message::SetActiveScope(scope_type));
+                msgs.push(Message::ExpandScope(scope_path));
             }
         }
 

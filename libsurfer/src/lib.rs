@@ -283,6 +283,9 @@ impl SystemState {
                     warn!("Setting active scope to {scope} which does not exist");
                 }
             }
+            Message::ExpandScope(scope_ref) => {
+                *self.scope_ref_to_expand.borrow_mut() = Some(scope_ref);
+            }
             Message::AddVariables(vars) => {
                 if !vars.is_empty() {
                     let undo_msg = if vars.len() == 1 {

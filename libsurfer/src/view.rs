@@ -642,6 +642,7 @@ impl SystemState {
         wave: &WaveData,
         scope: &ScopeRef,
         ui: &mut egui::Ui,
+        scroll_to_label: bool,
     ) {
         let name = scope.name();
         let mut response = ui.add(egui::SelectableLabel::new(
@@ -654,6 +655,10 @@ impl SystemState {
                 self.user.waves.as_ref().unwrap().display_item_ref_counter,
             )))
         });
+
+        if scroll_to_label {
+            response.scroll_to_me(Some(Align::Center));
+        }
 
         response.drag_stopped().then(|| {
             if ui.input(|i| i.pointer.hover_pos().unwrap_or_default().x)
@@ -735,58 +740,70 @@ impl SystemState {
             return;
         }
         if child_scopes.is_empty() && (!draw_variables || no_variables_in_scope) {
-            self.add_scope_selectable_label(msgs, wave, scope, ui);
+            self.add_scope_selectable_label(msgs, wave, scope, ui, false);
         } else {
-            egui::collapsing_header::CollapsingState::load_with_default_open(
-                ui.ctx(),
-                egui::Id::new(scope),
-                false,
-            )
-            .show_header(ui, |ui| {
-                ui.with_layout(
-                    Layout::top_down(Align::LEFT).with_cross_justify(true),
-                    |ui| {
-                        self.add_scope_selectable_label(msgs, wave, scope, ui);
-                    },
+            let should_open_header = self.should_open_header(scope);
+            let mut collapsing_header =
+                egui::collapsing_header::CollapsingState::load_with_default_open(
+                    ui.ctx(),
+                    egui::Id::new(scope),
+                    false,
                 );
-            })
-            .body(|ui| {
-                if draw_variables || self.show_parameters_in_scopes() {
-                    let wave_container = wave.inner.as_waves().unwrap();
-                    let parameters = wave_container.parameters_in_scope(scope);
-                    if !parameters.is_empty() {
-                        egui::collapsing_header::CollapsingState::load_with_default_open(
-                            ui.ctx(),
-                            egui::Id::new(&parameters),
-                            false,
-                        )
-                        .show_header(ui, |ui| {
-                            ui.with_layout(
-                                Layout::top_down(Align::LEFT).with_cross_justify(true),
-                                |ui| {
-                                    ui.label("Parameters");
-                                },
-                            );
-                        })
-                        .body(|ui| {
-                            self.draw_variable_list(
+            if should_open_header {
+                collapsing_header.set_open(true);
+            }
+            collapsing_header
+                .show_header(ui, |ui| {
+                    ui.with_layout(
+                        Layout::top_down(Align::LEFT).with_cross_justify(true),
+                        |ui| {
+                            self.add_scope_selectable_label(
                                 msgs,
-                                wave_container,
+                                wave,
+                                scope,
                                 ui,
-                                &parameters,
-                                None,
-                                filter,
+                                should_open_header,
                             );
-                        });
+                        },
+                    );
+                })
+                .body(|ui| {
+                    if draw_variables || self.show_parameters_in_scopes() {
+                        let wave_container = wave.inner.as_waves().unwrap();
+                        let parameters = wave_container.parameters_in_scope(scope);
+                        if !parameters.is_empty() {
+                            egui::collapsing_header::CollapsingState::load_with_default_open(
+                                ui.ctx(),
+                                egui::Id::new(&parameters),
+                                false,
+                            )
+                            .show_header(ui, |ui| {
+                                ui.with_layout(
+                                    Layout::top_down(Align::LEFT).with_cross_justify(true),
+                                    |ui| {
+                                        ui.label("Parameters");
+                                    },
+                                );
+                            })
+                            .body(|ui| {
+                                self.draw_variable_list(
+                                    msgs,
+                                    wave_container,
+                                    ui,
+                                    &parameters,
+                                    None,
+                                    filter,
+                                );
+                            });
+                        }
                     }
-                }
-                self.draw_root_scope_view(msgs, wave, scope, draw_variables, ui, filter);
-                if draw_variables {
-                    let wave_container = wave.inner.as_waves().unwrap();
-                    let variables = wave_container.variables_in_scope(scope);
-                    self.draw_variable_list(msgs, wave_container, ui, &variables, None, filter);
-                }
-            });
+                    self.draw_root_scope_view(msgs, wave, scope, draw_variables, ui, filter);
+                    if draw_variables {
+                        let wave_container = wave.inner.as_waves().unwrap();
+                        let variables = wave_container.variables_in_scope(scope);
+                        self.draw_variable_list(msgs, wave_container, ui, &variables, None, filter);
+                    }
+                });
         }
     }
 
@@ -2260,6 +2277,20 @@ impl SystemState {
         } else {
             &Color32::TRANSPARENT
         }
+    }
+
+    fn should_open_header(&self, scope: &ScopeRef) -> bool {
+        let mut scope_ref_cell = self.scope_ref_to_expand.borrow_mut();
+        if let Some(state) = scope_ref_cell.as_mut() {
+            if state.strs.starts_with(&scope.strs) {
+                if (state.strs.len() - 1) == scope.strs.len() {
+                    // need to compare vs. parent of signal
+                    *scope_ref_cell = None;
+                }
+                return true;
+            }
+        }
+        false
     }
 
     /// Draw the default timeline at the top of the canvas

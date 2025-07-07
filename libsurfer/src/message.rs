@@ -70,6 +70,7 @@ impl<T: Copy> Copy for MessageTarget<T> {}
 pub enum Message {
     /// Set active scope
     SetActiveScope(ScopeType),
+    ExpandScope(ScopeRef),
     /// Add one or more variables to wave view.
     AddVariables(Vec<VariableRef>),
     /// Add scope to wave view. If second argument is true, add subscopes recursively.
