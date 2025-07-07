@@ -541,6 +541,12 @@ snapshot_ui_with_file_and_msgs! {top_level_signals_have_no_aliasing, "examples/p
     Message::AddScope(ScopeRef::from_strs(&["testbench"]), false)
 ]}
 
+snapshot_ui_with_file_and_msgs! {expand_scope_works, "examples/counter.vcd", [
+    Message::ToggleSidePanel,
+    Message::AddScope(ScopeRef::from_strs(&["tb"]), true),
+    Message::ExpandScope(ScopeRef::from_strs(&["tb", "dut"])),
+]}
+
 snapshot_ui! {resizing_the_canvas_redraws, || {
     let mut state = SystemState::new_default_config().unwrap().with_params(StartupParams {
         waves: Some(WaveSource::File(get_project_root().unwrap().join("examples/counter.vcd").try_into().unwrap())),
