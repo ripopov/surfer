@@ -628,15 +628,14 @@ impl SystemState {
                 viewport_idx,
             } => {
                 let waves = self.user.waves.as_mut()?;
-                let num_timestamps = waves
-                    .num_timestamps()
-                    .expect("No timestamps count, even though waveforms should be loaded");
-                waves.viewports[viewport_idx].handle_canvas_zoom(
-                    mouse_ptr,
-                    delta as f64,
-                    &num_timestamps,
-                );
-                self.invalidate_draw_commands();
+                if let Some(num_timestamps) = waves.num_timestamps() {
+                    waves.viewports[viewport_idx].handle_canvas_zoom(
+                        mouse_ptr,
+                        delta as f64,
+                        &num_timestamps,
+                    );
+                    self.invalidate_draw_commands();
+                }
             }
             Message::ZoomToFit { viewport_idx } => {
                 let waves = self.user.waves.as_mut()?;
