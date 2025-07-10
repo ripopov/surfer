@@ -109,6 +109,14 @@ test-no-default-features:
         - cargo -V
         - cargo test --color=always --locked --no-default-features -- --include-ignored
 
+test-all-features:
+    stage: test
+    extends: .snapshots
+    script:
+        - rustc -V
+        - cargo -V
+        - cargo test --color=always --locked --all-features -- --include-ignored
+
 test-oldest-supported:
     # This version should match rust-version in Cargo.toml
     image: rust:1.82
