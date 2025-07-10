@@ -55,7 +55,6 @@ rfd.workspace = true
 ron.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-serde_stacker = { version = "0.1", optional = true }
 softposit.workspace = true
 surfer-translation-types = { path = "../surfer-translation-types" }
 surver.workspace = true
