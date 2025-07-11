@@ -644,7 +644,7 @@ impl SystemState {
         ui: &mut egui::Ui,
     ) {
         let name = scope.name();
-        let mut response = ui.add(egui::SelectableLabel::new(
+        let mut response = ui.add(egui::Button::selectable(
             wave.active_scope == Some(ScopeType::WaveScope(scope.clone())),
             name,
         ));
@@ -689,19 +689,15 @@ impl SystemState {
         response.context_menu(|ui| {
             if ui.button("Add scope").clicked() {
                 msgs.push(Message::AddScope(scope.clone(), false));
-                ui.close_menu();
             }
             if ui.button("Add scope recursively").clicked() {
                 msgs.push(Message::AddScope(scope.clone(), true));
-                ui.close_menu();
             }
             if ui.button("Add scope as group").clicked() {
                 msgs.push(Message::AddScopeAsGroup(scope.clone(), false));
-                ui.close_menu();
             }
             if ui.button("Add scope as group recursively").clicked() {
                 msgs.push(Message::AddScopeAsGroup(scope.clone(), true));
-                ui.close_menu();
             }
         });
         response
@@ -988,7 +984,7 @@ impl SystemState {
                         }
                     }
 
-                    let mut response = ui.add(egui::SelectableLabel::new(false, label));
+                    let mut response = ui.add(egui::Button::selectable(false, label));
 
                     let _ = response.interact(egui::Sense::click_and_drag());
 
@@ -1248,7 +1244,7 @@ impl SystemState {
                 Layout::top_down(Align::LEFT).with_cross_justify(true),
                 |ui| {
                     let root_name = String::from("tr");
-                    let response = ui.add(egui::SelectableLabel::new(
+                    let response = ui.add(egui::Button::selectable(
                         streams.active_scope == Some(ScopeType::StreamScope(StreamScopeRef::Root)),
                         root_name,
                     ));
@@ -1264,7 +1260,7 @@ impl SystemState {
         .body(|ui| {
             for (id, stream) in &streams.inner.as_transactions().unwrap().inner.tx_streams {
                 let name = stream.name.clone();
-                let response = ui.add(egui::SelectableLabel::new(
+                let response = ui.add(egui::Button::selectable(
                     streams.active_scope.as_ref().is_some_and(|s| {
                         if let ScopeType::StreamScope(StreamScopeRef::Stream(scope_stream)) = s {
                             scope_stream.stream_id == *id
@@ -1299,7 +1295,7 @@ impl SystemState {
                         Layout::top_down(Align::LEFT).with_cross_justify(true),
                         |ui| {
                             let response =
-                                ui.add(egui::SelectableLabel::new(false, stream.name.clone()));
+                                ui.add(egui::Button::selectable(false, stream.name.clone()));
 
                             response.clicked().then(|| {
                                 msgs.push(Message::AddStreamOrGenerator(
@@ -1319,7 +1315,7 @@ impl SystemState {
                     ui.with_layout(
                         Layout::top_down(Align::LEFT).with_cross_justify(true),
                         |ui| {
-                            let response = ui.add(egui::SelectableLabel::new(false, &gen_name));
+                            let response = ui.add(egui::Button::selectable(false, &gen_name));
 
                             response.clicked().then(|| {
                                 msgs.push(Message::AddStreamOrGenerator(
@@ -1881,7 +1877,7 @@ impl SystemState {
         let item_label = ui
             .selectable_label(
                 self.item_is_selected(displayed_id) || self.item_is_focused(vidx),
-                WidgetText::LayoutJob(layout_job),
+                WidgetText::LayoutJob(layout_job.into()),
             )
             .interact(Sense::drag());
         item_label.context_menu(|ui| {
