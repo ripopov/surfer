@@ -214,7 +214,11 @@ impl SystemState {
 
         let mut markers: Vec<(u8, &BigInt, WidgetText)> = vec![];
         if let Some(cursor) = &waves.cursor {
-            markers.push((255, cursor, WidgetText::RichText(RichText::new("Primary"))));
+            markers.push((
+                255,
+                cursor,
+                WidgetText::RichText(RichText::new("Primary").into()),
+            ));
         }
 
         let mut numbered_markers = waves
