@@ -16,7 +16,7 @@ version = "0.4.0-dev"
 license = "EUPL-1.2"
 categories = ["development-tools::debugging", "science"]
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.85"
 repository = "https://gitlab.com/surfer-project/surfer/"
 
 [workspace.dependencies]
