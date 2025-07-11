@@ -1412,9 +1412,7 @@ impl SystemState {
                 self.draw_line(&time, ctx, size, &waves.viewports[viewport_idx], waves);
                 ui.menu_button("Set marker", |ui| {
                     macro_rules! close_menu {
-                        () => {{
-                            ui.close_menu();
-                        }};
+                        () => {{}};
                     }
 
                     for id in waves.markers.keys().sorted() {

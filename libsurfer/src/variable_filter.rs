@@ -276,7 +276,6 @@ impl SystemState {
             )
             .clicked()
             .then(|| {
-                ui.close_menu();
                 msgs.push(Message::SetVariableNameFilterType(filter_type));
             });
         }
