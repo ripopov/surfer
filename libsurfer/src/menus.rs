@@ -1,5 +1,5 @@
 //! Menu handling.
-use egui::{menu, Button, Context, TextWrapMode, TopBottomPanel, Ui};
+use egui::{Button, Context, TextWrapMode, TopBottomPanel, Ui};
 use eyre::WrapErr;
 use futures::executor::block_on;
 use itertools::Itertools;
@@ -71,9 +71,7 @@ impl ButtonBuilder {
         };
         if ui.add_enabled(self.enabled, button).clicked() {
             msgs.push(self.message);
-            if close_menu {
-                ui.close_menu();
-            }
+            if close_menu {}
         }
     }
 }
@@ -81,7 +79,7 @@ impl ButtonBuilder {
 impl SystemState {
     pub fn add_menu_panel(&self, ctx: &Context, msgs: &mut Vec<Message>) {
         TopBottomPanel::top("menu").show(ctx, |ui| {
-            menu::bar(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
                 self.menu_contents(ui, msgs);
             });
         });
@@ -242,10 +240,7 @@ impl SystemState {
                         format!("{} %", scale * 100.),
                     )
                     .clicked()
-                    .then(|| {
-                        ui.close_menu();
-                        msgs.push(Message::SetUIZoomFactor(*scale))
-                    });
+                    .then(|| msgs.push(Message::SetUIZoomFactor(*scale)));
                 }
             });
         });
@@ -267,7 +262,6 @@ impl SystemState {
                         ui.radio(variable_name_type == name_type, name_type.to_string())
                             .clicked()
                             .then(|| {
-                                ui.close_menu();
                                 msgs.push(Message::ForceVariableNameTypes(name_type));
                             });
                     }
@@ -279,11 +273,9 @@ impl SystemState {
                     .align_names_right
                     .unwrap_or_else(|| self.user.config.layout.align_names_right());
                 ui.radio(!align_right, "Left").clicked().then(|| {
-                    ui.close_menu();
                     msgs.push(Message::SetNameAlignRight(false));
                 });
                 ui.radio(align_right, "Right").clicked().then(|| {
-                    ui.close_menu();
                     msgs.push(Message::SetNameAlignRight(true));
                 });
             });
@@ -296,7 +288,6 @@ impl SystemState {
                     ui.radio(self.hierarchy_style() == style, style.to_string())
                         .clicked()
                         .then(|| {
-                            ui.close_menu();
                             msgs.push(Message::SetHierarchyStyle(style));
                         });
                 }
@@ -307,7 +298,6 @@ impl SystemState {
                     ui.radio(self.arrow_key_bindings() == binding, binding.to_string())
                         .clicked()
                         .then(|| {
-                            ui.close_menu();
                             msgs.push(Message::SetArrowKeyBindings(binding));
                         });
                 }
@@ -321,7 +311,6 @@ impl SystemState {
                     )
                     .clicked()
                     .then(|| {
-                        ui.close_menu();
                         msgs.push(Message::SetPrimaryMouseDragBehavior(behavior));
                     });
                 }
@@ -330,42 +319,36 @@ impl SystemState {
             ui.radio(self.show_ticks(), "Show tick lines")
                 .clicked()
                 .then(|| {
-                    ui.close_menu();
                     msgs.push(Message::ToggleTickLines);
                 });
 
             ui.radio(self.show_tooltip(), "Show variable tooltip")
                 .clicked()
                 .then(|| {
-                    ui.close_menu();
                     msgs.push(Message::ToggleVariableTooltip);
                 });
 
             ui.radio(self.show_scope_tooltip(), "Show scope tooltip")
                 .clicked()
                 .then(|| {
-                    ui.close_menu();
                     msgs.push(Message::ToggleScopeTooltip);
                 });
 
             ui.radio(self.show_variable_indices(), "Show variable indices")
                 .clicked()
                 .then(|| {
-                    ui.close_menu();
                     msgs.push(Message::ToggleIndices);
                 });
 
             ui.radio(self.show_variable_direction(), "Show variable direction")
                 .clicked()
                 .then(|| {
-                    ui.close_menu();
                     msgs.push(Message::ToggleDirection);
                 });
 
             ui.radio(self.show_empty_scopes(), "Show empty scopes")
                 .clicked()
                 .then(|| {
-                    ui.close_menu();
                     msgs.push(Message::ToggleEmptyScopes);
                 });
 
@@ -375,21 +358,16 @@ impl SystemState {
             )
             .clicked()
             .then(|| {
-                ui.close_menu();
                 msgs.push(Message::ToggleParametersInScopes);
             });
 
             ui.radio(self.highlight_focused(), "Highlight focused")
                 .clicked()
-                .then(|| {
-                    ui.close_menu();
-                    msgs.push(Message::SetHighlightFocused(!self.highlight_focused()))
-                });
+                .then(|| msgs.push(Message::SetHighlightFocused(!self.highlight_focused())));
 
             ui.radio(self.fill_high_values(), "Fill high values")
                 .clicked()
                 .then(|| {
-                    ui.close_menu();
                     msgs.push(Message::SetFillHighValues(!self.fill_high_values()));
                 });
         });
@@ -446,7 +424,6 @@ impl SystemState {
                 ui.radio(selected_color == color_name, color_name)
                     .clicked()
                     .then(|| {
-                        ui.close_menu();
                         msgs.push(Message::ItemColorChange(
                             affected_vidxs.into(),
                             Some(color_name.clone()),
@@ -457,7 +434,6 @@ impl SystemState {
             ui.radio(*selected_color == "__nocolor__", "Default")
                 .clicked()
                 .then(|| {
-                    ui.close_menu();
                     msgs.push(Message::ItemColorChange(
                         MessageTarget::Explicit(vidx),
                         None,
@@ -471,7 +447,6 @@ impl SystemState {
                 ui.radio(selected_color == color_name, color_name)
                     .clicked()
                     .then(|| {
-                        ui.close_menu();
                         msgs.push(Message::ItemBackgroundColorChange(
                             affected_vidxs.into(),
                             Some(color_name.clone()),
@@ -482,7 +457,6 @@ impl SystemState {
             ui.radio(*selected_color == "__nocolor__", "Default")
                 .clicked()
                 .then(|| {
-                    ui.close_menu();
                     msgs.push(Message::ItemBackgroundColorChange(
                         MessageTarget::Explicit(vidx),
                         None,
@@ -497,7 +471,6 @@ impl SystemState {
                     ui.radio(variable_name_type == name_type, name_type.to_string())
                         .clicked()
                         .then(|| {
-                            ui.close_menu();
                             msgs.push(Message::ChangeVariableNameType(
                                 MessageTarget::Explicit(vidx),
                                 name_type,
@@ -512,7 +485,6 @@ impl SystemState {
                     ui.radio(selected_size == *size, format!("{}", size))
                         .clicked()
                         .then(|| {
-                            ui.close_menu();
                             msgs.push(Message::ItemHeightScalingFactorChange(
                                 affected_vidxs.into(),
                                 *size,
@@ -531,21 +503,18 @@ impl SystemState {
                             ch.send(WcpSCMessage::event(WcpEvent::goto_declaration { variable })),
                         )
                     });
-                    ui.close_menu();
                 }
                 if self.wcp_client_capabilities.add_drivers && ui.button("Add drivers").clicked() {
                     let variable = variable.variable_ref.full_path_string();
                     self.channels.wcp_s2c_sender.as_ref().map(|ch| {
                         block_on(ch.send(WcpSCMessage::event(WcpEvent::add_drivers { variable })))
                     });
-                    ui.close_menu();
                 }
                 if self.wcp_client_capabilities.add_loads && ui.button("Add loads").clicked() {
                     let variable = variable.variable_ref.full_path_string();
                     self.channels.wcp_s2c_sender.as_ref().map(|ch| {
                         block_on(ch.send(WcpSCMessage::event(WcpEvent::add_loads { variable })))
                     });
-                    ui.close_menu();
                 }
             }
         }
@@ -566,7 +535,6 @@ impl SystemState {
         }
 
         if ui.button("Rename").clicked() {
-            ui.close_menu();
             msgs.push(Message::RenameItem(Some(vidx)));
         }
 
@@ -593,7 +561,6 @@ impl SystemState {
                 },
             );
             msgs.push(Message::InvalidateCount);
-            ui.close_menu();
         }
         if path.is_some() {
             // Actual signal. Not one of: divider, timeline, marker.
@@ -601,20 +568,17 @@ impl SystemState {
                 #[allow(clippy::collapsible_if)]
                 if waves.cursor.is_some() {
                     if ui.button("Value").clicked() {
-                        ui.close_menu();
                         msgs.push(Message::VariableValueToClipbord(MessageTarget::Explicit(
                             vidx,
                         )));
                     }
                 }
                 if ui.button("Name").clicked() {
-                    ui.close_menu();
                     msgs.push(Message::VariableNameToClipboard(MessageTarget::Explicit(
                         vidx,
                     )));
                 }
                 if ui.button("Full name").clicked() {
-                    ui.close_menu();
                     msgs.push(Message::VariableFullNameToClipboard(
                         MessageTarget::Explicit(vidx),
                     ));
@@ -624,11 +588,9 @@ impl SystemState {
         ui.separator();
         ui.menu_button("Insert", |ui| {
             if ui.button("Divider").clicked() {
-                ui.close_menu();
                 msgs.push(Message::AddDivider(None, Some(vidx)));
             }
             if ui.button("Timeline").clicked() {
-                ui.close_menu();
                 msgs.push(Message::AddTimeLine(Some(vidx)));
             }
         });
@@ -641,8 +603,6 @@ impl SystemState {
                 .expect("Inconsistent, could not find displayed signal in tree");
 
             if ui.button("Create").clicked() {
-                ui.close_menu();
-
                 let mut items = if affect_selected {
                     waves
                         .items_tree
@@ -673,7 +633,6 @@ impl SystemState {
             }
             if matches!(displayed_item, DisplayedItem::Group(_)) {
                 if ui.button("Dissolve").clicked() {
-                    ui.close_menu();
                     msgs.push(Message::GroupDissolve(Some(displayed_item_id)))
                 }
 
@@ -691,11 +650,9 @@ impl SystemState {
                     )
                 };
                 if ui.button(text).clicked() {
-                    ui.close_menu();
                     msgs.push(msg)
                 }
                 if ui.button(text.to_owned() + " recursive").clicked() {
-                    ui.close_menu();
                     msgs.push(msg_recursive)
                 }
             }
@@ -770,7 +727,6 @@ impl SystemState {
             ui.radio(selected_translator.is_some_and(|st| st == name), name)
                 .clicked()
                 .then(|| {
-                    ui.close_menu();
                     msgs.push(Message::VariableFormatChange(
                         if waves
                             .items_tree
