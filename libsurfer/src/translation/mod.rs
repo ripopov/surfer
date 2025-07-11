@@ -85,7 +85,7 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
             AnyTranslator::Full(translator) => translator.set_wave_source(wave_source),
             AnyTranslator::Basic(_) => {}
             #[cfg(feature = "python")]
-            AnyTranslator::Python(t) => {}
+            AnyTranslator::Python(_) => {}
         }
     }
 
@@ -138,7 +138,7 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
             AnyTranslator::Full(translator) => translator.variable_name_info(variable),
             AnyTranslator::Basic(_) => None,
             #[cfg(feature = "python")]
-            AnyTranslator::Python(t) => None,
+            AnyTranslator::Python(_) => None,
         }
     }
 }

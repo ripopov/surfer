@@ -654,12 +654,12 @@ impl SystemState {
             }
             Message::GoToTime(time, viewport_idx) => {
                 let waves = self.user.waves.as_mut()?;
-                let time = time?;
-                let num_timestamps = waves
-                    .num_timestamps()
-                    .expect("No timestamps count, even though waveforms should be loaded");
-                waves.viewports[viewport_idx].go_to_time(&time.clone(), &num_timestamps);
-                self.invalidate_draw_commands();
+                // If there are no timestamps, the file is not fully loaded
+                if let Some(num_timestamps) = waves.num_timestamps() {
+                    let time = time?;
+                    waves.viewports[viewport_idx].go_to_time(&time.clone(), &num_timestamps);
+                    self.invalidate_draw_commands();
+                }
             }
             Message::SetTimeUnit(timeunit) => {
                 self.user.wanted_timeunit = timeunit;
@@ -675,11 +675,11 @@ impl SystemState {
                 viewport_idx,
             } => {
                 let waves = self.user.waves.as_mut()?;
-                let num_timestamps = waves
-                    .num_timestamps()
-                    .expect("No timestamps count, even though waveforms should be loaded");
-                waves.viewports[viewport_idx].zoom_to_range(&start, &end, &num_timestamps);
-                self.invalidate_draw_commands();
+                // If there are no timestamps, the file is not fully loaded
+                if let Some(num_timestamps) = waves.num_timestamps() {
+                    waves.viewports[viewport_idx].zoom_to_range(&start, &end, &num_timestamps);
+                    self.invalidate_draw_commands();
+                }
             }
             Message::VariableFormatChange(displayed_field_ref, format) => {
                 let waves = self.user.waves.as_mut()?;
@@ -873,25 +873,25 @@ impl SystemState {
                 skip_zero,
             } => {
                 let waves = self.user.waves.as_mut()?;
-                // if no cursor is set, move it to
-                // start of visible area transition for next transition
-                // end of visible area for previous transition
-                if waves.cursor.is_none() && waves.focused_item.is_some() {
-                    if let Some(vp) = waves.viewports.first() {
-                        let num_timestamps = waves
-                            .num_timestamps()
-                            .expect("No timestamps count, even though waveforms should be loaded");
-                        waves.cursor = if next {
-                            Some(vp.left_edge_time(&num_timestamps))
-                        } else {
-                            Some(vp.right_edge_time(&num_timestamps))
-                        };
+                // If there are no timestamps, the file is not fully loaded
+                if let Some(num_timestamps) = waves.num_timestamps() {
+                    // if no cursor is set, move it to
+                    // start of visible area transition for next transition
+                    // end of visible area for previous transition
+                    if waves.cursor.is_none() && waves.focused_item.is_some() {
+                        if let Some(vp) = waves.viewports.first() {
+                            waves.cursor = if next {
+                                Some(vp.left_edge_time(&num_timestamps))
+                            } else {
+                                Some(vp.right_edge_time(&num_timestamps))
+                            };
+                        }
                     }
-                }
-                waves.set_cursor_at_transition(next, variable, skip_zero);
-                let moved = waves.go_to_cursor_if_not_in_view();
-                if moved {
-                    self.invalidate_draw_commands();
+                    waves.set_cursor_at_transition(next, variable, skip_zero);
+                    let moved = waves.go_to_cursor_if_not_in_view();
+                    if moved {
+                        self.invalidate_draw_commands();
+                    }
                 }
             }
             Message::MoveTransaction { next } => {
@@ -1389,12 +1389,12 @@ impl SystemState {
             }
             Message::GoToMarkerPosition(idx, viewport_idx) => {
                 let waves = self.user.waves.as_mut()?;
-                let cursor = waves.markers.get(&idx)?;
-                let num_timestamps = waves
-                    .num_timestamps()
-                    .expect("No timestamps count, even though waveforms should be loaded");
-                waves.viewports[viewport_idx].go_to_time(cursor, &num_timestamps);
-                self.invalidate_draw_commands();
+                // If there are no timestamps, the file is not fully loaded
+                if let Some(num_timestamps) = waves.num_timestamps() {
+                    let cursor = waves.markers.get(&idx)?;
+                    waves.viewports[viewport_idx].go_to_time(cursor, &num_timestamps);
+                    self.invalidate_draw_commands();
+                }
             }
             Message::ChangeVariableNameType(vidx, name_type) => {
                 let waves = self.user.waves.as_mut()?;
