@@ -87,6 +87,16 @@ test:
         - cargo -V
         - cargo test --features python --color=always --locked -- --include-ignored
 
+test-linux-arm64:
+    tags:
+        - saas-linux-small-arm64
+    stage: test
+    extends: .snapshots
+    script:
+        - rustc -V
+        - cargo -V
+        - cargo test --features python --color=always --locked -- --include-ignored
+
 test-windows:
     tags:
         - saas-windows-medium-amd64
@@ -132,6 +142,7 @@ test-beta:
     stage: test
     extends: .snapshots
     script:
+        - apt install -y ninja-build clang
         - rustc -V
         - cargo -V
         - cargo test --features python --color=always --locked -- --include-ignored
@@ -296,6 +307,30 @@ rocky_build:
     # Do not run this in user repos as it tends to give errors
     rules:
         - if: '$CI_PROJECT_NAMESPACE == "surfer-project"'
+    interruptible: true
+
+linux_arm64_build:
+    tags:
+        - saas-linux-small-arm64
+    stage: deploy
+    needs: [test-linux-arm64]
+    script:
+        - apt-get update -y
+        - apt-get install -y openssl libssl-dev zip
+        - git fetch --tags
+        - rustc -V
+        - cargo -V
+        - cargo build --release --locked --features accesskit --timings --color always
+        - mkdir dist
+        - cp target/release/surfer dist/surfer
+        - cp target/release/surver dist/surver
+        - cd dist
+        - zip ../surfer_linux_arm64.zip surfer surver
+    artifacts:
+        paths:
+            - surfer_linux_arm64.zip
+            - target/cargo-timings/*.html
+        expire_in: 1 week
     interruptible: true
 
 windows_build:
