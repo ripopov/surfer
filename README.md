@@ -85,22 +85,21 @@ You can install your own version of surfer with `cargo install --path surfer`.
 
 ### Pre-built Linux binary
 
-You can download a pre-built Linux binary
-[here](https://gitlab.com/api/v4/projects/42073614/jobs/artifacts/main/raw/surfer_linux.zip?job=linux_build).
+You can download a pre-built [Linux binary](https://gitlab.com/api/v4/projects/42073614/jobs/artifacts/main/raw/surfer_linux.zip?job=linux_build).
 It is built on a Debian system with some dynamically linked libs, so it may
 not work on all systems.
 
+You can also download a pre-built [Linux binary](https://gitlab.com/api/v4/projects/42073614/jobs/artifacts/main/raw/surfer_linux_rocky.zip?job=rocky_build) suitable for RHEL-like distributions and a pre-built [ARM64 Linux binary](https://gitlab.com/api/v4/projects/42073614/jobs/artifacts/main/raw/surfer_linux_arm64.zip?job=linux_arm64_build).
+
 ### Pre-built Windows binary
 
-You can download a pre-built Windows binary
-[here](https://gitlab.com/api/v4/projects/42073614/jobs/artifacts/main/raw/surfer_win.zip?job=windows_build).
+You can download a pre-built [Windows binary](https://gitlab.com/api/v4/projects/42073614/jobs/artifacts/main/raw/surfer_win.zip?job=windows_build).
 
 Note that sometimes Windows Defender has been known to report Surfer [and other rust projects](https://github.com/cargo-bins/cargo-binstall/issues/945) as a trojan. If in doubt, please use [Virus total](https://www.virustotal.com/) to check.
 
 ### Pre-built macos-aarch64 binary
 
-You can download a pre-built macos-aarch64 binary
-[here](https://gitlab.com/api/v4/projects/42073614/jobs/artifacts/main/raw/surfer_macos-aarch64.zip?job=macos-aarch64_build).
+You can download a pre-built [macos-aarch64 binary](https://gitlab.com/api/v4/projects/42073614/jobs/artifacts/main/raw/surfer_macos-aarch64.zip?job=macos-aarch64_build).
 
 However, this binary is currently not signed, so most users will not be able to install it as is. We are looking for a solution to this.
 
@@ -238,7 +237,7 @@ As an indication of the status of the project, here is an incomplete list of sup
   - [x] Leading/trailing zeros/ones
   - [x] Identical MSBs
   - [ ] Custom translation via Python API
-  - [ ] Custom translation via WASM API
+  - [x] Custom translation via WASM API
 - [x] Dividers
 - [x] Wave file reloading
 - [x] Saving and loading selected waves
@@ -256,7 +255,7 @@ As an indication of the status of the project, here is an incomplete list of sup
   - [x] Loading of commands on startup
   - [x] Loading of script file/commands in running instance
   - [ ] Logging of commands (generation of log file to be executed later)
-- [ ] Grouping of variables
+- [x] Grouping of variables
 - [ ] Computed variables, e.g., `a >= 100`
 - [ ] Clock period time unit
 - [x] Configurable color schemes
