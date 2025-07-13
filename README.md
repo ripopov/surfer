@@ -85,24 +85,39 @@ You can install your own version of surfer with `cargo install --path surfer`.
 
 ### Pre-built Linux binary
 
-You can download a pre-built Linux binary
-[here](https://gitlab.com/api/v4/projects/42073614/jobs/artifacts/main/raw/surfer_linux.zip?job=linux_build).
+You can download a pre-built [Linux binary](https://gitlab.com/api/v4/projects/42073614/jobs/artifacts/main/raw/surfer_linux.zip?job=linux_build).
 It is built on a Debian system with some dynamically linked libs, so it may
 not work on all systems.
 
+You can also download a pre-built [Linux binary](https://gitlab.com/api/v4/projects/42073614/jobs/artifacts/main/raw/surfer_linux_rocky.zip?job=rocky_build) suitable for RHEL-like distributions and a pre-built [ARM64 Linux binary](https://gitlab.com/api/v4/projects/42073614/jobs/artifacts/main/raw/surfer_linux_arm64.zip?job=linux_arm64_build).
+
+It is also possible to install through the package manager for [Arch](https://aur.archlinux.org/packages/surfer-waveform-git-bin), [Nix](https://search.nixos.org/packages?channel=25.05&from=0&size=50&sort=alpha_asc&type=packages&query=surfer), and [Solus](https://packages.getsol.us/unstable/s/surfer/).
+
 ### Pre-built Windows binary
 
-You can download a pre-built Windows binary
-[here](https://gitlab.com/api/v4/projects/42073614/jobs/artifacts/main/raw/surfer_win.zip?job=windows_build).
+You can download a pre-built [Windows binary](https://gitlab.com/api/v4/projects/42073614/jobs/artifacts/main/raw/surfer_win.zip?job=windows_build).
 
 Note that sometimes Windows Defender has been known to report Surfer [and other rust projects](https://github.com/cargo-bins/cargo-binstall/issues/945) as a trojan. If in doubt, please use [Virus total](https://www.virustotal.com/) to check.
 
 ### Pre-built macos-aarch64 binary
 
-You can download a pre-built macos-aarch64 binary
-[here](https://gitlab.com/api/v4/projects/42073614/jobs/artifacts/main/raw/surfer_macos-aarch64.zip?job=macos-aarch64_build).
+You can download a pre-built [macos-aarch64 binary](https://gitlab.com/api/v4/projects/42073614/jobs/artifacts/main/raw/surfer_macos-aarch64.zip?job=macos-aarch64_build).
 
 However, this binary is currently not signed, so most users will not be able to install it as is. We are looking for a solution to this.
+
+It is also possible to install Surfer through [Homebrew](https://formulae.brew.sh/formula/surfer):
+
+``` bash
+brew install surfer
+```
+
+to get the latest released version or
+
+``` bash
+brew install surfer --HEAD
+```
+
+to get the latest git version (currently recommended).
 
 ### WSL support
 
@@ -128,7 +143,7 @@ To learn more about configuration, have a look at our [wiki](https://gitlab.com/
 
 ## Server Mode (experimental)
 
-It is possible to start Surfer in server mode on one computer and open the wave form viewer on another computer to avoid copying the wave form files. There is also a stand-alone version of the server: Surver. Run
+It is possible to start Surfer in server mode on one computer and open the waveform viewer on another computer to avoid copying the waveform files. There is also a stand-alone version of the server: Surver. Run
 
 ```bash
 surfer server --file waveform.vcd/fst/ghw
@@ -140,7 +155,7 @@ or, after installing `surver` with `cargo install --path surver`,
 surver waveform.vcd/fst/ghw
 ```
 
-on the computer where the wave form is located and follow the instructions.
+on the computer where the waveform is located and follow the instructions.
 
 ## Development Information
 
@@ -191,7 +206,7 @@ As an indication of the status of the project, here is an incomplete list of sup
 
 - [x] Basic rendering of waves
 - [x] Snappy zooming, panning and general interaction
-- [x] Wave form file format support
+- [x] Waveform file format support
   - [x] VCD loading
   - [x] FST loading
   - [x] GHW loading
@@ -238,7 +253,7 @@ As an indication of the status of the project, here is an incomplete list of sup
   - [x] Leading/trailing zeros/ones
   - [x] Identical MSBs
   - [ ] Custom translation via Python API
-  - [ ] Custom translation via WASM API
+  - [x] Custom translation via WASM API
 - [x] Dividers
 - [x] Wave file reloading
 - [x] Saving and loading selected waves
@@ -256,7 +271,7 @@ As an indication of the status of the project, here is an incomplete list of sup
   - [x] Loading of commands on startup
   - [x] Loading of script file/commands in running instance
   - [ ] Logging of commands (generation of log file to be executed later)
-- [ ] Grouping of variables
+- [x] Grouping of variables
 - [ ] Computed variables, e.g., `a >= 100`
 - [ ] Clock period time unit
 - [x] Configurable color schemes
