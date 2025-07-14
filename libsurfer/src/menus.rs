@@ -54,14 +54,14 @@ impl ButtonBuilder {
     }
 
     pub fn add_leave_menu(self, msgs: &mut Vec<Message>, ui: &mut Ui) {
-        self.add_inner(false, msgs, ui);
+        self.add_inner(msgs, ui);
     }
 
     pub fn add_closing_menu(self, msgs: &mut Vec<Message>, ui: &mut Ui) {
-        self.add_inner(true, msgs, ui);
+        self.add_inner(msgs, ui);
     }
 
-    pub fn add_inner(self, close_menu: bool, msgs: &mut Vec<Message>, ui: &mut Ui) {
+    pub fn add_inner(self, msgs: &mut Vec<Message>, ui: &mut Ui) {
         let button = Button::new(self.text);
         let button = if let Some(s) = self.shortcut {
             button.shortcut_text(s)
@@ -70,7 +70,6 @@ impl ButtonBuilder {
         };
         if ui.add_enabled(self.enabled, button).clicked() {
             msgs.push(self.message);
-            if close_menu {}
         }
     }
 }

@@ -2039,7 +2039,7 @@ impl SystemState {
         };
 
         let builder = UiBuilder::new().max_rect(rect_with_margin);
-        ui.allocate_new_ui(builder, |ui| {
+        ui.scope_builder(builder, |ui| {
             let text_style = TextStyle::Monospace;
             ui.style_mut().override_text_style = Some(text_style);
             for (vidx, drawing_info) in waves
