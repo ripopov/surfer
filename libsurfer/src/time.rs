@@ -117,7 +117,6 @@ pub fn timeunit_menu(ui: &mut Ui, msgs: &mut Vec<Message>, wanted_timeunit: &Tim
         ui.radio(*wanted_timeunit == timeunit, timeunit.to_string())
             .clicked()
             .then(|| {
-                ui.close_menu();
                 msgs.push(Message::SetTimeUnit(timeunit));
             });
     }
@@ -176,7 +175,6 @@ pub fn timeformat_menu(ui: &mut Ui, msgs: &mut Vec<Message>, current_timeformat:
         )
         .clicked()
         .then(|| {
-            ui.close_menu();
             msgs.push(Message::SetTimeStringFormatting(Some(time_string_format)));
         });
     }

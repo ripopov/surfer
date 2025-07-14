@@ -83,7 +83,6 @@ pub fn clock_highlight_type_menu(
         )
         .clicked()
         .then(|| {
-            ui.close_menu();
             msgs.push(Message::SetClockHighlightType(highlight_type));
         });
     }
