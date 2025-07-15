@@ -481,7 +481,7 @@ impl SystemState {
             ui.menu_button("Height", |ui| {
                 let selected_size = displayed_item.height_scaling_factor();
                 for size in &self.user.config.layout.waveforms_line_height_multiples {
-                    ui.radio(selected_size == *size, format!("{}", size))
+                    ui.radio(selected_size == *size, format!("{size}"))
                         .clicked()
                         .then(|| {
                             msgs.push(Message::ItemHeightScalingFactorChange(

@@ -373,7 +373,7 @@ pub async fn server_main(
             let service =
                 service_fn(move |req| handle(state.clone(), shared.clone(), tx.clone(), req));
             if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
-                error!("server error: {}", e);
+                error!("server error: {e}");
             }
         });
     }

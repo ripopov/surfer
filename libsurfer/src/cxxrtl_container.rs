@@ -477,7 +477,7 @@ impl CxxrtlContainer {
 
     pub fn modules(&mut self) -> Vec<ScopeRef> {
         if let Some(scopes) = &self.scopes() {
-            scopes.iter().map(|(k, _)| k.clone()).collect()
+            scopes.keys().cloned().collect()
         } else {
             vec![]
         }
