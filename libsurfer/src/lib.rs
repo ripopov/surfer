@@ -350,7 +350,7 @@ impl SystemState {
             }
             Message::AddStreamOrGenerator(s) => {
                 let undo_msg = if let Some(gen_id) = s.gen_id {
-                    format!("Add generator(id: {})", gen_id)
+                    format!("Add generator(id: {gen_id})")
                 } else {
                     format!("Add stream(id: {})", s.stream_id)
                 };
@@ -858,7 +858,7 @@ impl SystemState {
                 }
             }
             Message::ItemHeightScalingFactorChange(vidx, scale) => {
-                self.save_current_canvas(format!("Change item height scaling factor to {}", scale));
+                self.save_current_canvas(format!("Change item height scaling factor to {scale}"));
                 let waves = self.user.waves.as_mut()?;
                 let vidx = match vidx {
                     MessageTarget::Explicit(vidx) => vidx,

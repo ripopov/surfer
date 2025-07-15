@@ -548,7 +548,7 @@ impl WaveData {
             .transactions
             .is_empty()
         {
-            info!("(Generator {})Loading transactions into memory!", gen_id);
+            info!("(Generator {gen_id})Loading transactions into memory!");
             match self
                 .inner
                 .as_transactions_mut()
@@ -556,7 +556,7 @@ impl WaveData {
                 .inner
                 .load_stream_into_memory(gen_ref.stream_id)
             {
-                Ok(_) => info!("(Generator {}) Finished loading transactions!", gen_id),
+                Ok(_) => info!("(Generator {gen_id}) Finished loading transactions!"),
                 Err(_) => return,
             }
         }

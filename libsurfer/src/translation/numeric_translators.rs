@@ -462,7 +462,7 @@ impl Translator<VarId, ScopeId, Message> for UnsignedFixedPointTranslator {
         let (string, value_kind) = if let Some(idx) = &variable.index {
             translate_numeric(|v| big_uint_to_ufixed(&v, -idx.lsb), value)
         } else {
-            translate_numeric(|v| format!("{}", v), value)
+            translate_numeric(|v| format!("{v}"), value)
         };
         Ok(TranslationResult {
             kind: value_kind,
@@ -502,7 +502,7 @@ impl Translator<VarId, ScopeId, Message> for SignedFixedPointTranslator {
                 value,
             )
         } else {
-            translate_numeric(|v| format!("{}", v), value)
+            translate_numeric(|v| format!("{v}"), value)
         };
         Ok(TranslationResult {
             kind: value_kind,
