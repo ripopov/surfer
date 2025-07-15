@@ -525,7 +525,6 @@ impl SystemState {
                 .as_ref()
                 .is_some_and(|meta| meta.variable_type == Some(VariableType::VCDParameter));
             if !is_parameter && ui.button("Expand scope").clicked() {
-                ui.close_menu();
                 let scope_path = path.root.path.clone();
                 let scope_type = ScopeType::WaveScope(scope_path.clone());
                 msgs.push(Message::SetActiveScope(scope_type));
