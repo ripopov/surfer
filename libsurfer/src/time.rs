@@ -25,6 +25,12 @@ pub struct TimeScale {
 
 #[derive(Debug, Clone, Copy, Display, Eq, PartialEq, Serialize, Deserialize, Sequence)]
 pub enum TimeUnit {
+    #[display("zs")]
+    ZeptoSeconds,
+
+    #[display("as")]
+    AttoSeconds,
+
     #[display("fs")]
     FemtoSeconds,
 
@@ -57,6 +63,8 @@ const THIN_SPACE: &str = "\u{2009}";
 impl From<wellen::TimescaleUnit> for TimeUnit {
     fn from(timescale: wellen::TimescaleUnit) -> Self {
         match timescale {
+            wellen::TimescaleUnit::ZeptoSeconds => TimeUnit::ZeptoSeconds,
+            wellen::TimescaleUnit::AttoSeconds => TimeUnit::AttoSeconds,
             wellen::TimescaleUnit::FemtoSeconds => TimeUnit::FemtoSeconds,
             wellen::TimescaleUnit::PicoSeconds => TimeUnit::PicoSeconds,
             wellen::TimescaleUnit::NanoSeconds => TimeUnit::NanoSeconds,
@@ -87,6 +95,8 @@ impl TimeUnit {
     /// Get the power-of-ten exponent for a time unit.
     fn exponent(&self) -> i8 {
         match self {
+            TimeUnit::ZeptoSeconds => -21,
+            TimeUnit::AttoSeconds => -18,
             TimeUnit::FemtoSeconds => -15,
             TimeUnit::PicoSeconds => -12,
             TimeUnit::NanoSeconds => -9,
@@ -100,6 +110,8 @@ impl TimeUnit {
     /// Convert a power-of-ten exponent to a time unit.
     fn from_exponent(exponent: i8) -> Self {
         match exponent {
+            -21 => TimeUnit::ZeptoSeconds,
+            -18 => TimeUnit::AttoSeconds,
             -15 => TimeUnit::FemtoSeconds,
             -12 => TimeUnit::PicoSeconds,
             -9 => TimeUnit::NanoSeconds,
