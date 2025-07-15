@@ -150,7 +150,7 @@ impl SystemState {
         }
 
         if let Some(port) = args.wcp_initiate {
-            let addr = format!("127.0.0.1:{}", port);
+            let addr = format!("127.0.0.1:{port}");
             self.add_batch_message(Message::StartWcpServer {
                 address: Some(addr),
                 initiate: true,

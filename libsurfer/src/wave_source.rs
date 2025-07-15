@@ -293,7 +293,7 @@ impl SystemState {
                         let sender = self.channels.msg_sender.clone();
                         perform_async_work(async move {
                             let new_state = match ron::de::from_bytes(&bytes)
-                                .context(format!("Failed loading {}", path))
+                                .context(format!("Failed loading {path}"))
                             {
                                 Ok(s) => s,
                                 Err(e) => {

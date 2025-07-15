@@ -122,7 +122,7 @@ impl SystemState {
 pub async fn save_state_dialog() -> Option<rfd::FileHandle> {
     create_file_dialog(
         (
-            format!("Surfer state files (*.{})", STATE_FILE_EXTENSION),
+            format!("Surfer state files (*.{STATE_FILE_EXTENSION})"),
             ([STATE_FILE_EXTENSION.to_string()]).to_vec(),
         ),
         "Save state",
@@ -134,7 +134,7 @@ pub async fn save_state_dialog() -> Option<rfd::FileHandle> {
 pub async fn load_state_dialog() -> Option<rfd::FileHandle> {
     create_file_dialog(
         (
-            format!("Surfer state files (*.{})", STATE_FILE_EXTENSION),
+            format!("Surfer state files (*.{STATE_FILE_EXTENSION})"),
             ([STATE_FILE_EXTENSION.to_string()]).to_vec(),
         ),
         "Load state",

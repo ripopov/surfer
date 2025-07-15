@@ -11,7 +11,7 @@ pub(crate) fn big_uint_to_ufixed(uint: &BigUint, lg_scaling_factor: i64) -> Stri
         Ordering::Less => {
             format!("{}", uint << (-lg_scaling_factor))
         }
-        Ordering::Equal => format!("{}", uint),
+        Ordering::Equal => format!("{uint}"),
         Ordering::Greater => {
             let mask = (BigUint::one() << lg_scaling_factor) - 1_u32;
 
@@ -37,7 +37,7 @@ pub(crate) fn big_uint_to_ufixed(uint: &BigUint, lg_scaling_factor: i64) -> Stri
                     }
                 }
 
-                format!("{}.{}", integer_part, fractional_part)
+                format!("{integer_part}.{fractional_part}")
             }
         }
     }
