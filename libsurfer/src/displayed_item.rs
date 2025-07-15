@@ -152,7 +152,7 @@ impl DisplayedMarker {
         let style = Style::default();
         let mut layout_job = LayoutJob::default();
         self.rich_text(color, &style, &mut layout_job);
-        WidgetText::LayoutJob(layout_job)
+        WidgetText::LayoutJob(layout_job.into())
     }
 
     pub fn rich_text(&self, color: &Color32, style: &Style, layout_job: &mut LayoutJob) {

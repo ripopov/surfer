@@ -92,7 +92,7 @@ impl WebHandle {
         canvas: web_sys::HtmlCanvasElement,
     ) -> Result<(), wasm_bindgen::JsValue> {
         let web_options = eframe::WebOptions {
-            should_propagate_event: Box::new(|_event| true),
+            should_stop_propagation: Box::new(|_event| false),
             ..Default::default()
         };
 
