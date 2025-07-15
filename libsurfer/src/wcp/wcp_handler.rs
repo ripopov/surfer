@@ -114,7 +114,7 @@ impl SystemState {
                                 self.send_error(
                                     "get_item_info",
                                     vec![],
-                                    &format!("No item with id {:?}", id),
+                                    &format!("No item with id {id:?}"),
                                 );
                                 return;
                             }
@@ -149,7 +149,7 @@ impl SystemState {
                     }
                     WcpCommand::add_scope { scope, recursive } => {
                         if self.user.waves.is_some() {
-                            self.save_current_canvas(format!("Add scope {}", scope));
+                            self.save_current_canvas(format!("Add scope {scope}"));
                         }
                         let scope = ScopeRef::from_hierarchy_string(scope);
                         let variables = self.get_scope(scope, *recursive);
@@ -272,10 +272,7 @@ impl SystemState {
                     self.send_error(
                         "greeting",
                         vec![],
-                        &format!(
-                            "Surfer only supports WCP version 0, client requested {}",
-                            version
-                        ),
+                        &format!("Surfer only supports WCP version 0, client requested {version}"),
                     )
                 } else {
                     self.wcp_client_capabilities = WcpClientCapabilities::new();
