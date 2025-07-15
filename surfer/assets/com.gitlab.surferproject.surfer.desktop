@@ -5,6 +5,7 @@ GenericName=Electronic Waveform Viewer
 Comment=A waveform viewer with a focus on a snappy usable interface, and extensibility.
 TryExec=surfer
 Exec=surfer
+Icon=com.gitlab.surferproject.surfer.png
 Terminal=false
 Categories=Utility;Electronics;Engineering;
 StartupNotify=true
