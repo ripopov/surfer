@@ -66,6 +66,20 @@ impl SystemState {
         {
             draw_progress_information(ui, progress_data);
         }
+
+        // Show analog cache building status
+        if let Some(waves) = waves {
+            let in_progress_count = waves.cache_build_in_progress.len();
+            if in_progress_count > 0 {
+                ui.add_space(STATUS_SPACING);
+                ui.spinner();
+                if in_progress_count == 1 {
+                    ui.label("Building analog cache…");
+                } else {
+                    ui.label(format!("Building {} analog caches…", in_progress_count));
+                }
+            }
+        }
     }
 
     /// Draw right-aligned status bar elements: cursor time, undo info, and count

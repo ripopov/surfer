@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
+use std::sync::Arc;
 
 use derive_more::Debug;
 use eyre::{Result, anyhow, bail};
@@ -32,10 +33,10 @@ pub struct WellenContainer {
     server: Option<String>,
     scopes: Vec<String>,
     vars: Vec<String>,
-    signals: HashMap<SignalRef, Signal>,
+    signals: HashMap<SignalRef, Arc<Signal>>,
     /// keeps track of signals that need to be loaded once the body of the waveform file has been loaded
     signals_to_be_loaded: HashSet<SignalRef>,
-    time_table: TimeTable,
+    time_table: Arc<TimeTable>,
     #[debug(skip)]
     source: Option<SignalSource>,
     unique_id: u64,
@@ -141,7 +142,7 @@ impl WellenContainer {
             vars,
             signals: HashMap::new(),
             signals_to_be_loaded: HashSet::new(),
-            time_table: vec![],
+            time_table: Arc::new(vec![]),
             source: None,
             unique_id,
             body_loaded: false,
@@ -163,7 +164,7 @@ impl WellenContainer {
                         "We are connected to a server, but also received the result of parsing a file locally. Something is going wrong here!"
                     );
                 }
-                self.time_table = body.time_table;
+                self.time_table = Arc::new(body.time_table);
                 self.source = Some(body.source);
             }
             BodyResult::Remote(time_table, server) => {
@@ -174,7 +175,7 @@ impl WellenContainer {
                 } else {
                     bail!("Missing server URL!");
                 }
-                self.time_table = time_table;
+                self.time_table = Arc::new(time_table);
             }
         }
         self.body_loaded = true;
@@ -416,7 +417,7 @@ impl WellenContainer {
             debug_assert!(self.server.is_some() || self.source.is_some());
             // install signals
             for (id, signal) in res.signals {
-                self.signals.insert(id, signal);
+                self.signals.insert(id, Arc::new(signal));
             }
         }
 
@@ -611,6 +612,57 @@ impl WellenContainer {
             enum_map: self.get_enum_map(var),
             encoding,
         })
+    }
+
+    pub fn signal_accessor(&self, signal_ref: SignalRef) -> Result<WellenSignalAccessor> {
+        let signal = self
+            .signals
+            .get(&signal_ref)
+            .cloned()
+            .ok_or_else(|| anyhow!("Signal not loaded"))?;
+        Ok(WellenSignalAccessor::new(
+            signal,
+            Arc::clone(&self.time_table),
+        ))
+    }
+
+    /// Get the SignalRef for a variable (canonical signal identity for cache keys)
+    pub fn signal_ref(&self, variable: &VariableRef) -> Result<SignalRef> {
+        let var_ref = self.get_var_ref(variable)?;
+        Ok(self.hierarchy[var_ref].signal_ref())
+    }
+
+    /// Check if a signal is already loaded (data available)
+    pub fn is_signal_loaded(&self, signal_ref: SignalRef) -> bool {
+        self.signals.contains_key(&signal_ref)
+    }
+}
+
+/// Wellen-specific accessor for iterating through signal changes in a time range
+pub struct WellenSignalAccessor {
+    signal: Arc<Signal>,
+    time_table: Arc<TimeTable>,
+}
+
+impl WellenSignalAccessor {
+    /// Create a new WellenSignalAccessor from Arc pointers
+    pub fn new(signal: Arc<Signal>, time_table: Arc<TimeTable>) -> Self {
+        Self { signal, time_table }
+    }
+
+    /// Iterator over signal changes as (time_u64, value) pairs
+    pub fn iter_changes(
+        &self,
+    ) -> Box<dyn Iterator<Item = (u64, surfer_translation_types::VariableValue)> + '_> {
+        Box::new(
+            self.signal
+                .iter_changes()
+                .filter_map(|(time_idx, signal_value)| {
+                    let time_u64 = *self.time_table.get(time_idx as usize)?;
+                    let var_value = convert_variable_value(signal_value);
+                    Some((time_u64, var_value))
+                }),
+        )
     }
 }
 
