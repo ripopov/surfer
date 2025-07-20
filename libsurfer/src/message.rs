@@ -6,7 +6,9 @@ use emath::{Pos2, Vec2};
 use ftr_parser::types::Transaction;
 use num::BigInt;
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 use surver::Status;
 
 use crate::async_util::AsyncJob;
@@ -31,7 +33,7 @@ use crate::{
     time::{TimeStringFormatting, TimeUnit},
     variable_filter::VariableIOFilterType,
     variable_name_type::VariableNameType,
-    wave_container::{ScopeRef, VariableRef, WaveContainer},
+    wave_container::{AnalogCacheKey, ScopeRef, VariableRef, WaveContainer},
     wave_source::{CxxrtlKind, LoadOptions, WaveFormat},
     wellen::{BodyResult, HeaderResult, LoadSignalsResult},
     MoveDir, VariableNameFilterType, WaveSource,
@@ -190,7 +192,7 @@ pub enum Message {
     #[serde(skip)]
     Error(eyre::Error),
     #[serde(skip)]
-    TranslatorLoaded(#[debug(skip)] Box<DynTranslator>),
+    TranslatorLoaded(#[debug(skip)] Arc<DynTranslator>),
     /// Take note that the specified translator errored on a `translates` call on the
     /// specified variable
     BlacklistTranslator(VariableRef, String),
@@ -361,6 +363,30 @@ pub enum Message {
     ExpandDrawnItem {
         item: DisplayedItemRef,
         levels: usize,
+    },
+    /// Set analog settings for a variable
+    SetAnalogSettings(
+        MessageTarget<VisibleItemIndex>,
+        crate::displayed_item::AnalogSettings,
+    ),
+    /// Build analog cache asynchronously
+    BuildAnalogCache {
+        cache_key: AnalogCacheKey,
+        variable_ref: crate::wave_container::VariableRef,
+    },
+    #[serde(skip)]
+    /// Analog cache build completed
+    AnalogCacheBuilt {
+        cache_key: AnalogCacheKey,
+        #[debug(skip)]
+        cache: Option<crate::analog_signal_cache::AnalogSignalCache>,
+        error: Option<String>,
+    },
+    #[serde(skip)]
+    /// Sweep unused analog caches after draw command generation
+    SweepUnusedAnalogCaches {
+        #[debug(skip)]
+        used_keys: HashSet<AnalogCacheKey>,
     },
 
     SetViewportStrategy(ViewportStrategy),

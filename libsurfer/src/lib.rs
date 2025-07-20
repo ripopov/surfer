@@ -1,5 +1,7 @@
 #![deny(unused_crate_dependencies)]
 
+pub mod analog_renderer;
+pub mod analog_signal_cache;
 pub mod async_util;
 pub mod batch_commands;
 #[cfg(feature = "performance_plot")]
@@ -873,6 +875,51 @@ impl SystemState {
                     .entry(node.item_ref)
                     .and_modify(|item| item.set_height_scaling_factor(scale));
             }
+            Message::SetAnalogSettings(vidx, new_settings) => {
+                self.save_current_canvas("Set analog settings".into());
+                self.invalidate_draw_commands();
+                let waves = self.user.waves.as_mut()?;
+
+                match vidx {
+                    MessageTarget::Explicit(vidx) => {
+                        let node = waves.items_tree.get_visible(vidx)?;
+                        waves
+                            .displayed_items
+                            .entry(node.item_ref)
+                            .and_modify(|item| {
+                                if let DisplayedItem::Variable(var) = item {
+                                    var.analog_settings = new_settings;
+                                }
+                            });
+                    }
+                    MessageTarget::CurrentSelection => {
+                        if let Some(focused) = waves.focused_item {
+                            let node = waves.items_tree.get_visible(focused)?;
+                            waves
+                                .displayed_items
+                                .entry(node.item_ref)
+                                .and_modify(|item| {
+                                    if let DisplayedItem::Variable(var) = item {
+                                        var.analog_settings = new_settings;
+                                    }
+                                });
+                        }
+
+                        let selected_items: Vec<_> = waves
+                            .items_tree
+                            .iter_visible_selected()
+                            .map(|node| node.item_ref)
+                            .collect();
+                        for item_ref in selected_items {
+                            waves.displayed_items.entry(item_ref).and_modify(|item| {
+                                if let DisplayedItem::Variable(var) = item {
+                                    var.analog_settings = new_settings;
+                                }
+                            });
+                        }
+                    }
+                }
+            }
             Message::MoveCursorToTransition {
                 next,
                 variable,
@@ -1012,7 +1059,7 @@ impl SystemState {
                 perform_work(
                     move || match PluginTranslator::new(path.into_std_path_buf()) {
                         Ok(t) => {
-                            if let Err(e) = sender.send(Message::TranslatorLoaded(Box::new(t))) {
+                            if let Err(e) = sender.send(Message::TranslatorLoaded(Arc::new(t))) {
                                 error!("Failed to send message: {e}");
                             }
                         }
@@ -1918,6 +1965,45 @@ impl SystemState {
                     }
                     self.channels.wcp_s2c_sender = Some(WCP_SC_HANDLER.tx.clone());
                 }
+            }
+            Message::BuildAnalogCache {
+                cache_key,
+                variable_ref,
+            } => {
+                let waves = self.user.waves.as_mut()?;
+                if waves.cache_build_in_progress.contains(&cache_key) {
+                    return None; // Ignore duplicate request
+                }
+                waves.cache_build_in_progress.insert(cache_key.clone());
+                let translator = self.translators.clone_translator(&cache_key.1);
+                waves.build_analog_cache_async(
+                    cache_key,
+                    &variable_ref,
+                    translator,
+                    &self.channels.msg_sender,
+                );
+            }
+            Message::AnalogCacheBuilt {
+                cache_key,
+                cache,
+                error,
+            } => {
+                OUTSTANDING_TRANSACTIONS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                let waves = self.user.waves.as_mut()?;
+                waves.cache_build_in_progress.remove(&cache_key);
+                if let Some(cache) = cache {
+                    waves.analog_signal_caches.insert(cache_key.clone(), cache);
+                }
+                if let Some(err) = error {
+                    warn!("Failed to build analog cache for {cache_key:?}: {err}");
+                }
+                self.invalidate_draw_commands();
+            }
+            Message::SweepUnusedAnalogCaches { used_keys } => {
+                let waves = self.user.waves.as_mut()?;
+                waves
+                    .analog_signal_caches
+                    .retain(|key, _| used_keys.contains(key));
             }
             Message::Exit | Message::ToggleFullscreen => {} // Handled in eframe::update
             Message::AddViewport => {

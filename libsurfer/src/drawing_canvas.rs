@@ -9,17 +9,20 @@ use num::bigint::{ToBigInt, ToBigUint};
 use num::{BigInt, BigUint, ToPrimitive};
 use rayon::prelude::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::f32::consts::PI;
 use surfer_translation_types::{
     SubFieldFlatTranslationResult, TranslatedValue, ValueKind, VariableInfo, VariableType,
 };
 use tracing::{error, warn};
 
+use crate::analog_renderer::AnalogDrawingCommand;
 use crate::clock_highlighting::draw_clock_edge_marks;
 use crate::config::SurferTheme;
 use crate::data_container::DataContainer;
-use crate::displayed_item::{DisplayedFieldRef, DisplayedItemRef, DisplayedVariable};
+use crate::displayed_item::{
+    AnalogSettings, DisplayedFieldRef, DisplayedItemRef, DisplayedVariable,
+};
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::time::get_ticks;
 use crate::tooltips::handle_transaction_tooltip;
@@ -27,7 +30,7 @@ use crate::transaction_container::{TransactionRef, TransactionStreamRef};
 use crate::translation::{TranslationResultExt, TranslatorList, ValueKindExt, VariableInfoExt};
 use crate::view::{DrawConfig, DrawingContext, ItemDrawingInfo};
 use crate::viewport::Viewport;
-use crate::wave_container::{QueryResult, VariableRefExt};
+use crate::wave_container::{AnalogCacheKey, QueryResult, VariableRefExt};
 use crate::wave_data::WaveData;
 use crate::CachedDrawData::TransactionDrawData;
 use crate::{
@@ -36,49 +39,42 @@ use crate::{
 };
 
 pub struct DrawnRegion {
-    inner: Option<TranslatedValue>,
+    pub inner: Option<TranslatedValue>,
     /// True if a transition should be drawn even if there is no change in the value
     /// between the previous and next pixels. Only used by the bool drawing logic to
     /// draw draw a vertical line and prevent apparent aliasing
     force_anti_alias: bool,
 }
 
-/// List of values to draw for a variable. It is an ordered list of values that should
-/// be drawn at the *start time* until the *start time* of the next value
-pub struct DrawingCommands {
-    is_bool: bool,
-    is_clock: bool,
-    values: Vec<(f32, DrawnRegion)>,
+pub enum DrawingCommands {
+    Digital(DigitalDrawingCommands),
+    Analog(AnalogDrawingCommands),
 }
 
-impl DrawingCommands {
-    pub fn new_bool() -> Self {
-        Self {
-            values: vec![],
-            is_bool: true,
-            is_clock: false,
-        }
-    }
+pub struct DigitalDrawingCommands {
+    pub is_bool: bool,
+    pub is_clock: bool,
+    pub values: Vec<(f32, DrawnRegion)>,
+}
 
-    pub fn new_clock() -> Self {
-        Self {
-            values: vec![],
-            is_bool: true,
-            is_clock: true,
-        }
-    }
+pub struct AnalogDrawingCommands {
+    /// Viewport min/max for the visible signal range (used for Y-axis scaling)
+    pub viewport_min: f64,
+    pub viewport_max: f64,
 
-    pub fn new_wide() -> Self {
-        Self {
-            values: vec![],
-            is_bool: false,
-            is_clock: false,
-        }
-    }
+    /// Global min/max across entire signal (used for global Y-axis scaling)
+    pub global_min: f64,
+    pub global_max: f64,
 
-    pub fn push(&mut self, val: (f32, DrawnRegion)) {
-        self.values.push(val);
-    }
+    /// Per-pixel drawing commands with flat spans and ranges
+    pub values: Vec<AnalogDrawingCommand>,
+
+    /// Used for clipping when interpolating with values outside the viewport.
+    pub min_valid_pixel: f32,
+    pub max_valid_pixel: f32,
+
+    /// Analog rendering settings (style, Y-axis scale, etc.)
+    pub analog_settings: AnalogSettings,
 }
 
 pub struct TxDrawingCommands {
@@ -87,13 +83,17 @@ pub struct TxDrawingCommands {
     gen_ref: TransactionStreamRef, // makes it easier to later access the actual Transaction object
 }
 
-struct VariableDrawCommands {
-    clock_edges: Vec<f32>,
-    display_id: DisplayedItemRef,
-    local_commands: HashMap<Vec<String>, DrawingCommands>,
-    local_msgs: Vec<Message>,
+pub(crate) struct VariableDrawCommands {
+    pub(crate) clock_edges: Vec<f32>,
+    pub(crate) display_id: DisplayedItemRef,
+    pub(crate) local_commands: HashMap<Vec<String>, DrawingCommands>,
+    pub(crate) local_msgs: Vec<Message>,
+    /// Analog cache key used during rendering (for mark-and-sweep invalidation)
+    pub(crate) used_cache_key: Option<AnalogCacheKey>,
 }
 
+/// Common setup for variable draw commands: extracts metadata and determines rendering mode.
+/// Routes to either analog or digital command generation.
 fn variable_draw_commands(
     displayed_variable: &DisplayedVariable,
     display_id: DisplayedItemRef,
@@ -103,11 +103,14 @@ fn variable_draw_commands(
     view_width: f32,
     viewport_idx: usize,
 ) -> Option<VariableDrawCommands> {
-    let mut clock_edges = vec![];
-    let mut local_msgs = vec![];
-
-    // Extract wave_container once to avoid repeated as_waves().unwrap() calls
     let wave_container = waves.inner.as_waves()?;
+
+    let signal_id = wave_container
+        .signal_id(&displayed_variable.variable_ref)
+        .ok()?;
+    if !wave_container.is_signal_loaded(&signal_id) {
+        return None;
+    }
 
     let meta = match wave_container
         .variable_meta(&displayed_variable.variable_ref)
@@ -122,11 +125,57 @@ fn variable_draw_commands(
 
     let displayed_field_ref: DisplayedFieldRef = display_id.into();
     let translator = waves.variable_translator(&displayed_field_ref, translators);
-    // we need to get the variable info here to get the correct info for aliases
     let info = translator.variable_info(&meta).unwrap();
+
+    let is_analog_mode = displayed_variable.analog_settings.enabled;
+    let is_bool = matches!(info, VariableInfo::Bool | VariableInfo::Clock);
+
+    if is_analog_mode && !is_bool {
+        return crate::analog_renderer::variable_analog_draw_commands(
+            displayed_variable,
+            display_id,
+            waves,
+            translators,
+            view_width,
+            viewport_idx,
+        );
+    }
+
+    variable_digital_draw_commands(
+        displayed_variable,
+        display_id,
+        timestamps,
+        waves,
+        translators,
+        wave_container,
+        &meta,
+        translator,
+        &info,
+        view_width,
+        viewport_idx,
+    )
+}
+
+/// Generate draw commands for digital waveform rendering.
+fn variable_digital_draw_commands(
+    displayed_variable: &DisplayedVariable,
+    display_id: DisplayedItemRef,
+    timestamps: &[(f32, num::BigUint)],
+    waves: &WaveData,
+    translators: &TranslatorList,
+    wave_container: &crate::wave_container::WaveContainer,
+    meta: &crate::wave_container::VariableMeta,
+    translator: &crate::translation::DynTranslator,
+    info: &VariableInfo,
+    view_width: f32,
+    viewport_idx: usize,
+) -> Option<VariableDrawCommands> {
+    let mut clock_edges = vec![];
+    let mut local_msgs = vec![];
+    let displayed_field_ref: DisplayedFieldRef = display_id.into();
     let num_timestamps = waves.num_timestamps().unwrap_or(1.into());
 
-    let mut local_commands: HashMap<Vec<_>, _> = HashMap::new();
+    let mut local_commands: HashMap<Vec<String>, DigitalDrawingCommands> = HashMap::new();
 
     let mut prev_values = HashMap::new();
 
@@ -183,7 +232,7 @@ fn variable_draw_commands(
             continue;
         }
 
-        let translation_result = match translator.translate(&meta, &val) {
+        let translation_result = match translator.translate(meta, &val) {
             Ok(result) => result,
             Err(e) => {
                 error!(
@@ -205,10 +254,11 @@ fn variable_draw_commands(
 
         for SubFieldFlatTranslationResult { names, value } in fields {
             let entry = local_commands.entry(names.clone()).or_insert_with(|| {
-                match info.get_subinfo(&names) {
-                    VariableInfo::Bool => DrawingCommands::new_bool(),
-                    VariableInfo::Clock => DrawingCommands::new_clock(),
-                    _ => DrawingCommands::new_wide(),
+                let subinfo = info.get_subinfo(&names);
+                DigitalDrawingCommands {
+                    is_bool: matches!(subinfo, VariableInfo::Bool | VariableInfo::Clock),
+                    is_clock: matches!(subinfo, VariableInfo::Clock),
+                    values: vec![],
                 }
             });
 
@@ -243,7 +293,7 @@ fn variable_draw_commands(
                     }
                 }
 
-                entry.push((
+                entry.values.push((
                     *pixel,
                     DrawnRegion {
                         inner: value,
@@ -256,8 +306,12 @@ fn variable_draw_commands(
     Some(VariableDrawCommands {
         clock_edges,
         display_id,
-        local_commands,
+        local_commands: local_commands
+            .into_iter()
+            .map(|(k, v)| (k, DrawingCommands::Digital(v)))
+            .collect(),
         local_msgs,
+        used_cache_key: None,
     })
 }
 
@@ -356,13 +410,20 @@ impl SystemState {
             })
             .collect::<Vec<_>>();
 
+        let mut used_analog_keys = HashSet::new();
+
         for VariableDrawCommands {
             clock_edges: mut new_clock_edges,
             display_id,
             local_commands,
             mut local_msgs,
+            used_cache_key,
         } in commands
         {
+            if let Some(key) = used_cache_key {
+                used_analog_keys.insert(key);
+            }
+
             msgs.append(&mut local_msgs);
             for (field, val) in local_commands {
                 draw_commands.insert(
@@ -375,6 +436,11 @@ impl SystemState {
             }
             clock_edges.append(&mut new_clock_edges);
         }
+
+        msgs.push(Message::SweepUnusedAnalogCaches {
+            used_keys: used_analog_keys,
+        });
+
         let ticks = get_ticks(
             &waves.viewports[viewport_idx],
             &waves.inner.metadata().timescale,
@@ -750,7 +816,7 @@ impl SystemState {
 
         match &self.draw_data.borrow()[viewport_idx] {
             Some(CachedDrawData::WaveDrawData(draw_data)) => {
-                self.draw_wave_data(waves, draw_data, &mut ctx);
+                self.draw_wave_data(waves, draw_data, frame_width, &mut ctx);
             }
             Some(CachedDrawData::TransactionDrawData(draw_data)) => {
                 self.draw_transaction_data(
@@ -838,6 +904,7 @@ impl SystemState {
         &self,
         waves: &WaveData,
         draw_data: &CachedWaveDrawData,
+        frame_width: f32,
         ctx: &mut DrawingContext,
     ) {
         let clock_edges = &draw_data.clock_edges;
@@ -912,27 +979,44 @@ impl SystemState {
                                 &self.user.config.theme.variable_default
                             }
                         });
-                        for (old, new) in commands.values.iter().zip(commands.values.iter().skip(1))
-                        {
-                            if commands.is_bool {
-                                self.draw_bool_transition(
-                                    (old, new),
-                                    new.1.force_anti_alias,
+                        match commands {
+                            DrawingCommands::Digital(digital_commands) => {
+                                for (old, new) in digital_commands
+                                    .values
+                                    .iter()
+                                    .zip(digital_commands.values.iter().skip(1))
+                                {
+                                    if digital_commands.is_bool {
+                                        self.draw_bool_transition(
+                                            (old, new),
+                                            new.1.force_anti_alias,
+                                            color,
+                                            y_offset,
+                                            height_scaling_factor,
+                                            digital_commands.is_clock && draw_clock_rising_marker,
+                                            self.fill_high_values(),
+                                            ctx,
+                                        );
+                                    } else {
+                                        self.draw_region(
+                                            (old, new),
+                                            color,
+                                            y_offset,
+                                            height_scaling_factor,
+                                            ctx,
+                                            *text_color,
+                                        );
+                                    }
+                                }
+                            }
+                            DrawingCommands::Analog(analog_commands) => {
+                                crate::analog_renderer::draw_analog(
+                                    analog_commands,
                                     color,
                                     y_offset,
                                     height_scaling_factor,
-                                    commands.is_clock && draw_clock_rising_marker,
-                                    self.fill_high_values(),
+                                    frame_width,
                                     ctx,
-                                );
-                            } else {
-                                self.draw_region(
-                                    (old, new),
-                                    color,
-                                    y_offset,
-                                    height_scaling_factor,
-                                    ctx,
-                                    *text_color,
                                 );
                             }
                         }

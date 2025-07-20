@@ -15,6 +15,9 @@ pub type ScopeRef = surfer_translation_types::ScopeRef<ScopeId>;
 pub type VariableRef = surfer_translation_types::VariableRef<VarId, ScopeId>;
 pub type VariableMeta = surfer_translation_types::VariableMeta<VarId, ScopeId>;
 
+/// Cache key for analog signal data: (signal_id, translator_name)
+pub type AnalogCacheKey = (SignalId, String);
+
 #[derive(Debug, Clone)]
 pub enum SimulationStatus {
     Paused,
@@ -51,6 +54,36 @@ pub enum VarId {
 impl Default for VarId {
     fn default() -> Self {
         Self::None
+    }
+}
+
+/// A backend-specific, numeric reference for fast access to the associated signal data.
+/// Used as cache key for signal data lookups.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SignalId {
+    None,
+    Wellen(wellen::SignalRef),
+}
+
+impl Default for SignalId {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+/// Backend-agnostic enum for accessing signal data.
+/// Variants provide iteration over signal changes.
+pub enum SignalAccessor {
+    Wellen(crate::wellen::WellenSignalAccessor),
+    // Future: Cxxrtl(CxxrtlSignalAccessor),
+}
+
+impl SignalAccessor {
+    /// Iterator over signal changes as (time_u64, value) pairs
+    pub fn iter_changes(&self) -> Box<dyn Iterator<Item = (u64, VariableValue)> + '_> {
+        match self {
+            SignalAccessor::Wellen(accessor) => accessor.iter_changes(),
+        }
     }
 }
 
@@ -368,6 +401,33 @@ impl WaveContainer {
         }
     }
 
+    pub fn signal_accessor(&self, signal_id: SignalId) -> Result<SignalAccessor> {
+        match (self, signal_id) {
+            (WaveContainer::Wellen(f), SignalId::Wellen(signal_ref)) => {
+                Ok(SignalAccessor::Wellen(f.signal_accessor(signal_ref)?))
+            }
+            _ => bail!("Invalid signal accessor combination"),
+        }
+    }
+    /// Get the SignalId for a variable (canonical signal identity for cache keys)
+    pub fn signal_id(&self, variable: &VariableRef) -> Result<SignalId> {
+        match self {
+            WaveContainer::Wellen(f) => Ok(SignalId::Wellen(f.signal_ref(variable)?)),
+            WaveContainer::Empty => bail!("No signal data"),
+            WaveContainer::Cxxrtl(_) => bail!("Not supported for Cxxrtl yet"),
+        }
+    }
+
+    /// Check if a signal is already loaded (data available)
+    pub fn is_signal_loaded(&self, signal_id: &SignalId) -> bool {
+        match (self, signal_id) {
+            (WaveContainer::Wellen(f), SignalId::Wellen(signal_ref)) => {
+                f.is_signal_loaded(*signal_ref)
+            }
+            _ => false,
+        }
+    }
+
     /// Looks up the variable _by name_ and returns a new reference with an updated `id` if the variable is found.
     pub fn update_variable_ref(&self, variable: &VariableRef) -> Option<VariableRef> {
         match self {
@@ -510,5 +570,11 @@ impl WaveContainer {
             WaveContainer::Empty => true,
             WaveContainer::Cxxrtl(_) => true,
         }
+    }
+
+    /// Returns true if this wave container supports analog rendering options in the GUI.
+    /// Currently only the wellen backend (VCD/FST/GHW) supports analog rendering.
+    pub fn supports_analog(&self) -> bool {
+        matches!(self, WaveContainer::Wellen(_))
     }
 }
