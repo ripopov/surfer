@@ -1,5 +1,6 @@
 #![deny(unused_crate_dependencies)]
 
+pub mod analog_renderer;
 pub mod async_util;
 pub mod batch_commands;
 #[cfg(feature = "performance_plot")]
@@ -861,6 +862,51 @@ impl SystemState {
                     .displayed_items
                     .entry(node.item_ref)
                     .and_modify(|item| item.set_height_scaling_factor(scale));
+            }
+            Message::SetAnalogMode(vidx, new_mode) => {
+                self.save_current_canvas("Set analog mode".into());
+                self.invalidate_draw_commands();
+                let waves = self.user.waves.as_mut()?;
+
+                match vidx {
+                    MessageTarget::Explicit(vidx) => {
+                        let node = waves.items_tree.get_visible(vidx)?;
+                        waves
+                            .displayed_items
+                            .entry(node.item_ref)
+                            .and_modify(|item| {
+                                if let DisplayedItem::Variable(var) = item {
+                                    var.analog_mode = new_mode;
+                                }
+                            });
+                    }
+                    MessageTarget::CurrentSelection => {
+                        if let Some(focused) = waves.focused_item {
+                            let node = waves.items_tree.get_visible(focused)?;
+                            waves
+                                .displayed_items
+                                .entry(node.item_ref)
+                                .and_modify(|item| {
+                                    if let DisplayedItem::Variable(var) = item {
+                                        var.analog_mode = new_mode;
+                                    }
+                                });
+                        }
+
+                        let selected_items: Vec<_> = waves
+                            .items_tree
+                            .iter_visible_selected()
+                            .map(|node| node.item_ref)
+                            .collect();
+                        for item_ref in selected_items {
+                            waves.displayed_items.entry(item_ref).and_modify(|item| {
+                                if let DisplayedItem::Variable(var) = item {
+                                    var.analog_mode = new_mode;
+                                }
+                            });
+                        }
+                    }
+                }
             }
             Message::MoveCursorToTransition {
                 next,

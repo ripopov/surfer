@@ -436,6 +436,7 @@ impl WaveData {
                 format: None,
                 field_formats: vec![],
                 height_scaling_factor: None,
+                analog_mode: crate::displayed_item::AnalogMode::Off,
             });
 
             indices.push(self.insert_item(new_variable, Some(target_position), true));
