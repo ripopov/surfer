@@ -57,7 +57,7 @@ impl FileWatcher {
                     }
                 }
                 Ok(_) => {}
-                Err(e) => error!("Error while watching fil\n{}", e),
+                Err(e) => error!("Error while watching fil\n{e}"),
             },
             Config::default().with_poll_interval(Duration::from_secs(1)),
         )?;

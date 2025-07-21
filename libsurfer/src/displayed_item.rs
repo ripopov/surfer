@@ -69,17 +69,12 @@ pub struct FieldFormat {
     pub format: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum AnalogMode {
+    #[default]
     Off,
     Step,
     Interpolated,
-}
-
-impl Default for AnalogMode {
-    fn default() -> Self {
-        AnalogMode::Off
-    }
 }
 
 impl std::fmt::Display for AnalogMode {

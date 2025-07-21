@@ -2542,3 +2542,46 @@ snapshot_ui_with_file_and_msgs! {wasm_translator_works, "examples/picorv32.vcd",
     ),
     Message::ExpandDrawnItem { item: DisplayedItemRef(1), levels: 1 }
 ]}
+
+snapshot_ui_with_file_and_msgs! {analog_waveform_with_state, "examples/analog.vcd", [
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.clk_cnt"),
+        VariableRef::from_hierarchy_string("top.sine_4state"),
+        VariableRef::from_hierarchy_string("top.sine_4state"),
+        VariableRef::from_hierarchy_string("top.sine_real"),
+    ]),
+
+    Message::VariableFormatChange(
+        MessageTarget::Explicit(DisplayedFieldRef {
+            item: DisplayedItemRef(2),
+            field: vec![],
+        }),
+        String::from("Unsigned"),
+    ),
+
+    // Configure analog modes
+    Message::SetAnalogMode(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        crate::displayed_item::AnalogMode::Interpolated,
+    ),
+    Message::SetAnalogMode(
+        MessageTarget::Explicit(VisibleItemIndex(1)),
+        crate::displayed_item::AnalogMode::Step,
+    ),
+    Message::SetAnalogMode(
+        MessageTarget::Explicit(VisibleItemIndex(3)),
+        crate::displayed_item::AnalogMode::Step,
+    ),
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        8.0,
+    ),
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(1)),
+        4.0,
+    ),
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(3)),
+        2.0,
+    ),
+]}

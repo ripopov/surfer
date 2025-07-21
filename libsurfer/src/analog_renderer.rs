@@ -97,6 +97,7 @@ fn create_stroke(color: Color32, config: &AnalogRenderConfig) -> Stroke {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn process_analog_points<F>(
     commands: &DrawingCommands,
     stroke: Stroke,
@@ -163,6 +164,7 @@ fn process_analog_points<F>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_step_mode(
     commands: &DrawingCommands,
     color: Color32,
@@ -204,6 +206,7 @@ fn render_step_mode(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_interpolated_mode(
     commands: &DrawingCommands,
     color: Color32,
@@ -236,6 +239,7 @@ fn render_interpolated_mode(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_amplitude_labels(
     color: Color32,
     offset: f32,
@@ -262,14 +266,14 @@ fn draw_amplitude_labels(
     let text_color = color.gamma_multiply(config.label_alpha);
     let background_color = Color32::from_rgba_unmultiplied(0, 0, 0, config.background_alpha);
 
-    let max_text = format!("max: {:.2}", max_val);
+    let max_text = format!("max: {max_val:.2}");
     let max_galley = ctx.painter.layout_no_wrap(
         max_text.clone(),
         egui::FontId::monospace(text_size),
         text_color,
     );
 
-    let min_text = format!("min: {:.2}", min_val);
+    let min_text = format!("min: {min_val:.2}");
     let min_galley = ctx.painter.layout_no_wrap(
         min_text.clone(),
         egui::FontId::monospace(text_size),
