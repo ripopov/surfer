@@ -15,6 +15,7 @@ variable_undefined = "46000c"
 # to make visible on a white background, so we'll make it Purple
 variable_highimp = "46175e"
 variable_dontcare = "17265e"
+variable_event = "569cd6"
 variable_weak = "808080"
 waveform_opacity = 0.5
 wide_opacity = 0.2

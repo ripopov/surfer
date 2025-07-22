@@ -1679,6 +1679,7 @@ impl SystemState {
             VariableInfo::Bool
             | VariableInfo::Bits
             | VariableInfo::Clock
+            | VariableInfo::Event
             | VariableInfo::String
             | VariableInfo::Real => {
                 let label = ui

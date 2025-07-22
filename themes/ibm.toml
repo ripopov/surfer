@@ -14,6 +14,7 @@ variable_default = "648fff"
 variable_undef = "dc267f"
 variable_highimp = "ffb000"
 variable_dontcare = "785ef0"
+variable_event = "648fff"
 variable_weak = "bbbbbb"
 cursor = { color="ffffff", width=2 }
 gesture = { color="ffffff", width=2 }

@@ -14,6 +14,7 @@ variable_undefined = "46000c"
 # Convention dictates this being yellow, but yellow is super hard
 # to make visible on a white background, so we'll make it blue
 variable_highimp = "000347"
+variable_event = "268bd2"
 cursor = { color="b63935", width=2 }
 linewidth = 2
 highlight_background = "0F3B37"

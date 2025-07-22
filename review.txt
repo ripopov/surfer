@@ -1,0 +1,19 @@
+Support rendering of Events in surfer ( VarType::Event  VariableType::VCDEvent )
+
+VCD events are a special type of signal in GTKWave that represent discrete occurrences at specific time points,
+unlike regular signals that maintain state between transitions.
+
+- Events are drawn as vertical lines with arrow indicators
+- Unlike regular signals, events don't connect horizontally between time points
+- Events are only rendered if they occur at or after the first visible time
+- Events always render with standard orientation
+- Events skip horizontal line drawing between transitions
+- No state interpolation between events
+
+After implementation is complete, add snapshot based test to libsurfer/src/tests/snapshot.rs
+that will use examples/event.vcd
+( use existing tests for examples/counter.vcd as reference )
+
+This assignment requires detailed codebase analysis, as there are many way to implement event support,
+and careful design choices are required. Don't jump into coding, instead first write detailed plan with sw design and required changes.
+And then work on implementation and testing.

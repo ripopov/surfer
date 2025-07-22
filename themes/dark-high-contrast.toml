@@ -19,6 +19,7 @@ variable_default = "44bc44" # green
 variable_undef = "ff5f59" # red
 variable_highimp = "d0bc00" # yellow
 variable_dontcare = "2fafff" # blue
+variable_event = "2fafff" # blue
 variable_weak = "e1e1e1" # custom grey
 waveform_opacity = 0.5
 cursor = { color="ffffff", width=3 } # fg-main

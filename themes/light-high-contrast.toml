@@ -19,6 +19,7 @@ variable_default = "009900" # custom green
 variable_undef = "ff0000" # custom red
 variable_highimp = "ffcf00" # bg-graph-yellow-0
 variable_dontcare = "0000ff" # blue-warmer
+variable_event = "0000ff" # blue-warmer
 variable_weak = "303030" # custom grey
 waveform_opacity = 0.5
 cursor = { color="000000", width=3 } # fg-main

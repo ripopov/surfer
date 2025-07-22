@@ -144,6 +144,7 @@ pub enum VariableInfo {
     Bits,
     Bool,
     Clock,
+    Event,
     // NOTE: only used for state saving where translators will clear this out with the actual value
     #[default]
     String,

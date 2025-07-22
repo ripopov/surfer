@@ -47,6 +47,7 @@ pub struct DrawnRegion {
 pub struct DrawingCommands {
     is_bool: bool,
     is_clock: bool,
+    is_event: bool,
     values: Vec<(f32, DrawnRegion)>,
 }
 
@@ -56,6 +57,7 @@ impl DrawingCommands {
             values: vec![],
             is_bool: true,
             is_clock: false,
+            is_event: false,
         }
     }
 
@@ -64,6 +66,16 @@ impl DrawingCommands {
             values: vec![],
             is_bool: true,
             is_clock: true,
+            is_event: false,
+        }
+    }
+
+    pub fn new_event() -> Self {
+        Self {
+            values: vec![],
+            is_bool: false,
+            is_clock: false,
+            is_event: true,
         }
     }
 
@@ -72,6 +84,7 @@ impl DrawingCommands {
             values: vec![],
             is_bool: false,
             is_clock: false,
+            is_event: false,
         }
     }
 
@@ -136,13 +149,20 @@ fn variable_draw_commands(
     // list, since we skip one pixel to have a previous value
     let start_pixel = timestamps.get(1).map(|t| t.0).unwrap_or_default();
 
+    // Check if this is an event signal - events need special handling
+    // because they don't have "value changes" in the traditional sense
+    let is_event_signal = matches!(info, VariableInfo::Event)
+        || meta.variable_type == Some(surfer_translation_types::VariableType::VCDEvent);
+
     // Iterate over all the time stamps to draw on
     let mut next_change = timestamps.first().map(|t| t.0).unwrap_or_default();
     for ((_, prev_time), (pixel, time)) in timestamps.iter().zip(timestamps.iter().skip(1)) {
         let is_last_timestep = pixel == &end_pixel;
         let is_first_timestep = pixel == &start_pixel;
 
-        if *pixel < next_change && !is_first_timestep && !is_last_timestep {
+        // Skip optimization for event signals - they need to be queried at every time point
+        // because each event occurrence needs to be detected individually
+        if !is_event_signal && *pixel < next_change && !is_first_timestep && !is_last_timestep {
             continue;
         }
 
@@ -182,7 +202,9 @@ fn variable_draw_commands(
 
         // Check if the value remains unchanged between this pixel
         // and the last
-        if &change_time < prev_time && !is_first_timestep && !is_last_timestep {
+        // For event signals, we should NOT skip values based on change_time
+        // because events need to be rendered at their exact occurrence time
+        if !is_event_signal && &change_time < prev_time && !is_first_timestep && !is_last_timestep {
             continue;
         }
 
@@ -211,6 +233,7 @@ fn variable_draw_commands(
                 match info.get_subinfo(&names) {
                     VariableInfo::Bool => DrawingCommands::new_bool(),
                     VariableInfo::Clock => DrawingCommands::new_clock(),
+                    VariableInfo::Event => DrawingCommands::new_event(),
                     _ => DrawingCommands::new_wide(),
                 }
             });
@@ -227,7 +250,10 @@ fn variable_draw_commands(
                 && waves.inner.as_waves().unwrap().wants_anti_aliasing();
             let new_value = prev != Some(&value);
 
-            // This is not the value we drew last time
+            // This is not the value we drew last time.
+            // For events, only draw at the exact pixel where the timestamp maps to,
+            // not for every pixel in the time range (which would create regions instead of impulses).
+
             if new_value || is_last_timestep || anti_alias {
                 prev_values
                     .entry(names.clone())
@@ -902,7 +928,9 @@ impl SystemState {
                             .unwrap();
 
                         let color = *color.unwrap_or_else(|| {
-                            if let Some(DisplayedItem::Variable(variable)) = displayed_item {
+                            if commands.is_event {
+                                &self.user.config.theme.variable_event
+                            } else if let Some(DisplayedItem::Variable(variable)) = displayed_item {
                                 waves
                                     .inner
                                     .as_waves()
@@ -922,9 +950,42 @@ impl SystemState {
                                 &self.user.config.theme.variable_default
                             }
                         });
-                        for (old, new) in commands.values.iter().zip(commands.values.iter().skip(1))
+
+                        // For events, handle the first event specially since there's no "previous" state
+                        if commands.is_event && !commands.values.is_empty() {
+                            let first_value = &commands.values[0];
+                            if first_value
+                                .1
+                                .inner
+                                .as_ref()
+                                .map(|r| !r.value.is_empty())
+                                .unwrap_or(false)
+                            {
+                                self.draw_single_event_impulse(
+                                    first_value.0,
+                                    color,
+                                    y_offset,
+                                    height_scaling_factor,
+                                    ctx,
+                                );
+                            }
+                        }
+
+                        for (_i, (old, new)) in commands
+                            .values
+                            .iter()
+                            .zip(commands.values.iter().skip(1))
+                            .enumerate()
                         {
-                            if commands.is_bool {
+                            if commands.is_event {
+                                self.draw_event_impulse(
+                                    (old, new),
+                                    color,
+                                    y_offset,
+                                    height_scaling_factor,
+                                    ctx,
+                                );
+                            } else if commands.is_bool {
                                 self.draw_bool_transition(
                                     (old, new),
                                     new.1.force_anti_alias,
@@ -1319,6 +1380,75 @@ impl SystemState {
                 ));
             }
         }
+    }
+
+    /// Draws an event impulse as a vertical line at the event occurrence time.
+    ///
+    /// Events are rendered as vertical impulses with small arrow heads to indicate
+    /// discrete occurrences at specific time points.
+    fn draw_event_impulse(
+        &self,
+        ((_old_x, _prev_region), (new_x, new_region)): (&(f32, DrawnRegion), &(f32, DrawnRegion)),
+        color: Color32,
+        offset: f32,
+        height_scaling_factor: f32,
+        ctx: &mut DrawingContext,
+    ) {
+        let new_has_event = new_region
+            .inner
+            .as_ref()
+            .map(|r| !r.value.is_empty())
+            .unwrap_or(false);
+
+        // Draw impulse when we have an event at the new position.
+        // Since we only add event values at exact occurrence times,
+        // any new event value represents an event occurrence.
+        if new_has_event {
+            self.draw_single_event_impulse(*new_x, color, offset, height_scaling_factor, ctx);
+        }
+    }
+
+    /// Draws a single event impulse as a vertical line with an arrow head.
+    ///
+    /// The impulse consists of:
+    /// - A vertical line from bottom to top of the signal lane
+    /// - A small triangular arrow head at the top
+    /// - Slightly thicker line width for better visibility
+    fn draw_single_event_impulse(
+        &self,
+        event_x: f32,
+        color: Color32,
+        offset: f32,
+        height_scaling_factor: f32,
+        ctx: &mut DrawingContext,
+    ) {
+        let line_height = ctx.cfg.line_height * height_scaling_factor;
+
+        // Draw vertical impulse line from bottom to top of the lane
+        let start_pos = (ctx.to_screen)(event_x, offset);
+        let end_pos = (ctx.to_screen)(event_x, offset + line_height);
+
+        let stroke = Stroke {
+            color,
+            width: self.user.config.theme.linewidth * 1.2, // Slightly thicker for visibility
+        };
+
+        ctx.painter
+            .add(PathShape::line(vec![start_pos, end_pos], stroke));
+
+        // Add upward-pointing arrow at the top to indicate event direction
+        // Arrow size is independent of height scaling factor
+        let arrow_height = ctx.cfg.line_height * 0.15; // Make it bigger
+        let arrow_width = arrow_height * 1.0; // Make it wider
+        let arrow_tip = (ctx.to_screen)(event_x, offset - arrow_height); // Point upward (smaller Y)
+        let arrow_left = (ctx.to_screen)(event_x - arrow_width / 2.0, offset);
+        let arrow_right = (ctx.to_screen)(event_x + arrow_width / 2.0, offset);
+
+        ctx.painter.add(PathShape::convex_polygon(
+            vec![arrow_tip, arrow_left, arrow_right],
+            color,
+            stroke,
+        ));
     }
 
     /// Draws a curvy arrow from `start` to `end`.

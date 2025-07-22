@@ -15,6 +15,7 @@ use toml::Table;
 mod basic_translators;
 pub mod clock;
 mod enum_translator;
+mod event;
 mod fixed_point;
 mod instruction_translators;
 pub mod numeric_translators;
@@ -25,6 +26,7 @@ pub mod wasm_translator;
 
 pub use basic_translators::*;
 use clock::ClockTranslator;
+use event::EventTranslator;
 #[cfg(not(target_arch = "wasm32"))]
 use instruction_decoder::Decoder;
 pub use instruction_translators::*;
@@ -295,6 +297,7 @@ pub fn all_translators() -> TranslatorList {
         basic_translators,
         vec![
             Box::new(ClockTranslator::new()),
+            Box::new(EventTranslator::new()),
             Box::new(StringTranslator {}),
             Box::new(EnumTranslator {}),
             Box::new(UnsignedFixedPointTranslator),
@@ -587,6 +590,7 @@ impl VariableInfoExt for VariableInfo {
                 VariableInfo::Bits => panic!(),
                 VariableInfo::Bool => panic!(),
                 VariableInfo::Clock => panic!(),
+                VariableInfo::Event => panic!(),
                 VariableInfo::String => panic!(),
                 VariableInfo::Real => panic!(),
             },

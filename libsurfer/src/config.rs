@@ -337,6 +337,9 @@ pub struct SurferTheme {
     /// Color used for don't-care variables
     pub variable_dontcare: Color32,
     #[serde(deserialize_with = "deserialize_hex_color")]
+    /// Color used for event variables
+    pub variable_event: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
     /// Color used for weak variables
     pub variable_weak: Color32,
     #[serde(deserialize_with = "deserialize_hex_color")]

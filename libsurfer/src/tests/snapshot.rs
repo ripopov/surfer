@@ -2542,3 +2542,9 @@ snapshot_ui_with_file_and_msgs! {wasm_translator_works, "examples/picorv32.vcd",
     ),
     Message::ExpandDrawnItem { item: DisplayedItemRef(1), levels: 1 }
 ]}
+
+snapshot_ui_with_file_and_msgs! {event_signals_render_as_impulses, "examples/event.vcd", [
+    Message::AddScope(ScopeRef::from_strs(&["top"]), false),
+    Message::VariableFormatChange(MessageTarget::Explicit(DisplayedFieldRef{item: DisplayedItemRef(2), field: vec![]}), String::from("Event")),
+    Message::ZoomToFit{viewport_idx: 0},
+]}
