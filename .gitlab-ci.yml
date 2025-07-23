@@ -159,6 +159,23 @@ test-nightly:
         - cargo test --features python --color=always --locked -- --include-ignored
     allow_failure: true
 
+test-linux-risc-v:
+    stage: test
+    image: riscv64/ubuntu
+    tags:
+        - risc-v
+    script:
+        - apt update
+        - apt install -y curl ninja-build clang openssl pkg-config
+        - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        - . "/builds/surfer-project/surfer/cargo/env"
+        - rustc -V
+        - cargo -V
+        - cargo test --locked --color=always
+    rules:
+        - if: '$CI_PROJECT_NAMESPACE == "surfer-project"'
+    allow_failure: true
+
 test-macos-aarch64:
     stage: test
     extends: .snapshots
