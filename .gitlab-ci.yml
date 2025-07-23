@@ -159,6 +159,19 @@ test-nightly:
         - cargo test --features python --color=always --locked -- --include-ignored
     allow_failure: true
 
+test-risc-v:
+    stage: test
+    image: riscv64/ubuntu
+    tags:
+        - risc-v
+    script:
+        - apt update
+        - apt install -y curl ninja-build clang
+        - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        - rustc -V
+        - cargo -V
+        - cargo test
+
 test-macos-aarch64:
     stage: test
     extends: .snapshots
