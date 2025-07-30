@@ -1,10 +1,12 @@
+#[cfg(feature = "extism-convert")]
 use extism_convert::{FromBytes, Json, ToBytes};
 use serde::{Deserialize, Serialize};
 
 use crate::ValueKind;
 
-#[derive(Clone, Serialize, Deserialize, FromBytes, ToBytes)]
-#[encoding(Json)]
+#[cfg_attr(feature = "extism-convert", derive(FromBytes, ToBytes))]
+#[cfg_attr(feature = "extism-convert", encoding(Json))]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TranslationResult {
     pub val: ValueRepr,
     pub subfields: Vec<SubFieldTranslationResult>,

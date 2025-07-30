@@ -151,7 +151,7 @@ pub enum Message {
     LoadPythonTranslator(Utf8PathBuf),
     /// Load a web assembly translator from file. This is loaded in addition to the
     /// translators loaded on startup.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "extism"))]
     LoadWasmTranslator(Utf8PathBuf),
     /// Load command file from file path.
     LoadCommandFile(Utf8PathBuf),

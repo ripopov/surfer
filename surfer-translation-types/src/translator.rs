@@ -1,5 +1,6 @@
 //! Definition of the main [`Translator`] trait and the simplified version
 //! [`BasicTranslator`].
+#[cfg(feature = "extism-convert")]
 use extism_convert::{FromBytes, Json, ToBytes};
 use eyre::Result;
 use num::BigUint;
@@ -11,8 +12,9 @@ use crate::{
     TranslationPreference, ValueKind, VariableEncoding, VariableInfo, VariableMeta, VariableValue,
 };
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromBytes, ToBytes)]
-#[encoding(Json)]
+#[cfg_attr(feature = "extism-convert", derive(FromBytes, ToBytes))]
+#[cfg_attr(feature = "extism-convert", encoding(Json))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TrueName {
     /// The variable's true name is best represented as part of a line of code
     /// for example if line 100 is
@@ -35,8 +37,9 @@ pub enum TrueName {
 /// generated subexpression back into names that a human can understand. In this use case,
 /// it is _very_ unlikely that the user wants to see the raw anonymous name that the compiler
 /// emitted, so performing this translation globally makes sense.
-#[derive(Clone, Debug, Serialize, Deserialize, FromBytes, ToBytes)]
-#[encoding(Json)]
+#[cfg_attr(feature = "extism-convert", derive(FromBytes, ToBytes))]
+#[cfg_attr(feature = "extism-convert", encoding(Json))]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VariableNameInfo {
     /// A more human-undesrstandable name for a signal. This should only be used by translators
     /// which
@@ -52,8 +55,9 @@ pub struct VariableNameInfo {
     pub priority: Option<i32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromBytes, ToBytes)]
-#[encoding(Json)]
+#[cfg_attr(feature = "extism-convert", derive(FromBytes, ToBytes))]
+#[cfg_attr(feature = "extism-convert", encoding(Json))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum WaveSource {
     File(String),
     Data,
