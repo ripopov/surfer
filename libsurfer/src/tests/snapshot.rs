@@ -2514,6 +2514,7 @@ snapshot_ui!(command_file_in_command_file_works, || {
     state
 });
 
+#[cfg(feature = "extism")]
 snapshot_ui_with_file_and_msgs! {wasm_translator_works, "examples/picorv32.vcd", [
     Message::ToggleSidePanel,
     Message::LoadWasmTranslator(

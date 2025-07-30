@@ -90,11 +90,12 @@ use surfer_translation_types::Translator;
 pub use system_state::SystemState;
 #[cfg(target_arch = "wasm32")]
 use tokio_stream as _;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "extism"))]
 use translation::wasm_translator::PluginTranslator;
 use wave_container::ScopeRef;
 use wcp::{proto::WcpCSMessage, proto::WcpEvent, proto::WcpSCMessage};
 
+#[cfg(all(not(target_arch = "wasm32"), feature = "extism"))]
 use crate::async_util::perform_work;
 use crate::config::{SurferConfig, SurferTheme};
 use crate::dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog};
@@ -1001,7 +1002,7 @@ impl SystemState {
                     "Error loading Python translator",
                 )
             }
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(all(not(target_arch = "wasm32"), feature = "extism"))]
             Message::LoadWasmTranslator(path) => {
                 let sender = self.channels.msg_sender.clone();
                 perform_work(
