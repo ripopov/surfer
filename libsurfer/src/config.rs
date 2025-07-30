@@ -72,7 +72,7 @@ pub struct SurferConfig {
     pub default_variable_name_type: VariableNameType,
     default_clock_highlight_type: ClockHighlightType,
     /// Preferred time unit
-    pub preferred_time_unit: TimeUnit,
+    preferred_time_unit: TimeUnit,
     /// Distance in pixels for cursor snap
     pub snap_distance: f32,
     /// Maximum size of the undo stack
@@ -96,6 +96,10 @@ impl SurferConfig {
 
     pub fn autoreload_files(&self) -> AutoLoad {
         self.autoreload_files
+    }
+
+    pub fn preferred_time_unit(&self) -> TimeUnit {
+        self.preferred_time_unit
     }
 }
 

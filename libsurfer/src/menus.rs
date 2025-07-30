@@ -249,7 +249,7 @@ impl SystemState {
                 clock_highlight_type_menu(ui, msgs, self.clock_highlight_type());
             });
             ui.menu_button("Time unit", |ui| {
-                timeunit_menu(ui, msgs, &self.user.wanted_timeunit);
+                timeunit_menu(ui, msgs, &self.wanted_time_unit());
             });
             ui.menu_button("Time format", |ui| {
                 timeformat_menu(ui, msgs, &self.get_time_format());

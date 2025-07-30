@@ -58,10 +58,10 @@ impl SystemState {
                         ui.label(time_string(
                             time,
                             &waves.inner.metadata().timescale,
-                            &self.user.wanted_timeunit,
+                            &self.wanted_time_unit(),
                             &self.get_time_format(),
                         ))
-                        .context_menu(|ui| timeunit_menu(ui, msgs, &self.user.wanted_timeunit));
+                        .context_menu(|ui| timeunit_menu(ui, msgs, &self.wanted_time_unit()));
                         ui.add_space(10.0);
                     }
                     if let Some(undo_op) = &self.undo_stack.last() {

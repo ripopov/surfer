@@ -15,6 +15,7 @@ use crate::{
     displayed_item::DisplayedItemRef,
     message::Message,
     state::UserState,
+    time::TimeUnit,
     translation::{all_translators, TranslatorList},
     variable_filter::VariableFilter,
     wave_container::{ScopeRef, VariableRef},
@@ -119,7 +120,10 @@ impl SystemState {
 
         // Basic translators that we can load quickly
         let translators = all_translators();
-        let wanted_timeunit = config.preferred_time_unit;
+        let wanted_timeunit = match config.preferred_time_unit() {
+            TimeUnit::Auto => None,
+            others => Some(others),
+        };
 
         let result = SystemState {
             user: UserState {
