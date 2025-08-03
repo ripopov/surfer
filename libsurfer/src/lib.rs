@@ -95,6 +95,7 @@ use translation::wasm_translator::PluginTranslator;
 use wave_container::ScopeRef;
 use wcp::{proto::WcpCSMessage, proto::WcpEvent, proto::WcpSCMessage};
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::async_util::perform_work;
 use crate::config::{SurferConfig, SurferTheme};
 use crate::dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog};
