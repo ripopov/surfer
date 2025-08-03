@@ -408,14 +408,14 @@ pages_build:
         - rustup target add wasm32-unknown-unknown
         - rustc -V
         - cargo -V
-        - wget -qO- https://github.com/trunk-rs/trunk/releases/download/v0.20.2/trunk-x86_64-unknown-linux-gnu.tar.gz | tar -xzf-
+        - wget -qO- https://github.com/trunk-rs/trunk/releases/download/v0.21.14/trunk-x86_64-unknown-linux-gnu.tar.gz | tar -xzf-
         - ls ./trunk
         - chmod +x trunk
           # https://github.com/thedodd/trunk/pull/361#issuecomment-1308487648 trunk can not
           # generate relative urls which we want for external pipelines to be able
           # to download our artefacts and put them wherever on their webserver. To fix this,
           # we'll build with a dummy public URL, then replace it with ./
-        - RUSTFLAGS="--cfg=web_sys_unstable_apis" ./trunk build surfer/index.html --release --public-url /dist --features accesskit
+        - RUSTFLAGS="--cfg=web_sys_unstable_apis" ./trunk build --config=surfer/Trunk.toml index.html --release --public-url /dist --features accesskit
         - cp -r surfer/dist pages_build
         - cp -r surfer/dist surfer_wasm
         - cp examples/*.vcd pages_build/
