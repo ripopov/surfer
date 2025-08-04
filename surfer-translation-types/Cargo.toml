@@ -10,7 +10,11 @@ categories.workspace = true
 eyre.workspace = true
 derive_more.workspace = true
 ecolor.workspace = true
-extism-convert = "1.11.1"
+extism-convert = { version = "1.11.1", optional = true }
 num.workspace = true
 pyo3 = { workspace = true, optional = true }
 serde.workspace = true
+
+[features]
+default = ["wasm_plugins"]
+wasm_plugins = ["dep:extism-convert"]
