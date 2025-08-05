@@ -26,6 +26,9 @@ mod main_impl {
             /// port on which server will listen
             #[clap(long)]
             port: Option<u16>,
+            /// IP address to bind the server to
+            #[clap(long)]
+            bind_address: Option<String>,
             /// token used by the client to authenticate to the server
             #[clap(long)]
             token: Option<String>,
@@ -114,14 +117,20 @@ mod main_impl {
         // parse arguments
         let args = Args::parse();
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(Commands::Server { port, token, file }) = args.command {
-            let default_port = 8911; // FIXME: make this more configurable
-            let res = runtime.block_on(surver::server_main(
-                port.unwrap_or(default_port),
-                token,
-                file,
-                None,
-            ));
+        if let Some(Commands::Server {
+            port,
+            bind_address,
+            token,
+            file,
+        }) = args.command
+        {
+            let config = SystemState::new()?.user.config;
+
+            // Use CLI override if provided, otherwise use config setting
+            let bind_addr = bind_address.unwrap_or(config.server.bind_address);
+            let port = port.unwrap_or(config.server.port);
+
+            let res = runtime.block_on(surver::server_main(port, bind_addr, token, file, None));
             return res;
         }
 
