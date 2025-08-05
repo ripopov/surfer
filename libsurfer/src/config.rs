@@ -81,6 +81,8 @@ pub struct SurferConfig {
     autoload_sibling_state_files: AutoLoad,
     /// WCP Configuration
     pub wcp: WcpConfig,
+    /// HTTP Server Configuration
+    pub server: ServerConfig,
 }
 
 impl SurferConfig {
@@ -578,6 +580,14 @@ pub struct WcpConfig {
     pub autostart: bool,
     /// Address to bind to (address:port)
     pub address: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ServerConfig {
+    /// IP address to bind the HTTP server to
+    pub bind_address: String,
+    /// Default port for the HTTP server
+    pub port: u16,
 }
 
 fn default_colors() -> HashMap<String, Color32> {

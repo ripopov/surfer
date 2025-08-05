@@ -9,10 +9,11 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
 /// starts the remote server in a background thread
-fn start_server(port: u16, token: &str, filename: &str) -> String {
+fn start_server(bind_address: &str, port: u16, token: &str, filename: &str) -> String {
     let addr = format!("http://localhost:{port}/{token}");
     let token = Some(token.to_string());
     let filename = filename.to_string();
+    let bind_address = bind_address.to_string();
     let started = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let started_copy = started.clone();
     std::thread::spawn(move || {
@@ -23,6 +24,7 @@ fn start_server(port: u16, token: &str, filename: &str) -> String {
             .unwrap();
         let _res = runtime.block_on(surver::server_main(
             port,
+            bind_address.to_string(),
             token,
             filename,
             Some(started_copy),
@@ -40,13 +42,14 @@ fn start_server(port: u16, token: &str, filename: &str) -> String {
 /// Starts a server to load the `filename`, then updates the Surfer state until the waveform
 /// is loaded from the client and all custom messages have been processed. Returns the final state.
 fn run_with_server(
+    bind_address: &str,
     port: u16,
     token: &str,
     filename: &str,
     custom_messages: impl Fn() -> Vec<Message>,
 ) -> SystemState {
     // start server in a background thread
-    let url = start_server(port, token, filename);
+    let url = start_server(bind_address, port, token, filename);
 
     // create state and add messages as batch commands
     let mut state = SystemState::new_default_config().unwrap();
@@ -74,6 +77,7 @@ fn run_with_server(
 static UNIQUE_PORT_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 const BASE_PORT: u16 = 8400;
 const DEFAULT_TOKEN: &str = "1234567890";
+const DEFAULT_IP: &str = "127.0.0.1";
 
 macro_rules! snapshot_ui_remote {
     ($name:ident, $file:expr, $msgs:expr) => {
@@ -81,6 +85,7 @@ macro_rules! snapshot_ui_remote {
         fn $name() {
             let port_offset = UNIQUE_PORT_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let port = BASE_PORT + port_offset as u16;
+            let bind_address = DEFAULT_IP;
             let token = DEFAULT_TOKEN;
             let project_root: camino::Utf8PathBuf = project_root::get_project_root()
                 .unwrap()
@@ -92,7 +97,7 @@ macro_rules! snapshot_ui_remote {
             test_name.push_str(stringify!($name));
 
             render_and_compare(&PathBuf::from(&test_name), || {
-                run_with_server(port, token, filename.as_str(), messages)
+                run_with_server(bind_address, port, token, filename.as_str(), messages)
             })
         }
     };
