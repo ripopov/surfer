@@ -90,6 +90,7 @@ pub struct UserState {
     pub(crate) show_performance: bool,
     pub(crate) show_logs: bool,
     pub(crate) show_cursor_window: bool,
+    pub(crate) show_statistics: bool,
     pub(crate) wanted_timeunit: TimeUnit,
     pub(crate) time_string_format: Option<TimeStringFormatting>,
     pub(crate) show_url_entry: bool,

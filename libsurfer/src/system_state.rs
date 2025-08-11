@@ -9,6 +9,9 @@ use tokio::task::JoinHandle;
 use egui::{Pos2, Rect};
 use surfer_translation_types::translator::VariableNameInfo;
 
+#[cfg(feature = "analysis")]
+use crate::analysis::VariableStatistics;
+
 use crate::{
     command_prompt,
     config::SurferConfig,
@@ -98,6 +101,13 @@ pub struct SystemState {
 
     pub(crate) url_callback: Option<Box<dyn Fn(String) -> Message + Send + 'static>>,
 
+    #[cfg(feature = "analysis")]
+    pub(crate) show_histogram_window: bool,
+    #[cfg(feature = "analysis")]
+    pub(crate) show_state_window: bool,
+    #[cfg(feature = "analysis")]
+    pub(crate) statistics: Option<VariableStatistics>,
+
     // Only used for testing
     pub(crate) expand_parameter_section: bool,
 }
@@ -134,6 +144,7 @@ impl SystemState {
                 show_license: false,
                 show_logs: false,
                 show_cursor_window: false,
+                show_statistics: false,
                 wanted_timeunit: TimeUnit::None,
                 time_string_format: None,
                 show_url_entry: false,
@@ -205,6 +216,12 @@ impl SystemState {
             timing: RefCell::new(Timing::new()),
             undo_stack: vec![],
             redo_stack: vec![],
+            #[cfg(feature = "analysis")]
+            show_histogram_window: false,
+            #[cfg(feature = "analysis")]
+            show_state_window: false,
+            #[cfg(feature = "analysis")]
+            statistics: None,
         };
 
         Ok(result)

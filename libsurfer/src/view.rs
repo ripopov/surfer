@@ -312,6 +312,16 @@ impl SystemState {
             }
         }
 
+        #[cfg(feature = "analysis")]
+        if self.show_histogram_window {
+            self.draw_histogram_window(ctx, &mut msgs);
+        }
+
+        #[cfg(feature = "analysis")]
+        if self.show_state_window {
+            self.draw_state_window(ctx, &mut msgs);
+        }
+
         if self
             .user
             .show_menu
