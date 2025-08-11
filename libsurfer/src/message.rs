@@ -36,6 +36,9 @@ use crate::{
     MoveDir, VariableNameFilterType, WaveSource,
 };
 
+#[cfg(feature = "analysis")]
+use crate::analysis::AnalysisWindow;
+
 type CommandCount = usize;
 
 /// Encapsulates either a specific variable or all selected variables
@@ -94,6 +97,8 @@ pub enum Message {
     SetItemSelected(VisibleItemIndex, bool),
     /// Unfocus a wave/item.
     UnfocusItem,
+    #[cfg(feature = "analysis")]
+    OpenAnalysisWindow(Option<VisibleItemIndex>, AnalysisWindow),
     MoveFocus(MoveDir, CommandCount, bool),
     MoveFocusedItem(MoveDir, CommandCount),
     FocusTransaction(Option<TransactionRef>, Option<Transaction>),
@@ -302,6 +307,8 @@ pub enum Message {
     SetPerformanceVisible(bool),
     SetContinuousRedraw(bool),
     SetCursorWindowVisible(bool),
+    #[cfg(feature = "analysis")]
+    SetAnalysisWindowVisible(AnalysisWindow, bool),
     SetHierarchyStyle(HierarchyStyle),
     SetArrowKeyBindings(ArrowKeyBindings),
     SetPrimaryMouseDragBehavior(PrimaryMouseDrag),
