@@ -312,6 +312,9 @@ impl SystemState {
             }
         }
 
+        #[cfg(feature = "analysis")]
+        self.draw_analysis_windows(ctx, &mut msgs);
+
         if self
             .user
             .show_menu

@@ -30,7 +30,7 @@ wellen.workspace = true
 vergen-gitcl = { workspace = true, features = ["build"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-fastrand = "2.3.0"
+fastrand = "2.3"
 http-body-util = "0.1.2"
 hyper = { version = "1.4", features = ["http1", "server"] }
 hyper-util = { version = "0.1.6", features = ["tokio"] }
