@@ -1,0 +1,20 @@
+[package]
+name = "surfer-waveform"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "surfer_waveform"
+# This enables both static lib (for standalone) and cdylib (for Python)
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+
+[dependencies]
+ecolor = { workspace = true }
+# PyO3 is optional - only used when building Python extension
+pyo3.workspace = true
+surfer-translation-types = { path = "../surfer-translation-types" }
+# Feature flag to enable Python bindings
+# python = ["pyo3"]
