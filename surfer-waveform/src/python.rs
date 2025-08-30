@@ -1,18 +1,11 @@
 use ecolor::Color32;
 use pyo3::prelude::*;
 
-use crate::ValueKind;
+use surfer_translation_types::ValueKind;
 
-#[pymodule]
-#[pyo3(name = "surfer")]
-pub fn surfer_pyo3_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<PythonBasicTranslator>()?;
-    m.add_class::<PythonValueKind>()?;
-    Ok(())
-}
-
+#[derive(Hash, PartialEq, Eq, Debug, Clone)]
 #[pyclass(name = "BasicTranslator", subclass)]
-struct PythonBasicTranslator {}
+pub struct PythonBasicTranslator {}
 // NOTE: No implementation for the PythonBasicTranslator here. Will be done later.
 
 #[derive(Clone)]
