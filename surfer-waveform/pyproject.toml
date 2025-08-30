@@ -1,0 +1,24 @@
+
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "surfer_waveform"
+version = "0.1.0"
+description = "A Rust extension for Python that also works standalone"
+# readme = "README.md"
+requires-python = ">=3.8"
+# license = {file = "LICENSE"}
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+classifiers = [
+    "Programming Language :: Python",
+    "Programming Language :: Rust",
+    "License :: OSI Approved :: MIT License",
+]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+# python-source = "python"
