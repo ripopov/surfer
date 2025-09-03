@@ -54,6 +54,7 @@ pub struct ItemInfo {
 pub enum WcpResponse {
     get_item_list { ids: Vec<DisplayedItemRef> },
     get_item_info { results: Vec<ItemInfo> },
+    add_items { ids: Vec<DisplayedItemRef> },
     add_variables { ids: Vec<DisplayedItemRef> },
     add_scope { ids: Vec<DisplayedItemRef> },
     ack,
@@ -119,6 +120,7 @@ pub enum WcpCommand {
     /// Responds with [WcpResponse::ack]
     /// Responds with an error if the `id` does not exist in the currently loaded waveform.
     set_item_color { id: DisplayedItemRef, color: String },
+    // TODO -- remove add_variables and add_scope
     /// Adds the specified variables to the view.
     /// Responds with [WcpResponse::add_variables] which contains a list of the item references
     /// that can be used to reference the added items later
@@ -131,6 +133,16 @@ pub enum WcpCommand {
     /// Responds with an error if no waveforms are loaded
     add_scope {
         scope: String,
+        #[serde(default)]
+        recursive: bool,
+    },
+    /// Adds the specified variables or variables in the specified scopes to the view.
+    /// Does so recursively if specified
+    /// Responds with [WcpResponse::add_items] which contains a list of the item references
+    /// that can be used to reference the added items later
+    /// Responds with an error if no waveforms are loaded
+    add_items {
+        items: Vec<String>,
         #[serde(default)]
         recursive: bool,
     },
