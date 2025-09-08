@@ -164,21 +164,21 @@ impl DisplayedItemTree {
     }
 
     /// Iterate through all visible items
-    pub fn iter_visible(&self) -> VisibleItemIterator {
+    pub fn iter_visible(&self) -> VisibleItemIterator<'_> {
         VisibleItemIterator {
             items: &self.items,
             next_idx: 0,
         }
     }
 
-    pub fn iter_visible_mut(&mut self) -> VisibleItemIteratorMut {
+    pub fn iter_visible_mut(&mut self) -> VisibleItemIteratorMut<'_> {
         VisibleItemIteratorMut {
             items: &mut self.items,
             next_idx: 0,
         }
     }
 
-    pub fn iter_visible_extra(&self) -> VisibleItemIteratorExtraInfo {
+    pub fn iter_visible_extra(&self) -> VisibleItemIteratorExtraInfo<'_> {
         VisibleItemIteratorExtraInfo {
             items: &self.items,
             next_idx: 0,
@@ -233,7 +233,7 @@ impl DisplayedItemTree {
     }
 
     /// Return the index past the end of the subtree started by `idx`
-    pub fn subtree_end(&self, start_idx: usize) -> usize {
+    fn subtree_end(&self, start_idx: usize) -> usize {
         let level = self.items[start_idx].level;
         self.items
             .iter()
