@@ -164,21 +164,21 @@ impl DisplayedItemTree {
     }
 
     /// Iterate through all visible items
-    pub fn iter_visible(&self) -> VisibleItemIterator {
+    pub fn iter_visible(&self) -> VisibleItemIterator<'_> {
         VisibleItemIterator {
             items: &self.items,
             next_idx: 0,
         }
     }
 
-    pub fn iter_visible_mut(&mut self) -> VisibleItemIteratorMut {
+    pub fn iter_visible_mut(&mut self) -> VisibleItemIteratorMut<'_> {
         VisibleItemIteratorMut {
             items: &mut self.items,
             next_idx: 0,
         }
     }
 
-    pub fn iter_visible_extra(&self) -> VisibleItemIteratorExtraInfo {
+    pub fn iter_visible_extra(&self) -> VisibleItemIteratorExtraInfo<'_> {
         VisibleItemIteratorExtraInfo {
             items: &self.items,
             next_idx: 0,
