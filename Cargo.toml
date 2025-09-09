@@ -18,6 +18,7 @@ categories = ["development-tools::debugging", "science"]
 edition = "2021"
 rust-version = "1.85"
 repository = "https://gitlab.com/surfer-project/surfer/"
+build = "build.rs"
 
 [workspace.dependencies]
 

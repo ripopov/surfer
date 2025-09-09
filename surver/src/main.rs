@@ -5,7 +5,7 @@ use fern::colors::ColoredLevelConfig;
 use fern::Dispatch;
 
 #[derive(clap::Parser, Default)]
-#[command(version, about)]
+#[command(version = env!("VERSION"), about)]
 struct Args {
     /// Waveform file in VCD, FST, or GHW format.
     wave_file: String,
