@@ -4,8 +4,8 @@ use log::{error, info};
 use pyo3::types::{PyAnyMethods, PyDict, PyModule, PyStringMethods};
 use pyo3::{Bound, Py, Python};
 use std::ffi::{CStr, CString};
-use surfer_translation_types::python::{surfer_pyo3_module, PythonValueKind};
 use surfer_translation_types::{BasicTranslator, ValueKind, VariableValue};
+use surfer_waveform::{python::PythonValueKind, surfer_pyo3_module};
 
 use crate::wave_container::{ScopeId, VarId};
 
@@ -17,7 +17,7 @@ pub struct PythonTranslator {
 impl PythonTranslator {
     pub fn new(code: &CStr) -> Result<Vec<Self>> {
         info!("Loading Python translator");
-        Python::with_gil(|py| -> pyo3::PyResult<_> {
+        Python::attach(|py| -> pyo3::PyResult<_> {
             let surfer_module = PyModule::new(py, "surfer")?;
             surfer_pyo3_module(&surfer_module)?;
             let sys = PyModule::import(py, "sys")?;
@@ -48,7 +48,7 @@ impl PythonTranslator {
 
 impl BasicTranslator<VarId, ScopeId> for PythonTranslator {
     fn name(&self) -> String {
-        let name = Python::with_gil(|py| {
+        let name = Python::attach(|py| {
             self.module
                 .bind(py)
                 .getattr(self.class_name.as_str())
@@ -64,7 +64,7 @@ impl BasicTranslator<VarId, ScopeId> for PythonTranslator {
     }
 
     fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
-        let result = Python::with_gil(|py| -> pyo3::PyResult<_> {
+        let result = Python::attach(|py| -> pyo3::PyResult<_> {
             let ret = self
                 .module
                 .bind(py)
