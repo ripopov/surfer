@@ -32,7 +32,6 @@ emath.workspace = true
 enum-iterator.workspace = true
 epaint.workspace = true
 f128 = { path = "../f128", optional = true }
-fern.workspace = true
 ftr_parser.workspace = true
 futures-core.workspace = true
 futures-util.workspace = true
@@ -60,10 +59,13 @@ surfer-translation-types = { path = "../surfer-translation-types", default-featu
 surver.workspace = true
 sys-locale.workspace = true
 toml.workspace = true
+tracing-subscriber.workspace = true
 web-time.workspace = true
 wellen.workspace = true
 leb128.workspace = true
 tokio-stream = "0.1.17"
+tracing = "0.1.41"
+tracing-log = "0.2.0"
 
 [features]
 default = ["performance_plot"]

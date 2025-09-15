@@ -91,6 +91,7 @@ impl PluginTranslator {
         let manifest = Manifest::new([Wasm::data(data)])
             .with_memory_options(MemoryOptions::new().with_max_var_bytes(1024 * 1024 * 10));
         let mut plugin = PluginBuilder::new(manifest)
+            .with_debug_info()
             .with_function(
                 "read_file",
                 [PTR],

@@ -1,16 +1,18 @@
-use std::{borrow::Cow, sync::Mutex};
+use std::{borrow::Cow, collections::BTreeMap, sync::Mutex};
 
 use ecolor::Color32;
 use egui::{self, RichText, TextWrapMode};
 use egui_extras::{Column, TableBuilder, TableRow};
 use eyre::Result;
-use log::{Level, Log, Record};
+use tracing::{
+    field::{Field, Visit},
+    Level,
+};
+use tracing_subscriber::Layer;
 
 use crate::{message::Message, SystemState};
 
-pub static EGUI_LOGGER: EguiLogger = EguiLogger {
-    records: Mutex::new(vec![]),
-};
+static RECORD_MUTEX: Mutex<Vec<LogMessage>> = Mutex::new(vec![]);
 
 #[macro_export]
 macro_rules! try_log_error {
@@ -22,40 +24,53 @@ macro_rules! try_log_error {
 }
 
 #[derive(Clone)]
-pub struct LogMessage<'a> {
-    pub msg: Cow<'a, str>,
+pub struct LogMessage {
+    pub name: String,
+    pub msg: String,
     pub level: Level,
 }
 
-pub struct EguiLogger<'a> {
-    records: Mutex<Vec<LogMessage<'a>>>,
-}
+struct EguiLogger {}
 
-impl EguiLogger<'_> {
-    pub fn records(&self) -> Vec<LogMessage<'_>> {
-        self.records
+impl EguiLogger {
+    pub fn records(&self) -> Vec<LogMessage> {
+        RECORD_MUTEX
             .lock()
             .expect("Failed to lock logger. Thread poisoned?")
             .to_vec()
     }
 }
 
-impl Log for EguiLogger<'_> {
-    fn enabled(&self, _metadata: &log::Metadata) -> bool {
-        true
-    }
+struct FieldVisitor<'a>(&'a mut BTreeMap<String, String>);
 
-    fn log(&self, record: &Record) {
-        self.records
+impl<'a> Visit for FieldVisitor<'a> {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        self.0
+            .insert(field.name().to_string(), format!("{:?}", value));
+    }
+}
+
+impl<S> Layer<S> for EguiLogger
+where
+    S: tracing::Subscriber,
+{
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let mut fields = BTreeMap::new();
+        event.record(&mut FieldVisitor(&mut fields));
+
+        RECORD_MUTEX
             .lock()
             .expect("Failed to lock logger. Thread poisoned?")
             .push(LogMessage {
-                msg: format!("{}", record.args()).into(),
-                level: record.level(),
+                name: event.metadata().module_path().unwrap_or("-").to_string(),
+                msg: fields.get("message").cloned().unwrap_or("-".to_string()),
+                level: *event.metadata().level(),
             });
     }
-
-    fn flush(&self) {}
 }
 
 impl SystemState {
@@ -71,6 +86,7 @@ impl SystemState {
                 egui::ScrollArea::new([true, false]).show(ui, |ui| {
                     TableBuilder::new(ui)
                         .column(Column::auto().resizable(true))
+                        .column(Column::auto().resizable(true))
                         .column(Column::remainder())
                         .vscroll(true)
                         .stick_to_bottom(true)
@@ -79,11 +95,14 @@ impl SystemState {
                                 ui.heading("Level");
                             });
                             header.col(|ui| {
+                                ui.heading("Source");
+                            });
+                            header.col(|ui| {
                                 ui.heading("Message");
                             });
                         })
                         .body(|body| {
-                            let records = EGUI_LOGGER.records();
+                            let records = RECORD_MUTEX.lock().unwrap();
                             let heights = records
                                 .iter()
                                 .map(|record| {
@@ -97,14 +116,21 @@ impl SystemState {
                                 let record = &records[row.index()];
                                 row.col(|ui| {
                                     let (color, text) = match record.level {
-                                        log::Level::Error => (Color32::RED, "Error"),
-                                        log::Level::Warn => (Color32::YELLOW, "Warn"),
-                                        log::Level::Info => (Color32::GREEN, "Info"),
-                                        log::Level::Debug => (Color32::BLUE, "Debug"),
-                                        log::Level::Trace => (Color32::GRAY, "Trace"),
+                                        Level::ERROR => (Color32::RED, "Error"),
+                                        Level::WARN => (Color32::YELLOW, "Warn"),
+                                        Level::INFO => (Color32::GREEN, "Info"),
+                                        Level::DEBUG => (Color32::BLUE, "Debug"),
+                                        Level::TRACE => (Color32::GRAY, "Trace"),
                                     };
 
                                     ui.colored_label(color, text);
+                                });
+                                row.col(|ui| {
+                                    ui.label(
+                                        RichText::new(record.name.clone())
+                                            .color(Color32::GRAY)
+                                            .monospace(),
+                                    );
                                 });
                                 row.col(|ui| {
                                     ui.label(RichText::new(record.msg.clone()).monospace());
@@ -119,42 +145,27 @@ impl SystemState {
     }
 }
 
-pub fn setup_logging(platform_logger: fern::Dispatch) -> Result<()> {
-    let egui_log_config = fern::Dispatch::new()
-        .level(log::LevelFilter::Info)
-        .level_for("surfer", log::LevelFilter::Trace)
-        .format(move |out, message, _record| out.finish(format_args!(" {message}")))
-        .chain(&EGUI_LOGGER as &(dyn log::Log + 'static));
-
-    fern::Dispatch::new()
-        .chain(platform_logger)
-        .chain(egui_log_config)
-        .apply()?;
-    Ok(())
-}
-
 /// Starts the logging and error handling. Can be used by unittests to get more insights.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn start_logging() -> Result<()> {
-    let colors = fern::colors::ColoredLevelConfig::new()
-        .error(fern::colors::Color::Red)
-        .warn(fern::colors::Color::Yellow)
-        .info(fern::colors::Color::Green)
-        .debug(fern::colors::Color::Blue)
-        .trace(fern::colors::Color::White);
+    use std::io::stdout;
 
-    let stdout_config = fern::Dispatch::new()
-        .level(log::LevelFilter::Info)
-        .level_for("surfer", log::LevelFilter::Trace)
-        .format(move |out, message, record| {
-            out.finish(format_args!(
-                "[{}] {}",
-                colors.color(record.level()),
-                message
-            ));
-        })
-        .chain(std::io::stdout());
-    setup_logging(stdout_config)?;
+    use tracing_subscriber::{fmt, layer::SubscriberExt, Registry};
+
+    tracing_log::LogTracer::init()?;
+
+    let filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    let subscriber = Registry::default()
+        .with(
+            fmt::layer()
+                .without_time()
+                .with_writer(stdout)
+                .with_filter(filter.clone()),
+        )
+        .with(EguiLogger {}.with_filter(filter));
+
+    tracing::subscriber::set_global_default(subscriber).expect("unable to set global subscriber");
 
     Ok(())
 }

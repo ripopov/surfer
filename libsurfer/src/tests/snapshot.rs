@@ -2247,7 +2247,6 @@ snapshot_ui_with_file_and_msgs! {simple_ftr_loads, "examples/my_db.ftr", [
     Message::AddStreamOrGenerator(TransactionStreamRef::new_stream(3, "data_stream".to_string())),
     Message::AddDivider(Some("Divider".to_string()), None),
     Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(1, 4, "pipelined_stream.read".to_string())),
-    Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(1, 5, "pipelined_stream.write".to_string())),
     Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(2, 6, "addr_stream.addr".to_string())),
     Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(3, 7, "data_stream.rdata".to_string())),
     Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(3, 8, "data_stream.wdata".to_string())),
