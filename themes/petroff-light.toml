@@ -1,0 +1,30 @@
+foreground = "343434"
+alt_text_color = "dddddd"
+border_color = "282b2d"
+selected_elements_colors = { background = "adadad", foreground = "343434" }
+canvas_colors = { background = "ffffff", alt_background = "efefef", foreground = "343434" }
+primary_ui_color = { background = "f3f3f3", foreground = "343434" }
+secondary_ui_color = { background = "f3f3f3", foreground = "2c2c2c" }
+accent_info = { background = "007acc", foreground = "f3f3f3" }
+accent_warn = { background = "32302f", foreground = "d4d4d4" }
+accent_error = { background = "32302f", foreground = "d4d4d4" }
+
+variable_default = "3f90da"
+variable_undef = "bd1f01"
+variable_highimp = "e76b00"
+variable_dontcare = "94a4a2"
+variable_weak = "b9ac70"
+cursor = { color="ffa90e", width=2 }
+gesture = { color="ffa90e", width=2 }
+
+[colors]
+Blue = "3f90da"
+Pop = "ffa90e"
+Red = "bd1f01"
+Gray = "94a4a2"
+Purple = "832db6"
+Brown = "a96b59"
+Orange = "e76b00"
+Tan = "b9ac70"
+Dim = "717581"
+Sky = "92dadb"

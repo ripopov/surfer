@@ -1781,6 +1781,8 @@ snapshot_ui_with_theme!(theme_default, "default");
 snapshot_ui_with_theme!(theme_ibm, "ibm");
 snapshot_ui_with_theme!(theme_light_high_contrast, "light-high-contrast");
 snapshot_ui_with_theme!(theme_light_plus, "light+");
+snapshot_ui_with_theme!(theme_petroff_dark, "petroff-dark");
+snapshot_ui_with_theme!(theme_petroff_light, "petroff-light");
 snapshot_ui_with_theme!(theme_solarized, "solarized");
 
 snapshot_ui_with_file_and_msgs! {undo_redo_works, "examples/counter.vcd", [
