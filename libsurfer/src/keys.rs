@@ -109,6 +109,12 @@ impl SystemState {
                         }
                     }
                     (Key::T, true, false, false) => msgs.push(Message::ToggleToolbar),
+                    (Key::F2, true, false, _) => {
+						if let Some(waves) = &self.user.waves {
+							msgs.push(Message::RenameItem(waves
+								.focused_item));	
+						}
+					}
                     (Key::F11, true, false, _) => msgs.push(Message::ToggleFullscreen),
                     (Key::U, true, false, false) => {
                         if modifiers.shift {
