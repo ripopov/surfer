@@ -1,11 +1,13 @@
 use crate::ScopeRef;
+#[cfg(feature = "wasm_plugins")]
 use extism_convert::{FromBytes, Json, ToBytes};
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 
 // FIXME: We'll be cloning these quite a bit, I wonder if a `Cow<&str>` or Rc/Arc would be better
-#[derive(Clone, Debug, Eq, Serialize, Deserialize, ToBytes, FromBytes)]
-#[encoding(Json)]
+#[cfg_attr(feature = "wasm_plugins", derive(FromBytes, ToBytes))]
+#[cfg_attr(feature = "wasm_plugins", encoding(Json))]
+#[derive(Clone, Debug, Eq, Serialize, Deserialize)]
 pub struct VariableRef<VarId, ScopeId> {
     /// Path in the scope hierarchy to where this variable resides
     pub path: ScopeRef<ScopeId>,

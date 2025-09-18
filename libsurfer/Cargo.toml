@@ -56,7 +56,7 @@ ron.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 softposit.workspace = true
-surfer-translation-types = { path = "../surfer-translation-types" }
+surfer-translation-types = { path = "../surfer-translation-types", default-features = false }
 surver.workspace = true
 sys-locale.workspace = true
 toml.workspace = true
@@ -71,6 +71,11 @@ accesskit = ["eframe/accesskit", "eframe/web_screen_reader"]
 f128 = ["dep:f128"]
 performance_plot = ["dep:egui_plot"]
 python = ["pyo3", "surfer-translation-types/pyo3"]
+wasm_plugins = [
+    "dep:extism",
+    "dep:extism-manifest",
+    "surfer-translation-types/wasm_plugins",
+]
 
 [target.'cfg(all(not(windows), not(target_arch = "wasm32")))'.dependencies]
 notify = "8.0"
@@ -79,8 +84,8 @@ notify = "8.0"
 directories = "6.0"
 futures = { workspace = true, features = ["executor"] }
 tokio.workspace = true
-extism = { version = "1.11.1", default-features = false }
-extism-manifest = "1.11.1"
+extism = { version = "1.11.1", default-features = false, optional = true }
+extism-manifest = { version = "1.11.1", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 futures.workspace = true
@@ -92,8 +97,8 @@ web-sys = { version = "= 0.3.77", features = ["Location", "UrlSearchParams"] }
 [dev-dependencies]
 egui_skia_renderer = { git = "https://gitlab.com/oscargus/egui_skia_renderer.git", rev = "a8b4a64226328cc4f14e68a434dd0bd35304f3bd" }
 image = { version = "0.25", default-features = false, features = ["png"] }
-image-compare = "0.4.2"
-port_check = "0.2.1"
+image-compare = "0.5"
+port_check = "0.3"
 project-root = "0.2.2"
 test-log = "0.2.15"
 

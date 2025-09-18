@@ -13,3 +13,5 @@
   - [Config parameters](./configuration/config/README.md)
   - [Theme parameters](./configuration/themes/parameters.md)
   - [Built-in themes](./configuration/themes/builtin.md)
+- [Development](./development/README.md)
+- [Compile Features](./features.md)

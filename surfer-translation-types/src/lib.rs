@@ -10,6 +10,7 @@ mod variable_ref;
 
 use derive_more::Display;
 use ecolor::Color32;
+#[cfg(feature = "wasm_plugins")]
 use extism_convert::{FromBytes, Json, ToBytes};
 use num::BigUint;
 use serde::{Deserialize, Serialize};
@@ -27,8 +28,9 @@ pub use crate::translator::{
 pub use crate::variable_index::VariableIndex;
 pub use crate::variable_ref::VariableRef;
 
-#[derive(Deserialize, Serialize, FromBytes, ToBytes)]
-#[encoding(Json)]
+#[cfg_attr(feature = "wasm_plugins", derive(FromBytes, ToBytes))]
+#[cfg_attr(feature = "wasm_plugins", encoding(Json))]
+#[derive(Deserialize, Serialize)]
 pub struct PluginConfig(pub HashMap<String, String>);
 
 /// Turn vector variable string into name and corresponding color if it
@@ -122,8 +124,9 @@ pub enum ValueKind {
     Weak,
 }
 
-#[derive(PartialEq, Deserialize, Serialize, FromBytes, ToBytes)]
-#[encoding(Json)]
+#[cfg_attr(feature = "wasm_plugins", derive(FromBytes, ToBytes))]
+#[cfg_attr(feature = "wasm_plugins", encoding(Json))]
+#[derive(PartialEq, Deserialize, Serialize)]
 pub enum TranslationPreference {
     /// This translator prefers translating the variable, so it will be selected
     /// as the default translator for the variable
@@ -135,8 +138,9 @@ pub enum TranslationPreference {
 }
 
 /// Static information about the structure of a variable.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, FromBytes, ToBytes)]
-#[encoding(Json)]
+#[cfg_attr(feature = "wasm_plugins", derive(FromBytes, ToBytes))]
+#[cfg_attr(feature = "wasm_plugins", encoding(Json))]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub enum VariableInfo {
     Compound {
         subfields: Vec<(String, VariableInfo)>,
@@ -250,8 +254,9 @@ pub enum VariableDirection {
     Unknown,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, FromBytes, ToBytes)]
-#[encoding(Json)]
+#[cfg_attr(feature = "wasm_plugins", derive(FromBytes, ToBytes))]
+#[cfg_attr(feature = "wasm_plugins", encoding(Json))]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VariableMeta<VarId, ScopeId> {
     pub var: VariableRef<VarId, ScopeId>,
     pub num_bits: Option<u32>,
