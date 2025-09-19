@@ -297,7 +297,7 @@ impl SystemState {
                     self.save_current_canvas(undo_msg);
                     if let Some(waves) = self.user.waves.as_mut() {
                         if let (Some(cmd), _) =
-                            waves.add_variables(&self.translators, vars, None, true)
+                            waves.add_variables(&self.translators, vars, None, true, false)
                         {
                             self.load_variables(cmd);
                         }
@@ -324,7 +324,9 @@ impl SystemState {
                 let waves = self.user.waves.as_mut()?;
 
                 // TODO add parameter to add_variables, insert to (self.drag_target_idx, self.drag_source_idx)
-                if let (Some(cmd), _) = waves.add_variables(&self.translators, vars, None, true) {
+                if let (Some(cmd), _) =
+                    waves.add_variables(&self.translators, vars, None, true, false)
+                {
                     self.load_variables(cmd);
                 }
 
@@ -1579,7 +1581,7 @@ impl SystemState {
                 let target = self.user.drag_target_idx.take();
 
                 if let (Some(cmd), _) =
-                    waves.add_variables(&self.translators, variables, target, true)
+                    waves.add_variables(&self.translators, variables, target, true, false)
                 {
                     self.load_variables(cmd);
                 }
@@ -1970,7 +1972,8 @@ impl SystemState {
 
         let group_ref = waves.add_group(scope.name(), Some(pos));
 
-        let (cmd, variable_refs) = waves.add_variables(&self.translators, variables, None, false);
+        let (cmd, variable_refs) =
+            waves.add_variables(&self.translators, variables, None, false, false);
 
         let variable_idxs = waves
             .items_tree
