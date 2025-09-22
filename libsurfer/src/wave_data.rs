@@ -386,6 +386,7 @@ impl WaveData {
         variables: Vec<VariableRef>,
         target_position: Option<TargetPosition>,
         update_display_names: bool,
+        ignore_failures: bool,
     ) -> (Option<LoadSignalsCmd>, Vec<DisplayedItemRef>) {
         let mut indices = vec![];
         // load variables from waveform
@@ -415,6 +416,9 @@ impl WaveData {
                 .context("When adding variable")
                 .map_err(|e| error!("{e:#?}"))
             else {
+                if ignore_failures {
+                    continue;
+                }
                 return (res, indices);
             };
 

@@ -130,8 +130,13 @@ impl SystemState {
                                 .iter()
                                 .map(|n| VariableRef::from_hierarchy_string(n))
                                 .collect_vec();
-                            let (cmd, ids) =
-                                waves.add_variables(&self.translators, variable_refs, None, true);
+                            let (cmd, ids) = waves.add_variables(
+                                &self.translators,
+                                variable_refs,
+                                None,
+                                true,
+                                false,
+                            );
                             if let Some(cmd) = cmd {
                                 self.load_variables(cmd);
                             }
@@ -154,8 +159,13 @@ impl SystemState {
                         let scope = ScopeRef::from_hierarchy_string(scope);
                         let variables = self.get_scope(scope, *recursive);
                         if let Some(waves) = self.user.waves.as_mut() {
-                            let (cmd, ids) =
-                                waves.add_variables(&self.translators, variables, None, true);
+                            let (cmd, ids) = waves.add_variables(
+                                &self.translators,
+                                variables,
+                                None,
+                                true,
+                                false,
+                            );
                             if let Some(cmd) = cmd {
                                 self.load_variables(cmd);
                             }
@@ -165,6 +175,38 @@ impl SystemState {
                             self.invalidate_draw_commands();
                         } else {
                             self.send_error("scope_add", vec![], "No waveform loaded");
+                        }
+                    }
+                    WcpCommand::add_items { items, recursive } => {
+                        if self.user.waves.is_some() {
+                            self.save_current_canvas(format!("Add {} items", items.len()));
+                        }
+
+                        let mut variables: Vec<VariableRef> = Vec::new();
+                        for item in items {
+                            let variable_ref = VariableRef::from_hierarchy_string(item);
+                            let scope = ScopeRef::from_hierarchy_string(item);
+                            let scope_variables = self.get_scope(scope, *recursive);
+                            variables.push(variable_ref);
+                            variables.extend(scope_variables);
+                        }
+
+                        if let Some(waves) = self.user.waves.as_mut() {
+                            let (cmd, ids) =
+                                waves.add_variables(&self.translators, variables, None, true, true);
+                            if let Some(cmd) = cmd {
+                                self.load_variables(cmd);
+                            }
+                            self.send_response(WcpResponse::add_items {
+                                ids: ids.into_iter().map(|id| id.into()).collect_vec(),
+                            });
+                            self.invalidate_draw_commands();
+                        } else {
+                            self.send_error(
+                                "add_items",
+                                vec![],
+                                "Can't add items. No waveform loaded",
+                            )
                         }
                     }
                     WcpCommand::reload => {
@@ -303,6 +345,7 @@ impl SystemState {
             "cursor_set",
             "reload",
             "add_scope",
+            "add_items",
             "get_item_list",
             "set_item_color",
             "get_item_info",
