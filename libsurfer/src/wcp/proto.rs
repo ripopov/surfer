@@ -105,6 +105,14 @@ impl WcpSCMessage {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub struct MarkerInfo {
+    #[serde(deserialize_with = "deserialize_timestamp")]
+    pub time: BigInt,
+    pub name: Option<String>,
+    pub move_focus: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(tag = "command")]
 #[allow(non_camel_case_types)]
 pub enum WcpCommand {
@@ -146,6 +154,9 @@ pub enum WcpCommand {
         #[serde(default)]
         recursive: bool,
     },
+    /// Adds the specified markers to the view.
+    /// TODO response
+    add_markers { markers: Vec<MarkerInfo> },
     /// Reloads the waveform from disk if this is possible for the current waveform format.
     /// If it is not possible, this has no effect.
     /// Responds instantly with [WcpResponse::ack]

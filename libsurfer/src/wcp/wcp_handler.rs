@@ -209,6 +209,19 @@ impl SystemState {
                             )
                         }
                     }
+                    WcpCommand::add_markers { markers } => {
+                        if self.user.waves.is_some() {
+                            self.save_current_canvas(format!("Add {} markers", markers.len()));
+                        }
+                        for marker in markers {
+                            self.update(Message::AddMarker {
+                                time: marker.time.clone(),
+                                name: marker.name.clone(),
+                                move_focus: marker.move_focus,
+                            });
+                        }
+                        self.send_response(WcpResponse::ack);
+                    }
                     WcpCommand::reload => {
                         self.update(Message::ReloadWaveform(false));
                         self.send_response(WcpResponse::ack);
@@ -354,6 +367,7 @@ impl SystemState {
             "clear",
             "load",
             "zoom_to_fit",
+            "add_markers",
         ]
         .into_iter()
         .map(str::to_string)
