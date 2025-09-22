@@ -285,6 +285,7 @@ pub type ServerStartedFlag = Arc<std::sync::atomic::AtomicBool>;
 
 pub async fn server_main(
     port: u16,
+    bind_address: String,
     token: Option<String>,
     filename: String,
     started: Option<ServerStartedFlag>,
@@ -311,7 +312,10 @@ pub async fn server_main(
         "Loaded header of {filename} in {:?}",
         start_read_header.elapsed()
     );
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let ip_addr: std::net::IpAddr = bind_address
+        .parse()
+        .with_context(|| format!("Invalid bind address: {bind_address}"))?;
+    let addr = SocketAddr::new(ip_addr, port);
 
     // immutable read-only data
     let url = format!("http://{addr:?}/{token}");
@@ -335,6 +339,12 @@ pub async fn server_main(
     let shared_2 = shared.clone();
     let state_2 = state.clone();
     std::thread::spawn(move || loader(shared_2, header_result.body, state_2, rx));
+
+    if bind_address != "127.0.0.1" {
+        warn!("Server is binding to {bind_address} instead of 127.0.0.1 (localhost)");
+        warn!("This may make the server accessible from external networks");
+        warn!("Surver traffic is unencrypted and unauthenticated - use with caution!");
+    }
 
     // print out status
     info!("Starting server on {addr:?}. To use:");

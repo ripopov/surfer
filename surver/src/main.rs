@@ -12,6 +12,9 @@ struct Args {
     /// Port on which server will listen
     #[clap(long)]
     port: Option<u16>,
+    /// IP address to bind the server to
+    #[clap(long)]
+    bind_address: Option<String>,
     /// Token used by the client to authenticate to the server
     #[clap(long)]
     token: Option<String>,
@@ -57,9 +60,14 @@ fn main() -> Result<()> {
 
     // parse arguments
     let args = Args::parse();
-    let default_port = 8911; // FIXME: make this more configurable
+
+    // Use CLI override if provided, otherwise use hardcoded defaults
+    let bind_addr = args.bind_address.unwrap_or_else(|| "127.0.0.1".to_string());
+    let port = args.port.unwrap_or(8911);
+
     runtime.block_on(surver::server_main(
-        args.port.unwrap_or(default_port),
+        port,
+        bind_addr,
         args.token,
         args.wave_file,
         None,
