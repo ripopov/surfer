@@ -1,0 +1,26 @@
+# Example Surfer Command File for PNG Export
+
+# Load a waveform file
+load_file examples/counter.vcd
+
+# Add some signals to the view
+variable_add tb.dut.clk
+variable_add tb.dut.reset
+variable_add tb.dut.count
+
+# Set item focus and scope
+item_focus a_tb.dut.clk
+scope_select tb.dut
+item_set_background_color Gray
+
+marker_set "RESET" 100
+
+# Set a cursor at a specific time (e.g., 100ns)
+cursor_set 110
+
+# Set the view to a specific time range (e.g., 0ns to 200ns)
+set_time_range 0 200
+
+# Export the current view as a PNG image
+# The output file will be named 'exported_waveform.png' in the current directory
+export_png exported_waveform.png
