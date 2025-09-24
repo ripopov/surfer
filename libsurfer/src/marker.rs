@@ -8,7 +8,7 @@ use num::BigInt;
 use crate::SystemState;
 use crate::{
     config::SurferTheme,
-    displayed_item::{DisplayedItem, DisplayedMarker},
+    displayed_item::{DisplayedItem, DisplayedItemRef, DisplayedMarker},
     message::Message,
     time::time_string,
     view::{DrawingContext, ItemDrawingInfo},
@@ -90,9 +90,14 @@ impl WaveData {
         self.markers.len() < MAX_MARKERS
     }
 
-    pub fn add_marker(&mut self, location: &BigInt, name: Option<String>, move_focus: bool) {
+    pub fn add_marker(
+        &mut self,
+        location: &BigInt,
+        name: Option<String>,
+        move_focus: bool,
+    ) -> Option<DisplayedItemRef> {
         if !self.can_add_marker() {
-            return;
+            return None;
         }
 
         let Some(idx) = (0..=MAX_MARKER_INDEX).find(|idx| !self.markers.contains_key(idx)) else {
@@ -101,7 +106,7 @@ impl WaveData {
             return;
         };
 
-        self.insert_item(
+        let item_ref = self.insert_item(
             DisplayedItem::Marker(DisplayedMarker {
                 color: None,
                 background_color: None,
@@ -112,6 +117,8 @@ impl WaveData {
             move_focus,
         );
         self.markers.insert(idx, location.clone());
+
+        Some(item_ref)
     }
 
     pub fn remove_marker(&mut self, idx: u8) {

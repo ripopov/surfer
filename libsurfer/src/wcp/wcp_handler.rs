@@ -13,7 +13,7 @@ use std::sync::atomic::Ordering;
 use surfer_translation_types::ScopeRef;
 use tracing::{trace, warn};
 
-use super::proto::{ItemInfo, WcpCSMessage, WcpCommand, WcpResponse, WcpSCMessage};
+use super::proto::{ItemInfo, MarkerInfo, WcpCSMessage, WcpCommand, WcpResponse, WcpSCMessage};
 
 impl SystemState {
     pub fn handle_wcp_commands(&mut self) {
@@ -213,14 +213,25 @@ impl SystemState {
                         if self.user.waves.is_some() {
                             self.save_current_canvas(format!("Add {} markers", markers.len()));
                         }
-                        for marker in markers {
-                            self.update(Message::AddMarker {
-                                time: marker.time.clone(),
-                                name: marker.name.clone(),
-                                move_focus: marker.move_focus,
+                        if let Some(waves) = self.user.waves.as_mut() {
+                            let mut indices = vec![];
+                            for marker in markers {
+                                let MarkerInfo {
+                                    time,
+                                    name,
+                                    move_focus,
+                                } = marker;
+                                if let Some(id) = waves.add_marker(time, name.clone(), *move_focus)
+                                {
+                                    indices.push(id);
+                                }
+                            }
+                            self.send_response(WcpResponse::add_markers {
+                                ids: indices.into_iter().map(|id| id.into()).collect_vec(),
                             });
+                        } else {
+                            self.send_error("add_markers", vec![], "No waveform loaded");
                         }
-                        self.send_response(WcpResponse::ack);
                     }
                     WcpCommand::reload => {
                         self.update(Message::ReloadWaveform(false));

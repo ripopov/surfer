@@ -57,6 +57,7 @@ pub enum WcpResponse {
     add_items { ids: Vec<DisplayedItemRef> },
     add_variables { ids: Vec<DisplayedItemRef> },
     add_scope { ids: Vec<DisplayedItemRef> },
+    add_markers { ids: Vec<DisplayedItemRef> },
     ack,
 }
 
@@ -155,7 +156,9 @@ pub enum WcpCommand {
         recursive: bool,
     },
     /// Adds the specified markers to the view.
-    /// TODO response
+    /// Responds with [WcpResponse::add_markers] which contains a list of the item references
+    /// that can be used to reference the added items later
+    /// Responds with an error if no waveforms are loaded
     add_markers { markers: Vec<MarkerInfo> },
     /// Reloads the waveform from disk if this is possible for the current waveform format.
     /// If it is not possible, this has no effect.
