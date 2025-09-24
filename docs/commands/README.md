@@ -2,7 +2,7 @@
 
 To execute a command, press space and type the command. There is fuzzy match support, so it is enough to type parts of the command name and it will display options that matches.
 
-It is also possible to create a command file, extension `.sucl`, and run that. Running a command file can be done from within Surfer using the menu option in the File menu, through the toolbar button, or by typing the command ``run_command_file``. It can also be done using the ``--command-file`` argument when starting Surfer.
+It is also possible to create a command file, extension `.sucl`, and run that. Running a command file can be done from within Surfer using the menu option in the File menu, through the toolbar button, or by typing the command ``run_command_file``. It can also be done using the ``--command-file`` argument when starting Surfer, or by using the ``--headless`` argument to run Surfer without a GUI, typically for CI/CD environments.
 
 Not all commands are available unless a file is loaded. Also, some commands are not available in the WASM-build (browser/VS Code extension).
 
@@ -143,6 +143,10 @@ Not all commands are available unless a file is loaded. Also, some commands are 
 * ``transaction_next``
 * ``transaction_prev``
 
+* ``set_zoom <START_TIME> <END_TIME> [VIEWPORT_ID]``
+
+  Set the visible time range of the waveform display. `START_TIME` and `END_TIME` can be absolute times (e.g., `100ns`) or relative to the current view. `VIEWPORT_ID` (optional) specifies which viewport to apply the zoom to. If omitted, the zoom is applied to the currently active viewport.
+
 ## UI control
 
 * ``show_controls``
@@ -228,6 +232,15 @@ using the `address` setting in the `wcp` part of the config file.
 * ``wcp_server_stop`` (not WASM)
 
 Stop the WCP server.
+
+## Image Export
+
+* ``export_png <FILE_PATH_PREFIX> [VIEWPORT_ID] [REGION_SPECIFICATIONS]``
+
+  Export the waveform view(s) as one or more PNG images.
+  `FILE_PATH_PREFIX` specifies the base name for the output file(s). If multiple images are exported (e.g., multiple viewports or regions), a suffix (e.g., `_viewport_0`, `_region_0`) will be appended before the `.png` extension.
+  `VIEWPORT_ID` (optional) specifies a single viewport to export. If omitted, all viewports are considered. By default, if multiple viewports exist and no `VIEWPORT_ID` is specified, each viewport will be exported as a separate PNG. An option to combine all viewports into a single PNG will be available (details to be specified in configuration).
+  `REGION_SPECIFICATIONS` (optional) allows defining specific time ranges or signal groups to export within the selected viewport(s). If omitted, the currently displayed view of the viewport(s) is exported.
 
 ## Other
 
