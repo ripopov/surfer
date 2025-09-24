@@ -24,7 +24,7 @@ inclusion: manual
 
 ## Acceptance Criteria Requirements
 
-- WHEN I execute a Surfer command file containing a `set_zoom` command with a `VIEWPORT_ID`, THEN Surfer SHALL adjust the zoom for that specific viewport.
+- WHEN I execute a Surfer command file containing a `set_time_range` command with a `VIEWPORT_ID`, THEN Surfer SHALL adjust the zoom for that specific viewport.
 - WHEN I execute a Surfer command file containing an `export_png` command with parameters defining a specific view or multiple regions of interest and a `.png` file path, THEN Surfer SHALL generate one or more PNG images of the specified waveform views at the specified path(s). This includes options to export a single specified viewport, or by default, all viewports either as a single combined PNG or as separate PNGs.
 - WHEN the export is successful, THEN the command file execution SHALL complete without errors.
 - WHEN the export fails (e.g., invalid path, rendering error, invalid region specification), THEN the command file execution SHALL terminate with an error and provide an informative error message.

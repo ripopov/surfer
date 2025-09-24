@@ -23,7 +23,7 @@ The core rendering logic will reside in `libsurfer` to allow for reuse. The `sur
 - **New CLI Argument:** A new command-line argument, `--headless`, will be added to the `surfer` executable. When present, this argument will prevent the GUI from launching, allowing Surfer to run in a headless mode suitable for CI/CD environments where command files are processed for tasks like PNG export.
 - **New Command File Commands:**
   - `export_png <path/to/output_prefix.png> [VIEWPORT_ID] [REGION_SPECIFICATIONS]`: Export the waveform view(s) as one or more PNG images. `FILE_PATH_PREFIX` specifies the base name for the output file(s). If multiple images are exported (e.g., multiple viewports or regions), a suffix (e.g., `_viewport_0`, `_region_0`) will be appended before the `.png` extension. `VIEWPORT_ID` (optional) specifies a single viewport to export. If omitted, all viewports are considered. By default, if multiple viewports exist and no `VIEWPORT_ID` is specified, each viewport will be exported as a separate PNG. An option to combine all viewports into a single PNG will be available (details to be specified in configuration). `REGION_SPECIFICATIONS` (optional) allows defining specific time ranges or signal groups to export within the selected viewport(s). If omitted, the currently displayed view of the viewport(s) is exported.
-  - `set_zoom <START_TIME> <END_TIME> [VIEWPORT_ID]`: Set the visible time range of the waveform display. `START_TIME` and `END_TIME` can be absolute times (e.g., `100ns`) or relative to the current view. `VIEWPORT_ID` (optional) specifies which viewport to apply the zoom to. If omitted, the zoom is applied to the currently active viewport.
+  - `set_time_range <START_TIME> <END_TIME> [VIEWPORT_ID]`: Set the visible time range of the waveform display. `START_TIME` and `END_TIME` can be absolute times (e.g., `100ns`) or relative to the current view. `VIEWPORT_ID` (optional) specifies which viewport to apply the zoom to. If omitted, the zoom is applied to the currently active viewport.
 - **New GUI Menu Item:** A new menu item (e.g., "File -> Export Plot as PNG...") will be added to the Surfer GUI. This will trigger the export of the currently displayed waveform view to a user-specified PNG file.
 
 ### 3.2. Data Models
@@ -33,7 +33,7 @@ The core rendering logic will reside in `libsurfer` to allow for reuse. The `sur
 ### 3.3. Component Responsibilities
 
 - **`surfer/src/main.rs`:**
-  - Process command files, including parsing and executing the new `export_png` and `set_zoom` commands and their associated region/view specifications.
+  - Process command files, including parsing and executing the new `export_png` and `set_time_range` commands and their associated region/view specifications.
   - Initialize `SystemState` (potentially loading a waveform and other commands from the command file), call the `libsurfer` export function (potentially multiple times for different regions/viewports), and handle success/failure.
   - For GUI mode, handle the new menu item action, triggering the `libsurfer` export function for the current view.
   - Ensure that the GUI is not launched when processing command files in a headless export mode.

@@ -6,7 +6,7 @@ inclusion: manual
 
 ## Clear Objective
 
-Implement the PNG export functionality for waveform views in the Surfer project, enabling the export of specific views or multiple regions of a waveform as PNG images via command files, and providing a GUI menu item for interactive export of the current plot to PNG. This also includes implementing a `set_zoom` command that can target specific viewports, and a `--headless` CLI argument for running Surfer without a GUI in CI environments.
+Implement the PNG export functionality for waveform views in the Surfer project, enabling the export of specific views or multiple regions of a waveform as PNG images via command files, and providing a GUI menu item for interactive export of the current plot to PNG. This also includes implementing a `set_time_range` command that can target specific viewports, and a `--headless` CLI argument for running Surfer without a GUI in CI environments.
 
 ## Acceptance Criteria
 
@@ -23,7 +23,7 @@ Implement the PNG export functionality for waveform views in the Surfer project,
   - The current waveform plot is accurately exported as a PNG image to the specified location upon confirmation.
   - A confirmation message is displayed on successful GUI export, and an informative error message is displayed on failure.
 - **Viewport Zoom Control:**
-  - The `surfer` executable can process command files containing `set_zoom <START_TIME> <END_TIME> [VIEWPORT_ID]` commands.
+  - The `surfer` executable can process command files containing `set_time_range <START_TIME> <END_TIME> [VIEWPORT_ID]` commands.
   - When `VIEWPORT_ID` is specified, the zoom is applied only to that viewport.
   - When `VIEWPORT_ID` is omitted, the zoom is applied to the currently active viewport.
 
@@ -34,7 +34,7 @@ Implement the PNG export functionality for waveform views in the Surfer project,
 
 ## Test Strategy
 
-- Create new integration tests that load a sample waveform, apply some commands (e.g., adding signals, cursors, `set_zoom` for specific viewports), and then execute a command file with `export_png` commands, including parameters for multiple regions or views and viewport selection.
+- Create new integration tests that load a sample waveform, apply some commands (e.g., adding signals, cursors, `set_time_range` for specific viewports), and then execute a command file with `export_png` commands, including parameters for multiple regions or views and viewport selection.
 - Verify that multiple PNG files are created at the specified paths, with appropriate naming conventions (e.g., suffixed), and that each accurately represents its specified area.
 - Create new GUI-specific tests (if applicable to the testing framework) to verify the functionality of the "Export Plot as PNG..." menu item, including file dialog interaction and successful image generation.
 - (Future step) Compare the generated PNGs with reference images to ensure visual correctness for both command file and GUI exports.
@@ -45,11 +45,11 @@ This task will be broken down into the following sequential, ACID-Compliant Step
 
 - `01_create_export_module.md`: Create the `libsurfer/src/export.rs` module with a basic `export_png` function, designed to be extensible for region/view specifications and current view export.
 - `02_integrate_export_into_libsurfer.md`: Expose the `export_png` function and a new `set_zoom_viewport` function through `libsurfer/src/lib.rs`, ensuring they can accept parameters for region/view specifications and viewport selection.
-- `03_add_command_file_parsing.md`: Implement parsing for the new `export_png` and `set_zoom` commands and their associated arguments (including viewport ID and region/view specifications) within `surfer/src/main.rs`.
+- `03_add_command_file_parsing.md`: Implement parsing for the new `export_png` and `set_time_range` commands and their associated arguments (including viewport ID and region/view specifications) within `surfer/src/main.rs`.
 - `04_implement_command_file_export_logic.md`: Implement the logic within `libsurfer/src/export.rs` to handle multiple region/view specifications and viewport selection from command files, configure the `SystemState` for each, and export individual PNGs.
-- `05_implement_set_zoom_logic.md`: Implement the logic for the `set_zoom` command within `libsurfer/src/export.rs` (or a related module) to adjust the zoom for a specified or active viewport.
+- `05_implement_set_zoom_logic.md`: Implement the logic for the `set_time_range` command within `libsurfer/src/export.rs` (or a related module) to adjust the zoom for a specified or active viewport.
 - `06_add_gui_menu_item.md`: Implement the "File -> Export Plot as PNG..." menu item in the Surfer GUI, including file dialog interaction.
 - `07_integrate_gui_export_logic.md`: Integrate the `libsurfer` export function with the GUI menu item to export the current plot, considering viewport selection.
 - `08_add_headless_cli_argument.md`: Implement the `--headless` CLI argument in `surfer/src/main.rs` to prevent GUI launch.
-- `09_add_integration_tests.md`: Create comprehensive integration tests to verify the command file export functionality (including `set_zoom` and `export_png` with viewport options).
+- `09_add_integration_tests.md`: Create comprehensive integration tests to verify the command file export functionality (including `set_time_range` and `export_png` with viewport options).
 - `10_add_gui_tests.md`: Create tests for the GUI menu item export functionality (if applicable to the testing framework).

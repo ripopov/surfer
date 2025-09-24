@@ -143,7 +143,7 @@ Not all commands are available unless a file is loaded. Also, some commands are 
 * ``transaction_next``
 * ``transaction_prev``
 
-* ``set_zoom <START_TIME> <END_TIME> [VIEWPORT_ID]``
+* ``set_time_range <START_TIME> <END_TIME> [VIEWPORT_ID]``
 
   Set the visible time range of the waveform display. `START_TIME` and `END_TIME` can be absolute times (e.g., `100ns`) or relative to the current view. `VIEWPORT_ID` (optional) specifies which viewport to apply the zoom to. If omitted, the zoom is applied to the currently active viewport.
 
