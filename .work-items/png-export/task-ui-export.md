@@ -24,8 +24,16 @@ Implement the functionality to export the current waveform plot as a high-qualit
 
 ## Test Strategy
 
-- Create new GUI-specific tests (if applicable to the testing framework) to verify the functionality of the "Export Plot as PNG..." menu item, including file dialog interaction and successful image generation.
-- (Future step) Compare the generated PNGs with reference images to ensure visual correctness for GUI exports.
+Following a Test-Driven Development (TDD) approach, tests will be written *before* the corresponding GUI and export logic. This ensures that the implementation is guided by verifiable behavior.
+
+- **Unit Tests for `libsurfer::export` (Future Step):** While not the immediate focus of this UI task, robust unit tests will be developed for the `libsurfer::export` module. These tests will mock the `SystemState` and rendering context to verify that the core export logic correctly processes rendering instructions, encodes to PNG, and handles various scenarios (e.g., empty view, different dimensions, error conditions).
+- **GUI Integration Tests:** New GUI-specific integration tests will be created to simulate user interaction with the "Export Plot as PNG..." menu item. These tests will:
+  - **Simulate Menu Click:** Programmatically trigger the menu item selection.
+  - **Mock File Dialog:** Intercept the file dialog call and provide a predefined temporary output path.
+  - **Verify Export Function Call:** Assert that the `libsurfer::export::export_current_view_to_png` function is invoked with the correct `SystemState`, output path, and dimensions.
+  - **Verify File Creation:** Check for the existence of the generated PNG file at the temporary path.
+  - **Verify UI Feedback:** Assert that appropriate success or error messages are displayed to the user within the GUI.
+  - **(Future Step - Visual Correctness):** Compare the generated PNGs with reference images using a visual regression testing framework to ensure pixel-perfect accuracy for GUI exports.
 
 ## Architectural Considerations (from `standards-architecture.md`)
 
@@ -174,5 +182,5 @@ This feature will be broken down into the following sequential, ACID-Compliant S
   - *Acceptance Criteria*: New menu item exists; selecting it opens a file dialog; user can choose output path/filename.
 - **04_integrate_gui_export_logic**: Integrate the `libsurfer` export function with the GUI menu item to export the current plot.
   - *Acceptance Criteria*: GUI menu item successfully calls `libsurfer::export_png` with current `SystemState` and chosen path; confirmation/error messages displayed.
-- **05_add_gui_tests**: Create tests for the GUI menu item export functionality.
-  - *Acceptance Criteria*: New GUI tests exist; verify menu item functionality, file dialog interaction, and successful image generation; tests pass successfully.
+- **05_add_gui_tests**: Create comprehensive GUI integration tests for the menu item export functionality.
+  - *Acceptance Criteria*: New GUI tests exist; tests simulate menu item selection and file dialog interaction; verify that `libsurfer::export::export_current_view_to_png` is called with correct arguments; assert existence of generated PNG file; verify correct UI feedback (success/error messages); tests pass successfully.

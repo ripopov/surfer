@@ -30,9 +30,16 @@ Implement the functionality to export waveform plots as PNG images via command f
 
 ## Test Strategy
 
-- Create new integration tests that load a sample waveform, apply some commands (e.g., adding signals, cursors, `set_time_range` for specific viewports), and then execute a command file with `export_png` commands, including parameters for multiple regions or views and viewport selection.
-- Verify that multiple PNG files are created at the specified paths, with appropriate naming conventions (e.g., suffixed), and that each accurately represents its specified area.
-- (Future step) Compare the generated PNGs with reference images to ensure visual correctness for command file exports.
+Following a Test-Driven Development (TDD) approach, tests will be written *before* the corresponding CLI and export logic. This ensures that the implementation is guided by verifiable behavior.
+
+- **Unit Tests for `libsurfer::export` (Future Step):** While not the immediate focus of this CLI task, robust unit tests will be developed for the `libsurfer::export` module. These tests will mock the `SystemState` and rendering context to verify that the core export logic correctly processes rendering instructions, encodes to PNG, and handles various scenarios (e.g., empty view, different dimensions, error conditions, multiple regions/viewports).
+- **CLI Integration Tests:** New integration tests will be created to simulate command-line invocation of `surfer` with the `--headless` argument and command files. These tests will:
+  - **Prepare Test Data:** Load a sample waveform and create temporary command files (`.sucl`) with `set_time_range` and `export_png` commands, including various parameters (e.g., specific viewports, multiple regions).
+  - **Invoke CLI:** Use `std::process::Command` to execute the `surfer` binary with `--headless` and the path to the temporary command file.
+  - **Verify Exit Code:** Assert that the command exits successfully (exit code 0) for valid operations and with a non-zero exit code for expected error conditions.
+  - **Verify File Creation:** Check for the existence of the generated PNG file(s) at the specified temporary paths, including correct naming conventions (e.g., suffixed files for multiple exports).
+  - **(Optional - Image Inspection):** Perform basic checks on the generated PNGs (e.g., dimensions, file size) using the `image` crate.
+  - **(Future Step - Visual Correctness):** Compare the generated PNGs with reference images using a visual regression testing framework to ensure pixel-perfect accuracy for headless exports.
 
 ## Architectural Considerations (from `standards-architecture.md`)
 
