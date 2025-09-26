@@ -12,6 +12,7 @@ Implement the functionality to export the current waveform plot as a high-qualit
 
 - **GUI Menu Item:**
   - A new menu item (e.g., "File -> Export Plot as PNG...") is available in the Surfer GUI.
+  - The menu item is disabled (grayed out) when no waveform data is loaded or no plot is currently displayed.
   - Selecting this menu item opens a file dialog, allowing the user to choose the output path and filename.
   - The current waveform plot is accurately exported as a PNG image to the specified location upon confirmation.
   - A confirmation message is displayed on successful GUI export, and an informative error message is displayed on failure.
@@ -28,12 +29,45 @@ Following a Test-Driven Development (TDD) approach, tests will be written *befor
 
 - **Unit Tests for `libsurfer::export` (Future Step):** While not the immediate focus of this UI task, robust unit tests will be developed for the `libsurfer::export` module. These tests will mock the `SystemState` and rendering context to verify that the core export logic correctly processes rendering instructions, encodes to PNG, and handles various scenarios (e.g., empty view, different dimensions, error conditions).
 - **GUI Integration Tests:** New GUI-specific integration tests will be created to simulate user interaction with the "Export Plot as PNG..." menu item. These tests will:
+  - **Verify Menu State:** Assert that the menu item is disabled when no waveform data is loaded and enabled when waveform data is present.
   - **Simulate Menu Click:** Programmatically trigger the menu item selection.
   - **Mock File Dialog:** Intercept the file dialog call and provide a predefined temporary output path.
   - **Verify Export Function Call:** Assert that the `libsurfer::export::export_current_view_to_png` function is invoked with the correct `SystemState`, output path, and dimensions.
   - **Verify File Creation:** Check for the existence of the generated PNG file at the temporary path.
   - **Verify UI Feedback:** Assert that appropriate success or error messages are displayed to the user within the GUI.
   - **(Future Step - Visual Correctness):** Compare the generated PNGs with reference images using a visual regression testing framework to ensure pixel-perfect accuracy for GUI exports.
+
+### Pseudocode for `export_png_works` GUI Integration Test
+
+```rust
+// In libsurfer/src/tests/snapshot.rs
+
+snapshot_ui_with_file_and_msgs! {
+    export_png_works,
+    "examples/counter.vcd", // Load a sample waveform file
+    state_mods: (|state: &mut SystemState| {
+        // Optional: Add any initial state modifications here, e.g., adding variables
+        state.update(Message::AddVariables(vec![
+            VariableRef::from_hierarchy_string("tb.dut.counter"),
+        ]));
+    }),
+    [
+        // 1. Define a temporary output path for the PNG
+        //    (This would typically be handled by mocking the file dialog in a real GUI test)
+        //    For snapshot tests, we might pass this as an argument or use a predefined temp path.
+        //    Let's assume `output_path` is available in the test context.
+        // 2. Trigger the ExportPng message
+        Message::ExportPng { output_path: PathBuf::from("/tmp/test_export.png"), width: 1280, height: 720 },
+    ],
+    // Late messages for assertions after the main messages are processed
+    late_msgs: [
+        // 3. Verify file creation (this would be an assertion in the test function)
+        //    assert!(PathBuf::from("/tmp/test_export.png").exists());
+        // 4. Clean up the temporary file (also in the test function)
+        //    std::fs::remove_file("/tmp/test_export.png").unwrap();
+    ]
+}
+```
 
 ## Architectural Considerations (from `standards-architecture.md`)
 
@@ -118,6 +152,12 @@ fn handle_menu_action(action: MenuAction, app_state: &mut SystemState) {
     }
 }
 
+// Function to determine if export menu should be enabled
+fn is_export_menu_enabled(app_state: &SystemState) -> bool {
+    // Check if waveform data is loaded and plot is available
+    app_state.has_waveform_data() && app_state.has_visible_plot()
+}
+
 // Placeholder for GUI file dialog (e.g., using `rfd` or `native-dialog` crate)
 fn open_save_file_dialog(title: &str, default_filename: &str) -> Option<PathBuf> {
     // ... implementation to open a native save file dialog ...
@@ -178,9 +218,9 @@ This feature will be broken down into the following sequential, ACID-Compliant S
   - *Acceptance Criteria*: New file `libsurfer/src/export.rs` exists; contains `export_png` with specified signature; function successfully renders `SystemState` and encodes as PNG; returns `Result<()>`. (Traces to: Design Document: PNG Export Feature Section 3.3)
 - **02_integrate_export_into_libsurfer**: Make the `export_png` function from `libsurfer/src/export.rs` publicly accessible through the `libsurfer` crate.
   - *Acceptance Criteria*: `export_png` re-exported in `libsurfer/src/lib.rs`; `libsurfer` compiles successfully. (Traces to: Design Document: PNG Export Feature Section 3.3)
-- **03_add_gui_menu_item**: Implement the "File -> Export Plot as PNG..." menu item in the Surfer GUI, including file dialog interaction.
-  - *Acceptance Criteria*: New menu item exists; selecting it opens a file dialog; user can choose output path/filename.
+- **03_add_gui_menu_item**: Implement the "File -> Export Plot as PNG..." menu item in the Surfer GUI, including file dialog interaction and proper enable/disable state management.
+  - *Acceptance Criteria*: New menu item exists; menu item is disabled when no waveform data is loaded; menu item is enabled when waveform data is present; selecting it opens a file dialog; user can choose output path/filename.
 - **04_integrate_gui_export_logic**: Integrate the `libsurfer` export function with the GUI menu item to export the current plot.
   - *Acceptance Criteria*: GUI menu item successfully calls `libsurfer::export_png` with current `SystemState` and chosen path; confirmation/error messages displayed.
 - **05_add_gui_tests**: Create comprehensive GUI integration tests for the menu item export functionality.
-  - *Acceptance Criteria*: New GUI tests exist; tests simulate menu item selection and file dialog interaction; verify that `libsurfer::export::export_current_view_to_png` is called with correct arguments; assert existence of generated PNG file; verify correct UI feedback (success/error messages); tests pass successfully.
+  - *Acceptance Criteria*: New GUI tests exist; tests verify menu item enable/disable state based on waveform data presence; tests simulate menu item selection and file dialog interaction; verify that `libsurfer::export::export_current_view_to_png` is called with correct arguments; assert existence of generated PNG file; verify correct UI feedback (success/error messages); tests pass successfully.

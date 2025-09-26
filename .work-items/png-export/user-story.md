@@ -35,6 +35,7 @@ inclusion: manual
 - WHEN the GUI export is successful, THEN a confirmation message (e.g., a toast notification) SHALL be displayed.
 - WHEN the GUI export fails, THEN an informative error message SHALL be displayed to the user.
 - WHEN exporting via GUI, THEN the generated PNG image SHALL accurately represent the currently displayed waveform data, including all visible signals, cursors, and markers.
+- WHEN no waveform data is loaded or no plot is currently displayed, THEN the "Export Plot as PNG..." menu item SHALL be disabled (grayed out) to prevent users from attempting to export empty or non-existent plots.
 
 ## Value Proposition
 
