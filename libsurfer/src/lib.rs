@@ -16,6 +16,7 @@ pub mod dialog;
 pub mod displayed_item;
 pub mod displayed_item_tree;
 pub mod drawing_canvas;
+pub mod export;
 pub mod file_dialog;
 pub mod file_watcher;
 pub mod fzcmd;
@@ -76,6 +77,7 @@ use displayed_item::DisplayedVariable;
 use displayed_item_tree::DisplayedItemTree;
 use eframe::{App, CreationContext};
 use egui::{FontData, FontDefinitions, FontFamily};
+
 use eyre::Context;
 use eyre::Result;
 use ftr_parser::types::Transaction;
@@ -87,6 +89,7 @@ use message::MessageTarget;
 use num::BigInt;
 use serde::Deserialize;
 use surfer_translation_types::Translator;
+pub use export::ExportError;
 pub use system_state::SystemState;
 #[cfg(target_arch = "wasm32")]
 use tokio_stream as _;
@@ -1478,6 +1481,7 @@ impl SystemState {
                 self.invalidate_draw_commands();
             }
             Message::SaveStateFile(path) => self.save_state_file(path),
+            Message::ExportPng(path) => self.export_png(path),
             Message::LoadStateFile(path) => self.load_state_file(path),
             Message::LoadState(state, path) => self.load_state(state, path),
             Message::SetStateFile(path) => {
@@ -1947,7 +1951,7 @@ impl SystemState {
             }
             Message::ExpandDrawnItem { item, levels } => {
                 self.items_to_expand.borrow_mut().push((item, levels))
-            }
+            },
             Message::AddCharToPrompt(c) => *self.char_to_add_to_prompt.borrow_mut() = Some(c),
         }
         Some(())

@@ -277,6 +277,7 @@ pub enum Message {
     #[cfg(feature = "python")]
     ReloadPythonPlugin,
     SaveStateFile(Option<PathBuf>),
+    ExportPng(Option<PathBuf>),
     LoadStateFile(Option<PathBuf>),
     LoadState(Box<UserState>, Option<PathBuf>),
     SetStateFile(PathBuf),

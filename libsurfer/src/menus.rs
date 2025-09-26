@@ -120,6 +120,7 @@ impl SystemState {
                 .add_closing_menu(msgs, ui);
             }
             b("Save state as...", Message::SaveStateFile(None)).add_closing_menu(msgs, ui);
+            b("Export Plot as PNG...", Message::ExportPng(None)).add_closing_menu(msgs, ui);
             b(
                 "Open URL...",
                 Message::SetUrlEntryVisible(
