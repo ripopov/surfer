@@ -19,11 +19,32 @@ impl From<std::io::Error> for ExportError {
     }
 }
 
+/// Determine export format from file path extension
+/// Falls back to default format if extension is not recognized
+/// 
+/// Note: Only PNG and JPEG formats are supported. Additional formats are out of scope
+/// for this implementation and can be considered in a future PR.
+pub fn detect_format_from_path(path: &PathBuf, default_format: ExportFormat) -> ExportFormat {
+    if let Some(extension) = path.extension() {
+        match extension.to_str().unwrap_or("").to_lowercase().as_str() {
+            "png" => ExportFormat::Png,
+            "jpg" | "jpeg" => ExportFormat::Jpeg,
+            _ => default_format, // Use default if extension not recognized
+        }
+    } else {
+        default_format // No extension, use default
+    }
+}
+
 impl SystemState {
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn export_waveform(&mut self, path: Option<PathBuf>, format: Option<ExportFormat>) {
-        let format = format.unwrap_or_default();
+    pub fn export_waveform(&mut self, path: Option<PathBuf>, default_format: Option<ExportFormat>) {
+        let default_format = default_format.unwrap_or(ExportFormat::Png);
         if let Some(path) = path {
+            // Detect format from file extension
+            let format = detect_format_from_path(&path, default_format);
+            log::info!("Detected format {:?} from path: {:?}", format, path);
+            
             // Simple synchronous export - just like snapshot tests
             if let Err(e) = self.export_to_path(path, format) {
                 log::error!("Failed to export waveform: {:?}", e);
@@ -37,24 +58,21 @@ impl SystemState {
             let messages = async move |destination: FileHandle| {
                 let output_path = destination.path().to_path_buf();
                 
-                // The actual export needs to happen synchronously with access to SystemState
-                // So we'll just return a message that triggers the export
-                log::info!("File dialog selected path: {:?}", output_path);
+                // Detect format from the selected path
+                let format = detect_format_from_path(&output_path, default_format);
+                log::info!("File dialog selected path: {:?}, detected format: {:?}", output_path, format);
                 
                 vec![
                     // Trigger the actual export with the selected path
-                    crate::Message::ExportWaveform(Some(output_path), Some(format)),
+                    crate::Message::ExportWaveform(Some(output_path), Some(default_format)),
                     crate::Message::AsyncDone(AsyncJob::ExportWaveform),
                 ]
             };
 
-            let (title, filter_name, extensions) = match format {
-                ExportFormat::Png => (
-                    "Export Waveform as PNG",
-                    "PNG files (*.png)",
-                    vec!["png".to_string()],
-                ),
-            };
+            // Create file dialog with PNG and JPEG filters
+            let title = "Export Waveform";
+            let filter_name = "Image files";
+            let extensions = vec!["png".to_string(), "jpg".to_string(), "jpeg".to_string()];
             
             self.file_dialog_save(
                 title,
@@ -94,10 +112,16 @@ impl SystemState {
         );
 
         // 3. Encode the image buffer to the specified format and write to file
+        let encoded_format = self.get_encoded_image_format(format);
         let image_data = surface
             .image_snapshot()
-            .encode(None, self.get_encoded_image_format(format), None)
-            .ok_or_else(|| ExportError::RenderError(format!("Failed to encode image to {:?}", format)))?;
+            .encode(None, encoded_format, None)
+            .ok_or_else(|| {
+                ExportError::RenderError(format!(
+                    "Failed to encode image to {:?}. This format may not be supported in the current Skia build. Try PNG or JPEG instead.",
+                    format
+                ))
+            })?;
 
         std::fs::write(&path, image_data.as_bytes())?;
         log::info!("Exported waveform as {:?} to {:?}", format, path);
@@ -111,6 +135,7 @@ impl SystemState {
     fn get_encoded_image_format(&self, format: ExportFormat) -> EncodedImageFormat {
         match format {
             ExportFormat::Png => EncodedImageFormat::PNG,
+            ExportFormat::Jpeg => EncodedImageFormat::JPEG,
         }
     }
 

@@ -47,7 +47,7 @@ Based on the design document analysis, the following export settings will be ava
   - "JPEG"
 - **Description**: Default format when no extension is specified
 - **Behavior**:
-  - File dialog shows both PNG and JPEG filters
+  - File dialog shows PNG and JPEG format filters
   - Format is determined by file extension (.png → PNG, .jpg/.jpeg → JPEG)
   - Default format used when no extension provided
   - Settings menu controls the default format preference

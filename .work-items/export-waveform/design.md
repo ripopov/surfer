@@ -62,11 +62,15 @@ Following UX best practices, the export format will be determined by the file ex
 - No extension → Uses default format from Settings menu
 - Unknown extension → Falls back to default format
 
+Note: Only PNG and JPEG formats are supported. Additional formats are out of scope
+for this implementation and can be considered in a future PR.
+
 **Settings Integration:**
 
 - Settings menu includes "Default Format" preference (PNG/JPEG)
 - Controls what format to use when no extension is provided
 - File dialog pre-fills filename with appropriate extension based on default format
+- Format detection automatically detects format from chosen filename
 
 ### 2.4. User Experience and Feedback Patterns
 
@@ -157,7 +161,12 @@ Based on analysis of the existing snapshot testing infrastructure, the following
 
 #### 3.2.1. Image Format and Quality Options
 
-- **Format Selection**: Support for PNG (default) and JPEG formats
+- **Format Selection**: Support for PNG and JPEG formats only:
+  - **PNG** (default) - Portable Network Graphics, lossless compression
+  - **JPEG** - Joint Photographic Experts Group, lossy compression
+  
+  Note: Support for additional image formats (WebP, BMP, GIF, HEIF, AVIF, SVG, etc.)
+  is out of scope for this implementation and can be considered in a future PR.
 - **Image Dimensions**: Configurable width and height (default: 1280x720, matching snapshot tests)
 - **DPI/Resolution**: Multiplier for high-resolution exports (default: 1.0, supports 2.0 for retina displays)
 - **Anti-aliasing**: Feathering option for smoother rendering (default: false, matching snapshot behavior)
