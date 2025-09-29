@@ -22,25 +22,31 @@ impl From<std::io::Error> for ExportError {
 impl SystemState {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn export_png(&mut self, path: Option<PathBuf>) {
-        use crate::async_util::perform_async_work;
-        use rfd::FileHandle;
-
-        let messages = async move |destination: FileHandle| {
-            let result = Self::export_png_to_path(destination.path().to_path_buf()).await;
-            if let Err(e) = result {
+        if let Some(path) = path {
+            // Simple synchronous export - just like snapshot tests
+            if let Err(e) = self.export_png_to_path(path) {
                 log::error!("Failed to export PNG: {:?}", e);
             }
-            vec![crate::Message::AsyncDone(AsyncJob::ExportPng)]
-        };
-
-        if let Some(path) = path {
-            let sender = self.channels.msg_sender.clone();
-            perform_async_work(async move {
-                for message in messages(path.into()).await {
-                    sender.send(message).unwrap();
-                }
-            });
         } else {
+            // For file dialog, we need to capture the current state for export
+            // Since we can't easily serialize the entire SystemState for async export,
+            // we'll use a different approach: trigger the export immediately after the dialog
+            use rfd::FileHandle;
+
+            let messages = async move |destination: FileHandle| {
+                let output_path = destination.path().to_path_buf();
+                
+                // The actual PNG export needs to happen synchronously with access to SystemState
+                // So we'll just return a message that triggers the export
+                log::info!("File dialog selected path: {:?}", output_path);
+                
+                vec![
+                    // Trigger the actual export with the selected path
+                    crate::Message::ExportPng(Some(output_path)),
+                    crate::Message::AsyncDone(AsyncJob::ExportPng),
+                ]
+            };
+
             self.file_dialog_save(
                 "Export Plot as PNG",
                 (
@@ -58,22 +64,20 @@ impl SystemState {
         log::error!("WASM export not yet implemented");
     }
 
-    async fn export_png_to_path(path: PathBuf) -> Result<(), ExportError> {
-        // 1. Create an image buffer (e.g., Skia surface)
+    fn export_png_to_path(&mut self, path: PathBuf) -> Result<(), ExportError> {
+        // 1. Create an image buffer (e.g., Skia surface) - exactly like snapshot tests
         let size = Vec2::new(1280.0, 720.0);
         let mut surface = create_surface((size.x as i32, size.y as i32));
         surface.canvas().clear(egui_skia_renderer::Color::BLACK);
 
-        // 2. Render the waveform view to the surface
+        // 2. Render the waveform view to the surface - exactly like snapshot tests
         draw_onto_surface(
             &mut surface,
             |ctx| {
                 ctx.memory_mut(|mem| mem.options.tessellation_options.feathering = false);
-                // Note: We can't access self here, so we'll need to pass the visuals and draw function
-                // For now, this is a placeholder implementation
-                ctx.set_visuals(egui::Visuals::dark());
+                ctx.set_visuals(self.get_visuals());
                 setup_custom_font(ctx);
-                // TODO: Need to pass the draw function or render context
+                self.draw(ctx, Some(size));
             },
             Some(egui_skia_renderer::RasterizeOptions {
                 frames_before_screenshot: 5,
