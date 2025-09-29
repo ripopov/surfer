@@ -16,7 +16,8 @@ Implement the functionality to export the current waveform plot as a high-qualit
   - [x] The current waveform plot is accurately exported as a PNG image to the specified location upon confirmation.
   - [x] The menu item is disabled (grayed out) when no waveform data is loaded or no plot is currently displayed.
   - [x] User short cuts
-  - [ ] Success feedback is provided via status bar update (non-intrusive), and error feedback is provided via modal dialog (user attention required).
+  - [x] Success feedback is provided via status bar update (non-intrusive)
+  - [ ] error feedback is provided via modal dialog (user attention required)
   - [ ] Settings under "Settings" menu Export Plot
   - [ ] WASM implementation
 

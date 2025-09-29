@@ -52,6 +52,16 @@ impl SystemState {
                     draw_progress_information(ui, progress_data);
                 }
             }
+            
+            // Show temporary status message if present and not expired
+            if let Some(message) = &self.status_message {
+                if let Some(expiry) = &self.status_message_expiry {
+                    if Instant::now() < *expiry {
+                        ui.label(message);
+                        ui.add_space(10.0);
+                    }
+                }
+            }
             if let Some(waves) = waves {
                 ui.with_layout(Layout::right_to_left(Align::RIGHT), |ui| {
                     if let Some(time) = &waves.cursor {

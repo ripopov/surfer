@@ -101,6 +101,10 @@ impl SystemState {
 
         std::fs::write(&path, image_data.as_bytes())?;
         log::info!("Exported waveform as {:?} to {:?}", format, path);
+        
+        // Set success status message
+        self.set_status_message(format!("Exported to: {}", path.display()), 4);
+        
         Ok(())
     }
 

@@ -3,6 +3,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet, VecDeque},
     sync::{atomic::AtomicBool, Arc},
+    time::Instant,
 };
 use tokio::task::JoinHandle;
 
@@ -101,6 +102,11 @@ pub struct SystemState {
 
     // Only used for testing
     pub(crate) expand_parameter_section: bool,
+
+    /// Temporary status message to display in the status bar
+    pub(crate) status_message: Option<String>,
+    /// When the status message should expire
+    pub(crate) status_message_expiry: Option<Instant>,
 }
 
 impl SystemState {
@@ -215,9 +221,17 @@ impl SystemState {
             timing: RefCell::new(Timing::new()),
             undo_stack: vec![],
             redo_stack: vec![],
+            status_message: None,
+            status_message_expiry: None,
         };
 
         Ok(result)
+    }
+
+    /// Set a temporary status message that will be displayed in the status bar
+    pub fn set_status_message(&mut self, message: String, duration_secs: u64) {
+        self.status_message = Some(message);
+        self.status_message_expiry = Some(Instant::now() + std::time::Duration::from_secs(duration_secs));
     }
 }
 
