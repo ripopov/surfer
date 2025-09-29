@@ -17,9 +17,257 @@ Implement the functionality to export the current waveform plot as a high-qualit
   - [x] The menu item is disabled (grayed out) when no waveform data is loaded or no plot is currently displayed.
   - [x] User short cuts
   - [x] Success feedback is provided via status bar update (non-intrusive)
-  - [ ] error feedback is provided via modal dialog (user attention required)
+  - [~] error feedback is provided via modal dialog (user attention required) -- already handled with the Logs dialog that pops up
   - [ ] Settings under "Settings" menu Export Plot
   - [ ] WASM implementation
+
+## Export Settings Configuration
+
+Based on the design document analysis, the following export settings will be available in the UI. These represent the most essential options that users need for waveform export, following the 80/20 rule:
+
+### 3.1. Essential Export Settings (80% of use cases)
+
+#### Image Format
+- **Setting Name**: "Format"
+- **UI Element**: Dropdown menu
+- **Values**: 
+  - "PNG" (default)
+  - "JPEG"
+- **Description**: Choose the output image format
+
+#### Image Size
+- **Setting Name**: "Size"
+- **UI Element**: Dropdown menu with custom input option
+- **Values**:
+  - "Current Window Size" (default)
+  - "1280x720 (HD)"
+  - "1920x1080 (Full HD)"
+  - "2560x1440 (2K)"
+  - "Custom..." (opens width/height input fields)
+- **Description**: Set the output image dimensions
+- **Custom Size Validation**:
+  - **Width**: Integer between 100 and 8000 pixels
+  - **Height**: Integer between 100 and 8000 pixels
+  - **Aspect Ratio**: Warn if aspect ratio exceeds 10:1 or 1:10
+  - **Sanitization**: Strip whitespace, convert to integers, validate bounds
+
+#### Resolution/DPI
+- **Setting Name**: "Resolution"
+- **UI Element**: Dropdown menu with intelligent defaults
+- **Values**:
+  - "Auto (Match Display)" (default) - Automatically detects system DPI
+  - "1x (Standard)"
+  - "2x (High DPI)"
+  - "3x (Retina)"
+- **Description**: Resolution multiplier for export quality
+- **Platform Detection**:
+  - **macOS**: Detect Retina displays (2x, 3x) automatically
+  - **Windows**: Detect high DPI displays (1.25x, 1.5x, 2x) automatically  
+  - **Linux**: Detect fractional scaling (1.25x, 1.5x, 2x) automatically
+  - **WASM**: Detect device pixel ratio from browser
+
+#### Include UI Elements
+- **Setting Name**: "Include UI"
+- **UI Element**: Checkbox
+- **Default**: Unchecked (false)
+- **Description**: Include menu, toolbar, side panel, status bar in export
+
+#### Include Waveform Elements
+- **Setting Name**: "Include Waveform Elements"
+- **UI Element**: Checkbox group
+- **Options**:
+  - "Timeline/Axis" (default: checked)
+  - "Time Markers" (default: checked)
+  - "Cursor Line" (default: checked)
+- **Description**: Control which waveform elements are included
+
+#### Export Theme
+- **Setting Name**: "Theme"
+- **UI Element**: Dropdown menu
+- **Values**:
+  - "Use Current Theme" (default)
+  - "Dark+"
+  - "Light+"
+  - "Solarized"
+- **Description**: Apply a specific theme for the export
+
+### 3.2. Settings Menu Integration (Simplified)
+
+The export settings will be integrated into the existing "Settings" menu structure as follows:
+
+```
+Settings
+├── Export Plot
+│   ├── Format: PNG ▼
+│   ├── Size: Current Window Size ▼
+│   │   └── Custom: [Width: 1920] [Height: 1080] (when Custom selected)
+│   ├── Resolution: Auto (Match Display) ▼
+│   ├── Include UI: ☐
+│   ├── Include Waveform Elements
+│   │   ├── Timeline/Axis: ☑
+│   │   ├── Time Markers: ☑
+│   │   └── Cursor Line: ☑
+│   └── Theme: Use Current Theme ▼
+```
+
+### 3.3. Settings Persistence
+
+- **Settings Storage**: Export settings will be persisted in the user's configuration file
+- **Default Values**: All settings will have sensible defaults that match the current behavior
+- **Reset Option**: "Reset to Defaults" option will be available in the settings menu
+- **Per-Session Memory**: Settings will be remembered across application sessions
+
+### 3.4. Essential Validation (Simplified)
+
+#### Image Format Validation
+- **Allowed Values**: PNG, JPEG
+- **Sanitization**: Convert to lowercase, strip whitespace
+
+#### Image Size Validation
+- **Predefined Sizes**: Must match exact predefined values
+- **Sanitization**: No custom input needed - dropdown only
+
+#### UI Element Validation
+- **Boolean Values**: Must be true/false
+- **Sanitization**: Convert to boolean, default to false
+
+#### Theme Validation
+- **Allowed Themes**: Must match existing theme names
+- **Sanitization**: Convert to lowercase, validate against available themes
+
+#### File Path Validation
+- **Path Format**: Must be valid file system path
+- **Extension**: Must match selected image format
+- **Sanitization**: Remove invalid filename characters, ensure proper extension
+
+### 3.5. User Experience Principles
+
+- **Progressive Disclosure**: Keep advanced options in command files
+- **Sensible Defaults**: Most users will use defaults
+- **Clear Labels**: Use simple, descriptive names
+- **Immediate Feedback**: Show validation errors inline
+- **One-Click Export**: Default settings should work for most users
+
+### 3.6. DPI Detection Implementation
+
+#### Platform-Specific DPI Detection
+```rust
+// DPI detection for different platforms
+pub fn detect_system_dpi() -> f32 {
+    #[cfg(target_os = "macos")]
+    {
+        // macOS: Use Core Graphics to detect Retina displays
+        use core_graphics::display::CGDisplay;
+        let display = CGDisplay::main();
+        display.scale_factor() as f32
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        // Windows: Use WinAPI to detect DPI scaling
+        use winapi::um::winuser::GetDpiForWindow;
+        use winapi::um::winuser::GetDesktopWindow;
+        let dpi = unsafe { GetDpiForWindow(GetDesktopWindow()) };
+        dpi as f32 / 96.0 // Convert to scaling factor
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        // Linux: Use X11 or Wayland to detect scaling
+        // This is a simplified example - real implementation would be more complex
+        std::env::var("GDK_SCALE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1.0)
+    }
+    
+    #[cfg(target_arch = "wasm32")]
+    {
+        // WASM: Use browser's device pixel ratio
+        web_sys::window()
+            .and_then(|w| w.device_pixel_ratio())
+            .unwrap_or(1.0) as f32
+    }
+    
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux", target_arch = "wasm32")))]
+    {
+        1.0 // Default fallback
+    }
+}
+
+// Convert detected DPI to user-friendly resolution setting
+pub fn dpi_to_resolution_setting(dpi: f32) -> &'static str {
+    match dpi {
+        d if d >= 2.5 => "3x (Retina)",
+        d if d >= 1.5 => "2x (High DPI)", 
+        d if d >= 1.25 => "1.5x (High DPI)",
+        _ => "1x (Standard)",
+    }
+}
+```
+
+#### User Experience Benefits
+- **Automatic Quality**: Exports automatically match display quality
+- **No Manual Configuration**: Users don't need to know their DPI
+- **Platform Optimized**: Each platform uses native DPI detection
+- **Fallback Support**: Graceful degradation for unsupported platforms
+
+#### Settings Behavior
+- **Default**: "Auto (Match Display)" - automatically detects and applies system DPI
+- **Manual Override**: Users can still choose specific resolution if needed
+- **Status Feedback**: Show detected DPI in settings (e.g., "Auto (2x detected)")
+- **Persistence**: Remember user's choice (auto vs manual)
+
+#### Custom Size Implementation
+```rust
+// Custom size validation and sanitization
+pub fn validate_custom_size(width: &str, height: &str) -> Result<(u32, u32), ValidationError> {
+    let width = width.trim().parse::<u32>()
+        .map_err(|_| ValidationError::InvalidNumber)?;
+    let height = height.trim().parse::<u32>()
+        .map_err(|_| ValidationError::InvalidNumber)?;
+    
+    if width < 100 || width > 8000 || height < 100 || height > 8000 {
+        return Err(ValidationError::OutOfBounds);
+    }
+    
+    // Warn about extreme aspect ratios
+    let aspect_ratio = width as f32 / height as f32;
+    if aspect_ratio > 10.0 || aspect_ratio < 0.1 {
+        // Show warning but allow the export
+        log::warn!("Extreme aspect ratio detected: {:.2}:1", aspect_ratio);
+    }
+    
+    Ok((width, height))
+}
+
+// UI behavior for custom size
+pub enum SizeSetting {
+    Predefined(String), // "Current Window Size", "1280x720 (HD)", etc.
+    Custom { width: u32, height: u32 },
+}
+```
+
+#### User Experience for Custom Size
+- **Progressive Disclosure**: Custom fields only appear when "Custom..." is selected
+- **Input Validation**: Real-time validation with inline error messages
+- **Sensible Defaults**: Pre-fill with current window size when switching to custom
+- **Aspect Ratio Warnings**: Alert users about extreme ratios but allow them
+- **Persistence**: Remember custom dimensions across sessions
+- **Common Presets**: Suggest common dimensions (square, portrait, etc.)
+
+### 3.7. Advanced Features (Command File Only)
+
+The following advanced features will be available only through command files:
+- Custom image dimensions
+- Anti-aliasing control
+- Custom time ranges
+- Signal filtering
+- Background color overrides
+- Multiple viewport exports
+- Batch export operations
+
+This approach keeps the UI simple and focused on the most common use cases while providing power users with full control through command files.
 
 ## Requirements Traceability
 
