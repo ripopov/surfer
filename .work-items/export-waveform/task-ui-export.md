@@ -19,6 +19,17 @@ Implement the functionality to export the current waveform plot as a high-qualit
   - [x] Success feedback is provided via status bar update (non-intrusive)
   - [~] error feedback is provided via modal dialog (user attention required) -- already handled with the Logs dialog that pops up
   - [ ] Settings under "Settings" menu Export Plot
+    - [ ] Format dropdown (PNG/JPEG) - Simple enum dropdown
+    - [ ] Include UI checkbox - Single boolean setting
+    - [ ] Theme dropdown (Use Current Theme, Dark+, Light+, Solarized) - Simple enum dropdown
+    - [ ] Include Waveform Elements checkboxes (Timeline/Axis, Time Markers, Cursor Line) - Multiple boolean settings
+    - [ ] Size dropdown (Current Window, HD, Full HD, 2K, Custom) - Enum with custom option
+    - [ ] Resolution dropdown (Auto, 1x, 2x, 3x) - Enum with auto detection
+    - [ ] Custom size input fields (Width/Height) - Text input with validation
+    - [ ] Settings persistence (save/load from config) - File I/O and serialization
+    - [ ] Settings validation and error handling - Input validation logic
+    - [ ] Custom size validation - Complex validation with bounds checking
+    - [ ] DPI detection implementation - Platform-specific system calls
   - [ ] WASM implementation
 
 ## Export Settings Configuration
@@ -28,14 +39,21 @@ Based on the design document analysis, the following export settings will be ava
 ### 3.1. Essential Export Settings (80% of use cases)
 
 #### Image Format
-- **Setting Name**: "Format"
+
+- **Setting Name**: "Default Format"
 - **UI Element**: Dropdown menu
-- **Values**: 
+- **Values**:
   - "PNG" (default)
   - "JPEG"
-- **Description**: Choose the output image format
+- **Description**: Default format when no extension is specified
+- **Behavior**:
+  - File dialog shows both PNG and JPEG filters
+  - Format is determined by file extension (.png → PNG, .jpg/.jpeg → JPEG)
+  - Default format used when no extension provided
+  - Settings menu controls the default format preference
 
 #### Image Size
+
 - **Setting Name**: "Size"
 - **UI Element**: Dropdown menu with custom input option
 - **Values**:
@@ -52,6 +70,7 @@ Based on the design document analysis, the following export settings will be ava
   - **Sanitization**: Strip whitespace, convert to integers, validate bounds
 
 #### Resolution/DPI
+
 - **Setting Name**: "Resolution"
 - **UI Element**: Dropdown menu with intelligent defaults
 - **Values**:
@@ -67,12 +86,14 @@ Based on the design document analysis, the following export settings will be ava
   - **WASM**: Detect device pixel ratio from browser
 
 #### Include UI Elements
+
 - **Setting Name**: "Include UI"
 - **UI Element**: Checkbox
 - **Default**: Unchecked (false)
 - **Description**: Include menu, toolbar, side panel, status bar in export
 
 #### Include Waveform Elements
+
 - **Setting Name**: "Include Waveform Elements"
 - **UI Element**: Checkbox group
 - **Options**:
@@ -82,6 +103,7 @@ Based on the design document analysis, the following export settings will be ava
 - **Description**: Control which waveform elements are included
 
 #### Export Theme
+
 - **Setting Name**: "Theme"
 - **UI Element**: Dropdown menu
 - **Values**:
@@ -98,7 +120,7 @@ The export settings will be integrated into the existing "Settings" menu structu
 ```
 Settings
 ├── Export Plot
-│   ├── Format: PNG ▼
+│   ├── Default Format: PNG ▼
 │   ├── Size: Current Window Size ▼
 │   │   └── Custom: [Width: 1920] [Height: 1080] (when Custom selected)
 │   ├── Resolution: Auto (Match Display) ▼
@@ -120,22 +142,27 @@ Settings
 ### 3.4. Essential Validation (Simplified)
 
 #### Image Format Validation
+
 - **Allowed Values**: PNG, JPEG
 - **Sanitization**: Convert to lowercase, strip whitespace
 
 #### Image Size Validation
+
 - **Predefined Sizes**: Must match exact predefined values
 - **Sanitization**: No custom input needed - dropdown only
 
 #### UI Element Validation
+
 - **Boolean Values**: Must be true/false
 - **Sanitization**: Convert to boolean, default to false
 
 #### Theme Validation
+
 - **Allowed Themes**: Must match existing theme names
 - **Sanitization**: Convert to lowercase, validate against available themes
 
 #### File Path Validation
+
 - **Path Format**: Must be valid file system path
 - **Extension**: Must match selected image format
 - **Sanitization**: Remove invalid filename characters, ensure proper extension
@@ -151,6 +178,7 @@ Settings
 ### 3.6. DPI Detection Implementation
 
 #### Platform-Specific DPI Detection
+
 ```rust
 // DPI detection for different platforms
 pub fn detect_system_dpi() -> f32 {
@@ -207,18 +235,21 @@ pub fn dpi_to_resolution_setting(dpi: f32) -> &'static str {
 ```
 
 #### User Experience Benefits
+
 - **Automatic Quality**: Exports automatically match display quality
 - **No Manual Configuration**: Users don't need to know their DPI
 - **Platform Optimized**: Each platform uses native DPI detection
 - **Fallback Support**: Graceful degradation for unsupported platforms
 
 #### Settings Behavior
+
 - **Default**: "Auto (Match Display)" - automatically detects and applies system DPI
 - **Manual Override**: Users can still choose specific resolution if needed
 - **Status Feedback**: Show detected DPI in settings (e.g., "Auto (2x detected)")
 - **Persistence**: Remember user's choice (auto vs manual)
 
 #### Custom Size Implementation
+
 ```rust
 // Custom size validation and sanitization
 pub fn validate_custom_size(width: &str, height: &str) -> Result<(u32, u32), ValidationError> {
@@ -249,6 +280,7 @@ pub enum SizeSetting {
 ```
 
 #### User Experience for Custom Size
+
 - **Progressive Disclosure**: Custom fields only appear when "Custom..." is selected
 - **Input Validation**: Real-time validation with inline error messages
 - **Sensible Defaults**: Pre-fill with current window size when switching to custom
@@ -256,9 +288,60 @@ pub enum SizeSetting {
 - **Persistence**: Remember custom dimensions across sessions
 - **Common Presets**: Suggest common dimensions (square, portrait, etc.)
 
-### 3.7. Advanced Features (Command File Only)
+### 3.8. File Extension-Based Format Selection Implementation
+
+#### Format Detection Logic
+
+```rust
+// Determine export format from file path
+pub fn detect_format_from_path(path: &Path, default_format: ExportFormat) -> ExportFormat {
+    if let Some(extension) = path.extension() {
+        match extension.to_str().unwrap_or("").to_lowercase().as_str() {
+            "png" => ExportFormat::Png,
+            "jpg" | "jpeg" => ExportFormat::Jpeg,
+            _ => default_format, // Use default if extension not recognized
+        }
+    } else {
+        default_format // No extension, use default
+    }
+}
+
+// File dialog configuration
+pub fn create_export_file_dialog(default_format: ExportFormat) -> AsyncFileDialog {
+    let mut dialog = AsyncFileDialog::new()
+        .add_filter("PNG Images", &["png"])
+        .add_filter("JPEG Images", &["jpg", "jpeg"])
+        .add_filter("All Images", &["png", "jpg", "jpeg"]);
+    
+    // Set default filename with appropriate extension
+    let default_filename = match default_format {
+        ExportFormat::Png => "waveform.png",
+        ExportFormat::Jpeg => "waveform.jpg",
+    };
+    
+    dialog.set_file_name(default_filename)
+}
+```
+
+#### User Experience Benefits
+
+- **Intuitive**: Users naturally understand file extensions determine format
+- **Flexible**: Can change format by changing extension in filename
+- **Consistent**: Matches behavior of all other applications
+- **Efficient**: One less UI element to manage
+- **Fallback**: Default format used when no extension provided
+
+#### Settings Behavior
+
+- **Default Format Setting**: Controls what format to use when no extension is provided
+- **File Dialog**: Shows both PNG and JPEG filters
+- **Smart Defaults**: Pre-fills filename with appropriate extension based on default format
+- **Format Detection**: Automatically detects format from chosen filename
+
+### 3.9. Advanced Features (Command File Only)
 
 The following advanced features will be available only through command files:
+
 - Custom image dimensions
 - Anti-aliasing control
 - Custom time ranges

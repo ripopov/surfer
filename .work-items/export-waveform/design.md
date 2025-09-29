@@ -2,17 +2,17 @@
 inclusion: manual
 ---
 
-# Design Document: PNG Export Feature
+# Design Document: Waveform Export Feature
 
 ## 1. Objective
 
-To enable CI/CD Engineer Carl to specify commands within a Surfer command file to export specific views or multiple regions of a waveform as PNG images, facilitating automated, focused visual diffs of waveform files in merge requests. Additionally, to provide a GUI menu item for interactive export of the current plot to PNG.
+To enable CI/CD Engineer Carl to specify commands within a Surfer command file to export specific views or multiple regions of a waveform as images, facilitating automated, focused visual diffs of waveform files in merge requests. Additionally, to provide a GUI menu item for interactive export of the current waveform.
 
 ## 2. Technical Design
 
-The PNG export functionality will be integrated into both the `surfer` command file processing and the GUI. A new `export_png` command will be added to the command file syntax. For the GUI, a new menu item will be added to trigger the export of the current view. Both methods will leverage the existing `egui_skia_renderer` and `image` crates, which are already used for snapshot testing, to render the current `SystemState` into offscreen surfaces and then encode them as PNG files.
+The waveform export functionality will be integrated into both the `surfer` command file processing and the GUI. A new `export_waveform` command will be added to the command file syntax. For the GUI, a new menu item will be added to trigger the export of the current view. Both methods will leverage the existing `egui_skia_renderer` and `image` crates, which are already used for snapshot testing, to render the current `SystemState` into offscreen surfaces and then encode them as image files.
 
-The core rendering logic will reside in `libsurfer` to allow for reuse. The `surfer` executable will handle parsing the command file and orchestrating the rendering and file writing process based on the `export_png` commands, including the specification of multiple regions or views to export. The GUI will handle user interaction for exporting the current view.
+The core rendering logic will reside in `libsurfer` to allow for reuse. The `surfer` executable will handle parsing the command file and orchestrating the rendering and file writing process based on the `export_waveform` commands, including the specification of multiple regions or views to export. The GUI will handle user interaction for exporting the current view.
 
 ### 2.1. Terminology Clarification: 'Export' vs. 'Screenshot'
 
@@ -20,11 +20,11 @@ While this feature primarily captures a visual representation of the waveform pl
 
 ### 2.2. Platform-Specific Implementation Considerations (WASM vs. Native)
 
-The implementation of the PNG export feature requires careful consideration of the target platform due to fundamental differences in file system access and rendering contexts between native desktop applications (macOS, Linux, Windows) and WebAssembly (WASM) environments (web browsers).
+The implementation of the waveform export feature requires careful consideration of the target platform due to fundamental differences in file system access and rendering contexts between native desktop applications (macOS, Linux, Windows) and WebAssembly (WASM) environments (web browsers).
 
 - **File I/O (`std::fs::write`):**
-  - **Native:** On native platforms, `std::fs::write` (or similar file system APIs) can be used directly to save the generated PNG data to a specified file path. This is a straightforward operation with full file system access.
-  - **WASM (Browser):** In a web browser environment, direct file system access is restricted for security reasons. `std::fs::write` will not work. Instead, the PNG data must be provided to the browser, typically by:
+  - **Native:** On native platforms, `std::fs::write` (or similar file system APIs) can be used directly to save the generated image data to a specified file path. This is a straightforward operation with full file system access.
+  - **WASM (Browser):** In a web browser environment, direct file system access is restricted for security reasons. `std::fs::write` will not work. Instead, the image data must be provided to the browser, typically by:
         1. Creating a JavaScript `Blob` object from the raw image byte array.
         2. Generating a temporary URL for this `Blob` using `URL.createObjectURL()`.
         3. Creating an `<a>` (anchor) HTML element, setting its `href` to the Blob URL and its `download` attribute to the desired filename.
@@ -46,19 +46,43 @@ The implementation of the PNG export feature requires careful consideration of t
 
 These considerations will be addressed by creating a thin abstraction layer or using conditional compilation within `libsurfer::export` to handle the platform-specific differences in file I/O, while leveraging the cross-platform capabilities of `egui_skia_renderer` for the core rendering logic.
 
-### 2.3. User Experience and Feedback Patterns
+### 2.3. File Extension-Based Format Selection
+
+Following UX best practices, the export format will be determined by the file extension rather than requiring users to select format separately. This approach provides several benefits:
+
+- **Intuitive User Experience**: Users naturally understand that file extensions determine format
+- **Simplified Workflow**: Eliminates the need for a separate format selection step
+- **Platform Consistency**: Matches the behavior of all other applications
+- **Flexible Format Selection**: Users can change format by editing the filename extension
+
+**Implementation Details:**
+
+- `.png` extension → PNG format
+- `.jpg` or `.jpeg` extension → JPEG format
+- No extension → Uses default format from Settings menu
+- Unknown extension → Falls back to default format
+
+**Settings Integration:**
+
+- Settings menu includes "Default Format" preference (PNG/JPEG)
+- Controls what format to use when no extension is provided
+- File dialog pre-fills filename with appropriate extension based on default format
+
+### 2.4. User Experience and Feedback Patterns
 
 Based on analysis of the existing Surfer codebase, the following UX patterns have been identified and will be followed for the PNG export feature:
 
 #### 2.3.1. Existing UI Patterns in Surfer
 
 **Current Feedback Mechanisms:**
+
 - **Status Bar Updates:** The status bar (`libsurfer/src/statusbar.rs`) displays contextual information including file paths, timestamps, and operation status
 - **Modal Dialogs:** Used for critical user decisions (e.g., `ReloadWaveformDialog`, `OpenSiblingStateFileDialog` in `libsurfer/src/dialog.rs`)
 - **Progress Indicators:** File loading operations show progress information in the status bar
 - **Error Handling:** Errors trigger `Message::Error` which logs to console and shows logs panel (`self.user.show_logs = true`)
 
 **File Operation Patterns:**
+
 - **File Dialogs:** Uses `rfd` crate with `AsyncFileDialog` for both open and save operations
 - **Async Operations:** File operations are handled asynchronously using `perform_async_work`
 - **Message-Based Communication:** All UI interactions use the `Message` enum system for decoupled communication
@@ -68,16 +92,19 @@ Based on analysis of the existing Surfer codebase, the following UX patterns hav
 Following modern UX best practices and Surfer's existing patterns:
 
 **Success Feedback (Non-Intrusive):**
+
 - **Status Bar Update:** Display export success with file path in status bar (following existing pattern)
 - **No Modal Dialogs:** Avoid interrupting user workflow for routine operations
 - **Brief Duration:** Status message should persist for 3-5 seconds then fade
 
 **Error Feedback (User Attention Required):**
+
 - **Modal Dialog:** Use existing dialog pattern for critical errors that require user action
 - **Specific Error Messages:** Provide actionable error information (file permissions, disk space, etc.)
 - **Error Logging:** Log detailed error information for debugging
 
 **Implementation Pattern:**
+
 ```rust
 // Success: Update status bar (non-intrusive)
 match export_result {
@@ -103,7 +130,7 @@ This approach aligns with Surfer's existing patterns while following modern UX p
 
 - **New CLI Argument:** A new command-line argument, `--headless`, will be added to the `surfer` executable. When present, this argument will prevent the GUI from launching, allowing Surfer to run in a headless mode suitable for CI/CD environments where command files are processed for tasks like PNG export.
 - **New Command File Commands:**
-  - `export_png <path/to/output_prefix.png> [OPTIONS]`: Export the waveform view(s) as one or more images. The command supports various configuration options to control the export behavior:
+  - `export_waveform <path/to/output_prefix.png> [OPTIONS]`: Export the waveform view(s) as one or more images. The command supports various configuration options to control the export behavior:
     - `--format <FORMAT>`: Image format (png, jpg). Default: png
     - `--size <WIDTH>x<HEIGHT>`: Output image dimensions. Default: 1280x720
     - `--dpi <DPI>`: DPI/resolution multiplier for high-resolution exports. Default: 1.0
@@ -122,19 +149,21 @@ This approach aligns with Surfer's existing patterns while following modern UX p
     - `--time-range <START> <END>`: Export specific time range instead of current view
     - `--signals <SIGNAL_LIST>`: Export only specified signals (comma-separated list)
   - `set_time_range <START_TIME> <END_TIME> [VIEWPORT_ID]`: Set the visible time range of the waveform display. `START_TIME` and `END_TIME` can be absolute times (e.g., `100ns`) or relative to the current view. `VIEWPORT_ID` (optional) specifies which viewport to apply the zoom to. If omitted, the zoom is applied to the currently active viewport.
-- **New GUI Menu Item:** A new menu item (e.g., "File -> Export Plot as PNG...") will be added to the Surfer GUI. This will open a dialog allowing users to configure export options including file format, dimensions, DPI, UI element visibility, and theme before exporting the current view.
+- **New GUI Menu Item:** A new menu item (e.g., "File -> Export waveform...") will be added to the Surfer GUI. This will open a file dialog allowing users to select the output path and filename. The export format will be automatically determined by the file extension (.png for PNG, .jpg/.jpeg for JPEG), with a default format preference configurable in the Settings menu. This approach follows UX best practices by using file extensions to determine format, simplifying the user workflow while maintaining flexibility.
 
 ### 3.2. Export Configuration Options
 
-Based on analysis of the existing snapshot testing infrastructure, the following configuration options will be available for PNG export:
+Based on analysis of the existing snapshot testing infrastructure, the following configuration options will be available for waveform export:
 
 #### 3.2.1. Image Format and Quality Options
+
 - **Format Selection**: Support for PNG (default) and JPEG formats
 - **Image Dimensions**: Configurable width and height (default: 1280x720, matching snapshot tests)
 - **DPI/Resolution**: Multiplier for high-resolution exports (default: 1.0, supports 2.0 for retina displays)
 - **Anti-aliasing**: Feathering option for smoother rendering (default: false, matching snapshot behavior)
 
 #### 3.2.2. UI Element Visibility Controls
+
 The export system will provide granular control over which UI elements are included in the exported image, based on the toggleable elements identified in snapshot tests:
 
 - **Menu Bar**: `--show-menu` / `--hide-menu` (default: hidden for clean exports)
@@ -148,6 +177,7 @@ The export system will provide granular control over which UI elements are inclu
 - **Signal Indices**: `--show-indices` / `--hide-indices` (default: shown)
 
 #### 3.2.3. Content and View Options
+
 - **Theme Selection**: Apply specific themes (dark+, light+, solarized, ibm, etc.) for export
 - **Time Range**: Export specific time ranges instead of current view
 - **Signal Filtering**: Export only specified signals or signal groups
@@ -155,6 +185,7 @@ The export system will provide granular control over which UI elements are inclu
 - **Zoom Level**: Control zoom/scale of the exported waveform
 
 #### 3.2.4. Rendering Options
+
 - **Background Color**: Custom background color (default: theme-based)
 - **Signal Colors**: Preserve current signal colors or apply theme defaults
 - **Font Rendering**: Use custom fonts (matching snapshot test behavior)
@@ -171,19 +202,19 @@ The export system will provide granular control over which UI elements are inclu
 ### 3.4. Component Responsibilities
 
 - **`surfer/src/main.rs`:**
-  - Process command files, including parsing and executing the new `export_png` command with all configuration options and the `set_time_range` command.
+  - Process command files, including parsing and executing the new `export_waveform` command with all configuration options and the `set_time_range` command.
   - Parse export configuration options from command-line arguments and command files, creating `ExportConfig` structs.
   - Initialize `SystemState` (potentially loading a waveform and other commands from the command file), apply export-specific UI element visibility settings, call the `libsurfer` export function with the configuration, and handle success/failure.
   - For GUI mode, handle the new menu item action, opening a configuration dialog, and triggering the `libsurfer` export function with user-selected options.
   - Ensure that the GUI is not launched when processing command files in a headless export mode.
 - **`libsurfer/src/export.rs` (New File):**
-  - A new module `export.rs` will be created to house the `export_png` function and related configuration structures.
-  - The `export_png` function will accept `SystemState`, `ExportConfig`, and output file path, handling all configuration options including format, dimensions, DPI, UI element visibility, theme, and content filtering.
+  - A new module `export.rs` will be created to house the `export_waveform` function and related configuration structures.
+  - The `export_waveform` function will accept `SystemState`, `ExportConfig`, and output file path, handling all configuration options including format, dimensions, DPI, UI element visibility, theme, and content filtering.
   - It will configure the `SystemState` based on the export configuration (e.g., hiding UI elements, applying themes, setting time ranges), use `egui_skia_renderer` to create an offscreen surface with the specified dimensions and DPI, draw the configured `SystemState` onto it, and then encode and save the surface content in the specified format.
   - Support for multiple export formats (PNG, JPEG) with appropriate encoding options.
   - Handle platform-specific file I/O differences (native vs WASM) for saving exported images.
 - **`libsurfer/src/lib.rs`:**
-  - Expose the `export_png` function, `ExportConfig` struct, and related configuration types from `export.rs`.
+  - Expose the `export_waveform` function, `ExportConfig` struct, and related configuration types from `export.rs`.
 
 ## 4. Alternatives Considered
 
@@ -221,6 +252,7 @@ Testing for the PNG export feature will adhere to the existing project style for
 ### 6.2. Test Data and Examples
 
 Tests will use the existing example files (`examples/counter.vcd`, `examples/picorv32.vcd`) and follow the established patterns:
+
 - Use the same Tokio runtime setup as snapshot tests
 - Apply the same UI element toggling patterns (`Message::ToggleMenu`, `Message::ToggleToolbar`, etc.)
 - Use the same rendering parameters (feathering, frame count, surface creation)
@@ -229,6 +261,7 @@ Tests will use the existing example files (`examples/counter.vcd`, `examples/pic
 ### 6.3. Test Structure
 
 New tests will be added to `libsurfer/src/tests/export.rs` following the established pattern:
+
 - Simple test functions (no macros for single tests)
 - Proper cleanup of temporary files
 - Validation of exported image properties
