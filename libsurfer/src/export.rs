@@ -65,6 +65,10 @@ impl SystemState {
     }
 
     fn export_png_to_path(&mut self, path: PathBuf) -> Result<(), ExportError> {
+        // Configure state for export - same as snapshot tests
+        self.user.show_statusbar = Some(false);
+        self.user.show_default_timeline = Some(!self.show_default_timeline());
+
         // 1. Create an image buffer (e.g., Skia surface) - exactly like snapshot tests
         let size = Vec2::new(1280.0, 720.0);
         let mut surface = create_surface((size.x as i32, size.y as i32));
