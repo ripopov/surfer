@@ -120,7 +120,13 @@ impl SystemState {
                 .add_closing_menu(msgs, ui);
             }
             b("Save state as...", Message::SaveStateFile(None)).add_closing_menu(msgs, ui);
+            // TODO: Keyboard shortcut not implemented - The menu shows "Ctrl+e" shortcut but there's 
+            // no actual keyboard handling code for Ctrl+E/Cmd+E export. The 'E' key is already bound 
+            // to "Go to end" functionality (line 152 in keys.rs). This requires adding proper keyboard 
+            // handling in keys.rs similar to how Ctrl+S is handled for save (line 139). This is a 
+            // broader keyboard shortcut implementation issue affecting menu shortcuts that show but don't work.
             b("Export waveform...", Message::ExportWaveform(None, None))
+                .shortcut("Ctrl+e")
                 .enabled(self.user.waves.as_ref().map_or(false, |w| w.any_displayed()))
                 .add_closing_menu(msgs, ui);
             b(

@@ -192,6 +192,8 @@ The export system will provide granular control over which UI elements are inclu
 
 ## 5. Out of Scope
 
+- **Keyboard Shortcut Implementation**: The current implementation shows "Ctrl+e" shortcut in the menu but the keyboard shortcut is not actually functional. The 'E' key is already bound to "Go to end" functionality in the keyboard handler (keys.rs line 152), and there's no handling for Ctrl+E/Cmd+E combination to trigger export. This requires adding proper keyboard handling in keys.rs similar to how Ctrl+S is handled for save operations. This is a broader keyboard shortcut implementation issue where menu shortcuts are displayed but not actually implemented, affecting multiple menu items beyond just export. This should be addressed in a separate keyboard shortcut implementation effort.
+
 - **SVG Export**: Vector-based SVG export is significantly more complex than raster image export, requiring conversion of the entire rendering pipeline from raster (Skia) to vector (SVG) operations. This would involve rewriting substantial portions of the rendering system and is not feasible for the initial implementation.
 - **WaveDrom Integration**: [WaveDrom](https://wavedrom.com/tutorial.html) is an interesting JavaScript-based approach for creating digital timing diagrams with a JSON-based format. While WaveDrom could potentially be used as an alternative export format for waveform visualization, integrating it would require either:
   - Converting Surfer's internal waveform data to WaveDrom's WaveJSON format

@@ -14,8 +14,8 @@ Implement the functionality to export the current waveform plot as a high-qualit
   - [x] A new menu item (e.g., "File -> Export Plot...") is available in the Surfer GUI. (Default as PNG)
   - [x] Selecting this menu item opens a file dialog, allowing the user to choose the output path and filename.
   - [x] The current waveform plot is accurately exported as a PNG image to the specified location upon confirmation.
-  - [ ] The menu item is disabled (grayed out) when no waveform data is loaded or no plot is currently displayed.
-  - [ ] User short cuts
+  - [x] The menu item is disabled (grayed out) when no waveform data is loaded or no plot is currently displayed.
+  - [x] User short cuts
   - [ ] Success feedback is provided via status bar update (non-intrusive), and error feedback is provided via modal dialog (user attention required).
   - [ ] Settings under "Settings" menu Export Plot
   - [ ] WASM implementation
