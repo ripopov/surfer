@@ -1,3 +1,35 @@
+//! Waveform export functionality for PNG and JPEG formats.
+//!
+//! This module provides the core functionality for exporting waveform views as image files.
+//! It supports both interactive GUI-based exports through file dialogs and programmatic
+//! exports with direct file paths.
+//!
+//! # Features
+//!
+//! - **Format Detection**: Automatic PNG/JPEG format detection from file extensions
+//! - **High-Quality Rendering**: Uses Skia for consistent, high-quality image generation
+//! - **Error Handling**: Comprehensive error handling with user-friendly messages
+//! - **Status Integration**: Integration with the application's status bar for user feedback
+//!
+//! # Usage
+//!
+//! The main entry point is through the `SystemState::export_waveform` method, which can be
+//! called either with a direct file path or `None` to trigger a file dialog.
+//!
+//! ```rust
+//! // Direct export to a specific path
+//! state.export_waveform(Some(PathBuf::from("output.png")), None);
+//!
+//! // Trigger file dialog for user to choose path
+//! state.export_waveform(None, None);
+//! ```
+//!
+//! # Limitations
+//!
+//! - Currently exports at a fixed 1280x720 resolution
+//! - Only supports PNG and JPEG formats
+//! - Not available on WASM targets
+
 use std::path::PathBuf;
 
 use egui_skia_renderer::{create_surface, draw_onto_surface, EncodedImageFormat};
@@ -5,12 +37,13 @@ use emath::Vec2;
 
 use crate::{setup_custom_font, SystemState, async_util::AsyncJob, message::ExportFormat};
 
-// Define an error type for export operations
+/// Error types that can occur during waveform export operations.
 #[derive(Debug)]
 pub enum ExportError {
+    /// Error occurred during image rendering or encoding
     RenderError(String),
+    /// Error occurred during file I/O operations
     IoError(std::io::Error),
-    // Add other specific errors as needed
 }
 
 impl From<std::io::Error> for ExportError {
@@ -19,11 +52,37 @@ impl From<std::io::Error> for ExportError {
     }
 }
 
-/// Determine export format from file path extension
-/// Falls back to default format if extension is not recognized
-/// 
-/// Note: Only PNG and JPEG formats are supported. Additional formats are out of scope
-/// for this implementation and can be considered in a future PR.
+/// Determine export format from file path extension.
+///
+/// This function examines the file extension of the provided path and returns the
+/// appropriate `ExportFormat`. If the extension is not recognized or the path has
+/// no extension, it falls back to the provided default format.
+///
+/// # Supported Extensions
+///
+/// - `.png` → `ExportFormat::Png`
+/// - `.jpg`, `.jpeg` → `ExportFormat::Jpeg`
+///
+/// # Parameters
+///
+/// * `path` - The file path to examine
+/// * `default_format` - The format to return if extension is not recognized
+///
+/// # Returns
+///
+/// The detected export format or the default format if detection fails.
+///
+/// # Example
+///
+/// ```rust
+/// use std::path::PathBuf;
+/// use libsurfer::message::ExportFormat;
+/// use libsurfer::export_waveform::detect_format_from_path;
+///
+/// let png_path = PathBuf::from("output.png");
+/// let format = detect_format_from_path(&png_path, ExportFormat::Jpeg);
+/// assert_eq!(format, ExportFormat::Png);
+/// ```
 pub fn detect_format_from_path(path: &PathBuf, default_format: ExportFormat) -> ExportFormat {
     if let Some(extension) = path.extension() {
         match extension.to_str().unwrap_or("").to_lowercase().as_str() {
@@ -37,6 +96,40 @@ pub fn detect_format_from_path(path: &PathBuf, default_format: ExportFormat) -> 
 }
 
 impl SystemState {
+    /// Export the current waveform view as a PNG or JPEG image.
+    ///
+    /// This method provides the main entry point for waveform export functionality.
+    /// It can be called in two modes:
+    ///
+    /// 1. **Direct Export**: Provide a file path to export directly to that location
+    /// 2. **Interactive Export**: Pass `None` to trigger a file dialog for user path selection
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - Optional file path for direct export. If `None`, a file dialog will be shown.
+    /// * `default_format` - Optional default format if not detected from path. Defaults to PNG.
+    ///
+    /// # Behavior
+    ///
+    /// - **Format Detection**: Automatically detects PNG/JPEG format from file extension
+    /// - **Status Feedback**: Displays success message in status bar upon completion
+    /// - **Error Handling**: Logs errors and provides user feedback for failures
+    /// - **WASM Support**: Not implemented for WASM targets (logs error)
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use std::path::PathBuf;
+    /// 
+    /// // Direct export to PNG
+    /// state.export_waveform(Some(PathBuf::from("waveform.png")), None);
+    /// 
+    /// // Direct export to JPEG with explicit format
+    /// state.export_waveform(Some(PathBuf::from("waveform.jpg")), Some(ExportFormat::Jpeg));
+    /// 
+    /// // Interactive export via file dialog
+    /// state.export_waveform(None, None);
+    /// ```
     #[cfg(not(target_arch = "wasm32"))]
     pub fn export_waveform(&mut self, path: Option<PathBuf>, default_format: Option<ExportFormat>) {
         let default_format = default_format.unwrap_or(ExportFormat::Png);
@@ -82,12 +175,39 @@ impl SystemState {
         }
     }
 
+    /// Export functionality for WASM targets.
+    ///
+    /// Currently not implemented. Logs an error message indicating that WASM export
+    /// support is not yet available.
     #[cfg(target_arch = "wasm32")]
     pub fn export_waveform(&mut self, path: Option<PathBuf>, format: Option<ExportFormat>) {
         // TODO: Implement WASM-specific export logic
         log::error!("WASM export not yet implemented");
     }
 
+    /// Internal method to perform the actual export to a specific file path.
+    ///
+    /// This method handles the core export logic including:
+    /// - Creating a Skia surface for rendering
+    /// - Drawing the waveform to the surface
+    /// - Encoding the image in the specified format
+    /// - Writing the file to disk
+    /// - Setting success status message
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - The file path where the image should be saved
+    /// * `format` - The image format (PNG or JPEG)
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success or `Err(ExportError)` on failure.
+    ///
+    /// # Current Limitations
+    ///
+    /// - Fixed export size of 1280x720 pixels
+    /// - Uses black background color
+    /// - No viewport-specific rendering
     fn export_to_path(&mut self, path: PathBuf, format: ExportFormat) -> Result<(), ExportError> {
         // 1. Create an image buffer (e.g., Skia surface) - exactly like snapshot tests
         // BUG: fixed size of 1280x720 is not correct and should use the window size or settings overridden size if set
@@ -132,6 +252,18 @@ impl SystemState {
         Ok(())
     }
 
+    /// Convert ExportFormat enum to Skia's EncodedImageFormat.
+    ///
+    /// This is a helper method that maps our internal `ExportFormat` enum to the
+    /// corresponding Skia encoding format for image generation.
+    ///
+    /// # Parameters
+    ///
+    /// * `format` - The export format (PNG or JPEG)
+    ///
+    /// # Returns
+    ///
+    /// The corresponding Skia `EncodedImageFormat` for encoding the image.
     fn get_encoded_image_format(&self, format: ExportFormat) -> EncodedImageFormat {
         match format {
             ExportFormat::Png => EncodedImageFormat::PNG,

@@ -89,7 +89,6 @@ use message::MessageTarget;
 use num::BigInt;
 use serde::Deserialize;
 use surfer_translation_types::Translator;
-pub use export_waveform::ExportError;
 pub use system_state::SystemState;
 #[cfg(target_arch = "wasm32")]
 use tokio_stream as _;
