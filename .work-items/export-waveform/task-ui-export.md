@@ -11,11 +11,14 @@ Implement the functionality to export the current waveform plot as a high-qualit
 ## Acceptance Criteria
 
 - **GUI Menu Item:**
-  - A new menu item (e.g., "File -> Export Plot as PNG...") is available in the Surfer GUI.
-  - The menu item is disabled (grayed out) when no waveform data is loaded or no plot is currently displayed.
-  - Selecting this menu item opens a file dialog, allowing the user to choose the output path and filename.
-  - The current waveform plot is accurately exported as a PNG image to the specified location upon confirmation.
-  - A confirmation message is displayed on successful GUI export, and an informative error message is displayed on failure.
+  - [x] A new menu item (e.g., "File -> Export Plot...") is available in the Surfer GUI. (Default as PNG)
+  - [x] Selecting this menu item opens a file dialog, allowing the user to choose the output path and filename.
+  - [x] The current waveform plot is accurately exported as a PNG image to the specified location upon confirmation.
+  - [ ] The menu item is disabled (grayed out) when no waveform data is loaded or no plot is currently displayed.
+  - [ ] User short cuts
+  - [ ] Success feedback is provided via status bar update (non-intrusive), and error feedback is provided via modal dialog (user attention required).
+  - [ ] Settings under "Settings" menu Export Plot
+  - [ ] WASM implementation
 
 ## Requirements Traceability
 
@@ -37,37 +40,9 @@ Following a Test-Driven Development (TDD) approach, tests will be written *befor
   - **Verify UI Feedback:** Assert that appropriate success or error messages are displayed to the user within the GUI.
   - **(Future Step - Visual Correctness):** Compare the generated PNGs with reference images using a visual regression testing framework to ensure pixel-perfect accuracy for GUI exports.
 
-### Pseudocode for `export_png_works` GUI Integration Test
+### GUI Integration Test
 
-```rust
-// In libsurfer/src/tests/snapshot.rs
-
-snapshot_ui_with_file_and_msgs! {
-    export_png_works,
-    "examples/counter.vcd", // Load a sample waveform file
-    state_mods: (|state: &mut SystemState| {
-        // Optional: Add any initial state modifications here, e.g., adding variables
-        state.update(Message::AddVariables(vec![
-            VariableRef::from_hierarchy_string("tb.dut.counter"),
-        ]));
-    }),
-    [
-        // 1. Define a temporary output path for the PNG
-        //    (This would typically be handled by mocking the file dialog in a real GUI test)
-        //    For snapshot tests, we might pass this as an argument or use a predefined temp path.
-        //    Let's assume `output_path` is available in the test context.
-        // 2. Trigger the ExportPng message
-        Message::ExportPng { output_path: PathBuf::from("/tmp/test_export.png"), width: 1280, height: 720 },
-    ],
-    // Late messages for assertions after the main messages are processed
-    late_msgs: [
-        // 3. Verify file creation (this would be an assertion in the test function)
-        //    assert!(PathBuf::from("/tmp/test_export.png").exists());
-        // 4. Clean up the temporary file (also in the test function)
-        //    std::fs::remove_file("/tmp/test_export.png").unwrap();
-    ]
-}
-```
+See `libsurfer/src/tests/export.rs`.
 
 ## Architectural Considerations (from `standards-architecture.md`)
 
@@ -122,7 +97,7 @@ snapshot_ui_with_file_and_msgs! {
 While the primary interaction for this feature is through the GUI menu item, if a keyboard shortcut is to be implemented in the future, the following platform-specific considerations must be taken into account:
 
 - **WASM (WebAssembly):** Keyboard event handling in web environments can differ. Ensure that any chosen shortcut does not conflict with browser-native shortcuts or accessibility features. Consider using `eframe`'s or `egui`'s platform-agnostic input handling if available, or implement specific web-focused event listeners.
-- **Native (macOS/Linux/Windows):** Native desktop applications typically have more control over keyboard events. Shortcuts should adhere to platform conventions (e.g., `Cmd+S` on macOS, `Ctrl+S` on Windows/Linux for save operations). The implementation should use `eframe`'s or `egui`'s native event handling, which generally abstracts away OS-specific differences, but careful testing on each platform is crucial.
+- **Native (macOS/Linux/Windows):** Native desktop applications typically have more control over keyboard events. Shortcuts should adhere to platform conventions (e.g., `Cmd+E` on macOS, `Ctrl+E` on Windows/Linux for save operations). The implementation should use `eframe`'s or `egui`'s native event handling, which generally abstracts away OS-specific differences, but careful testing on each platform is crucial.
 
 ### GUI Interaction Pseudocode (e.g., in `surfer/src/gui/app.rs`)
 
@@ -169,46 +144,9 @@ fn show_toast_notification(message: &str) { /* ... */ }
 fn show_error_message(message: &str) { /* ... */ }
 ```
 
-### Core Export Logic Pseudocode (`libsurfer/src/export.rs`)
+### Core Export Logic
 
-```rust
-// In libsurfer/src/export.rs
-
-pub fn export_current_view_to_png(
-    app_state: &SystemState, // Contains all necessary rendering data
-    output_path: &Path,
-    width: u32,
-    height: u32,
-) -> Result<(), ExportError> {
-    // 1. Create an image buffer (e.g., Skia surface)
-    let mut surface = egui_skia_renderer::create_surface(width, height)?;
-
-    // 2. Render the waveform view to the surface
-    // This involves iterating through signals, drawing waveforms, cursors, markers, etc.
-    // The rendering logic would interact with the app_state to get data and theme info.
-    egui_skia_renderer::draw_onto_surface(&mut surface, app_state)?;
-
-    // 3. Encode the image buffer to PNG
-    let png_data = surface.image_snapshot().encode_png_data()?; // Assuming a method like this
-
-    // 4. Write the PNG data to the output file
-    std::fs::write(output_path, &png_data)?;
-
-    Ok(())
-}
-
-// Error types (simplified for pseudocode)
-enum ExportError {
-    RenderError(String),
-    IoError(std::io::Error),
-    // ... other potential errors
-}
-
-impl From<std::io::Error> for ExportError {
-    fn from(err: std::io::Error) -> Self { ExportError::IoError(err) }
-}
-// ... other From implementations for rendering errors ...
-```
+See `libsurfer/src/export.rs`.
 
 ## Task Breakdown Methodology: Sequential, ACID-Compliant Steps
 

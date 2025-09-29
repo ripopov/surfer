@@ -120,7 +120,9 @@ impl SystemState {
                 .add_closing_menu(msgs, ui);
             }
             b("Save state as...", Message::SaveStateFile(None)).add_closing_menu(msgs, ui);
-            b("Export Plot as PNG...", Message::ExportPng(None)).add_closing_menu(msgs, ui);
+            b("Export waveform...", Message::ExportWaveform(None, None))
+                .enabled(self.user.waves.as_ref().map_or(false, |w| w.any_displayed()))
+                .add_closing_menu(msgs, ui);
             b(
                 "Open URL...",
                 Message::SetUrlEntryVisible(

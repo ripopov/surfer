@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use egui_skia_renderer::{create_surface, draw_onto_surface, EncodedImageFormat};
 use emath::Vec2;
 
-use crate::{setup_custom_font, SystemState, async_util::AsyncJob};
+use crate::{setup_custom_font, SystemState, async_util::AsyncJob, message::ExportFormat};
 
 // Define an error type for export operations
 #[derive(Debug)]
@@ -21,11 +21,12 @@ impl From<std::io::Error> for ExportError {
 
 impl SystemState {
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn export_png(&mut self, path: Option<PathBuf>) {
+    pub fn export_waveform(&mut self, path: Option<PathBuf>, format: Option<ExportFormat>) {
+        let format = format.unwrap_or_default();
         if let Some(path) = path {
             // Simple synchronous export - just like snapshot tests
-            if let Err(e) = self.export_png_to_path(path) {
-                log::error!("Failed to export PNG: {:?}", e);
+            if let Err(e) = self.export_to_path(path, format) {
+                log::error!("Failed to export waveform: {:?}", e);
             }
         } else {
             // For file dialog, we need to capture the current state for export
@@ -36,36 +37,43 @@ impl SystemState {
             let messages = async move |destination: FileHandle| {
                 let output_path = destination.path().to_path_buf();
                 
-                // The actual PNG export needs to happen synchronously with access to SystemState
+                // The actual export needs to happen synchronously with access to SystemState
                 // So we'll just return a message that triggers the export
                 log::info!("File dialog selected path: {:?}", output_path);
                 
                 vec![
                     // Trigger the actual export with the selected path
-                    crate::Message::ExportPng(Some(output_path)),
-                    crate::Message::AsyncDone(AsyncJob::ExportPng),
+                    crate::Message::ExportWaveform(Some(output_path), Some(format)),
+                    crate::Message::AsyncDone(AsyncJob::ExportWaveform),
                 ]
             };
 
-            self.file_dialog_save(
-                "Export Plot as PNG",
-                (
-                    "PNG files (*.png)".to_string(),
+            let (title, filter_name, extensions) = match format {
+                ExportFormat::Png => (
+                    "Export Waveform as PNG",
+                    "PNG files (*.png)",
                     vec!["png".to_string()],
                 ),
+            };
+            
+            self.file_dialog_save(
+                title,
+                (filter_name.to_string(), extensions),
                 messages,
             );
         }
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn export_png(&mut self, path: Option<PathBuf>) {
+    pub fn export_waveform(&mut self, path: Option<PathBuf>, format: Option<ExportFormat>) {
         // TODO: Implement WASM-specific export logic
         log::error!("WASM export not yet implemented");
     }
 
-    fn export_png_to_path(&mut self, path: PathBuf) -> Result<(), ExportError> {
+    fn export_to_path(&mut self, path: PathBuf, format: ExportFormat) -> Result<(), ExportError> {
         // 1. Create an image buffer (e.g., Skia surface) - exactly like snapshot tests
+        // BUG: fixed size of 1280x720 is not correct and should use the window size or settings overridden size if set
+        // TODO: research proper UX for setting plot export size with settings, it may be confusing to have an override size in the settings, have a default size, or follow the window size
         let size = Vec2::new(1280.0, 720.0);
         let mut surface = create_surface((size.x as i32, size.y as i32));
         surface.canvas().clear(egui_skia_renderer::Color::BLACK);
@@ -85,20 +93,21 @@ impl SystemState {
             }),
         );
 
-        // 3. Encode the image buffer to PNG and write to file
-        let png_data = surface
+        // 3. Encode the image buffer to the specified format and write to file
+        let image_data = surface
             .image_snapshot()
-            .encode(None, EncodedImageFormat::PNG, None)
-            .ok_or_else(|| ExportError::RenderError("Failed to encode image to PNG".to_string()))?;
+            .encode(None, self.get_encoded_image_format(format), None)
+            .ok_or_else(|| ExportError::RenderError(format!("Failed to encode image to {:?}", format)))?;
 
-        std::fs::write(&path, png_data.as_bytes())?;
-        log::info!("Exported PNG to {:?}", path);
+        std::fs::write(&path, image_data.as_bytes())?;
+        log::info!("Exported waveform as {:?} to {:?}", format, path);
         Ok(())
     }
 
-    #[cfg(target_arch = "wasm32")]
-    pub fn export_png(&mut self, path: Option<PathBuf>) -> Result<(), ExportError> {
-        // TODO: Implement WASM-specific export logic
-        Err(ExportError::RenderError("WASM export not yet implemented".to_string()))
+    fn get_encoded_image_format(&self, format: ExportFormat) -> EncodedImageFormat {
+        match format {
+            ExportFormat::Png => EncodedImageFormat::PNG,
+        }
     }
+
 }

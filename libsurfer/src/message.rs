@@ -38,6 +38,35 @@ use crate::{
 
 type CommandCount = usize;
 
+/// Supported export formats for plot export
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum ExportFormat {
+    Png,
+    // Future formats can be added here
+    // Jpeg,
+    // Svg,
+}
+
+impl Default for ExportFormat {
+    fn default() -> Self {
+        ExportFormat::Png
+    }
+}
+
+impl ExportFormat {
+    pub fn file_extension(&self) -> &'static str {
+        match self {
+            ExportFormat::Png => "png",
+        }
+    }
+    
+    pub fn mime_type(&self) -> &'static str {
+        match self {
+            ExportFormat::Png => "image/png",
+        }
+    }
+}
+
 /// Encapsulates either a specific variable or all selected variables
 #[derive(Debug, Deserialize, Clone)]
 pub enum MessageTarget<T> {
@@ -277,7 +306,7 @@ pub enum Message {
     #[cfg(feature = "python")]
     ReloadPythonPlugin,
     SaveStateFile(Option<PathBuf>),
-    ExportPng(Option<PathBuf>),
+    ExportWaveform(Option<PathBuf>, Option<ExportFormat>),
     LoadStateFile(Option<PathBuf>),
     LoadState(Box<UserState>, Option<PathBuf>),
     SetStateFile(PathBuf),

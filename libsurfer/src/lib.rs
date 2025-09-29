@@ -16,7 +16,7 @@ pub mod dialog;
 pub mod displayed_item;
 pub mod displayed_item_tree;
 pub mod drawing_canvas;
-pub mod export;
+pub mod export_waveform;
 pub mod file_dialog;
 pub mod file_watcher;
 pub mod fzcmd;
@@ -89,7 +89,7 @@ use message::MessageTarget;
 use num::BigInt;
 use serde::Deserialize;
 use surfer_translation_types::Translator;
-pub use export::ExportError;
+pub use export_waveform::ExportError;
 pub use system_state::SystemState;
 #[cfg(target_arch = "wasm32")]
 use tokio_stream as _;
@@ -1481,7 +1481,7 @@ impl SystemState {
                 self.invalidate_draw_commands();
             }
             Message::SaveStateFile(path) => self.save_state_file(path),
-            Message::ExportPng(path) => self.export_png(path),
+            Message::ExportWaveform(path, format) => self.export_waveform(path, format),
             Message::LoadStateFile(path) => self.load_state_file(path),
             Message::LoadState(state, path) => self.load_state(state, path),
             Message::SetStateFile(path) => {
