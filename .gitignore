@@ -17,4 +17,8 @@ examples/save_and_start_with_state.ron
 
 .venv
 .env
+
+.gemini/
 .cursor/
+.markdownlint-cli2.yaml
+Makefile
