@@ -52,7 +52,7 @@ impl SystemState {
                     draw_progress_information(ui, progress_data);
                 }
             }
-            
+
             // Show temporary status message if present and not expired
             if let Some(message) = &self.status_message {
                 if let Some(expiry) = &self.status_message_expiry {

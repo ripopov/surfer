@@ -164,7 +164,7 @@ Based on analysis of the existing snapshot testing infrastructure, the following
 - **Format Selection**: Support for PNG and JPEG formats only:
   - **PNG** (default) - Portable Network Graphics, lossless compression
   - **JPEG** - Joint Photographic Experts Group, lossy compression
-  
+
   Note: Support for additional image formats (WebP, BMP, GIF, HEIF, AVIF, SVG, etc.)
   is out of scope for this implementation and can be considered in a future PR.
 - **Image Dimensions**: Configurable width and height (default: 1280x720, matching snapshot tests)

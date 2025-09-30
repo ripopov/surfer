@@ -1,3 +1,4 @@
+use crate::export_waveform::ExportFormat;
 use bytes::Bytes;
 use camino::Utf8PathBuf;
 use derive_more::Debug;
@@ -8,7 +9,6 @@ use num::BigInt;
 use serde::Deserialize;
 use std::path::PathBuf;
 use surver::Status;
-use crate::export_waveform::ExportFormat;
 
 use crate::async_util::AsyncJob;
 use crate::config::PrimaryMouseDrag;

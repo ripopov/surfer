@@ -1,6 +1,6 @@
-use std::path::PathBuf;
-use crate::export_waveform::ExportFormat;
 use crate::export_waveform::detect_format_from_path;
+use crate::export_waveform::ExportFormat;
+use std::path::PathBuf;
 
 #[test]
 fn test_detect_format_from_path_png() {

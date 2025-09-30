@@ -18,7 +18,7 @@
 //!
 //! ```rust
 //! use std::path::PathBuf;
-//! 
+//!
 //! // Direct export to a specific path
 //! // state.export_waveform(Some(PathBuf::from("output.png")), None);
 //!
@@ -32,16 +32,16 @@
 //! - Only supports PNG and JPEG formats
 //! - Not available on WASM targets
 
-use std::path::PathBuf;
 use serde::Deserialize;
+use std::path::PathBuf;
 
 use egui_skia_renderer::{create_surface, draw_onto_surface, EncodedImageFormat};
 use emath::Vec2;
 
-use crate::{setup_custom_font, SystemState, async_util::AsyncJob};
+use crate::{async_util::AsyncJob, setup_custom_font, SystemState};
 
 /// Supported export formats for plot export
-/// 
+///
 /// Note: Support for additional image formats (WebP, BMP, GIF, HEIF, AVIF, SVG, etc.)
 /// is out of scope for this implementation and can be considered in a future PR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -63,14 +63,14 @@ impl ExportFormat {
             ExportFormat::Jpeg => "jpg",
         }
     }
-    
+
     pub fn mime_type(&self) -> &'static str {
         match self {
             ExportFormat::Png => "image/png",
             ExportFormat::Jpeg => "image/jpeg",
         }
     }
-    
+
     /// Get a human-readable description of the format
     pub fn description(&self) -> &'static str {
         match self {
@@ -161,19 +161,19 @@ impl SystemState {
     ///
     /// # Example
     ///
-/// ```rust
-/// use std::path::PathBuf;
-/// use libsurfer::export_waveform::ExportFormat;
-/// 
-/// // Direct export to PNG
-/// // state.export_waveform(Some(PathBuf::from("waveform.png")), None);
-/// 
-/// // Direct export to JPEG with explicit format
-/// // state.export_waveform(Some(PathBuf::from("waveform.jpg")), Some(ExportFormat::Jpeg));
-/// 
-/// // Interactive export via file dialog
-/// // state.export_waveform(None, None);
-/// ```
+    /// ```rust
+    /// use std::path::PathBuf;
+    /// use libsurfer::export_waveform::ExportFormat;
+    ///
+    /// // Direct export to PNG
+    /// // state.export_waveform(Some(PathBuf::from("waveform.png")), None);
+    ///
+    /// // Direct export to JPEG with explicit format
+    /// // state.export_waveform(Some(PathBuf::from("waveform.jpg")), Some(ExportFormat::Jpeg));
+    ///
+    /// // Interactive export via file dialog
+    /// // state.export_waveform(None, None);
+    /// ```
     #[cfg(not(target_arch = "wasm32"))]
     pub fn export_waveform(&mut self, path: Option<PathBuf>, default_format: Option<ExportFormat>) {
         let default_format = default_format.unwrap_or(ExportFormat::Png);
@@ -181,7 +181,7 @@ impl SystemState {
             // Detect format from file extension
             let format = detect_format_from_path(&path, default_format);
             log::info!("Detected format {:?} from path: {:?}", format, path);
-            
+
             // Simple synchronous export - just like snapshot tests
             if let Err(e) = self.export_to_path(path, format) {
                 log::error!("Failed to export waveform: {:?}", e);
@@ -194,11 +194,15 @@ impl SystemState {
 
             let messages = async move |destination: FileHandle| {
                 let output_path = destination.path().to_path_buf();
-                
+
                 // Detect format from the selected path
                 let format = detect_format_from_path(&output_path, default_format);
-                log::info!("File dialog selected path: {:?}, detected format: {:?}", output_path, format);
-                
+                log::info!(
+                    "File dialog selected path: {:?}, detected format: {:?}",
+                    output_path,
+                    format
+                );
+
                 vec![
                     // Trigger the actual export with the selected path
                     crate::Message::ExportWaveform(Some(output_path), Some(default_format)),
@@ -210,12 +214,8 @@ impl SystemState {
             let title = "Export Waveform";
             let filter_name = "Image files";
             let extensions = vec!["png".to_string(), "jpg".to_string(), "jpeg".to_string()];
-            
-            self.file_dialog_save(
-                title,
-                (filter_name.to_string(), extensions),
-                messages,
-            );
+
+            self.file_dialog_save(title, (filter_name.to_string(), extensions), messages);
         }
     }
 
@@ -289,10 +289,10 @@ impl SystemState {
 
         std::fs::write(&path, image_data.as_bytes())?;
         log::info!("Exported waveform as {:?} to {:?}", format, path);
-        
+
         // Set success status message
         self.set_status_message(format!("Exported to: {}", path.display()), 4);
-        
+
         Ok(())
     }
 
@@ -314,5 +314,4 @@ impl SystemState {
             ExportFormat::Jpeg => EncodedImageFormat::JPEG,
         }
     }
-
 }

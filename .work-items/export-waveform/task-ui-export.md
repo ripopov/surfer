@@ -81,7 +81,7 @@ Based on the design document analysis, the following export settings will be ava
 - **Description**: Resolution multiplier for export quality
 - **Platform Detection**:
   - **macOS**: Detect Retina displays (2x, 3x) automatically
-  - **Windows**: Detect high DPI displays (1.25x, 1.5x, 2x) automatically  
+  - **Windows**: Detect high DPI displays (1.25x, 1.5x, 2x) automatically
   - **Linux**: Detect fractional scaling (1.25x, 1.5x, 2x) automatically
   - **WASM**: Detect device pixel ratio from browser
 
@@ -189,7 +189,7 @@ pub fn detect_system_dpi() -> f32 {
         let display = CGDisplay::main();
         display.scale_factor() as f32
     }
-    
+
     #[cfg(target_os = "windows")]
     {
         // Windows: Use WinAPI to detect DPI scaling
@@ -198,7 +198,7 @@ pub fn detect_system_dpi() -> f32 {
         let dpi = unsafe { GetDpiForWindow(GetDesktopWindow()) };
         dpi as f32 / 96.0 // Convert to scaling factor
     }
-    
+
     #[cfg(target_os = "linux")]
     {
         // Linux: Use X11 or Wayland to detect scaling
@@ -208,7 +208,7 @@ pub fn detect_system_dpi() -> f32 {
             .and_then(|s| s.parse().ok())
             .unwrap_or(1.0)
     }
-    
+
     #[cfg(target_arch = "wasm32")]
     {
         // WASM: Use browser's device pixel ratio
@@ -216,7 +216,7 @@ pub fn detect_system_dpi() -> f32 {
             .and_then(|w| w.device_pixel_ratio())
             .unwrap_or(1.0) as f32
     }
-    
+
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux", target_arch = "wasm32")))]
     {
         1.0 // Default fallback
@@ -227,7 +227,7 @@ pub fn detect_system_dpi() -> f32 {
 pub fn dpi_to_resolution_setting(dpi: f32) -> &'static str {
     match dpi {
         d if d >= 2.5 => "3x (Retina)",
-        d if d >= 1.5 => "2x (High DPI)", 
+        d if d >= 1.5 => "2x (High DPI)",
         d if d >= 1.25 => "1.5x (High DPI)",
         _ => "1x (Standard)",
     }
@@ -257,18 +257,18 @@ pub fn validate_custom_size(width: &str, height: &str) -> Result<(u32, u32), Val
         .map_err(|_| ValidationError::InvalidNumber)?;
     let height = height.trim().parse::<u32>()
         .map_err(|_| ValidationError::InvalidNumber)?;
-    
+
     if width < 100 || width > 8000 || height < 100 || height > 8000 {
         return Err(ValidationError::OutOfBounds);
     }
-    
+
     // Warn about extreme aspect ratios
     let aspect_ratio = width as f32 / height as f32;
     if aspect_ratio > 10.0 || aspect_ratio < 0.1 {
         // Show warning but allow the export
         log::warn!("Extreme aspect ratio detected: {:.2}:1", aspect_ratio);
     }
-    
+
     Ok((width, height))
 }
 
@@ -312,13 +312,13 @@ pub fn create_export_file_dialog(default_format: ExportFormat) -> AsyncFileDialo
         .add_filter("PNG Images", &["png"])
         .add_filter("JPEG Images", &["jpg", "jpeg"])
         .add_filter("All Images", &["png", "jpg", "jpeg"]);
-    
+
     // Set default filename with appropriate extension
     let default_filename = match default_format {
         ExportFormat::Png => "waveform.png",
         ExportFormat::Jpeg => "waveform.jpg",
     };
-    
+
     dialog.set_file_name(default_filename)
 }
 ```

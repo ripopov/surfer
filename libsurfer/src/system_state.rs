@@ -231,7 +231,8 @@ impl SystemState {
     /// Set a temporary status message that will be displayed in the status bar
     pub fn set_status_message(&mut self, message: String, duration_secs: u64) {
         self.status_message = Some(message);
-        self.status_message_expiry = Some(Instant::now() + std::time::Duration::from_secs(duration_secs));
+        self.status_message_expiry =
+            Some(Instant::now() + std::time::Duration::from_secs(duration_secs));
     }
 }
 
