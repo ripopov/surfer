@@ -17,11 +17,13 @@
 //! called either with a direct file path or `None` to trigger a file dialog.
 //!
 //! ```rust
+//! use std::path::PathBuf;
+//! 
 //! // Direct export to a specific path
-//! state.export_waveform(Some(PathBuf::from("output.png")), None);
+//! // state.export_waveform(Some(PathBuf::from("output.png")), None);
 //!
 //! // Trigger file dialog for user to choose path
-//! state.export_waveform(None, None);
+//! // state.export_waveform(None, None);
 //! ```
 //!
 //! # Limitations
@@ -117,7 +119,7 @@ impl From<std::io::Error> for ExportError {
 ///
 /// ```rust
 /// use std::path::PathBuf;
-/// use libsurfer::message::ExportFormat;
+/// use libsurfer::export_waveform::ExportFormat;
 /// use libsurfer::export_waveform::detect_format_from_path;
 ///
 /// let png_path = PathBuf::from("output.png");
@@ -159,18 +161,19 @@ impl SystemState {
     ///
     /// # Example
     ///
-    /// ```rust
-    /// use std::path::PathBuf;
-    /// 
-    /// // Direct export to PNG
-    /// state.export_waveform(Some(PathBuf::from("waveform.png")), None);
-    /// 
-    /// // Direct export to JPEG with explicit format
-    /// state.export_waveform(Some(PathBuf::from("waveform.jpg")), Some(ExportFormat::Jpeg));
-    /// 
-    /// // Interactive export via file dialog
-    /// state.export_waveform(None, None);
-    /// ```
+/// ```rust
+/// use std::path::PathBuf;
+/// use libsurfer::export_waveform::ExportFormat;
+/// 
+/// // Direct export to PNG
+/// // state.export_waveform(Some(PathBuf::from("waveform.png")), None);
+/// 
+/// // Direct export to JPEG with explicit format
+/// // state.export_waveform(Some(PathBuf::from("waveform.jpg")), Some(ExportFormat::Jpeg));
+/// 
+/// // Interactive export via file dialog
+/// // state.export_waveform(None, None);
+/// ```
     #[cfg(not(target_arch = "wasm32"))]
     pub fn export_waveform(&mut self, path: Option<PathBuf>, default_format: Option<ExportFormat>) {
         let default_format = default_format.unwrap_or(ExportFormat::Png);
