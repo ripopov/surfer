@@ -8,6 +8,7 @@ use num::BigInt;
 use serde::Deserialize;
 use std::path::PathBuf;
 use surver::Status;
+use crate::export_waveform::ExportFormat;
 
 use crate::async_util::AsyncJob;
 use crate::config::PrimaryMouseDrag;
@@ -37,46 +38,6 @@ use crate::{
 };
 
 type CommandCount = usize;
-
-/// Supported export formats for plot export
-/// 
-/// Note: Support for additional image formats (WebP, BMP, GIF, HEIF, AVIF, SVG, etc.)
-/// is out of scope for this implementation and can be considered in a future PR.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-pub enum ExportFormat {
-    Png,
-    Jpeg,
-}
-
-impl Default for ExportFormat {
-    fn default() -> Self {
-        ExportFormat::Png
-    }
-}
-
-impl ExportFormat {
-    pub fn file_extension(&self) -> &'static str {
-        match self {
-            ExportFormat::Png => "png",
-            ExportFormat::Jpeg => "jpg",
-        }
-    }
-    
-    pub fn mime_type(&self) -> &'static str {
-        match self {
-            ExportFormat::Png => "image/png",
-            ExportFormat::Jpeg => "image/jpeg",
-        }
-    }
-    
-    /// Get a human-readable description of the format
-    pub fn description(&self) -> &'static str {
-        match self {
-            ExportFormat::Png => "PNG (Portable Network Graphics)",
-            ExportFormat::Jpeg => "JPEG (Joint Photographic Experts Group)",
-        }
-    }
-}
 
 /// Encapsulates either a specific variable or all selected variables
 #[derive(Debug, Deserialize, Clone)]

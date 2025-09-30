@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use crate::message::ExportFormat;
+use crate::export_waveform::ExportFormat;
 use crate::export_waveform::detect_format_from_path;
 
 #[test]
