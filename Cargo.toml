@@ -85,7 +85,7 @@ softposit = "0.4.0"
 surfer = { path = "surfer", default-features = false }
 surver = { path = "surver", default-features = false }
 sys-locale = "0.3.2"
-tokio = { version = "1.43", features = ["rt", "time", "macros"] }
+tokio = { version = "1.43", features = ["rt", "time", "macros", "net"] }
 toml = { version = "0.9.2", default-features = false, features = ["parse"] }
 wasm-bindgen-futures = "0.4.50"
 web-time = "1.1.0"
