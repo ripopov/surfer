@@ -20,7 +20,6 @@ lz4_flex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 simple-eyre.workspace = true
-tokio.workspace = true
 web-time.workspace = true
 wellen.workspace = true
 leb128.workspace = true
@@ -30,4 +29,5 @@ fastrand = "2.3.0"
 http-body-util = "0.1.2"
 hyper = { version = "1.4", features = ["http1", "server"] }
 hyper-util = { version = "0.1.6", features = ["tokio"] }
+tokio = {workspace = true, features = ["net"]}
 whoami = "1.5.1"
