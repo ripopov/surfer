@@ -163,17 +163,43 @@ impl SystemState {
                         variable: None,
                         skip_zero: modifiers.shift,
                     }),
-                    (Key::Minus, true, false, false) => msgs.push(Message::CanvasZoom {
-                        mouse_ptr: None,
-                        delta: 2.0,
-                        viewport_idx: 0,
-                    }),
+                    (Key::Minus, true, false, false) => {
+                        if modifiers.ctrl && cfg!(not(target_arch = "wasm32")) {
+                            let mut next_factor = 0f32;
+                            for factor in &self.user.config.layout.zoom_factors {
+                                if *factor < self.ui_zoom_factor() && *factor > next_factor {
+                                    next_factor = *factor;
+                                }
+                            }
+                            if next_factor > 0f32 {
+                                msgs.push(Message::SetUIZoomFactor(next_factor));
+                            }
+                        } else {
+                            msgs.push(Message::CanvasZoom {
+                                mouse_ptr: None,
+                                delta: 2.0,
+                                viewport_idx: 0,
+                            });
+                        }
+                    }
                     (Key::Plus | Key::Equals, true, false, false) => {
-                        msgs.push(Message::CanvasZoom {
-                            mouse_ptr: None,
-                            delta: 0.5,
-                            viewport_idx: 0,
-                        });
+                        if modifiers.ctrl && cfg!(not(target_arch = "wasm32")) {
+                            let mut next_factor = f32::INFINITY;
+                            for factor in &self.user.config.layout.zoom_factors {
+                                if *factor > self.ui_zoom_factor() && *factor < next_factor {
+                                    next_factor = *factor;
+                                }
+                            }
+                            if next_factor != f32::INFINITY {
+                                msgs.push(Message::SetUIZoomFactor(next_factor));
+                            }
+                        } else {
+                            msgs.push(Message::CanvasZoom {
+                                mouse_ptr: None,
+                                delta: 0.5,
+                                viewport_idx: 0,
+                            });
+                        }
                     }
                     (Key::PageUp, true, false, false) => msgs.push(Message::CanvasScroll {
                         delta: Vec2 {
