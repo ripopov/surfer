@@ -88,6 +88,18 @@ test:
         - cargo -V
         - cargo test --features python --color=always --locked -- --include-ignored
 
+linux_install:
+    stage: test
+    script:
+        - apt-get update -y
+        - apt-get install -y openssl libssl-dev zip
+        - git fetch --tags
+        - rustc -V
+        - cargo -V
+        - cargo install --locked --color=always --path surver
+        - cargo install --locked --color=always --path surfer
+    interruptible: true
+
 test-linux-arm64:
     tags:
         - saas-linux-small-arm64
