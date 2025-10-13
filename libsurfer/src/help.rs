@@ -195,6 +195,10 @@ fn key_listing(ui: &mut Ui) {
         (icons::TOOLS_FILL, "t", "Show or hide toolbar"),
         (icons::ZOOM_IN_FILL, "+", "Zoom in"),
         (icons::ZOOM_OUT_FILL, "-", "Zoom out"),
+        #[cfg(not(target_arch = "wasm32"))]
+        ("", "Ctrl+'+'", "UI Zoom in"),
+        #[cfg(not(target_arch = "wasm32"))]
+        ("", "Ctrl+'-'", "UI Zoom out"),
         ("", "k/⬆", "Scroll up"),
         ("", "j/⬇", "Scroll down"),
         ("", "Ctrl+k/⬆", "Move focused item up"),
