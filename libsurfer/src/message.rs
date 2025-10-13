@@ -1,3 +1,4 @@
+use crate::export_waveform::ExportFormat;
 use bytes::Bytes;
 use camino::Utf8PathBuf;
 use derive_more::Debug;
@@ -277,6 +278,7 @@ pub enum Message {
     #[cfg(feature = "python")]
     ReloadPythonPlugin,
     SaveStateFile(Option<PathBuf>),
+    ExportWaveform(Option<PathBuf>, Option<ExportFormat>),
     LoadStateFile(Option<PathBuf>),
     LoadState(Box<UserState>, Option<PathBuf>),
     SetStateFile(PathBuf),

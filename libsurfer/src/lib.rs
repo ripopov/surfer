@@ -16,6 +16,7 @@ pub mod dialog;
 pub mod displayed_item;
 pub mod displayed_item_tree;
 pub mod drawing_canvas;
+pub mod export_waveform;
 pub mod file_dialog;
 pub mod file_watcher;
 pub mod fzcmd;
@@ -76,6 +77,7 @@ use displayed_item::DisplayedVariable;
 use displayed_item_tree::DisplayedItemTree;
 use eframe::{App, CreationContext};
 use egui::{FontData, FontDefinitions, FontFamily};
+
 use eyre::Context;
 use eyre::Result;
 use ftr_parser::types::Transaction;
@@ -1478,6 +1480,7 @@ impl SystemState {
                 self.invalidate_draw_commands();
             }
             Message::SaveStateFile(path) => self.save_state_file(path),
+            Message::ExportWaveform(path, format) => self.export_waveform(path, format),
             Message::LoadStateFile(path) => self.load_state_file(path),
             Message::LoadState(state, path) => self.load_state(state, path),
             Message::SetStateFile(path) => {

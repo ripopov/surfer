@@ -64,6 +64,7 @@ web-time.workspace = true
 wellen.workspace = true
 leb128.workspace = true
 tokio-stream = "0.1.17"
+egui_skia_renderer = { git = "https://gitlab.com/oscargus/egui_skia_renderer.git", rev = "a8b4a64226328cc4f14e68a434dd0bd35304f3bd" }
 
 [features]
 default = ["performance_plot"]
@@ -95,7 +96,6 @@ wasm-bindgen-futures.workspace = true
 web-sys = { version = "= 0.3.77", features = ["Location", "UrlSearchParams"] }
 
 [dev-dependencies]
-egui_skia_renderer = { git = "https://gitlab.com/oscargus/egui_skia_renderer.git", rev = "a8b4a64226328cc4f14e68a434dd0bd35304f3bd" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 image-compare = "0.5"
 port_check = "0.3"

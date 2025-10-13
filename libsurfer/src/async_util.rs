@@ -8,6 +8,7 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub enum AsyncJob {
     SaveState,
+    ExportWaveform,
 }
 
 // Wasm doesn't seem to support std::thread, so this spawns a thread where we can
