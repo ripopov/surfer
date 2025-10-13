@@ -2117,7 +2117,7 @@ impl SystemState {
                             let delta = time_string(
                                 &(waves.numbered_marker_time(numbered_cursor.idx) - cursor),
                                 &waves.inner.metadata().timescale,
-                                &self.user.wanted_timeunit,
+                                &self.wanted_time_unit(),
                                 &self.get_time_format(),
                             );
 
@@ -2303,7 +2303,7 @@ impl SystemState {
             &waves.inner.metadata().timescale,
             frame_width,
             cfg.text_size,
-            &self.user.wanted_timeunit,
+            &self.wanted_time_unit(),
             &self.get_time_format(),
             &self.user.config,
         );

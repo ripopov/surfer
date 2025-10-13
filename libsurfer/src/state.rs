@@ -90,7 +90,7 @@ pub struct UserState {
     pub(crate) show_performance: bool,
     pub(crate) show_logs: bool,
     pub(crate) show_cursor_window: bool,
-    pub(crate) wanted_timeunit: TimeUnit,
+    pub(crate) wanted_timeunit: Option<TimeUnit>,
     pub(crate) time_string_format: Option<TimeStringFormatting>,
     pub(crate) show_url_entry: bool,
     /// Show a confirmation dialog asking the user for confirmation
@@ -271,7 +271,10 @@ impl SystemState {
         if !is_reload {
             if let Some(waves) = &mut self.user.waves {
                 // Set time unit
-                self.user.wanted_timeunit = waves.inner.metadata().timescale.unit;
+                self.user.wanted_timeunit = match self.user.config.preferred_time_unit() {
+                    TimeUnit::Auto | TimeUnit::None => Some(waves.inner.metadata().timescale.unit),
+                    preferred => Some(preferred),
+                };
                 // Possibly open state file load dialog
                 if waves.source.sibling_state_file().is_some() {
                     self.update(Message::SuggestOpenSiblingStateFile);
@@ -318,7 +321,12 @@ impl SystemState {
         self.invalidate_draw_commands();
 
         self.user.config.theme.alt_frequency = 0;
-        self.user.wanted_timeunit = new_transaction_streams.inner.metadata().timescale.unit;
+        self.user.wanted_timeunit = match self.user.config.preferred_time_unit() {
+            TimeUnit::Auto | TimeUnit::None => {
+                Some(new_transaction_streams.inner.metadata().timescale.unit)
+            }
+            preferred => Some(preferred),
+        };
         self.user.waves = Some(new_transaction_streams);
     }
 

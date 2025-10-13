@@ -291,21 +291,12 @@ impl SystemState {
         let start_time_str = time_string(
             &start_time,
             timescale,
-            &self.user.wanted_timeunit,
+            &self.wanted_time_unit(),
             time_format,
         );
-        let end_time_str = time_string(
-            &end_time,
-            timescale,
-            &self.user.wanted_timeunit,
-            time_format,
-        );
-        let diff_time_str = time_string(
-            &diff_time,
-            timescale,
-            &self.user.wanted_timeunit,
-            time_format,
-        );
+        let end_time_str = time_string(&end_time, timescale, &self.wanted_time_unit(), time_format);
+        let diff_time_str =
+            time_string(&diff_time, timescale, &self.wanted_time_unit(), time_format);
         draw_gesture_text(
             ctx,
             (ctx.to_screen)(current_location.x, current_location.y),

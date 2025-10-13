@@ -1,5 +1,5 @@
 //! Time handling and formatting.
-use derive_more::Display;
+use derive_more::{Display, FromStr};
 use ecolor::Color32;
 use egui::Ui;
 use emath::{Align2, Pos2};
@@ -23,33 +23,42 @@ pub struct TimeScale {
     pub multiplier: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, Display, Eq, PartialEq, Serialize, Deserialize, Sequence)]
+#[derive(Debug, Clone, Copy, Display, Eq, PartialEq, Serialize, Deserialize, FromStr, Sequence)]
 pub enum TimeUnit {
     #[display("zs")]
+    #[serde(rename = "zs")]
     ZeptoSeconds,
 
     #[display("as")]
+    #[serde(rename = "as")]
     AttoSeconds,
 
     #[display("fs")]
+    #[serde(rename = "fs")]
     FemtoSeconds,
 
     #[display("ps")]
+    #[serde(rename = "ps")]
     PicoSeconds,
 
     #[display("ns")]
+    #[serde(rename = "ns")]
     NanoSeconds,
 
     #[display("μs")]
+    #[serde(rename = "μs")]
     MicroSeconds,
 
     #[display("ms")]
+    #[serde(rename = "ms")]
     MilliSeconds,
 
     #[display("s")]
+    #[serde(rename = "s")]
     Seconds,
 
     #[display("No unit")]
+    #[serde(rename = "No unit")]
     None,
 
     /// Use the largest time unit feasible for each time.

@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 use crate::hierarchy::HierarchyStyle;
 use crate::mousegestures::GestureZones;
-use crate::time::TimeFormat;
+use crate::time::{TimeFormat, TimeUnit};
 use crate::{clock_highlighting::ClockHighlightType, variable_name_type::VariableNameType};
 
 /// Select the function of the arrow keys
@@ -71,6 +71,8 @@ pub struct SurferConfig {
     pub default_time_format: TimeFormat,
     pub default_variable_name_type: VariableNameType,
     default_clock_highlight_type: ClockHighlightType,
+    /// Preferred time unit
+    preferred_time_unit: TimeUnit,
     /// Distance in pixels for cursor snap
     pub snap_distance: f32,
     /// Maximum size of the undo stack
@@ -96,6 +98,10 @@ impl SurferConfig {
 
     pub fn autoreload_files(&self) -> AutoLoad {
         self.autoreload_files
+    }
+
+    pub fn preferred_time_unit(&self) -> TimeUnit {
+        self.preferred_time_unit
     }
 }
 

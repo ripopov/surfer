@@ -8,6 +8,7 @@ use crate::{
     config::{ArrowKeyBindings, AutoLoad, PrimaryMouseDrag},
     displayed_item::DisplayedItem,
     hierarchy::HierarchyStyle,
+    time::TimeUnit,
     SystemState,
 };
 
@@ -181,5 +182,12 @@ impl SystemState {
         self.user
             .autoload_sibling_state_files
             .unwrap_or_else(|| self.user.config.autoload_sibling_state_files())
+    }
+
+    #[inline]
+    pub fn wanted_time_unit(&self) -> TimeUnit {
+        self.user
+            .wanted_timeunit
+            .unwrap_or_else(|| self.user.config.preferred_time_unit())
     }
 }
