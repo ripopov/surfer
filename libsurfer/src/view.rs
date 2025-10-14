@@ -178,7 +178,7 @@ impl eframe::App for SystemState {
         let (fullscreen, window_size) = ctx.input(|i| {
             (
                 i.viewport().fullscreen.unwrap_or_default(),
-                Some(i.screen_rect.size()),
+                Some(i.viewport_rect().size()),
             )
         });
         #[cfg(target_arch = "wasm32")]
@@ -946,7 +946,7 @@ impl SystemState {
                         Some(name) => {
                             // NOTE: Safe unwrap, we know that egui has its own built-in font
                             let font = ui.style().text_styles.get(&TextStyle::Monospace).unwrap();
-                            let char_width = ui.fonts(|fonts| {
+                            let char_width = ui.fonts_mut(|fonts| {
                                 fonts
                                     .layout_no_wrap(
                                         " ".to_string(),
@@ -1834,7 +1834,7 @@ impl SystemState {
 
         let monospace_font = ui.style().text_styles.get(&TextStyle::Monospace).unwrap();
         let monospace_width = {
-            ui.fonts(|fonts| {
+            ui.fonts_mut(|fonts| {
                 fonts
                     .layout_no_wrap(" ".to_string(), monospace_font.clone(), Color32::BLACK)
                     .size()

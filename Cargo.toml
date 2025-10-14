@@ -16,7 +16,7 @@ version = "0.4.0-dev"
 license = "EUPL-1.2"
 categories = ["development-tools::debugging", "science"]
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 repository = "https://gitlab.com/surfer-project/surfer/"
 
 [workspace.dependencies]
@@ -37,20 +37,20 @@ derive_more = { version = "2.0", default-features = false, features = [
     "not",
     "debug",
 ] }
-ecolor = { version = "0.32", features = ["serde"] }
-eframe = { version = "0.32", default-features = false, features = [
+ecolor = { version = "0.33", features = ["serde"] }
+eframe = { version = "0.33", default-features = false, features = [
     "default_fonts",
     "glow",
     "wayland",
     "x11",
 ] }
-egui = { version = "0.32", default-features = false, features = ["serde"] }
+egui = { version = "0.33", default-features = false, features = ["serde"] }
 egui-remixicon = { version = "0.29.1", default-features = false }
-egui_extras = { version = "0.32", default-features = false }
-egui_plot = "0.33"
-emath = "0.32"
+egui_extras = { version = "0.33", default-features = false }
+egui_plot = "0.34"
+emath = "0.33"
 enum-iterator = "2.1"
-epaint = "0.32"
+epaint = "0.33"
 eyre = "0.6.12"
 fern = { version = "0.7.1", features = ["colored"] }
 ftr_parser = "0.1.2"
