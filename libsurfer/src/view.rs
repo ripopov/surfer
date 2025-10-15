@@ -372,6 +372,7 @@ impl SystemState {
                     match self.hierarchy_style() {
                         HierarchyStyle::Separate => hierarchy::separate(self, ui, &mut msgs),
                         HierarchyStyle::Tree => hierarchy::tree(self, ui, &mut msgs),
+                        HierarchyStyle::Variables => hierarchy::variable_list(self, ui, &mut msgs),
                     }
                 });
         }
@@ -851,7 +852,14 @@ impl SystemState {
         filter: &VariableFilter,
     ) {
         let all_variables = self.filtered_variables(all_variables, filter);
-        self.draw_filtered_variable_list(msgs, wave_container, ui, &all_variables, row_range);
+        self.draw_filtered_variable_list(
+            msgs,
+            wave_container,
+            ui,
+            &all_variables,
+            row_range,
+            false,
+        );
     }
 
     pub fn draw_filtered_variable_list(
@@ -861,7 +869,9 @@ impl SystemState {
         ui: &mut egui::Ui,
         all_variables: &[VariableRef],
         row_range: Option<Range<usize>>,
+        full_path: bool,
     ) {
+        // Get filtered variables
         let variables = all_variables
             .iter()
             .map(|var| {
@@ -883,6 +893,7 @@ impl SystemState {
                     .unwrap_or(all_variables.len()),
             );
 
+        // Draw variables
         for (variable, meta, name_info) in variables {
             let index = meta
                 .as_ref()
@@ -994,8 +1005,13 @@ impl SystemState {
                                 color: self.user.config.theme.foreground,
                                 ..Default::default()
                             };
+                            let name = if full_path {
+                                variable.full_path().join(".")
+                            } else {
+                                variable.name.clone()
+                            };
                             label.append(&direction, 0.0, text_format.clone());
-                            label.append(&variable.name, 0.0, text_format.clone());
+                            label.append(&name, 0.0, text_format.clone());
                             label.append(&index, 0.0, text_format.clone());
                             label.append(&value, 0.0, text_format.clone());
                         }
