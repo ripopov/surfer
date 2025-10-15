@@ -142,15 +142,24 @@ impl VariableFilter {
         &self,
         variables: &[VariableRef],
         wave_container_opt: Option<&WaveContainer>,
+        full_path: bool,
     ) -> Vec<VariableRef> {
         let mut name_filter = self.name_filter_fn();
-
-        variables
-            .iter()
-            .filter(|&vr| name_filter(&vr.name))
-            .filter(|&vr| self.kind_filter(vr, wave_container_opt))
-            .cloned()
-            .collect_vec()
+        if full_path {
+            variables
+                .iter()
+                .filter(|&vr| name_filter(&vr.full_path().join(".")))
+                .filter(|&vr| self.kind_filter(vr, wave_container_opt))
+                .cloned()
+                .collect_vec()
+        } else {
+            variables
+                .iter()
+                .filter(|&vr| name_filter(&vr.name))
+                .filter(|&vr| self.kind_filter(vr, wave_container_opt))
+                .cloned()
+                .collect_vec()
+        }
     }
 }
 
@@ -181,6 +190,7 @@ impl SystemState {
                                     msgs.push(Message::AddVariables(self.filtered_variables(
                                         &variables,
                                         &self.user.variable_filter,
+                                        false,
                                     )));
                                 }
                                 ScopeType::StreamScope(active_scope) => {
@@ -378,6 +388,7 @@ impl SystemState {
         &self,
         variables: &[VariableRef],
         variable_filter: &VariableFilter,
+        full_path: bool,
     ) -> Vec<VariableRef> {
         let wave_container = match &self.user.waves {
             Some(wd) => wd.inner.as_waves(),
@@ -385,7 +396,7 @@ impl SystemState {
         };
 
         variable_filter
-            .matching_variables(variables, wave_container)
+            .matching_variables(variables, wave_container, full_path)
             .iter()
             .sorted_by(|a, b| self.variable_cmp(a, b, wave_container))
             .cloned()

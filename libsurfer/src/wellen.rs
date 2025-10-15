@@ -224,11 +224,18 @@ impl WellenContainer {
         }
     }
 
-    pub fn variables(&self) -> Vec<VariableRef> {
+    pub fn variables(&self, include_parameters: bool) -> Vec<VariableRef> {
         let h = &self.hierarchy;
-        h.iter_vars()
-            .map(|r| VariableRef::from_hierarchy_string(&r.full_name(h)))
-            .collect::<Vec<_>>()
+        if include_parameters {
+            h.iter_vars()
+                .map(|r| VariableRef::from_hierarchy_string(&r.full_name(h)))
+                .collect::<Vec<_>>()
+        } else {
+            h.iter_vars()
+                .filter(|id| id.var_type() != VarType::Parameter)
+                .map(|r| VariableRef::from_hierarchy_string(&r.full_name(h)))
+                .collect::<Vec<_>>()
+        }
     }
 
     pub fn variables_in_scope(&self, scope_ref: &ScopeRef) -> Vec<VariableRef> {
