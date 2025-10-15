@@ -372,6 +372,7 @@ impl SystemState {
                     match self.hierarchy_style() {
                         HierarchyStyle::Separate => hierarchy::separate(self, ui, &mut msgs),
                         HierarchyStyle::Tree => hierarchy::tree(self, ui, &mut msgs),
+                        HierarchyStyle::Variables => hierarchy::variable_list(self, ui, &mut msgs),
                     }
                 });
         }

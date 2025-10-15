@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 pub enum HierarchyStyle {
     Separate,
     Tree,
+    Variables,
 }
 
 /// Scopes and variables in two separate lists
@@ -169,4 +170,57 @@ pub fn tree(state: &mut SystemState, ui: &mut Ui, msgs: &mut Vec<Message>) {
             });
         },
     );
+}
+
+/// Scopes and variables in a joint tree.
+pub fn variable_list(state: &mut SystemState, ui: &mut Ui, msgs: &mut Vec<Message>) {
+    ui.visuals_mut().override_text_color =
+        Some(state.user.config.theme.primary_ui_color.foreground);
+
+    ui.with_layout(
+        Layout::top_down(Align::LEFT).with_cross_justify(true),
+        |ui| {
+            Frame::new().inner_margin(Margin::same(5)).show(ui, |ui| {
+                ui.with_layout(Layout::left_to_right(Align::TOP), |ui| {
+                    ui.heading("Variables");
+                    ui.add_space(3.0);
+                    state.draw_variable_filter_edit(ui, msgs);
+                });
+                ui.add_space(3.0);
+
+                ScrollArea::both().id_salt("variables").show(ui, |ui| {
+                    ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+                    draw_all_variables(state, msgs, ui);
+                });
+            });
+        },
+    );
+}
+
+fn draw_all_variables(state: &mut SystemState, msgs: &mut Vec<Message>, ui: &mut Ui) {
+    let filter = &state.user.variable_filter;
+
+    if let Some(waves) = &state.user.waves {
+        if waves.inner.is_waves() {
+            let wave_container = waves.inner.as_waves().unwrap();
+            let variables = state.filtered_variables(&wave_container.variables(), filter);
+            let row_height = ui
+                .text_style_height(&egui::TextStyle::Monospace)
+                .max(ui.text_style_height(&egui::TextStyle::Body));
+            ScrollArea::both()
+                .auto_shrink([false; 2])
+                .id_salt("variables")
+                .show_rows(ui, row_height, variables.len(), |ui, row_range| {
+                    state.draw_filtered_variable_list(
+                        msgs,
+                        wave_container,
+                        ui,
+                        &variables,
+                        Some(row_range),
+                    );
+                });
+        } else {
+            // No support for Streams yet
+        };
+    }
 }
