@@ -1,0 +1,82 @@
+{
+  "activationEvents": [],
+  "categories": [
+    "Visualization"
+  ],
+  "contributes": {
+    "customEditors": [
+      {
+        "displayName": "Surfer Waveform Viewer",
+        "priority": "default",
+        "selector": [
+          {
+            "filenamePattern": "*.{vcd,fst,ghw}"
+          }
+        ],
+        "viewType": "surfer.waveformViewer"
+      }
+    ],
+    "languages": [
+      {
+        "extensions": [
+          ".fst",
+          ".vcd",
+          ".ghw"
+        ],
+        "id": "wave-file"
+      }
+    ]
+  },
+  "dependencies": {
+    "eslint-plugin-unused-imports": "^3.2.0"
+  },
+  "description": "An Extensible and Snappy Waveform Viewer that supports VCD, FST, and GHW files",
+  "devDependencies": {
+    "@types/mocha": "^10.0.6",
+    "@types/node": "18.x",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^7.4.0",
+    "@typescript-eslint/parser": "^7.4.0",
+    "@vscode/test-cli": "^0.0.8",
+    "@vscode/test-electron": "^2.3.9",
+    "eslint": "^8.57.0",
+    "typescript": "^5.3.3"
+  },
+  "displayName": "surfer",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "extensionKind": [
+    "ui",
+    "workspace"
+  ],
+  "icon": "icon.png",
+  "keywords": [
+    "VCD",
+    "FST",
+    "GHW",
+    "FPGA",
+    "ASIC",
+    "waveform",
+    "VHDL",
+    "Verilog"
+  ],
+  "license": "EUPL-1.2",
+  "main": "./out/extension.js",
+  "name": "surfer",
+  "publisher": "surfer-project",
+  "readme": "./README.md",
+  "repository": {
+    "type": "git",
+    "url": "https://gitlab.com/surfer-project/surfer-vscode.git"
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "lint": "eslint src --ext ts",
+    "pretest": "npm run compile && npm run lint",
+    "test": "vscode-test",
+    "vscode:prepublish": "npm run compile",
+    "watch": "tsc -watch -p ./"
+  },
+  "version": "0.2.0"
+}
