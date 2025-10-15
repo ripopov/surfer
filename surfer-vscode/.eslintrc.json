@@ -1,0 +1,48 @@
+{
+  "env": {
+    "browser": false,
+    "commonjs": true,
+    "es6": true,
+    "mocha": true,
+    "node": true
+  },
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "ecmaFeatures": {
+      "jsx": true
+    },
+    "ecmaVersion": 2018,
+    "sourceType": "module"
+  },
+  "plugins": [
+    "@typescript-eslint",
+    "unused-imports"
+  ],
+  "root": true,
+  "rules": {
+    "@typescript-eslint/naming-convention": [
+      "error",
+      {
+        "format": [
+          "PascalCase"
+        ],
+        "selector": "enumMember"
+      }
+    ],
+    "@typescript-eslint/semi": "off",
+    "constructor-super": "warn",
+    "curly": "warn",
+    "eqeqeq": "warn",
+    "no-const-assign": "warn",
+    "no-constant-condition": "warn",
+    "no-extra-semi": "error",
+    "no-this-before-super": "warn",
+    "no-throw-literal": "warn",
+    "no-undef": "warn",
+    "no-unreachable": "warn",
+    "no-unused-vars": "off",
+    "semi": "off",
+    "unused-imports/no-unused-imports": "error",
+    "valid-typeof": "warn"
+  }
+}
