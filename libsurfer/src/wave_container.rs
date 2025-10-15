@@ -268,9 +268,10 @@ impl WaveContainer {
         }
     }
 
-    pub fn variables(&self) -> Vec<VariableRef> {
+    /// Return all variables (excluding parameters) in the whole design.
+    pub fn variables(&self, include_parameters: bool) -> Vec<VariableRef> {
         match self {
-            WaveContainer::Wellen(f) => f.variables(),
+            WaveContainer::Wellen(f) => f.variables(include_parameters),
             WaveContainer::Empty => vec![],
             WaveContainer::Cxxrtl(_) => vec![],
         }
