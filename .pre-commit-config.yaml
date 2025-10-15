@@ -10,6 +10,7 @@ repos:
     - id: mixed-line-ending
     - id: check-json
     - id: pretty-format-json
+      args: ["--autofix"]
   - repo: https://github.com/codespell-project/codespell
     rev: v2.4.1
     hooks:
