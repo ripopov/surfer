@@ -35,4 +35,3 @@ with open("extension/package-in.json", "rt") as f:
 package_json["version"] = version
 with open("extension/package.json", "wt") as f:
     json.dump(package_json, f, indent=2)
-
