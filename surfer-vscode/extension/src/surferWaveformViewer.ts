@@ -108,7 +108,7 @@ export class SurferWaveformViewerEditorProvider
             })
         }())`
     html = html.replaceAll("/*SURFER_SETUP_HOOKS*/", `${load_notifier}`)
-    
+
     return html
   }
 
