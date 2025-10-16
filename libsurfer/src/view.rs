@@ -1,6 +1,4 @@
-use std::ops::Range;
-
-use crate::fzcmd::expand_command;
+use crate::{fzcmd::expand_command, tooltips::variable_tooltip_text};
 use ecolor::Color32;
 #[cfg(not(target_arch = "wasm32"))]
 use egui::ViewportCommand;
@@ -9,25 +7,23 @@ use egui::{
     TextStyle, UiBuilder, WidgetText,
 };
 use egui_extras::{Column, TableBuilder};
-use egui_remixicon::icons;
 use emath::{Align, GuiRounding, Pos2, Rect, RectTransform, Vec2};
 use epaint::{
     text::{LayoutJob, TextWrapMode},
     CornerRadiusF32, Margin, Stroke,
 };
-use eyre::Context;
 use itertools::Itertools;
-use log::{info, warn};
+use log::info;
 
-use num::BigUint;
 use surfer_translation_types::{
     translator::{TrueName, VariableNameInfo},
-    SubFieldFlatTranslationResult, TranslatedValue, Translator, VariableInfo, VariableType,
+    SubFieldFlatTranslationResult, TranslatedValue, Translator, VariableInfo,
 };
 
 #[cfg(feature = "performance_plot")]
 use crate::benchmark::NUM_PERF_SAMPLES;
 use crate::command_parser::get_parser;
+use crate::config::SurferTheme;
 use crate::displayed_item::{
     draw_rename_window, DisplayedFieldRef, DisplayedItem, DisplayedItemRef,
 };
@@ -39,18 +35,13 @@ use crate::time::time_string;
 use crate::transaction_container::{StreamScopeRef, TransactionStreamRef};
 use crate::translation::TranslationResultExt;
 use crate::util::uint_idx_to_alpha_idx;
-use crate::variable_direction::VariableDirectionExt;
-use crate::variable_filter::VariableFilter;
-use crate::wave_container::{
-    FieldRef, FieldRefExt, ScopeRef, ScopeRefExt, VariableRef, VariableRefExt, WaveContainer,
-};
+use crate::wave_container::{FieldRef, FieldRefExt, VariableRef, WaveContainer};
 use crate::wave_data::ScopeType;
+use crate::OUTSTANDING_TRANSACTIONS;
 use crate::{
-    command_prompt::show_command_prompt, hierarchy, hierarchy::HierarchyStyle, wave_data::WaveData,
-    Message, MoveDir, SystemState,
+    command_prompt::show_command_prompt, hierarchy::HierarchyStyle, wave_data::WaveData, Message,
+    MoveDir, SystemState,
 };
-use crate::{config::SurferTheme, wave_container::VariableMeta};
-use crate::{data_container::VariableType as VarType, OUTSTANDING_TRANSACTIONS};
 
 pub struct DrawingContext<'a> {
     pub painter: &'a mut Painter,
@@ -370,8 +361,9 @@ impl SystemState {
                 .show(ctx, |ui| {
                     self.user.sidepanel_width = Some(ui.clip_rect().width());
                     match self.hierarchy_style() {
-                        HierarchyStyle::Separate => hierarchy::separate(self, ui, &mut msgs),
-                        HierarchyStyle::Tree => hierarchy::tree(self, ui, &mut msgs),
+                        HierarchyStyle::Separate => self.separate(ui, &mut msgs),
+                        HierarchyStyle::Tree => self.tree(ui, &mut msgs),
+                        HierarchyStyle::Variables => self.variable_list(ui, &mut msgs),
                     }
                 });
         }
@@ -602,437 +594,6 @@ impl SystemState {
         }
     }
 
-    pub fn draw_all_scopes(
-        &self,
-        msgs: &mut Vec<Message>,
-        wave: &WaveData,
-        draw_variables: bool,
-        ui: &mut egui::Ui,
-        filter: &VariableFilter,
-    ) {
-        for scope in wave.inner.root_scopes() {
-            match scope {
-                ScopeType::WaveScope(scope) => {
-                    self.draw_selectable_child_or_orphan_scope(
-                        msgs,
-                        wave,
-                        &scope,
-                        draw_variables,
-                        ui,
-                        filter,
-                    );
-                }
-                ScopeType::StreamScope(_) => {
-                    self.draw_transaction_root(msgs, wave, ui);
-                }
-            }
-        }
-        if draw_variables {
-            if let Some(wave_container) = wave.inner.as_waves() {
-                let scope = ScopeRef::empty();
-                let variables = wave_container.variables_in_scope(&scope);
-                self.draw_variable_list(msgs, wave_container, ui, &variables, None, filter);
-            }
-        }
-    }
-
-    fn add_scope_selectable_label(
-        &self,
-        msgs: &mut Vec<Message>,
-        wave: &WaveData,
-        scope: &ScopeRef,
-        ui: &mut egui::Ui,
-        scroll_to_label: bool,
-    ) {
-        let name = scope.name();
-        let mut response = ui.add(egui::Button::selectable(
-            wave.active_scope == Some(ScopeType::WaveScope(scope.clone())),
-            name,
-        ));
-        let _ = response.interact(egui::Sense::click_and_drag());
-        response.drag_started().then(|| {
-            msgs.push(Message::VariableDragStarted(VisibleItemIndex(
-                self.user.waves.as_ref().unwrap().display_item_ref_counter,
-            )))
-        });
-
-        if scroll_to_label {
-            response.scroll_to_me(Some(Align::Center));
-        }
-
-        response.drag_stopped().then(|| {
-            if ui.input(|i| i.pointer.hover_pos().unwrap_or_default().x)
-                > self.user.sidepanel_width.unwrap_or_default()
-            {
-                let scope_t = ScopeType::WaveScope(scope.clone());
-                let variables = self
-                    .user
-                    .waves
-                    .as_ref()
-                    .unwrap()
-                    .inner
-                    .variables_in_scope(&scope_t)
-                    .iter()
-                    .filter_map(|var| match var {
-                        VarType::Variable(var) => Some(var.clone()),
-                        _ => None,
-                    })
-                    .collect_vec();
-
-                msgs.push(Message::AddDraggedVariables(self.filtered_variables(
-                    variables.as_slice(),
-                    &self.user.variable_filter,
-                )));
-            }
-        });
-        if self.show_scope_tooltip() {
-            response = response.on_hover_ui(|ui| {
-                ui.set_max_width(ui.spacing().tooltip_width);
-                ui.add(egui::Label::new(scope_tooltip_text(wave, scope)));
-            });
-        }
-        response.context_menu(|ui| {
-            if ui.button("Add scope").clicked() {
-                msgs.push(Message::AddScope(scope.clone(), false));
-            }
-            if ui.button("Add scope recursively").clicked() {
-                msgs.push(Message::AddScope(scope.clone(), true));
-            }
-            if ui.button("Add scope as group").clicked() {
-                msgs.push(Message::AddScopeAsGroup(scope.clone(), false));
-            }
-            if ui.button("Add scope as group recursively").clicked() {
-                msgs.push(Message::AddScopeAsGroup(scope.clone(), true));
-            }
-        });
-        response
-            .clicked()
-            .then(|| msgs.push(Message::SetActiveScope(ScopeType::WaveScope(scope.clone()))));
-    }
-
-    fn draw_selectable_child_or_orphan_scope(
-        &self,
-        msgs: &mut Vec<Message>,
-        wave: &WaveData,
-        scope: &ScopeRef,
-        draw_variables: bool,
-        ui: &mut egui::Ui,
-        filter: &VariableFilter,
-    ) {
-        let Some(child_scopes) = wave
-            .inner
-            .as_waves()
-            .unwrap()
-            .child_scopes(scope)
-            .context("Failed to get child scopes")
-            .map_err(|e| warn!("{e:#?}"))
-            .ok()
-        else {
-            return;
-        };
-
-        let no_variables_in_scope = wave.inner.as_waves().unwrap().no_variables_in_scope(scope);
-        if child_scopes.is_empty() && no_variables_in_scope && !self.show_empty_scopes() {
-            return;
-        }
-        if child_scopes.is_empty() && (!draw_variables || no_variables_in_scope) {
-            self.add_scope_selectable_label(msgs, wave, scope, ui, false);
-        } else {
-            let should_open_header = self.should_open_header(scope);
-            let mut collapsing_header =
-                egui::collapsing_header::CollapsingState::load_with_default_open(
-                    ui.ctx(),
-                    egui::Id::new(scope),
-                    false,
-                );
-            if should_open_header {
-                collapsing_header.set_open(true);
-            }
-            collapsing_header
-                .show_header(ui, |ui| {
-                    ui.with_layout(
-                        Layout::top_down(Align::LEFT).with_cross_justify(true),
-                        |ui| {
-                            self.add_scope_selectable_label(
-                                msgs,
-                                wave,
-                                scope,
-                                ui,
-                                should_open_header,
-                            );
-                        },
-                    );
-                })
-                .body(|ui| {
-                    if draw_variables || self.show_parameters_in_scopes() {
-                        let wave_container = wave.inner.as_waves().unwrap();
-                        let parameters = wave_container.parameters_in_scope(scope);
-                        if !parameters.is_empty() {
-                            egui::collapsing_header::CollapsingState::load_with_default_open(
-                                ui.ctx(),
-                                egui::Id::new(&parameters),
-                                false,
-                            )
-                            .show_header(ui, |ui| {
-                                ui.with_layout(
-                                    Layout::top_down(Align::LEFT).with_cross_justify(true),
-                                    |ui| {
-                                        ui.label("Parameters");
-                                    },
-                                );
-                            })
-                            .body(|ui| {
-                                self.draw_variable_list(
-                                    msgs,
-                                    wave_container,
-                                    ui,
-                                    &parameters,
-                                    None,
-                                    filter,
-                                );
-                            });
-                        }
-                    }
-                    self.draw_root_scope_view(msgs, wave, scope, draw_variables, ui, filter);
-                    if draw_variables {
-                        let wave_container = wave.inner.as_waves().unwrap();
-                        let variables = wave_container.variables_in_scope(scope);
-                        self.draw_variable_list(msgs, wave_container, ui, &variables, None, filter);
-                    }
-                });
-        }
-    }
-
-    fn draw_root_scope_view(
-        &self,
-        msgs: &mut Vec<Message>,
-        wave: &WaveData,
-        root_scope: &ScopeRef,
-        draw_variables: bool,
-        ui: &mut egui::Ui,
-        filter: &VariableFilter,
-    ) {
-        let Some(child_scopes) = wave
-            .inner
-            .as_waves()
-            .unwrap()
-            .child_scopes(root_scope)
-            .context("Failed to get child scopes")
-            .map_err(|e| warn!("{e:#?}"))
-            .ok()
-        else {
-            return;
-        };
-
-        let child_scopes_sorted = child_scopes
-            .iter()
-            .sorted_by(|a, b| numeric_sort::cmp(&a.name(), &b.name()))
-            .collect_vec();
-
-        for child_scope in child_scopes_sorted {
-            self.draw_selectable_child_or_orphan_scope(
-                msgs,
-                wave,
-                child_scope,
-                draw_variables,
-                ui,
-                filter,
-            );
-        }
-    }
-
-    pub fn draw_variable_list(
-        &self,
-        msgs: &mut Vec<Message>,
-        wave_container: &WaveContainer,
-        ui: &mut egui::Ui,
-        all_variables: &[VariableRef],
-        row_range: Option<Range<usize>>,
-        filter: &VariableFilter,
-    ) {
-        let all_variables = self.filtered_variables(all_variables, filter);
-        self.draw_filtered_variable_list(msgs, wave_container, ui, &all_variables, row_range);
-    }
-
-    pub fn draw_filtered_variable_list(
-        &self,
-        msgs: &mut Vec<Message>,
-        wave_container: &WaveContainer,
-        ui: &mut egui::Ui,
-        all_variables: &[VariableRef],
-        row_range: Option<Range<usize>>,
-    ) {
-        let variables = all_variables
-            .iter()
-            .map(|var| {
-                let meta = wave_container.variable_meta(var).ok();
-                let name_info = self.get_variable_name_info(wave_container, var);
-                (var, meta, name_info)
-            })
-            .sorted_by_key(|(_, _, name_info)| {
-                -name_info
-                    .as_ref()
-                    .and_then(|info| info.priority)
-                    .unwrap_or_default()
-            })
-            .skip(row_range.as_ref().map(|r| r.start).unwrap_or(0))
-            .take(
-                row_range
-                    .as_ref()
-                    .map(|r| r.end - r.start)
-                    .unwrap_or(all_variables.len()),
-            );
-
-        for (variable, meta, name_info) in variables {
-            let index = meta
-                .as_ref()
-                .and_then(|meta| meta.index)
-                .map(|index| {
-                    if self.show_variable_indices() {
-                        format!(" {index}")
-                    } else {
-                        String::new()
-                    }
-                })
-                .unwrap_or_default();
-
-            let direction = if self.show_variable_direction() {
-                meta.as_ref()
-                    .and_then(|meta| meta.direction)
-                    .map(|direction| {
-                        format!(
-                            "{} ",
-                            // Icon based on direction
-                            direction.get_icon().unwrap_or_else(|| {
-                                if meta.as_ref().is_some_and(|meta| {
-                                    meta.variable_type == Some(VariableType::VCDParameter)
-                                }) {
-                                    // If parameter
-                                    icons::MAP_PIN_2_LINE
-                                } else {
-                                    // Align other items (can be improved)
-                                    // The padding depends on if we will render monospace or not
-                                    if name_info.is_some() {
-                                        "  "
-                                    } else {
-                                        "    "
-                                    }
-                                }
-                            })
-                        )
-                    })
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            };
-
-            let value = if meta
-                .as_ref()
-                .is_some_and(|meta| meta.variable_type == Some(VariableType::VCDParameter))
-            {
-                let res = wave_container.query_variable(variable, &BigUint::ZERO).ok();
-                res.and_then(|o| o.and_then(|q| q.current.map(|v| format!(": {}", v.1))))
-                    .unwrap_or_else(|| ": Undefined".to_string())
-            } else {
-                String::new()
-            };
-
-            ui.with_layout(
-                Layout::top_down(Align::LEFT).with_cross_justify(true),
-                |ui| {
-                    let mut label = LayoutJob::default();
-
-                    match name_info.and_then(|info| info.true_name) {
-                        Some(name) => {
-                            // NOTE: Safe unwrap, we know that egui has its own built-in font
-                            let font = ui.style().text_styles.get(&TextStyle::Monospace).unwrap();
-                            let char_width = ui.fonts_mut(|fonts| {
-                                fonts
-                                    .layout_no_wrap(
-                                        " ".to_string(),
-                                        font.clone(),
-                                        Color32::from_rgb(0, 0, 0),
-                                    )
-                                    .size()
-                                    .x
-                            });
-
-                            let direction_size = direction.chars().count();
-                            let index_size = index.chars().count();
-                            let value_size = value.chars().count();
-                            let used_space =
-                                (direction_size + index_size + value_size) as f32 * char_width;
-                            // The button padding is added by egui on selectable labels
-                            let available_space =
-                                ui.available_width() - ui.spacing().button_padding.x * 2.;
-                            let space_for_name = available_space - used_space;
-
-                            let text_format = TextFormat {
-                                font_id: font.clone(),
-                                color: self.user.config.theme.foreground,
-                                ..Default::default()
-                            };
-
-                            label.append(&direction, 0.0, text_format.clone());
-
-                            draw_true_name(
-                                &name,
-                                &mut label,
-                                font.clone(),
-                                self.user.config.theme.foreground,
-                                char_width,
-                                space_for_name,
-                            );
-
-                            label.append(&index, 0.0, text_format.clone());
-                            label.append(&value, 0.0, text_format.clone());
-                        }
-                        None => {
-                            let font = ui.style().text_styles.get(&TextStyle::Body).unwrap();
-                            let text_format = TextFormat {
-                                font_id: font.clone(),
-                                color: self.user.config.theme.foreground,
-                                ..Default::default()
-                            };
-                            label.append(&direction, 0.0, text_format.clone());
-                            label.append(&variable.name, 0.0, text_format.clone());
-                            label.append(&index, 0.0, text_format.clone());
-                            label.append(&value, 0.0, text_format.clone());
-                        }
-                    }
-
-                    let mut response = ui.add(egui::Button::selectable(false, label));
-
-                    let _ = response.interact(egui::Sense::click_and_drag());
-
-                    if self.show_tooltip() {
-                        // Should be possible to reuse the meta from above?
-                        response = response.on_hover_ui(|ui| {
-                            let meta = wave_container.variable_meta(variable).ok();
-                            ui.set_max_width(ui.spacing().tooltip_width);
-                            ui.add(egui::Label::new(variable_tooltip_text(&meta, variable)));
-                        });
-                    }
-                    response.drag_started().then(|| {
-                        msgs.push(Message::VariableDragStarted(VisibleItemIndex(
-                            self.user.waves.as_ref().unwrap().display_item_ref_counter,
-                        )))
-                    });
-                    response.drag_stopped().then(|| {
-                        if ui.input(|i| i.pointer.hover_pos().unwrap_or_default().x)
-                            > self.user.sidepanel_width.unwrap_or_default()
-                        {
-                            msgs.push(Message::AddDraggedVariables(vec![variable.clone()]));
-                        }
-                    });
-                    response
-                        .clicked()
-                        .then(|| msgs.push(Message::AddVariables(vec![variable.clone()])));
-                },
-            );
-        }
-    }
-
     fn draw_item_focus_list(&self, ui: &mut egui::Ui) {
         let alignment = self.get_name_alignment();
         ui.with_layout(
@@ -1245,7 +806,7 @@ impl SystemState {
         self.user.waves.as_mut().unwrap().drawing_infos = item_offsets;
     }
 
-    fn draw_transaction_root(
+    pub fn draw_transaction_root(
         &self,
         msgs: &mut Vec<Message>,
         streams: &WaveData,
@@ -2275,20 +1836,6 @@ impl SystemState {
         }
     }
 
-    fn should_open_header(&self, scope: &ScopeRef) -> bool {
-        let mut scope_ref_cell = self.scope_ref_to_expand.borrow_mut();
-        if let Some(state) = scope_ref_cell.as_mut() {
-            if state.strs.starts_with(&scope.strs) {
-                if (state.strs.len() - 1) == scope.strs.len() {
-                    // need to compare vs. parent of signal
-                    *scope_ref_cell = None;
-                }
-                return true;
-            }
-        }
-        false
-    }
-
     /// Draw the default timeline at the top of the canvas
     pub fn draw_default_timeline(
         &self,
@@ -2316,34 +1863,6 @@ impl SystemState {
             egui::Align2::CENTER_TOP,
             &self.user.config,
         );
-    }
-}
-
-fn variable_tooltip_text(meta: &Option<VariableMeta>, variable: &VariableRef) -> String {
-    if let Some(meta) = meta {
-        format!(
-            "{}\nNum bits: {}\nType: {}\nDirection: {}",
-            variable.full_path_string(),
-            meta.num_bits
-                .map_or_else(|| "unknown".to_string(), |bits| bits.to_string()),
-            meta.variable_type_name
-                .clone()
-                .or_else(|| meta.variable_type.map(|t| t.to_string()))
-                .unwrap_or_else(|| "unknown".to_string()),
-            meta.direction
-                .map_or_else(|| "unknown".to_string(), |direction| format!("{direction}"))
-        )
-    } else {
-        variable.full_path_string()
-    }
-}
-
-fn scope_tooltip_text(wave: &WaveData, scope: &ScopeRef) -> String {
-    let other = wave.inner.as_waves().unwrap().get_scope_tooltip_data(scope);
-    if other.is_empty() {
-        format!("{scope}")
-    } else {
-        format!("{scope}\n{other}")
     }
 }
 
