@@ -45,8 +45,8 @@ use crate::wave_container::{
 };
 use crate::wave_data::ScopeType;
 use crate::{
-    command_prompt::show_command_prompt, hierarchy, hierarchy::HierarchyStyle, wave_data::WaveData,
-    Message, MoveDir, SystemState,
+    command_prompt::show_command_prompt, hierarchy::HierarchyStyle, wave_data::WaveData, Message,
+    MoveDir, SystemState,
 };
 use crate::{config::SurferTheme, wave_container::VariableMeta};
 use crate::{data_container::VariableType as VarType, OUTSTANDING_TRANSACTIONS};
@@ -369,9 +369,9 @@ impl SystemState {
                 .show(ctx, |ui| {
                     self.user.sidepanel_width = Some(ui.clip_rect().width());
                     match self.hierarchy_style() {
-                        HierarchyStyle::Separate => hierarchy::separate(self, ui, &mut msgs),
-                        HierarchyStyle::Tree => hierarchy::tree(self, ui, &mut msgs),
-                        HierarchyStyle::Variables => hierarchy::variable_list(self, ui, &mut msgs),
+                        HierarchyStyle::Separate => self.separate(ui, &mut msgs),
+                        HierarchyStyle::Tree => self.tree(ui, &mut msgs),
+                        HierarchyStyle::Variables => self.variable_list(ui, &mut msgs),
                     }
                 });
         }
