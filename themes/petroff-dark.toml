@@ -1,0 +1,19 @@
+variable_default = "3f90da"
+variable_undef = "bd1f01"
+variable_highimp = "e76b00"
+variable_dontcare = "94a4a2"
+variable_weak = "b9ac70"
+cursor = { color="ffa90e", width=2 }
+gesture = { color="ffa90e", width=2 }
+
+[colors]
+Blue = "3f90da"
+Pop = "ffa90e"
+Red = "bd1f01"
+Gray = "94a4a2"
+Purple = "832db6"
+Brown = "a96b59"
+Orange = "e76b00"
+Tan = "b9ac70"
+Dim = "717581"
+Sky = "92dadb"

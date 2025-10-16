@@ -454,6 +454,8 @@ impl SurferTheme {
             "light+" => include_str!("../../themes/light+.toml"),
             "light-high-contrast" => include_str!("../../themes/light-high-contrast.toml"),
             "okabe/ito" => include_str!("../../themes/okabe-ito.toml"),
+            "petroff-dark" => include_str!("../../themes/petroff-dark.toml"),
+            "petroff-light" => include_str!("../../themes/petroff-light.toml"),
             "solarized" => include_str!("../../themes/solarized.toml"),
             _ => "",
         }
@@ -700,6 +702,8 @@ fn all_theme_names() -> Vec<String> {
         "light+".to_string(),
         "light-high-contrast".to_string(),
         "okabe/ito".to_string(),
+        "petroff-dark".to_string(),
+        "petroff-light".to_string(),
         "solarized".to_string(),
     ]
 }
