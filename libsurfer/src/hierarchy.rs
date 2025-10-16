@@ -2,9 +2,10 @@
 use crate::data_container::VariableType as VarType;
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::message::Message;
+use crate::tooltips::{scope_tooltip_text, variable_tooltip_text};
 use crate::transaction_container::StreamScopeRef;
 use crate::variable_direction::VariableDirectionExt;
-use crate::view::{draw_true_name, variable_tooltip_text};
+use crate::view::draw_true_name;
 use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, WaveContainer};
 use crate::wave_data::{ScopeType, WaveData};
 use crate::SystemState;
@@ -679,14 +680,5 @@ impl SystemState {
             }
         }
         false
-    }
-}
-
-fn scope_tooltip_text(wave: &WaveData, scope: &ScopeRef) -> String {
-    let other = wave.inner.as_waves().unwrap().get_scope_tooltip_data(scope);
-    if other.is_empty() {
-        format!("{scope}")
-    } else {
-        format!("{scope}\n{other}")
     }
 }

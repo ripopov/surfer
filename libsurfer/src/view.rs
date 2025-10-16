@@ -1,4 +1,4 @@
-use crate::fzcmd::expand_command;
+use crate::{fzcmd::expand_command, tooltips::variable_tooltip_text};
 use ecolor::Color32;
 #[cfg(not(target_arch = "wasm32"))]
 use egui::ViewportCommand;
@@ -23,6 +23,7 @@ use surfer_translation_types::{
 #[cfg(feature = "performance_plot")]
 use crate::benchmark::NUM_PERF_SAMPLES;
 use crate::command_parser::get_parser;
+use crate::config::SurferTheme;
 use crate::displayed_item::{
     draw_rename_window, DisplayedFieldRef, DisplayedItem, DisplayedItemRef,
 };
@@ -34,14 +35,13 @@ use crate::time::time_string;
 use crate::transaction_container::{StreamScopeRef, TransactionStreamRef};
 use crate::translation::TranslationResultExt;
 use crate::util::uint_idx_to_alpha_idx;
-use crate::wave_container::{FieldRef, FieldRefExt, VariableRef, VariableRefExt, WaveContainer};
+use crate::wave_container::{FieldRef, FieldRefExt, VariableRef, WaveContainer};
 use crate::wave_data::ScopeType;
 use crate::OUTSTANDING_TRANSACTIONS;
 use crate::{
     command_prompt::show_command_prompt, hierarchy::HierarchyStyle, wave_data::WaveData, Message,
     MoveDir, SystemState,
 };
-use crate::{config::SurferTheme, wave_container::VariableMeta};
 
 pub struct DrawingContext<'a> {
     pub painter: &'a mut Painter,
@@ -1863,25 +1863,6 @@ impl SystemState {
             egui::Align2::CENTER_TOP,
             &self.user.config,
         );
-    }
-}
-
-pub fn variable_tooltip_text(meta: &Option<VariableMeta>, variable: &VariableRef) -> String {
-    if let Some(meta) = meta {
-        format!(
-            "{}\nNum bits: {}\nType: {}\nDirection: {}",
-            variable.full_path_string(),
-            meta.num_bits
-                .map_or_else(|| "unknown".to_string(), |bits| bits.to_string()),
-            meta.variable_type_name
-                .clone()
-                .or_else(|| meta.variable_type.map(|t| t.to_string()))
-                .unwrap_or_else(|| "unknown".to_string()),
-            meta.direction
-                .map_or_else(|| "unknown".to_string(), |direction| format!("{direction}"))
-        )
-    } else {
-        variable.full_path_string()
     }
 }
 

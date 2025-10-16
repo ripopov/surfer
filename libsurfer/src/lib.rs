@@ -39,6 +39,7 @@ pub mod system_state;
 pub mod tests;
 pub mod time;
 pub mod toolbar;
+pub mod tooltips;
 pub mod transaction_container;
 pub mod translation;
 pub mod util;
