@@ -183,11 +183,9 @@ impl SystemState {
                     if let Some(waves) = self.user.waves.as_ref() {
                         if full_path {
                             let variables = waves.inner.as_waves().unwrap().variables(false);
-                            msgs.push(Message::AddVariables(self.filtered_variables(
-                                &variables,
-                                &self.user.variable_filter,
-                                false,
-                            )));
+                            msgs.push(Message::AddVariables(
+                                self.filtered_variables(&variables, false),
+                            ));
                         } else {
                             // Iterate over the reversed list to get
                             // waves in the same order as the variable
@@ -200,11 +198,9 @@ impl SystemState {
                                             .as_waves()
                                             .unwrap()
                                             .variables_in_scope(active_scope);
-                                        msgs.push(Message::AddVariables(self.filtered_variables(
-                                            &variables,
-                                            &self.user.variable_filter,
-                                            false,
-                                        )));
+                                        msgs.push(Message::AddVariables(
+                                            self.filtered_variables(&variables, false),
+                                        ));
                                     }
                                     ScopeType::StreamScope(active_scope) => {
                                         let Transactions(inner) = &waves.inner else {
@@ -403,7 +399,6 @@ impl SystemState {
     pub fn filtered_variables(
         &self,
         variables: &[VariableRef],
-        variable_filter: &VariableFilter,
         full_path: bool,
     ) -> Vec<VariableRef> {
         let wave_container = match &self.user.waves {
@@ -411,7 +406,8 @@ impl SystemState {
             None => None,
         };
 
-        variable_filter
+        self.user
+            .variable_filter
             .matching_variables(variables, wave_container, full_path)
             .iter()
             .sorted_by(|a, b| self.variable_cmp(a, b, wave_container))
