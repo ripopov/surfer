@@ -40,7 +40,6 @@ use crate::transaction_container::{StreamScopeRef, TransactionStreamRef};
 use crate::translation::TranslationResultExt;
 use crate::util::uint_idx_to_alpha_idx;
 use crate::variable_direction::VariableDirectionExt;
-use crate::variable_filter::VariableFilter;
 use crate::wave_container::{
     FieldRef, FieldRefExt, ScopeRef, ScopeRefExt, VariableRef, VariableRefExt, WaveContainer,
 };
@@ -609,7 +608,6 @@ impl SystemState {
         wave: &WaveData,
         draw_variables: bool,
         ui: &mut egui::Ui,
-        filter: &VariableFilter,
     ) {
         for scope in wave.inner.root_scopes() {
             match scope {
@@ -620,7 +618,6 @@ impl SystemState {
                         &scope,
                         draw_variables,
                         ui,
-                        filter,
                     );
                 }
                 ScopeType::StreamScope(_) => {
@@ -632,7 +629,7 @@ impl SystemState {
             if let Some(wave_container) = wave.inner.as_waves() {
                 let scope = ScopeRef::empty();
                 let variables = wave_container.variables_in_scope(&scope);
-                self.draw_variable_list(msgs, wave_container, ui, &variables, None, filter);
+                self.draw_variable_list(msgs, wave_container, ui, &variables, None);
             }
         }
     }
@@ -680,11 +677,9 @@ impl SystemState {
                     })
                     .collect_vec();
 
-                msgs.push(Message::AddDraggedVariables(self.filtered_variables(
-                    variables.as_slice(),
-                    &self.user.variable_filter,
-                    false,
-                )));
+                msgs.push(Message::AddDraggedVariables(
+                    self.filtered_variables(variables.as_slice(), false),
+                ));
             }
         });
         if self.show_scope_tooltip() {
@@ -719,7 +714,6 @@ impl SystemState {
         scope: &ScopeRef,
         draw_variables: bool,
         ui: &mut egui::Ui,
-        filter: &VariableFilter,
     ) {
         let Some(child_scopes) = wave
             .inner
@@ -790,16 +784,15 @@ impl SystemState {
                                     ui,
                                     &parameters,
                                     None,
-                                    filter,
                                 );
                             });
                         }
                     }
-                    self.draw_root_scope_view(msgs, wave, scope, draw_variables, ui, filter);
+                    self.draw_root_scope_view(msgs, wave, scope, draw_variables, ui);
                     if draw_variables {
                         let wave_container = wave.inner.as_waves().unwrap();
                         let variables = wave_container.variables_in_scope(scope);
-                        self.draw_variable_list(msgs, wave_container, ui, &variables, None, filter);
+                        self.draw_variable_list(msgs, wave_container, ui, &variables, None);
                     }
                 });
         }
@@ -812,7 +805,6 @@ impl SystemState {
         root_scope: &ScopeRef,
         draw_variables: bool,
         ui: &mut egui::Ui,
-        filter: &VariableFilter,
     ) {
         let Some(child_scopes) = wave
             .inner
@@ -832,14 +824,7 @@ impl SystemState {
             .collect_vec();
 
         for child_scope in child_scopes_sorted {
-            self.draw_selectable_child_or_orphan_scope(
-                msgs,
-                wave,
-                child_scope,
-                draw_variables,
-                ui,
-                filter,
-            );
+            self.draw_selectable_child_or_orphan_scope(msgs, wave, child_scope, draw_variables, ui);
         }
     }
 
@@ -850,9 +835,8 @@ impl SystemState {
         ui: &mut egui::Ui,
         all_variables: &[VariableRef],
         row_range: Option<Range<usize>>,
-        filter: &VariableFilter,
     ) {
-        let all_variables = self.filtered_variables(all_variables, filter, false);
+        let all_variables = self.filtered_variables(all_variables, false);
         self.draw_filtered_variable_list(
             msgs,
             wave_container,

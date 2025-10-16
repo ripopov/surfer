@@ -1,7 +1,6 @@
 //! Functions for drawing the left hand panel showing scopes and variables.
 use crate::message::Message;
 use crate::transaction_container::StreamScopeRef;
-use crate::variable_filter::VariableFilter;
 use crate::wave_container::{ScopeRef, ScopeRefExt};
 use crate::wave_data::ScopeType;
 use crate::SystemState;
@@ -39,8 +38,7 @@ pub fn separate(state: &mut SystemState, ui: &mut Ui, msgs: &mut Vec<Message>) {
                 .show(ui, |ui| {
                     ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                     if let Some(waves) = &state.user.waves {
-                        let empty_filter = VariableFilter::new();
-                        state.draw_all_scopes(msgs, waves, false, ui, &empty_filter);
+                        state.draw_all_scopes(msgs, waves, false, ui);
                     }
                 });
         });
@@ -59,8 +57,6 @@ pub fn separate(state: &mut SystemState, ui: &mut Ui, msgs: &mut Vec<Message>) {
 }
 
 fn draw_variables(state: &mut SystemState, msgs: &mut Vec<Message>, ui: &mut Ui) {
-    let filter = &state.user.variable_filter;
-
     if let Some(waves) = &state.user.waves {
         let empty_scope = if waves.inner.is_waves() {
             ScopeType::WaveScope(ScopeRef::empty())
@@ -71,11 +67,8 @@ fn draw_variables(state: &mut SystemState, msgs: &mut Vec<Message>, ui: &mut Ui)
         match active_scope {
             ScopeType::WaveScope(scope) => {
                 let wave_container = waves.inner.as_waves().unwrap();
-                let variables = state.filtered_variables(
-                    &wave_container.variables_in_scope(scope),
-                    filter,
-                    false,
-                );
+                let variables =
+                    state.filtered_variables(&wave_container.variables_in_scope(scope), false);
                 // Parameters shown in variable list
                 if !state.show_parameters_in_scopes() {
                     let parameters = wave_container.parameters_in_scope(scope);
@@ -104,7 +97,6 @@ fn draw_variables(state: &mut SystemState, msgs: &mut Vec<Message>, ui: &mut Ui)
                                         ui,
                                         &parameters,
                                         None,
-                                        filter,
                                     );
                                 });
                                 state.draw_filtered_variable_list(
@@ -168,8 +160,7 @@ pub fn tree(state: &mut SystemState, ui: &mut Ui, msgs: &mut Vec<Message>) {
                 ScrollArea::both().id_salt("hierarchy").show(ui, |ui| {
                     ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                     if let Some(waves) = &state.user.waves {
-                        let filter = &state.user.variable_filter;
-                        state.draw_all_scopes(msgs, waves, true, ui, filter);
+                        state.draw_all_scopes(msgs, waves, true, ui);
                     }
                 });
             });
@@ -203,13 +194,10 @@ pub fn variable_list(state: &mut SystemState, ui: &mut Ui, msgs: &mut Vec<Messag
 }
 
 fn draw_all_variables(state: &mut SystemState, msgs: &mut Vec<Message>, ui: &mut Ui) {
-    let filter = &state.user.variable_filter;
-
     if let Some(waves) = &state.user.waves {
         if waves.inner.is_waves() {
             let wave_container = waves.inner.as_waves().unwrap();
-            let variables =
-                state.filtered_variables(&wave_container.variables(false), filter, true);
+            let variables = state.filtered_variables(&wave_container.variables(false), true);
             let row_height = ui
                 .text_style_height(&egui::TextStyle::Monospace)
                 .max(ui.text_style_height(&egui::TextStyle::Body));
