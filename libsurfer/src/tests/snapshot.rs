@@ -1596,6 +1596,11 @@ snapshot_ui_with_file_and_msgs! {hierarchy_tree, "examples/counter.vcd", [
     Message::SetHierarchyStyle(HierarchyStyle::Tree),
 ]}
 
+snapshot_ui_with_file_and_msgs! {hierarchy_variables, "examples/counter.vcd", [
+    Message::ToggleSidePanel,
+    Message::SetHierarchyStyle(HierarchyStyle::Variables),
+]}
+
 // makes sure that variables that are not part of a scope are properly displayed in the hierarchy tree view
 snapshot_ui_with_file_and_msgs! {hierarchy_tree_with_root_vars, "examples/atxmega256a3u-bmda-jtag_short.vcd", [
     Message::ToggleSidePanel,
