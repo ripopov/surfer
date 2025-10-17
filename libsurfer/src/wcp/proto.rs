@@ -172,6 +172,15 @@ pub enum WcpCommand {
         #[serde(deserialize_with = "deserialize_timestamp")]
         timestamp: BigInt,
     },
+    /// Moves the viewport to center it on the specified timestamps range. Does affect the zoom
+    /// level.
+    /// Responds with [WcpResponse::ack]
+    set_viewport_range_to {
+        #[serde(deserialize_with = "deserialize_timestamp")]
+        start: BigInt,
+        #[serde(deserialize_with = "deserialize_timestamp")]
+        end: BigInt,
+    },
     /// Removes the specified items from the view.
     /// Responds with [WcpResponse::ack]
     /// Does not error if some of the IDs do not exist

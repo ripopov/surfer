@@ -241,6 +241,14 @@ impl SystemState {
                         self.update(Message::GoToTime(Some(timestamp.clone()), 0));
                         self.send_response(WcpResponse::ack);
                     }
+                    WcpCommand::set_viewport_range_to { start, end } => {
+                        self.update(Message::ZoomToRange {
+                            start: start.clone(),
+                            end: end.clone(),
+                            viewport_idx: 0,
+                        });
+                        self.send_response(WcpResponse::ack);
+                    }
                     WcpCommand::set_item_color { id, color } => {
                         let Some(waves) = &self.user.waves else {
                             self.send_error("set_item_color", vec![], "No waveform loaded");
@@ -379,6 +387,7 @@ impl SystemState {
             "load",
             "zoom_to_fit",
             "add_markers",
+            "set_viewport_range_to",
         ]
         .into_iter()
         .map(str::to_string)
