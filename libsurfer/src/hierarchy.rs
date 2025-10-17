@@ -1,5 +1,5 @@
 //! Functions for drawing the left hand panel showing scopes and variables.
-use crate::data_container::VariableType as VarType;
+use crate::data_container::{DataContainer, VariableType as VarType};
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::message::Message;
 use crate::tooltips::{scope_tooltip_text, variable_tooltip_text};
@@ -211,28 +211,38 @@ impl SystemState {
 
     fn draw_all_variables(&mut self, msgs: &mut Vec<Message>, ui: &mut Ui) {
         if let Some(waves) = &self.user.waves {
-            if waves.inner.is_waves() {
-                let wave_container = waves.inner.as_waves().unwrap();
-                let variables = self.filtered_variables(&wave_container.variables(false), true);
-                let row_height = ui
-                    .text_style_height(&egui::TextStyle::Monospace)
-                    .max(ui.text_style_height(&egui::TextStyle::Body));
-                ScrollArea::both()
-                    .auto_shrink([false; 2])
-                    .id_salt("variables")
-                    .show_rows(ui, row_height, variables.len(), |ui, row_range| {
-                        self.draw_filtered_variable_list(
-                            msgs,
-                            wave_container,
-                            ui,
-                            &variables,
-                            Some(row_range),
-                            true,
-                        );
-                    });
-            } else {
-                // No support for Streams yet
-            };
+            match &waves.inner {
+                DataContainer::Waves(wave_container) => {
+                    let variables = self.filtered_variables(&wave_container.variables(false), true);
+                    let row_height = ui
+                        .text_style_height(&egui::TextStyle::Monospace)
+                        .max(ui.text_style_height(&egui::TextStyle::Body));
+                    ScrollArea::both()
+                        .auto_shrink([false; 2])
+                        .id_salt("variables")
+                        .show_rows(ui, row_height, variables.len(), |ui, row_range| {
+                            self.draw_filtered_variable_list(
+                                msgs,
+                                wave_container,
+                                ui,
+                                &variables,
+                                Some(row_range),
+                                true,
+                            );
+                        });
+                }
+                DataContainer::Transactions(_) => {
+                    // No support for Streams yet
+                    ui.with_layout(
+                        Layout::top_down(Align::LEFT).with_cross_justify(true),
+                        |ui| {
+                            ui.label("Streams are not yet supported.");
+                            ui.label("Select another view.");
+                        },
+                    );
+                }
+                DataContainer::Empty => {}
+            }
         }
     }
 

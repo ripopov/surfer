@@ -25,7 +25,7 @@ use crate::{
     message::MessageTarget,
     setup_custom_font,
     state::UserState,
-    transaction_container::{TransactionRef, TransactionStreamRef},
+    transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef},
     variable_filter::{VariableIOFilterType, VariableNameFilterType},
     wave_container::{ScopeRef, ScopeRefExt, VariableRef, VariableRefExt},
     wave_data::ScopeType,
@@ -1597,6 +1597,22 @@ snapshot_ui_with_file_and_msgs! {hierarchy_tree, "examples/counter.vcd", [
 ]}
 
 snapshot_ui_with_file_and_msgs! {hierarchy_variables, "examples/counter.vcd", [
+    Message::ToggleSidePanel,
+    Message::SetHierarchyStyle(HierarchyStyle::Variables),
+]}
+
+snapshot_ui_with_file_and_msgs! {transaction_hierarchy_separate, "examples/my_db.ftr", [
+    Message::SetActiveScope(ScopeType::StreamScope(StreamScopeRef::Root)),
+    Message::ToggleSidePanel,
+    Message::SetHierarchyStyle(HierarchyStyle::Separate),
+]}
+
+snapshot_ui_with_file_and_msgs! {transaction_hierarchy_tree, "examples/my_db.ftr", [
+    Message::ToggleSidePanel,
+    Message::SetHierarchyStyle(HierarchyStyle::Tree),
+]}
+
+snapshot_ui_with_file_and_msgs! {transaction_hierarchy_variables, "examples/my_db.ftr", [
     Message::ToggleSidePanel,
     Message::SetHierarchyStyle(HierarchyStyle::Variables),
 ]}
