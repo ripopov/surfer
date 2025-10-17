@@ -142,20 +142,34 @@ impl VariableFilter {
         &self,
         variables: &[VariableRef],
         wave_container_opt: Option<&WaveContainer>,
+        full_path: bool,
     ) -> Vec<VariableRef> {
         let mut name_filter = self.name_filter_fn();
-
-        variables
-            .iter()
-            .filter(|&vr| name_filter(&vr.name))
-            .filter(|&vr| self.kind_filter(vr, wave_container_opt))
-            .cloned()
-            .collect_vec()
+        if full_path {
+            variables
+                .iter()
+                .filter(|&vr| name_filter(&vr.full_path().join(".")))
+                .filter(|&vr| self.kind_filter(vr, wave_container_opt))
+                .cloned()
+                .collect_vec()
+        } else {
+            variables
+                .iter()
+                .filter(|&vr| name_filter(&vr.name))
+                .filter(|&vr| self.kind_filter(vr, wave_container_opt))
+                .cloned()
+                .collect_vec()
+        }
     }
 }
 
 impl SystemState {
-    pub fn draw_variable_filter_edit(&mut self, ui: &mut Ui, msgs: &mut Vec<Message>) {
+    pub fn draw_variable_filter_edit(
+        &mut self,
+        ui: &mut Ui,
+        msgs: &mut Vec<Message>,
+        full_path: bool,
+    ) {
         ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
             let default_padding = ui.spacing().button_padding;
             ui.spacing_mut().button_padding = Vec2 {
@@ -167,53 +181,61 @@ impl SystemState {
                 .clicked()
                 .then(|| {
                     if let Some(waves) = self.user.waves.as_ref() {
-                        // Iterate over the reversed list to get
-                        // waves in the same order as the variable
-                        // list
-                        if let Some(active_scope) = waves.active_scope.as_ref() {
-                            match active_scope {
-                                ScopeType::WaveScope(active_scope) => {
-                                    let variables = waves
-                                        .inner
-                                        .as_waves()
-                                        .unwrap()
-                                        .variables_in_scope(active_scope);
-                                    msgs.push(Message::AddVariables(self.filtered_variables(
-                                        &variables,
-                                        &self.user.variable_filter,
-                                    )));
-                                }
-                                ScopeType::StreamScope(active_scope) => {
-                                    let Transactions(inner) = &waves.inner else {
-                                        return;
-                                    };
-                                    match active_scope {
-                                        StreamScopeRef::Root => {
-                                            for stream in inner.get_streams() {
-                                                msgs.push(Message::AddStreamOrGenerator(
-                                                    TransactionStreamRef::new_stream(
-                                                        stream.id,
-                                                        stream.name.clone(),
-                                                    ),
-                                                ));
+                        if full_path {
+                            let variables = waves.inner.as_waves().unwrap().variables(false);
+                            msgs.push(Message::AddVariables(
+                                self.filtered_variables(&variables, false),
+                            ));
+                        } else {
+                            // Iterate over the reversed list to get
+                            // waves in the same order as the variable
+                            // list
+                            if let Some(active_scope) = waves.active_scope.as_ref() {
+                                match active_scope {
+                                    ScopeType::WaveScope(active_scope) => {
+                                        let variables = waves
+                                            .inner
+                                            .as_waves()
+                                            .unwrap()
+                                            .variables_in_scope(active_scope);
+                                        msgs.push(Message::AddVariables(
+                                            self.filtered_variables(&variables, false),
+                                        ));
+                                    }
+                                    ScopeType::StreamScope(active_scope) => {
+                                        let Transactions(inner) = &waves.inner else {
+                                            return;
+                                        };
+                                        match active_scope {
+                                            StreamScopeRef::Root => {
+                                                for stream in inner.get_streams() {
+                                                    msgs.push(Message::AddStreamOrGenerator(
+                                                        TransactionStreamRef::new_stream(
+                                                            stream.id,
+                                                            stream.name.clone(),
+                                                        ),
+                                                    ));
+                                                }
                                             }
-                                        }
-                                        StreamScopeRef::Stream(s) => {
-                                            for gen_id in
-                                                &inner.get_stream(s.stream_id).unwrap().generators
-                                            {
-                                                let gen = inner.get_generator(*gen_id).unwrap();
+                                            StreamScopeRef::Stream(s) => {
+                                                for gen_id in &inner
+                                                    .get_stream(s.stream_id)
+                                                    .unwrap()
+                                                    .generators
+                                                {
+                                                    let gen = inner.get_generator(*gen_id).unwrap();
 
-                                                msgs.push(Message::AddStreamOrGenerator(
-                                                    TransactionStreamRef::new_gen(
-                                                        gen.stream_id,
-                                                        gen.id,
-                                                        gen.name.clone(),
-                                                    ),
-                                                ));
+                                                    msgs.push(Message::AddStreamOrGenerator(
+                                                        TransactionStreamRef::new_gen(
+                                                            gen.stream_id,
+                                                            gen.id,
+                                                            gen.name.clone(),
+                                                        ),
+                                                    ));
+                                                }
                                             }
+                                            StreamScopeRef::Empty(_) => {}
                                         }
-                                        StreamScopeRef::Empty(_) => {}
                                     }
                                 }
                             }
@@ -377,15 +399,16 @@ impl SystemState {
     pub fn filtered_variables(
         &self,
         variables: &[VariableRef],
-        variable_filter: &VariableFilter,
+        full_path: bool,
     ) -> Vec<VariableRef> {
         let wave_container = match &self.user.waves {
             Some(wd) => wd.inner.as_waves(),
             None => None,
         };
 
-        variable_filter
-            .matching_variables(variables, wave_container)
+        self.user
+            .variable_filter
+            .matching_variables(variables, wave_container, full_path)
             .iter()
             .sorted_by(|a, b| self.variable_cmp(a, b, wave_container))
             .cloned()
