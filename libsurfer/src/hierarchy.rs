@@ -3,7 +3,7 @@ use crate::data_container::VariableType as VarType;
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::message::Message;
 use crate::tooltips::{scope_tooltip_text, variable_tooltip_text};
-use crate::transaction_container::StreamScopeRef;
+use crate::transaction_container::{StreamScopeRef, TransactionStreamRef};
 use crate::variable_direction::VariableDirectionExt;
 use crate::view::draw_true_name;
 use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, WaveContainer};
@@ -680,5 +680,111 @@ impl SystemState {
             }
         }
         false
+    }
+
+    pub fn draw_transaction_variable_list(
+        &self,
+        msgs: &mut Vec<Message>,
+        streams: &WaveData,
+        ui: &mut egui::Ui,
+        active_stream: &StreamScopeRef,
+    ) {
+        let inner = streams.inner.as_transactions().unwrap();
+        match active_stream {
+            StreamScopeRef::Root => {
+                for stream in inner.get_streams() {
+                    ui.with_layout(
+                        Layout::top_down(Align::LEFT).with_cross_justify(true),
+                        |ui| {
+                            let response =
+                                ui.add(egui::Button::selectable(false, stream.name.clone()));
+
+                            response.clicked().then(|| {
+                                msgs.push(Message::AddStreamOrGenerator(
+                                    TransactionStreamRef::new_stream(
+                                        stream.id,
+                                        stream.name.clone(),
+                                    ),
+                                ));
+                            });
+                        },
+                    );
+                }
+            }
+            StreamScopeRef::Stream(stream_ref) => {
+                for gen_id in &inner.get_stream(stream_ref.stream_id).unwrap().generators {
+                    let gen_name = inner.get_generator(*gen_id).unwrap().name.clone();
+                    ui.with_layout(
+                        Layout::top_down(Align::LEFT).with_cross_justify(true),
+                        |ui| {
+                            let response = ui.add(egui::Button::selectable(false, &gen_name));
+
+                            response.clicked().then(|| {
+                                msgs.push(Message::AddStreamOrGenerator(
+                                    TransactionStreamRef::new_gen(
+                                        stream_ref.stream_id,
+                                        *gen_id,
+                                        gen_name,
+                                    ),
+                                ));
+                            });
+                        },
+                    );
+                }
+            }
+            StreamScopeRef::Empty(_) => {}
+        }
+    }
+
+    pub fn draw_transaction_root(
+        &self,
+        msgs: &mut Vec<Message>,
+        streams: &WaveData,
+        ui: &mut egui::Ui,
+    ) {
+        egui::collapsing_header::CollapsingState::load_with_default_open(
+            ui.ctx(),
+            egui::Id::from("Streams"),
+            false,
+        )
+        .show_header(ui, |ui| {
+            ui.with_layout(
+                Layout::top_down(Align::LEFT).with_cross_justify(true),
+                |ui| {
+                    let root_name = String::from("tr");
+                    let response = ui.add(egui::Button::selectable(
+                        streams.active_scope == Some(ScopeType::StreamScope(StreamScopeRef::Root)),
+                        root_name,
+                    ));
+
+                    response.clicked().then(|| {
+                        msgs.push(Message::SetActiveScope(ScopeType::StreamScope(
+                            StreamScopeRef::Root,
+                        )));
+                    });
+                },
+            );
+        })
+        .body(|ui| {
+            for (id, stream) in &streams.inner.as_transactions().unwrap().inner.tx_streams {
+                let name = stream.name.clone();
+                let response = ui.add(egui::Button::selectable(
+                    streams.active_scope.as_ref().is_some_and(|s| {
+                        if let ScopeType::StreamScope(StreamScopeRef::Stream(scope_stream)) = s {
+                            scope_stream.stream_id == *id
+                        } else {
+                            false
+                        }
+                    }),
+                    name.clone(),
+                ));
+
+                response.clicked().then(|| {
+                    msgs.push(Message::SetActiveScope(ScopeType::StreamScope(
+                        StreamScopeRef::Stream(TransactionStreamRef::new_stream(*id, name)),
+                    )));
+                });
+            }
+        });
     }
 }

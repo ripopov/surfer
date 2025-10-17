@@ -41,6 +41,7 @@ pub mod time;
 pub mod toolbar;
 pub mod tooltips;
 pub mod transaction_container;
+pub mod transactions;
 pub mod translation;
 pub mod util;
 pub mod variable_direction;
