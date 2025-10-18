@@ -663,11 +663,16 @@ impl SystemState {
                     let _ = response.interact(egui::Sense::click_and_drag());
 
                     if self.show_tooltip() {
-                        // Should be possible to reuse the meta from above?
-                        response = response.on_hover_ui(|ui| {
-                            let meta = wave_container.variable_meta(variable).ok();
+                        // Reuse the already-obtained `meta` and pass a clone of the variable
+                        // reference into the closure so we don't call `variable_meta` again.
+                        let tooltip_meta = meta.clone();
+                        let tooltip_var = variable.clone();
+                        response = response.on_hover_ui(move |ui| {
                             ui.set_max_width(ui.spacing().tooltip_width);
-                            ui.add(egui::Label::new(variable_tooltip_text(&meta, variable)));
+                            ui.add(egui::Label::new(variable_tooltip_text(
+                                &tooltip_meta,
+                                &tooltip_var,
+                            )));
                         });
                     }
                     response.drag_started().then(|| {
