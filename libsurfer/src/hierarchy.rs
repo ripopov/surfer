@@ -82,7 +82,10 @@ impl SystemState {
             let active_scope = waves.active_scope.as_ref().unwrap_or(&empty_scope);
             match active_scope {
                 ScopeType::WaveScope(scope) => {
-                    let wave_container = waves.inner.as_waves().unwrap();
+                    let wave_container = match waves.inner.as_waves() {
+                        Some(wc) => wc,
+                        None => return,
+                    };
                     let variables =
                         self.filtered_variables(&wave_container.variables_in_scope(scope), false);
                     // Parameters shown in variable list
@@ -359,10 +362,13 @@ impl SystemState {
         draw_variables: bool,
         ui: &mut egui::Ui,
     ) {
-        let Some(child_scopes) = wave
-            .inner
-            .as_waves()
-            .unwrap()
+        // Extract wave container once to avoid repeated as_waves().unwrap() calls
+        let wave_container = match wave.inner.as_waves() {
+            Some(wc) => wc,
+            None => return,
+        };
+
+        let Some(child_scopes) = wave_container
             .child_scopes(scope)
             .context("Failed to get child scopes")
             .map_err(|e| warn!("{e:#?}"))
@@ -371,7 +377,7 @@ impl SystemState {
             return;
         };
 
-        let no_variables_in_scope = wave.inner.as_waves().unwrap().no_variables_in_scope(scope);
+        let no_variables_in_scope = wave_container.no_variables_in_scope(scope);
         if child_scopes.is_empty() && no_variables_in_scope && !self.show_empty_scopes() {
             return;
         }
@@ -405,7 +411,6 @@ impl SystemState {
                 })
                 .body(|ui| {
                     if draw_variables || self.show_parameters_in_scopes() {
-                        let wave_container = wave.inner.as_waves().unwrap();
                         let parameters = wave_container.parameters_in_scope(scope);
                         if !parameters.is_empty() {
                             egui::collapsing_header::CollapsingState::load_with_default_open(
@@ -434,7 +439,6 @@ impl SystemState {
                     }
                     self.draw_root_scope_view(msgs, wave, scope, draw_variables, ui);
                     if draw_variables {
-                        let wave_container = wave.inner.as_waves().unwrap();
                         let variables = wave_container.variables_in_scope(scope);
                         self.draw_variable_list(msgs, wave_container, ui, &variables, None);
                     }
@@ -450,10 +454,13 @@ impl SystemState {
         draw_variables: bool,
         ui: &mut egui::Ui,
     ) {
-        let Some(child_scopes) = wave
-            .inner
-            .as_waves()
-            .unwrap()
+        // Extract wave container once to avoid unwrap
+        let wave_container = match wave.inner.as_waves() {
+            Some(wc) => wc,
+            None => return,
+        };
+
+        let Some(child_scopes) = wave_container
             .child_scopes(root_scope)
             .context("Failed to get child scopes")
             .map_err(|e| warn!("{e:#?}"))
@@ -716,7 +723,10 @@ impl SystemState {
         ui: &mut egui::Ui,
         active_stream: &StreamScopeRef,
     ) {
-        let inner = streams.inner.as_transactions().unwrap();
+        let inner = match streams.inner.as_transactions() {
+            Some(tx) => tx,
+            None => return,
+        };
         match active_stream {
             StreamScopeRef::Root => {
                 for stream in inner.get_streams() {
@@ -739,24 +749,29 @@ impl SystemState {
                 }
             }
             StreamScopeRef::Stream(stream_ref) => {
-                for gen_id in &inner.get_stream(stream_ref.stream_id).unwrap().generators {
-                    let gen_name = inner.get_generator(*gen_id).unwrap().name.clone();
-                    ui.with_layout(
-                        Layout::top_down(Align::LEFT).with_cross_justify(true),
-                        |ui| {
-                            let response = ui.add(egui::Button::selectable(false, &gen_name));
+                if let Some(stream) = inner.get_stream(stream_ref.stream_id) {
+                    for gen_id in &stream.generators {
+                        if let Some(generator) = inner.get_generator(*gen_id) {
+                            let gen_name = generator.name.clone();
+                            ui.with_layout(
+                                Layout::top_down(Align::LEFT).with_cross_justify(true),
+                                |ui| {
+                                    let response =
+                                        ui.add(egui::Button::selectable(false, &gen_name));
 
-                            response.clicked().then(|| {
-                                msgs.push(Message::AddStreamOrGenerator(
-                                    TransactionStreamRef::new_gen(
-                                        stream_ref.stream_id,
-                                        *gen_id,
-                                        gen_name,
-                                    ),
-                                ));
-                            });
-                        },
-                    );
+                                    response.clicked().then(|| {
+                                        msgs.push(Message::AddStreamOrGenerator(
+                                            TransactionStreamRef::new_gen(
+                                                stream_ref.stream_id,
+                                                *gen_id,
+                                                gen_name,
+                                            ),
+                                        ));
+                                    });
+                                },
+                            );
+                        }
+                    }
                 }
             }
             StreamScopeRef::Empty(_) => {}
@@ -793,24 +808,27 @@ impl SystemState {
             );
         })
         .body(|ui| {
-            for (id, stream) in &streams.inner.as_transactions().unwrap().inner.tx_streams {
-                let name = stream.name.clone();
-                let response = ui.add(egui::Button::selectable(
-                    streams.active_scope.as_ref().is_some_and(|s| {
-                        if let ScopeType::StreamScope(StreamScopeRef::Stream(scope_stream)) = s {
-                            scope_stream.stream_id == *id
-                        } else {
-                            false
-                        }
-                    }),
-                    name.clone(),
-                ));
+            if let Some(tx_container) = streams.inner.as_transactions() {
+                for (id, stream) in &tx_container.inner.tx_streams {
+                    let name = stream.name.clone();
+                    let response = ui.add(egui::Button::selectable(
+                        streams.active_scope.as_ref().is_some_and(|s| {
+                            if let ScopeType::StreamScope(StreamScopeRef::Stream(scope_stream)) = s
+                            {
+                                scope_stream.stream_id == *id
+                            } else {
+                                false
+                            }
+                        }),
+                        name.clone(),
+                    ));
 
-                response.clicked().then(|| {
-                    msgs.push(Message::SetActiveScope(ScopeType::StreamScope(
-                        StreamScopeRef::Stream(TransactionStreamRef::new_stream(*id, name)),
-                    )));
-                });
+                    response.clicked().then(|| {
+                        msgs.push(Message::SetActiveScope(ScopeType::StreamScope(
+                            StreamScopeRef::Stream(TransactionStreamRef::new_stream(*id, name)),
+                        )));
+                    });
+                }
             }
         });
     }
