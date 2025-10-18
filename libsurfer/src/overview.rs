@@ -21,6 +21,7 @@ impl SystemState {
         let (response, mut painter) = ui.allocate_painter(ui.available_size(), Sense::drag());
         let frame_width = response.rect.width();
         let frame_height = response.rect.height();
+        let half_frame_height = frame_height * 0.5;
         let cfg = DrawConfig::new(
             frame_height,
             self.user.config.layout.waveforms_line_height,
@@ -41,6 +42,13 @@ impl SystemState {
 
         let num_timestamps = waves.num_timestamps().unwrap_or(1.into());
         let viewport_all = waves.viewport_all();
+        let fill_color = self
+            .user
+            .config
+            .theme
+            .canvas_colors
+            .foreground
+            .gamma_multiply(0.3);
         for vidx in 0..waves.viewports.len() {
             let minx = viewport_all.pixel_from_absolute_time(
                 waves.viewports[vidx].curr_left.absolute(&num_timestamps),
@@ -54,16 +62,8 @@ impl SystemState {
             );
             let min = (ctx.to_screen)(minx, 0.);
             let max = (ctx.to_screen)(maxx, container_rect.max.y);
-            ctx.painter.rect_filled(
-                Rect { min, max },
-                CornerRadiusF32::ZERO,
-                self.user
-                    .config
-                    .theme
-                    .canvas_colors
-                    .foreground
-                    .gamma_multiply(0.3),
-            );
+            ctx.painter
+                .rect_filled(Rect { min, max }, CornerRadiusF32::ZERO, fill_color);
         }
 
         waves.draw_cursor(
@@ -84,13 +84,15 @@ impl SystemState {
         );
 
         if ticks.len() >= 2 {
+            // Remove first and last tick
             ticks.pop();
             ticks.remove(0);
+            // Draw ticks
             waves.draw_ticks(
                 None,
                 &ticks,
                 &ctx,
-                frame_height * 0.5,
+                half_frame_height,
                 Align2::CENTER_CENTER,
                 &self.user.config,
             );
