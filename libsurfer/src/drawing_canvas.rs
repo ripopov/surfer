@@ -1,6 +1,5 @@
 use ecolor::Color32;
 use egui::{FontId, PointerButton, Response, Sense, Ui};
-use egui_extras::{Column, TableBuilder};
 use emath::{Align2, Pos2, Rect, RectTransform, Vec2};
 use epaint::{CornerRadiusF32, CubicBezierShape, PathShape, PathStroke, RectShape, Shape, Stroke};
 use eyre::WrapErr;
@@ -22,6 +21,7 @@ use crate::config::SurferTheme;
 use crate::data_container::DataContainer;
 use crate::displayed_item::{DisplayedFieldRef, DisplayedItemRef, DisplayedVariable};
 use crate::displayed_item_tree::VisibleItemIndex;
+use crate::tooltips::handle_transaction_tooltip;
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
 use crate::translation::{TranslationResultExt, TranslatorList, ValueKindExt, VariableInfoExt};
 use crate::view::{DrawConfig, DrawingContext, ItemDrawingInfo};
@@ -105,10 +105,10 @@ fn variable_draw_commands(
     let mut clock_edges = vec![];
     let mut local_msgs = vec![];
 
-    let meta = match waves
-        .inner
-        .as_waves()
-        .unwrap()
+    // Extract wave_container once to avoid repeated as_waves().unwrap() calls
+    let wave_container = waves.inner.as_waves()?;
+
+    let meta = match wave_container
         .variable_meta(&displayed_variable.variable_ref)
         .context("failed to get variable meta")
     {
@@ -146,11 +146,7 @@ fn variable_draw_commands(
             continue;
         }
 
-        let query_result = waves
-            .inner
-            .as_waves()
-            .unwrap()
-            .query_variable(&displayed_variable.variable_ref, time);
+        let query_result = wave_container.query_variable(&displayed_variable.variable_ref, time);
         next_change = match &query_result {
             Ok(Some(QueryResult {
                 next: Some(timestamp),
@@ -224,7 +220,7 @@ fn variable_draw_commands(
             // translators
             let anti_alias = &change_time > prev_time
                 && names.is_empty()
-                && waves.inner.as_waves().unwrap().wants_anti_aliasing();
+                && wave_container.wants_anti_aliasing();
             let new_value = prev != Some(&value);
 
             // This is not the value we drew last time
@@ -1553,94 +1549,4 @@ impl VariableExt for String {
         };
         (height, color, background)
     }
-}
-
-fn handle_transaction_tooltip(
-    response: Response,
-    waves: &WaveData,
-    gen_ref: &TransactionStreamRef,
-    tx_ref: &TransactionRef,
-) -> Response {
-    response
-        .on_hover_ui(|ui| {
-            let tx = waves
-                .inner
-                .as_transactions()
-                .unwrap()
-                .get_generator(gen_ref.gen_id.unwrap())
-                .unwrap()
-                .transactions
-                .iter()
-                .find(|transaction| transaction.get_tx_id() == tx_ref.id)
-                .unwrap();
-
-            ui.set_max_width(ui.spacing().tooltip_width);
-            ui.add(egui::Label::new(transaction_tooltip_text(waves, tx)));
-        })
-        .on_hover_ui(|ui| {
-            // Seemingly a bit redundant to determine tx twice, but since the
-            // alternative is to do it every frame for every transaction, this
-            // is most likely still a better approach.
-            // Feel free to use some Rust magic to only do it once though...
-            let tx = waves
-                .inner
-                .as_transactions()
-                .unwrap()
-                .get_generator(gen_ref.gen_id.unwrap())
-                .unwrap()
-                .transactions
-                .iter()
-                .find(|transaction| transaction.get_tx_id() == tx_ref.id)
-                .unwrap();
-
-            transaction_tooltip_table(ui, tx)
-        })
-}
-
-fn transaction_tooltip_text(waves: &WaveData, tx: &Transaction) -> String {
-    let time_scale = waves.inner.as_transactions().unwrap().inner.time_scale;
-
-    format!(
-        "tx#{}: {}{} - {}{}\nType: {}",
-        tx.event.tx_id,
-        tx.event.start_time,
-        time_scale,
-        tx.event.end_time,
-        time_scale,
-        waves
-            .inner
-            .as_transactions()
-            .unwrap()
-            .get_generator(tx.get_gen_id())
-            .unwrap()
-            .name
-            .clone(),
-    )
-}
-
-fn transaction_tooltip_table(ui: &mut Ui, tx: &Transaction) {
-    TableBuilder::new(ui)
-        .column(Column::exact(80.))
-        .column(Column::exact(80.))
-        .header(20.0, |mut header| {
-            header.col(|ui| {
-                ui.heading("Attribute");
-            });
-            header.col(|ui| {
-                ui.heading("Value");
-            });
-        })
-        .body(|body| {
-            let total_rows = tx.attributes.len();
-            let attributes = &tx.attributes;
-            body.rows(15., total_rows, |mut row| {
-                let attribute = attributes.get(row.index()).unwrap();
-                row.col(|ui| {
-                    ui.label(attribute.name.clone());
-                });
-                row.col(|ui| {
-                    ui.label(attribute.value());
-                });
-            });
-        });
 }
