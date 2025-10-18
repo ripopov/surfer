@@ -82,7 +82,10 @@ impl SystemState {
             let active_scope = waves.active_scope.as_ref().unwrap_or(&empty_scope);
             match active_scope {
                 ScopeType::WaveScope(scope) => {
-                    let wave_container = waves.inner.as_waves().unwrap();
+                    let wave_container = match waves.inner.as_waves() {
+                        Some(wc) => wc,
+                        None => return,
+                    };
                     let variables =
                         self.filtered_variables(&wave_container.variables_in_scope(scope), false);
                     // Parameters shown in variable list
@@ -359,10 +362,13 @@ impl SystemState {
         draw_variables: bool,
         ui: &mut egui::Ui,
     ) {
-        let Some(child_scopes) = wave
-            .inner
-            .as_waves()
-            .unwrap()
+        // Extract wave container once to avoid repeated as_waves().unwrap() calls
+        let wave_container = match wave.inner.as_waves() {
+            Some(wc) => wc,
+            None => return,
+        };
+
+        let Some(child_scopes) = wave_container
             .child_scopes(scope)
             .context("Failed to get child scopes")
             .map_err(|e| warn!("{e:#?}"))
@@ -371,7 +377,7 @@ impl SystemState {
             return;
         };
 
-        let no_variables_in_scope = wave.inner.as_waves().unwrap().no_variables_in_scope(scope);
+        let no_variables_in_scope = wave_container.no_variables_in_scope(scope);
         if child_scopes.is_empty() && no_variables_in_scope && !self.show_empty_scopes() {
             return;
         }
@@ -405,7 +411,6 @@ impl SystemState {
                 })
                 .body(|ui| {
                     if draw_variables || self.show_parameters_in_scopes() {
-                        let wave_container = wave.inner.as_waves().unwrap();
                         let parameters = wave_container.parameters_in_scope(scope);
                         if !parameters.is_empty() {
                             egui::collapsing_header::CollapsingState::load_with_default_open(
@@ -434,7 +439,6 @@ impl SystemState {
                     }
                     self.draw_root_scope_view(msgs, wave, scope, draw_variables, ui);
                     if draw_variables {
-                        let wave_container = wave.inner.as_waves().unwrap();
                         let variables = wave_container.variables_in_scope(scope);
                         self.draw_variable_list(msgs, wave_container, ui, &variables, None);
                     }
@@ -450,10 +454,13 @@ impl SystemState {
         draw_variables: bool,
         ui: &mut egui::Ui,
     ) {
-        let Some(child_scopes) = wave
-            .inner
-            .as_waves()
-            .unwrap()
+        // Extract wave container once to avoid unwrap
+        let wave_container = match wave.inner.as_waves() {
+            Some(wc) => wc,
+            None => return,
+        };
+
+        let Some(child_scopes) = wave_container
             .child_scopes(root_scope)
             .context("Failed to get child scopes")
             .map_err(|e| warn!("{e:#?}"))
@@ -522,6 +529,32 @@ impl SystemState {
                     .unwrap_or(all_variables.len()),
             );
 
+        // Precompute common font metrics once per frame to avoid expensive per-row work.
+        // NOTE: Safe unwrap, we know that egui has its own built-in font.
+        // Use precomputed font and char width where available to reduce work.
+        let monospace_font = ui
+            .style()
+            .text_styles
+            .get(&TextStyle::Monospace)
+            .cloned()
+            .unwrap();
+        let body_font = ui
+            .style()
+            .text_styles
+            .get(&TextStyle::Body)
+            .cloned()
+            .unwrap();
+        let char_width_mono = ui.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(
+                    " ".to_string(),
+                    monospace_font.clone(),
+                    Color32::from_rgb(0, 0, 0),
+                )
+                .size()
+                .x
+        });
+
         // Draw variables
         for (variable, meta, name_info) in variables {
             let index = meta
@@ -584,31 +617,18 @@ impl SystemState {
 
                     match name_info.and_then(|info| info.true_name) {
                         Some(name) => {
-                            // NOTE: Safe unwrap, we know that egui has its own built-in font
-                            let font = ui.style().text_styles.get(&TextStyle::Monospace).unwrap();
-                            let char_width = ui.fonts_mut(|fonts| {
-                                fonts
-                                    .layout_no_wrap(
-                                        " ".to_string(),
-                                        font.clone(),
-                                        Color32::from_rgb(0, 0, 0),
-                                    )
-                                    .size()
-                                    .x
-                            });
-
                             let direction_size = direction.chars().count();
                             let index_size = index.chars().count();
                             let value_size = value.chars().count();
                             let used_space =
-                                (direction_size + index_size + value_size) as f32 * char_width;
+                                (direction_size + index_size + value_size) as f32 * char_width_mono;
                             // The button padding is added by egui on selectable labels
                             let available_space =
                                 ui.available_width() - ui.spacing().button_padding.x * 2.;
                             let space_for_name = available_space - used_space;
 
                             let text_format = TextFormat {
-                                font_id: font.clone(),
+                                font_id: monospace_font.clone(),
                                 color: self.user.config.theme.foreground,
                                 ..Default::default()
                             };
@@ -618,9 +638,9 @@ impl SystemState {
                             draw_true_name(
                                 &name,
                                 &mut label,
-                                font.clone(),
+                                monospace_font.clone(),
                                 self.user.config.theme.foreground,
-                                char_width,
+                                char_width_mono,
                                 space_for_name,
                             );
 
@@ -628,9 +648,8 @@ impl SystemState {
                             label.append(&value, 0.0, text_format.clone());
                         }
                         None => {
-                            let font = ui.style().text_styles.get(&TextStyle::Body).unwrap();
                             let text_format = TextFormat {
-                                font_id: font.clone(),
+                                font_id: body_font.clone(),
                                 color: self.user.config.theme.foreground,
                                 ..Default::default()
                             };
@@ -651,11 +670,16 @@ impl SystemState {
                     let _ = response.interact(egui::Sense::click_and_drag());
 
                     if self.show_tooltip() {
-                        // Should be possible to reuse the meta from above?
-                        response = response.on_hover_ui(|ui| {
-                            let meta = wave_container.variable_meta(variable).ok();
+                        // Reuse the already-obtained `meta` and pass a clone of the variable
+                        // reference into the closure so we don't call `variable_meta` again.
+                        let tooltip_meta = meta.clone();
+                        let tooltip_var = variable.clone();
+                        response = response.on_hover_ui(move |ui| {
                             ui.set_max_width(ui.spacing().tooltip_width);
-                            ui.add(egui::Label::new(variable_tooltip_text(&meta, variable)));
+                            ui.add(egui::Label::new(variable_tooltip_text(
+                                &tooltip_meta,
+                                &tooltip_var,
+                            )));
                         });
                     }
                     response.drag_started().then(|| {
@@ -699,7 +723,10 @@ impl SystemState {
         ui: &mut egui::Ui,
         active_stream: &StreamScopeRef,
     ) {
-        let inner = streams.inner.as_transactions().unwrap();
+        let inner = match streams.inner.as_transactions() {
+            Some(tx) => tx,
+            None => return,
+        };
         match active_stream {
             StreamScopeRef::Root => {
                 for stream in inner.get_streams() {
@@ -722,24 +749,29 @@ impl SystemState {
                 }
             }
             StreamScopeRef::Stream(stream_ref) => {
-                for gen_id in &inner.get_stream(stream_ref.stream_id).unwrap().generators {
-                    let gen_name = inner.get_generator(*gen_id).unwrap().name.clone();
-                    ui.with_layout(
-                        Layout::top_down(Align::LEFT).with_cross_justify(true),
-                        |ui| {
-                            let response = ui.add(egui::Button::selectable(false, &gen_name));
+                if let Some(stream) = inner.get_stream(stream_ref.stream_id) {
+                    for gen_id in &stream.generators {
+                        if let Some(generator) = inner.get_generator(*gen_id) {
+                            let gen_name = generator.name.clone();
+                            ui.with_layout(
+                                Layout::top_down(Align::LEFT).with_cross_justify(true),
+                                |ui| {
+                                    let response =
+                                        ui.add(egui::Button::selectable(false, &gen_name));
 
-                            response.clicked().then(|| {
-                                msgs.push(Message::AddStreamOrGenerator(
-                                    TransactionStreamRef::new_gen(
-                                        stream_ref.stream_id,
-                                        *gen_id,
-                                        gen_name,
-                                    ),
-                                ));
-                            });
-                        },
-                    );
+                                    response.clicked().then(|| {
+                                        msgs.push(Message::AddStreamOrGenerator(
+                                            TransactionStreamRef::new_gen(
+                                                stream_ref.stream_id,
+                                                *gen_id,
+                                                gen_name,
+                                            ),
+                                        ));
+                                    });
+                                },
+                            );
+                        }
+                    }
                 }
             }
             StreamScopeRef::Empty(_) => {}
@@ -776,24 +808,27 @@ impl SystemState {
             );
         })
         .body(|ui| {
-            for (id, stream) in &streams.inner.as_transactions().unwrap().inner.tx_streams {
-                let name = stream.name.clone();
-                let response = ui.add(egui::Button::selectable(
-                    streams.active_scope.as_ref().is_some_and(|s| {
-                        if let ScopeType::StreamScope(StreamScopeRef::Stream(scope_stream)) = s {
-                            scope_stream.stream_id == *id
-                        } else {
-                            false
-                        }
-                    }),
-                    name.clone(),
-                ));
+            if let Some(tx_container) = streams.inner.as_transactions() {
+                for (id, stream) in &tx_container.inner.tx_streams {
+                    let name = stream.name.clone();
+                    let response = ui.add(egui::Button::selectable(
+                        streams.active_scope.as_ref().is_some_and(|s| {
+                            if let ScopeType::StreamScope(StreamScopeRef::Stream(scope_stream)) = s
+                            {
+                                scope_stream.stream_id == *id
+                            } else {
+                                false
+                            }
+                        }),
+                        name.clone(),
+                    ));
 
-                response.clicked().then(|| {
-                    msgs.push(Message::SetActiveScope(ScopeType::StreamScope(
-                        StreamScopeRef::Stream(TransactionStreamRef::new_stream(*id, name)),
-                    )));
-                });
+                    response.clicked().then(|| {
+                        msgs.push(Message::SetActiveScope(ScopeType::StreamScope(
+                            StreamScopeRef::Stream(TransactionStreamRef::new_stream(*id, name)),
+                        )));
+                    });
+                }
             }
         });
     }
