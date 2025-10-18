@@ -21,7 +21,7 @@ pub enum ClockHighlightType {
 }
 
 pub fn draw_clock_edge_marks(
-    clock_edges: &Vec<f32>,
+    clock_edges: &[f32],
     ctx: &mut DrawingContext,
     config: &SurferConfig,
     clock_highlight_type: ClockHighlightType,
@@ -43,14 +43,15 @@ pub fn draw_clock_edge_marks(
             }
         }
         ClockHighlightType::Cycle => {
-            let mut x_start = 0.0;
-            let mut cycle = false;
-            for x_tmp in clock_edges {
-                if cycle {
+            // Process clock edges in pairs: every other cycle gets highlighted
+            for (idx, &x_tmp) in clock_edges.iter().enumerate() {
+                if idx % 2 == 1 {
+                    // Highlight the region from the previous edge to this one
+                    let x_start = clock_edges[idx - 1];
                     let Pos2 {
                         x: x_end,
                         y: y_start,
-                    } = (ctx.to_screen)(*x_tmp, 0.);
+                    } = (ctx.to_screen)(x_tmp, 0.);
                     ctx.painter.rect_filled(
                         Rect {
                             min: (ctx.to_screen)(x_start, 0.),
@@ -63,8 +64,6 @@ pub fn draw_clock_edge_marks(
                         config.theme.clock_highlight_cycle,
                     );
                 }
-                cycle = !cycle;
-                x_start = *x_tmp;
             }
         }
         ClockHighlightType::None => (),
