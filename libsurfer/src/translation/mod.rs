@@ -617,6 +617,7 @@ impl ValueKindExt for ValueKind {
             ValueKind::Warn => theme.variable_undef,
             ValueKind::Custom(custom_color) => *custom_color,
             ValueKind::Weak => theme.variable_weak,
+            ValueKind::Error => theme.accent_error.background,
             ValueKind::Normal => user_color,
         }
     }

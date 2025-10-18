@@ -122,6 +122,7 @@ pub enum ValueKind {
     Warn,
     DontCare,
     Weak,
+    Error,
 }
 
 #[cfg_attr(feature = "wasm_plugins", derive(FromBytes, ToBytes))]
