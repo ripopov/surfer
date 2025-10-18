@@ -10,6 +10,22 @@ use crate::time::time_string;
 use crate::view::DrawingContext;
 use crate::{wave_data::WaveData, Message, SystemState};
 
+/// Geometric constant: tan(22.5°) used for gesture zone calculations
+const TAN_22_5_DEGREES: f32 = 0.41421357;
+
+/// Helper function to create a stroke with appropriate color and width based on mode
+fn create_gesture_stroke(config: &SurferConfig, is_measure: bool) -> Stroke {
+    let line_style = if is_measure {
+        &config.theme.measure
+    } else {
+        &config.theme.gesture
+    };
+    Stroke {
+        color: line_style.color,
+        width: line_style.width,
+    }
+}
+
 /// The supported mouse gesture operations.
 #[derive(Clone, PartialEq, Copy, Display, Debug, Deserialize)]
 enum GestureKind {
@@ -93,7 +109,9 @@ impl SystemState {
         frame_width: f32,
     ) {
         let num_timestamps = waves.num_timestamps().unwrap_or(1.into());
-        let end_location = pointer_pos_canvas.unwrap();
+        let Some(end_location) = pointer_pos_canvas else {
+            return;
+        };
         let distance = end_location - start_location;
         if distance.length_sq() >= self.user.config.gesture.deadzone {
             match gesture_type(&self.user.config.gesture.mapping, distance) {
@@ -149,7 +167,9 @@ impl SystemState {
         waves: &WaveData,
         viewport_idx: usize,
     ) {
-        let current_location = pointer_pos_canvas.unwrap();
+        let Some(current_location) = pointer_pos_canvas else {
+            return;
+        };
         let distance = current_location - start_location;
         if distance.length_sq() >= self.user.config.gesture.deadzone {
             match gesture_type(&self.user.config.gesture.mapping, distance) {
@@ -207,12 +227,13 @@ impl SystemState {
         active: bool,
         ctx: &mut DrawingContext,
     ) {
+        let color = if active {
+            self.user.config.theme.gesture.color
+        } else {
+            self.user.config.theme.gesture.color.gamma_multiply(0.3)
+        };
         let stroke = Stroke {
-            color: if active {
-                self.user.config.theme.gesture.color
-            } else {
-                self.user.config.theme.gesture.color.gamma_multiply(0.3)
-            },
+            color,
             width: self.user.config.theme.gesture.width,
         };
         ctx.painter.line_segment(
@@ -242,41 +263,26 @@ impl SystemState {
         viewport_idx: usize,
         measure: bool,
     ) {
-        let stroke = if measure {
-            Stroke {
-                color: self.user.config.theme.measure.color,
-                width: self.user.config.theme.measure.width,
-            }
-        } else {
-            Stroke {
-                color: self.user.config.theme.gesture.color,
-                width: self.user.config.theme.gesture.width,
-            }
-        };
+        let stroke = create_gesture_stroke(&self.user.config, measure);
         let height = response.rect.height();
         let width = response.rect.width();
-        ctx.painter.line_segment(
-            [
-                (ctx.to_screen)(start_location.x, 0.0),
-                (ctx.to_screen)(start_location.x, height),
-            ],
-            stroke,
-        );
-        ctx.painter.line_segment(
-            [
-                (ctx.to_screen)(current_location.x, 0.0),
-                (ctx.to_screen)(current_location.x, height),
-            ],
-            stroke,
-        );
-        ctx.painter.line_segment(
-            [
-                (ctx.to_screen)(start_location.x, start_location.y),
-                (ctx.to_screen)(current_location.x, start_location.y),
-            ],
-            stroke,
-        );
-
+        let segments = [
+            ((start_location.x, 0.0), (start_location.x, height)),
+            ((current_location.x, 0.0), (current_location.x, height)),
+            (
+                (start_location.x, start_location.y),
+                (current_location.x, start_location.y),
+            ),
+        ];
+        for (start, end) in segments {
+            ctx.painter.line_segment(
+                [
+                    (ctx.to_screen)(start.0, start.1),
+                    (ctx.to_screen)(end.0, end.1),
+                ],
+                stroke,
+            );
+        }
         let (minx, maxx) = if measure || current_location.x > start_location.x {
             (start_location.x, current_location.x)
         } else {
@@ -368,16 +374,17 @@ impl SystemState {
                 && response.dragged_by(PointerButton::Primary)
                 && self.do_measure(&modifiers)
             {
-                let current_location = pointer_pos_canvas.unwrap();
-                self.draw_zoom_in_gesture(
-                    start_location,
-                    current_location,
-                    response,
-                    ctx,
-                    waves,
-                    viewport_idx,
-                    true,
-                );
+                if let Some(current_location) = pointer_pos_canvas {
+                    self.draw_zoom_in_gesture(
+                        start_location,
+                        current_location,
+                        response,
+                        ctx,
+                        waves,
+                        viewport_idx,
+                        true,
+                    );
+                }
             }
             if response.drag_stopped_by(PointerButton::Primary) {
                 msgs.push(Message::SetMeasureDragStart(None));
@@ -395,7 +402,6 @@ fn draw_gesture_help(
     draw_bg: bool,
 ) {
     // Compute sizes and coordinates
-    let tan225 = 0.41421357;
     let (midx, midy, deltax, deltay) = if let Some(midpoint) = midpoint {
         let halfsize = config.gesture.size * 0.5;
         (midpoint.x, midpoint.y, halfsize, halfsize)
@@ -414,8 +420,8 @@ fn draw_gesture_help(
         color: config.theme.gesture.color,
         width: config.theme.gesture.width,
     };
-    let tan225deltax = tan225 * deltax;
-    let tan225deltay = tan225 * deltay;
+    let tan225deltax = TAN_22_5_DEGREES * deltax;
+    let tan225deltay = TAN_22_5_DEGREES * deltay;
     let left = midx - deltax;
     let right = midx + deltax;
     let top = midy - deltay;
@@ -434,109 +440,79 @@ fn draw_gesture_help(
         );
     }
     // Draw lines
-    painter.line_segment(
-        [
-            to_screen(left, midy + tan225deltax),
-            to_screen(right, midy - tan225deltax),
-        ],
-        stroke,
-    );
-    painter.line_segment(
-        [
-            to_screen(left, midy - tan225deltax),
-            to_screen(right, midy + tan225deltax),
-        ],
-        stroke,
-    );
-    painter.line_segment(
-        [
-            to_screen(midx + tan225deltay, top),
-            to_screen(midx - tan225deltay, bottom),
-        ],
-        stroke,
-    );
-    painter.line_segment(
-        [
-            to_screen(midx - tan225deltay, top),
-            to_screen(midx + tan225deltay, bottom),
-        ],
-        stroke,
-    );
+    let segments = [
+        ((left, midy + tan225deltax), (right, midy - tan225deltax)),
+        ((left, midy - tan225deltax), (right, midy + tan225deltax)),
+        ((midx + tan225deltay, top), (midx - tan225deltay, bottom)),
+        ((midx - tan225deltay, top), (midx + tan225deltay, bottom)),
+    ];
+    for (start, end) in segments {
+        painter.line_segment(
+            [to_screen(start.0, start.1), to_screen(end.0, end.1)],
+            stroke,
+        );
+    }
 
     let halfwaytexty_upper = top + (deltay - tan225deltax) * 0.5;
     let halfwaytexty_lower = bottom - (deltay - tan225deltax) * 0.5;
-    // Draw commands
-    // West
-    painter.text(
-        to_screen(left, midy),
-        Align2::LEFT_CENTER,
-        config.gesture.mapping.west,
-        FontId::default(),
-        config.theme.foreground,
-    );
-    // East
-    painter.text(
-        to_screen(right, midy),
-        Align2::RIGHT_CENTER,
-        config.gesture.mapping.east,
-        FontId::default(),
-        config.theme.foreground,
-    );
-    // NorthWest
-    painter.text(
-        to_screen(left, halfwaytexty_upper),
-        Align2::LEFT_CENTER,
-        config.gesture.mapping.northwest,
-        FontId::default(),
-        config.theme.foreground,
-    );
-    // NorthEast
-    painter.text(
-        to_screen(right, halfwaytexty_upper),
-        Align2::RIGHT_CENTER,
-        config.gesture.mapping.northeast,
-        FontId::default(),
-        config.theme.foreground,
-    );
-    // North
-    painter.text(
-        to_screen(midx, top),
-        Align2::CENTER_TOP,
-        config.gesture.mapping.north,
-        FontId::default(),
-        config.theme.foreground,
-    );
-    // SouthWest
-    painter.text(
-        to_screen(left, halfwaytexty_lower),
-        Align2::LEFT_CENTER,
-        config.gesture.mapping.southwest,
-        FontId::default(),
-        config.theme.foreground,
-    );
-    // SouthEast
-    painter.text(
-        to_screen(right, halfwaytexty_lower),
-        Align2::RIGHT_CENTER,
-        config.gesture.mapping.southeast,
-        FontId::default(),
-        config.theme.foreground,
-    );
-    // South
-    painter.text(
-        to_screen(midx, bottom),
-        Align2::CENTER_BOTTOM,
-        config.gesture.mapping.south,
-        FontId::default(),
-        config.theme.foreground,
-    );
+
+    // Draw commands using a table-driven approach
+    let directions = [
+        (left, midy, Align2::LEFT_CENTER, config.gesture.mapping.west),
+        (
+            right,
+            midy,
+            Align2::RIGHT_CENTER,
+            config.gesture.mapping.east,
+        ),
+        (
+            left,
+            halfwaytexty_upper,
+            Align2::LEFT_CENTER,
+            config.gesture.mapping.northwest,
+        ),
+        (
+            right,
+            halfwaytexty_upper,
+            Align2::RIGHT_CENTER,
+            config.gesture.mapping.northeast,
+        ),
+        (midx, top, Align2::CENTER_TOP, config.gesture.mapping.north),
+        (
+            left,
+            halfwaytexty_lower,
+            Align2::LEFT_CENTER,
+            config.gesture.mapping.southwest,
+        ),
+        (
+            right,
+            halfwaytexty_lower,
+            Align2::RIGHT_CENTER,
+            config.gesture.mapping.southeast,
+        ),
+        (
+            midx,
+            bottom,
+            Align2::CENTER_BOTTOM,
+            config.gesture.mapping.south,
+        ),
+    ];
+
+    for (x, y, align, text) in directions {
+        painter.text(
+            to_screen(x, y),
+            align,
+            text,
+            FontId::default(),
+            config.theme.foreground,
+        );
+    }
 }
 
 /// Determine which mouse gesture ([`GestureKind`]) is currently drawn.
 fn gesture_type(zones: &GestureZones, delta: Vec2) -> GestureKind {
-    let tan225 = 0.41421357;
-    let tan225x = tan225 * delta.x;
-    let tan225y = tan225 * delta.y;
+    let tan225x = TAN_22_5_DEGREES * delta.x;
+    let tan225y = TAN_22_5_DEGREES * delta.y;
     if delta.x < 0.0 {
         if delta.y.abs() < -tan225x {
             // West
