@@ -1496,16 +1496,12 @@ impl SystemState {
     ) {
         let x = viewport.pixel_from_time(time, size.x, &waves.num_timestamps().unwrap_or(1.into()));
 
-        let stroke = Stroke {
-            color: self.user.config.theme.cursor.color,
-            width: self.user.config.theme.cursor.width,
-        };
         ctx.painter.line_segment(
             [
                 (ctx.to_screen)(x + 0.5, -0.5),
                 (ctx.to_screen)(x + 0.5, size.y),
             ],
-            stroke,
+            self.user.config.theme.cursor.clone(),
         );
     }
 }

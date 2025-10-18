@@ -60,12 +60,7 @@ impl WaveData {
         if let Some(marker) = &self.cursor {
             let num_timestamps = self.num_timestamps().unwrap_or(1.into());
             let x = viewport.pixel_from_time(marker, size.x, &num_timestamps);
-
-            let stroke = Stroke {
-                color: theme.cursor.color,
-                width: theme.cursor.width,
-            };
-            self.draw_vertical_line(x, ctx, size, &stroke);
+            self.draw_vertical_line(x, ctx, size, &theme.cursor.clone().into());
         }
     }
 
