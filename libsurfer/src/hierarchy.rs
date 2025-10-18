@@ -522,6 +522,32 @@ impl SystemState {
                     .unwrap_or(all_variables.len()),
             );
 
+        // Precompute common font metrics once per frame to avoid expensive per-row work.
+        // NOTE: Safe unwrap, we know that egui has its own built-in font.
+        // Use precomputed font and char width where available to reduce work.
+        let monospace_font = ui
+            .style()
+            .text_styles
+            .get(&TextStyle::Monospace)
+            .cloned()
+            .unwrap();
+        let body_font = ui
+            .style()
+            .text_styles
+            .get(&TextStyle::Body)
+            .cloned()
+            .unwrap();
+        let char_width_mono = ui.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(
+                    " ".to_string(),
+                    monospace_font.clone(),
+                    Color32::from_rgb(0, 0, 0),
+                )
+                .size()
+                .x
+        });
+
         // Draw variables
         for (variable, meta, name_info) in variables {
             let index = meta
@@ -584,31 +610,18 @@ impl SystemState {
 
                     match name_info.and_then(|info| info.true_name) {
                         Some(name) => {
-                            // NOTE: Safe unwrap, we know that egui has its own built-in font
-                            let font = ui.style().text_styles.get(&TextStyle::Monospace).unwrap();
-                            let char_width = ui.fonts_mut(|fonts| {
-                                fonts
-                                    .layout_no_wrap(
-                                        " ".to_string(),
-                                        font.clone(),
-                                        Color32::from_rgb(0, 0, 0),
-                                    )
-                                    .size()
-                                    .x
-                            });
-
                             let direction_size = direction.chars().count();
                             let index_size = index.chars().count();
                             let value_size = value.chars().count();
                             let used_space =
-                                (direction_size + index_size + value_size) as f32 * char_width;
+                                (direction_size + index_size + value_size) as f32 * char_width_mono;
                             // The button padding is added by egui on selectable labels
                             let available_space =
                                 ui.available_width() - ui.spacing().button_padding.x * 2.;
                             let space_for_name = available_space - used_space;
 
                             let text_format = TextFormat {
-                                font_id: font.clone(),
+                                font_id: monospace_font.clone(),
                                 color: self.user.config.theme.foreground,
                                 ..Default::default()
                             };
@@ -618,9 +631,9 @@ impl SystemState {
                             draw_true_name(
                                 &name,
                                 &mut label,
-                                font.clone(),
+                                monospace_font.clone(),
                                 self.user.config.theme.foreground,
-                                char_width,
+                                char_width_mono,
                                 space_for_name,
                             );
 
@@ -628,9 +641,8 @@ impl SystemState {
                             label.append(&value, 0.0, text_format.clone());
                         }
                         None => {
-                            let font = ui.style().text_styles.get(&TextStyle::Body).unwrap();
                             let text_format = TextFormat {
-                                font_id: font.clone(),
+                                font_id: body_font.clone(),
                                 color: self.user.config.theme.foreground,
                                 ..Default::default()
                             };
