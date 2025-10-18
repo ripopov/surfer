@@ -7,6 +7,7 @@ use derive_more::{Display, FromStr};
 use directories::ProjectDirs;
 use ecolor::Color32;
 use enum_iterator::Sequence;
+use epaint::Stroke;
 use eyre::Report;
 use eyre::{Context, Result};
 use serde::de;
@@ -257,11 +258,20 @@ pub struct SurferGesture {
     pub mapping: GestureZones,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct SurferLineStyle {
     #[serde(deserialize_with = "deserialize_hex_color")]
     pub color: Color32,
     pub width: f32,
+}
+
+impl Into<Stroke> for SurferLineStyle {
+    fn into(self) -> Stroke {
+        Stroke {
+            color: self.color,
+            width: self.width,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

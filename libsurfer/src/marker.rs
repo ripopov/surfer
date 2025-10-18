@@ -1,3 +1,4 @@
+use ecolor::Color32;
 use egui::{Context, Grid, RichText, WidgetText, Window};
 use emath::{Align2, Pos2, Rect, Vec2};
 use epaint::{CornerRadius, FontId, Stroke};
@@ -18,6 +19,37 @@ use crate::{
 pub const DEFAULT_MARKER_NAME: &str = "Marker";
 
 impl WaveData {
+    /// Get the color for a marker by its index, falling back to cursor color if not found
+    fn get_marker_color<'a>(&self, idx: u8, theme: &'a SurferTheme) -> &'a Color32 {
+        self.items_tree
+            .iter()
+            .find_map(|node| {
+                if let Some(DisplayedItem::Marker(marker)) =
+                    self.displayed_items.get(&node.item_ref)
+                {
+                    if marker.idx == idx {
+                        return marker
+                            .color
+                            .as_ref()
+                            .and_then(|color| theme.get_color(color));
+                    }
+                }
+                None
+            })
+            .unwrap_or(&theme.cursor.color)
+    }
+
+    /// Draw a vertical line at the given x position with the specified stroke
+    fn draw_vertical_line(&self, x: f32, ctx: &mut DrawingContext, size: Vec2, stroke: &Stroke) {
+        ctx.painter.line_segment(
+            [
+                (ctx.to_screen)(x + 0.5, -0.5),
+                (ctx.to_screen)(x + 0.5, size.y),
+            ],
+            *stroke,
+        );
+    }
+
     pub fn draw_cursor(
         &self,
         theme: &SurferTheme,
@@ -28,18 +60,7 @@ impl WaveData {
         if let Some(marker) = &self.cursor {
             let num_timestamps = self.num_timestamps().unwrap_or(1.into());
             let x = viewport.pixel_from_time(marker, size.x, &num_timestamps);
-
-            let stroke = Stroke {
-                color: theme.cursor.color,
-                width: theme.cursor.width,
-            };
-            ctx.painter.line_segment(
-                [
-                    (ctx.to_screen)(x + 0.5, -0.5),
-                    (ctx.to_screen)(x + 0.5, size.y),
-                ],
-                stroke,
-            );
+            self.draw_vertical_line(x, ctx, size, &theme.cursor.clone().into());
         }
     }
 
@@ -52,35 +73,13 @@ impl WaveData {
     ) {
         let num_timestamps = self.num_timestamps().unwrap_or(1.into());
         for (idx, marker) in &self.markers {
-            let color = self
-                .items_tree
-                .iter()
-                .map(|node| self.displayed_items.get(&node.item_ref))
-                .find_map(|item| match item {
-                    Some(DisplayedItem::Marker(tmp_marker)) => {
-                        if *idx == tmp_marker.idx {
-                            Some(tmp_marker)
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                })
-                .and_then(|displayed_maker| displayed_maker.color.clone())
-                .and_then(|color| theme.get_color(&color))
-                .unwrap_or(&theme.cursor.color);
+            let color = self.get_marker_color(*idx, theme);
             let stroke = Stroke {
                 color: *color,
                 width: theme.cursor.width,
             };
             let x = viewport.pixel_from_time(marker, size.x, &num_timestamps);
-            ctx.painter.line_segment(
-                [
-                    (ctx.to_screen)(x + 0.5, -0.5),
-                    (ctx.to_screen)(x + 0.5, size.y),
-                ],
-                stroke,
-            );
+            self.draw_vertical_line(x, ctx, size, &stroke);
         }
     }
 
@@ -148,6 +147,47 @@ impl WaveData {
         self.set_marker_position(idx, &location);
     }
 
+    /// Draw text with background box at the specified position
+    /// Returns the text and its background rectangle info for reuse if needed
+    fn draw_text_with_background(
+        ctx: &mut DrawingContext,
+        x: f32,
+        y: f32,
+        text: String,
+        text_size: f32,
+        background_color: &Color32,
+        foreground_color: Color32,
+        padding: f32,
+    ) {
+        // Measure text first
+        let rect = ctx.painter.text(
+            (ctx.to_screen)(x, y),
+            Align2::CENTER_CENTER,
+            text.clone(),
+            FontId::proportional(text_size),
+            foreground_color,
+        );
+
+        // Background rectangle with padding
+        let min = Pos2::new(rect.min.x - padding, rect.min.y - padding);
+        let max = Pos2::new(rect.max.x + padding, rect.max.y + padding);
+
+        ctx.painter.rect_filled(
+            Rect { min, max },
+            CornerRadius::default(),
+            *background_color,
+        );
+
+        // Draw text on top of background
+        ctx.painter.text(
+            (ctx.to_screen)(x, y),
+            Align2::CENTER_CENTER,
+            text,
+            FontId::proportional(text_size),
+            foreground_color,
+        );
+    }
+
     pub fn draw_marker_number_boxes(
         &self,
         ctx: &mut DrawingContext,
@@ -173,73 +213,67 @@ impl WaveData {
                 .unwrap_or(&theme.cursor.color);
 
             let x = self.numbered_marker_location(displayed_item.idx, viewport, size.x);
-
             let idx_string = displayed_item.idx.to_string();
-            // Determine size of text
-            let rect = ctx.painter.text(
-                (ctx.to_screen)(x, size.y * 0.5),
-                Align2::CENTER_CENTER,
-                idx_string.clone(),
-                FontId::proportional(text_size),
-                theme.foreground,
-            );
 
-            // Background rectangle
-            let min = (ctx.to_screen)(rect.min.x, 0.);
-            let max = (ctx.to_screen)(rect.max.x, size.y);
-            let min = Pos2::new(rect.min.x - 2., min.y);
-            let max = Pos2::new(rect.max.x + 2., max.y);
-
-            ctx.painter.rect_filled(
-                Rect { min, max },
-                CornerRadius::default(),
-                *background_color,
-            );
-
-            // Draw actual text on top of rectangle
-            ctx.painter.text(
-                (ctx.to_screen)(x, size.y * 0.5),
-                Align2::CENTER_CENTER,
+            Self::draw_text_with_background(
+                ctx,
+                x,
+                size.y * 0.5,
                 idx_string,
-                FontId::proportional(text_size),
+                text_size,
+                background_color,
                 theme.foreground,
+                2.0,
             );
         }
     }
 }
 
 impl SystemState {
+    /// Generate the message for a marker click based on its index
+    fn marker_click_message(marker_idx: u8, cursor: &Option<BigInt>) -> Message {
+        if marker_idx < 255 {
+            Message::GoToMarkerPosition(marker_idx, 0)
+        } else {
+            Message::GoToTime(cursor.clone(), 0)
+        }
+    }
+
     pub fn draw_marker_window(&self, waves: &WaveData, ctx: &Context, msgs: &mut Vec<Message>) {
         let mut open = true;
 
-        let mut markers: Vec<(u8, &BigInt, WidgetText)> = vec![];
-        if let Some(cursor) = &waves.cursor {
-            markers.push((
-                255,
-                cursor,
-                WidgetText::RichText(RichText::new("Primary").into()),
-            ));
-        }
-
-        let mut numbered_markers = waves
-            .items_tree
-            .iter()
-            .map(|node| waves.displayed_items.get(&node.item_ref))
-            .filter_map(|displayed_item| match displayed_item {
-                Some(DisplayedItem::Marker(marker)) => {
-                    let text_color = self.get_item_text_color(displayed_item.unwrap());
-                    Some((
-                        marker.idx,
-                        waves.numbered_marker_time(marker.idx),
-                        marker.marker_text(text_color),
-                    ))
-                }
-                _ => None,
+        // Construct markers list: cursor first (if present), then numbered markers
+        let markers: Vec<(u8, &BigInt, WidgetText)> = waves
+            .cursor
+            .as_ref()
+            .into_iter()
+            .map(|cursor| {
+                (
+                    255u8,
+                    cursor,
+                    WidgetText::RichText(RichText::new("Primary").into()),
+                )
             })
-            .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
-            .collect_vec();
+            .chain(
+                waves
+                    .items_tree
+                    .iter()
+                    .filter_map(|node| waves.displayed_items.get(&node.item_ref))
+                    .filter_map(|displayed_item| match displayed_item {
+                        DisplayedItem::Marker(marker) => {
+                            let text_color = self.get_item_text_color(displayed_item);
+                            Some((
+                                marker.idx,
+                                waves.numbered_marker_time(marker.idx),
+                                marker.marker_text(text_color),
+                            ))
+                        }
+                        _ => None,
+                    })
+                    .sorted_by(|a, b| Ord::cmp(&a.0, &b.0)),
+            )
+            .collect();
 
-        markers.append(&mut numbered_markers);
         Window::new("Markers")
             .collapsible(true)
             .resizable(true)
@@ -253,35 +287,25 @@ impl SystemState {
                         .show(ui, |ui| {
                             ui.label("");
                             for (marker_idx, _, widget_text) in &markers {
-                                if *marker_idx < 255 {
-                                    ui.selectable_label(false, widget_text.clone())
-                                        .clicked()
-                                        .then(|| {
-                                            msgs.push(Message::GoToMarkerPosition(*marker_idx, 0));
-                                        });
-                                } else {
-                                    ui.selectable_label(false, widget_text.clone())
-                                        .clicked()
-                                        .then(|| {
-                                            msgs.push(Message::GoToTime(waves.cursor.clone(), 0));
-                                        });
-                                }
+                                ui.selectable_label(false, widget_text.clone())
+                                    .clicked()
+                                    .then(|| {
+                                        msgs.push(Self::marker_click_message(
+                                            *marker_idx,
+                                            &waves.cursor,
+                                        ));
+                                    });
                             }
                             ui.end_row();
                             for (marker_idx, row_marker_time, row_widget_text) in &markers {
-                                if *marker_idx < 255 {
-                                    ui.selectable_label(false, row_widget_text.clone())
-                                        .clicked()
-                                        .then(|| {
-                                            msgs.push(Message::GoToMarkerPosition(*marker_idx, 0));
-                                        });
-                                } else {
-                                    ui.selectable_label(false, row_widget_text.clone())
-                                        .clicked()
-                                        .then(|| {
-                                            msgs.push(Message::GoToTime(waves.cursor.clone(), 0));
-                                        });
-                                }
+                                ui.selectable_label(false, row_widget_text.clone())
+                                    .clicked()
+                                    .then(|| {
+                                        msgs.push(Self::marker_click_message(
+                                            *marker_idx,
+                                            &waves.cursor,
+                                        ));
+                                    });
                                 for (_, col_marker_time, _) in &markers {
                                     ui.label(time_string(
                                         &(*row_marker_time - *col_marker_time),
