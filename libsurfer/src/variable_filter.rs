@@ -9,6 +9,7 @@ use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use itertools::Itertools;
 use regex::{escape, Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 
 use crate::data_container::DataContainer::Transactions;
 use crate::transaction_container::{StreamScopeRef, TransactionStreamRef};
@@ -35,7 +36,7 @@ pub enum VariableNameFilterType {
     Contain,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct VariableFilter {
     pub(crate) name_filter_type: VariableNameFilterType,
     pub(crate) name_filter_str: String,
@@ -47,6 +48,25 @@ pub struct VariableFilter {
     pub(crate) include_others: bool,
 
     pub(crate) group_by_direction: bool,
+    #[serde(skip)]
+    cache: RefCell<VariableFilterCache>,
+}
+
+// Lightweight cache for compiled regex and fuzzy matcher to avoid repeated compilation
+#[derive(Default)]
+struct VariableFilterCache {
+    // For regex-based filters (Regex, Start, Contain)
+    regex_pattern: Option<String>,
+    regex_case_insensitive: bool,
+    regex: Option<Regex>,
+
+    // For fuzzy matcher
+    fuzzy_pattern: Option<String>,
+    fuzzy_case_insensitive: bool,
+    // SkimMatcherV2 has no cheap Clone, so create on demand but avoid rebuilding if flags and
+    // pattern didn't change. We store a bool indicating whether the last built matcher used
+    // ignore_case.
+    fuzzy_matcher: Option<SkimMatcherV2>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,6 +96,7 @@ impl VariableFilter {
             include_others: true,
 
             group_by_direction: false,
+            cache: RefCell::new(Default::default()),
         }
     }
 
@@ -84,44 +105,100 @@ impl VariableFilter {
             return Box::new(|_var_name| true);
         }
 
-        match self.name_filter_type {
+        // Copy the decisions/inputs out of self so the borrow of self.cache can be short-lived.
+        let filter_type = &self.name_filter_type;
+        let filter_str = self.name_filter_str.clone();
+        let case_insensitive = self.name_filter_case_insensitive;
+
+        // Prepare owned clones that we will move into the returned closure.
+        let mut owned_regex: Option<Regex> = None;
+        let mut owned_matcher: Option<SkimMatcherV2> = None;
+
+        // Short-lived borrow of the cache to potentially rebuild and to clone out owned values.
+        {
+            let mut cache = self.cache.borrow_mut();
+
+            match filter_type {
+                VariableNameFilterType::Fuzzy => {
+                    let rebuild = cache
+                        .fuzzy_pattern
+                        .as_ref()
+                        .map(|p| p != &filter_str)
+                        .unwrap_or(true)
+                        || cache.fuzzy_case_insensitive != case_insensitive
+                        || cache.fuzzy_matcher.is_none();
+
+                    if rebuild {
+                        let mut matcher = SkimMatcherV2::default();
+                        matcher = if case_insensitive {
+                            matcher.ignore_case()
+                        } else {
+                            matcher.respect_case()
+                        };
+                        cache.fuzzy_pattern = Some(filter_str.clone());
+                        cache.fuzzy_case_insensitive = case_insensitive;
+                        cache.fuzzy_matcher = Some(matcher);
+                    }
+
+                    // SkimMatcherV2 does not implement Clone; create a new matcher configured
+                    // with the same case sensitivity instead of cloning the cached one.
+                    if cache.fuzzy_matcher.is_some() {
+                        let mut matcher = SkimMatcherV2::default();
+                        matcher = if case_insensitive {
+                            matcher.ignore_case()
+                        } else {
+                            matcher.respect_case()
+                        };
+                        owned_matcher = Some(matcher);
+                    }
+                }
+                VariableNameFilterType::Regex
+                | VariableNameFilterType::Contain
+                | VariableNameFilterType::Start => {
+                    let pat = match filter_type {
+                        VariableNameFilterType::Regex => filter_str.clone(),
+                        VariableNameFilterType::Start => format!("^{}", escape(&filter_str)),
+                        VariableNameFilterType::Contain => escape(&filter_str),
+                        _ => unreachable!(),
+                    };
+                    let rebuild = cache
+                        .regex_pattern
+                        .as_ref()
+                        .map(|p| p != &pat)
+                        .unwrap_or(true)
+                        || cache.regex_case_insensitive != case_insensitive
+                        || cache.regex.is_none();
+
+                    if rebuild {
+                        cache.regex_pattern = Some(pat.clone());
+                        cache.regex_case_insensitive = case_insensitive;
+                        cache.regex = RegexBuilder::new(&pat)
+                            .case_insensitive(case_insensitive)
+                            .build()
+                            .ok();
+                    }
+
+                    if let Some(r) = cache.regex.as_ref() {
+                        owned_regex = Some(r.clone());
+                    }
+                }
+            }
+        } // cache borrow ends here
+
+        // Now build the closure using only owned values (no borrow of cache/self remains).
+        match filter_type {
             VariableNameFilterType::Fuzzy => {
-                let matcher = if self.name_filter_case_insensitive {
-                    SkimMatcherV2::default().ignore_case()
-                } else {
-                    SkimMatcherV2::default().respect_case()
-                };
-
-                // Make a copy of the filter string to move into the closure below
-                let filter_str_clone = self.name_filter_str.clone();
-
-                Box::new(move |var_name| matcher.fuzzy_match(var_name, &filter_str_clone).is_some())
-            }
-            VariableNameFilterType::Regex => {
-                if let Ok(regex) = RegexBuilder::new(&self.name_filter_str)
-                    .case_insensitive(self.name_filter_case_insensitive)
-                    .build()
-                {
-                    Box::new(move |var_name| regex.is_match(var_name))
+                if let Some(matcher) = owned_matcher {
+                    let pat = filter_str;
+                    Box::new(move |var_name| matcher.fuzzy_match(var_name, &pat).is_some())
                 } else {
                     Box::new(|_var_name| false)
                 }
             }
-            VariableNameFilterType::Start => {
-                if let Ok(regex) = RegexBuilder::new(&format!("^{}", escape(&self.name_filter_str)))
-                    .case_insensitive(self.name_filter_case_insensitive)
-                    .build()
-                {
-                    Box::new(move |var_name| regex.is_match(var_name))
-                } else {
-                    Box::new(|_var_name| false)
-                }
-            }
-            VariableNameFilterType::Contain => {
-                if let Ok(regex) = RegexBuilder::new(&escape(&self.name_filter_str))
-                    .case_insensitive(self.name_filter_case_insensitive)
-                    .build()
-                {
+            VariableNameFilterType::Regex
+            | VariableNameFilterType::Start
+            | VariableNameFilterType::Contain => {
+                if let Some(regex) = owned_regex {
                     Box::new(move |var_name| regex.is_match(var_name))
                 } else {
                     Box::new(|_var_name| false)
