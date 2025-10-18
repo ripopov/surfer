@@ -281,9 +281,6 @@ impl SystemState {
                     msgs.push(Message::SetNameAlignRight(true));
                 });
             });
-            ui.menu_button("Variable filter type", |ui| {
-                self.variable_filter_type_menu(ui, msgs);
-            });
 
             ui.menu_button("Hierarchy", |ui| {
                 for style in enum_iterator::all::<HierarchyStyle>() {
