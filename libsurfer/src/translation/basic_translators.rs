@@ -8,25 +8,24 @@ use surfer_translation_types::{
     check_vector_variable, extend_string, BasicTranslator, VariableValue,
 };
 
-// Forms groups of n chars from from a string. If the string size is
-// not divisible by n, the first group will be smaller than n
-// The string must only consist of ascii characters
+/// Splits a string into groups of `n` characters.
+/// If the string length is not divisible by `n`, the first group will be shorter.
+/// The string must only consist of ASCII characters.
 pub fn group_n_chars(s: &str, n: usize) -> Vec<&str> {
-    let num_extra_chars = s.len() % n;
-
-    let last_group = &s[0..num_extra_chars];
-
-    let rest_groups = s.len() / n;
-    let rest_str = &s[num_extra_chars..];
-
-    if !last_group.is_empty() {
-        vec![last_group]
-    } else {
-        vec![]
+    let mut groups = Vec::new();
+    let len = s.len();
+    let rem = len % n;
+    let mut start = 0;
+    if rem > 0 {
+        groups.push(&s[0..rem]);
+        start = rem;
     }
-    .into_iter()
-    .chain((0..rest_groups).map(|start| &rest_str[start * n..(start + 1) * n]))
-    .collect()
+    while start < len {
+        let end = (start + n).min(len);
+        groups.push(&s[start..end]);
+        start += n;
+    }
+    groups
 }
 
 /// Number of digits for digit_size, simply ceil(num_bits/digit_size)
@@ -57,60 +56,36 @@ fn color_for_binary_representation(s: &str) -> ValueKind {
 
 /// Map to radix-based representation, in practice hex or octal
 fn map_to_radix(s: &str, radix: usize, num_bits: u64) -> (String, ValueKind) {
-    let mut is_undef = false;
-    let mut is_highimp = false;
-    let mut is_dontcare = false;
-    let mut is_weak = false;
-    let val = group_n_chars(
+    let mut had_invalid_digit = false;
+    let formatted = group_n_chars(
         &format!("{extra_bits}{s}", extra_bits = extend_string(s, num_bits)),
         radix,
     )
     .into_iter()
-    .map(|g| {
-        if g.contains('x') {
-            is_undef = true;
-            "x".to_string()
-        } else if g.contains('z') {
-            is_highimp = true;
-            "z".to_string()
-        } else if g.contains('-') {
-            is_dontcare = true;
-            "-".to_string()
-        } else if g.contains('u') {
-            is_undef = true;
-            "u".to_string()
-        } else if g.contains('w') {
-            is_undef = true;
-            "w".to_string()
-        } else if g.contains('h') {
-            is_weak = true;
-            "h".to_string()
-        } else if g.contains('l') {
-            is_weak = true;
-            "l".to_string()
-        } else {
-            format!(
-                "{:x}", // This works for radix up to 4, i.e., hex
-                u8::from_str_radix(g, 2).expect("Found non-binary digit in value")
-            )
-        }
+    .map(|g| match g {
+        g if g.contains('x') => "x".to_string(),
+        g if g.contains('z') => "z".to_string(),
+        g if g.contains('-') => "-".to_string(),
+        g if g.contains('u') => "u".to_string(),
+        g if g.contains('w') => "w".to_string(),
+        g if g.contains('h') => "h".to_string(),
+        g if g.contains('l') => "l".to_string(),
+        g => match u8::from_str_radix(g, 2) {
+            Ok(val) => format!("{:x}", val),
+            Err(_) => {
+                had_invalid_digit = true;
+                "?".to_string()
+            }
+        },
     })
     .join("");
 
-    (
-        val,
-        if is_undef {
-            ValueKind::Undef
-        } else if is_highimp {
-            ValueKind::HighImp
-        } else if is_dontcare {
-            ValueKind::DontCare
-        } else if is_weak {
-            ValueKind::Weak
-        } else {
-            ValueKind::Normal
-        },
-    )
+    let kind = if had_invalid_digit {
+        ValueKind::Error
+    } else {
+        color_for_binary_representation(&formatted)
+    };
+    (formatted, kind)
 }
 
 fn check_wordlength(
