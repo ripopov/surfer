@@ -221,56 +221,59 @@ fn strip_trailing_zeros_and_period(time: String) -> String {
 fn split_and_format_number(time: String, format: &TimeStringFormatting) -> String {
     match format {
         TimeStringFormatting::No => time,
-        TimeStringFormatting::Locale => {
-            let locale: Locale = get_locale()
-                .unwrap_or_else(|| "en-US".to_string())
-                .as_str()
-                .try_into()
-                .unwrap_or(Locale::en_US);
-            let grouping = locale_match!(locale => LC_NUMERIC::GROUPING);
-            if grouping[0] > 0 {
-                // "\u{202f}" (non-breaking thin space) does not exist in used font, replace with "\u{2009}" (thin space)
-                let thousands_sep = locale_match!(locale => LC_NUMERIC::THOUSANDS_SEP)
-                    .replace('\u{202f}', THIN_SPACE);
-                if time.contains('.') {
-                    let decimal_point = locale_match!(locale => LC_NUMERIC::DECIMAL_POINT);
-                    let mut parts = time.split('.');
-                    let integer_result = group_n_chars(parts.next().unwrap(), grouping[0] as usize)
-                        .join(thousands_sep.as_str());
-                    let fractional_part = parts.next().unwrap();
-                    format!("{integer_result}{decimal_point}{fractional_part}")
-                } else {
-                    group_n_chars(&time, grouping[0] as usize).join(thousands_sep.as_str())
-                }
-            } else {
-                time
-            }
+        TimeStringFormatting::Locale => format_locale(time),
+        TimeStringFormatting::SI => format_si(time),
+    }
+}
+
+fn format_si(time: String) -> String {
+    if time.contains('.') {
+        let mut parts = time.split('.');
+        let integer_part = parts.next().unwrap();
+        let fractional_part = parts.next().unwrap();
+        let integer_result = if integer_part.len() > 4 {
+            group_n_chars(integer_part, 3).join(THIN_SPACE)
+        } else {
+            integer_part.to_string()
+        };
+        if fractional_part.len() > 4 {
+            let reversed = fractional_part.chars().rev().collect::<String>();
+            let reversed_fractional_parts = group_n_chars(&reversed, 3).join(THIN_SPACE);
+            let fractional_result = reversed_fractional_parts.chars().rev().collect::<String>();
+            format!("{integer_result}.{fractional_result}")
+        } else {
+            format!("{integer_result}.{fractional_part}")
         }
-        TimeStringFormatting::SI => {
-            if time.contains('.') {
-                let mut parts = time.split('.');
-                let integer_part = parts.next().unwrap();
-                let fractional_part = parts.next().unwrap();
-                let integer_result = if integer_part.len() > 4 {
-                    group_n_chars(integer_part, 3).join(THIN_SPACE)
-                } else {
-                    integer_part.to_string()
-                };
-                if fractional_part.len() > 4 {
-                    let reversed = fractional_part.chars().rev().collect::<String>();
-                    let reversed_fractional_parts = group_n_chars(&reversed, 3).join(THIN_SPACE);
-                    let fractional_result =
-                        reversed_fractional_parts.chars().rev().collect::<String>();
-                    format!("{integer_result}.{fractional_result}")
-                } else {
-                    format!("{integer_result}.{fractional_part}")
-                }
-            } else if time.len() > 4 {
-                group_n_chars(&time, 3).join(THIN_SPACE)
-            } else {
-                time
-            }
+    } else if time.len() > 4 {
+        group_n_chars(&time, 3).join(THIN_SPACE)
+    } else {
+        time
+    }
+}
+
+fn format_locale(time: String) -> String {
+    let locale: Locale = get_locale()
+        .unwrap_or_else(|| "en-US".to_string())
+        .as_str()
+        .try_into()
+        .unwrap_or(Locale::en_US);
+    let grouping = locale_match!(locale => LC_NUMERIC::GROUPING);
+    if grouping[0] > 0 {
+        // "\u{202f}" (non-breaking thin space) does not exist in used font, replace with "\u{2009}" (thin space)
+        let thousands_sep =
+            locale_match!(locale => LC_NUMERIC::THOUSANDS_SEP).replace('\u{202f}', THIN_SPACE);
+        if time.contains('.') {
+            let decimal_point = locale_match!(locale => LC_NUMERIC::DECIMAL_POINT);
+            let mut parts = time.split('.');
+            let integer_result = group_n_chars(parts.next().unwrap(), grouping[0] as usize)
+                .join(thousands_sep.as_str());
+            let fractional_part = parts.next().unwrap();
+            format!("{integer_result}{decimal_point}{fractional_part}")
+        } else {
+            group_n_chars(&time, grouping[0] as usize).join(thousands_sep.as_str())
         }
+    } else {
+        time
     }
 }
 

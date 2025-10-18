@@ -292,7 +292,7 @@ impl SystemState {
             );
             ui.separator();
 
-            // Add items
+            // Add/remove viewport
             add_toolbar_button(
                 ui,
                 msgs,
