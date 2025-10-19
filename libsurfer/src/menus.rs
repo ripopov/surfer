@@ -533,7 +533,11 @@ impl SystemState {
         }
 
         if ui.button("Rename").clicked() {
-            msgs.push(Message::RenameItem(Some(vidx)));
+            let name = displayed_item.name();
+            msgs.push(Message::FocusItem(vidx));
+            msgs.push(Message::ShowCommandPrompt(Some(
+                format!("item_rename {name}").to_owned(),
+            )));
         }
 
         if ui.button("Remove").clicked() {
