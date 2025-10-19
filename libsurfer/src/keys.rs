@@ -68,6 +68,23 @@ impl SystemState {
                         msgs.push(Message::ShowCommandPrompt(Some("".to_string())))
                     }
                     (Key::Escape, true, true, false) => msgs.push(Message::ShowCommandPrompt(None)),
+                    (Key::Escape, true, false, false) => {
+                        msgs.push(Message::InvalidateCount);
+                        msgs.push(Message::ItemSelectionClear);
+                    }
+                    (Key::Escape, true, _, true) => msgs.push(Message::SetFilterFocused(false)),
+                    (Key::A, true, false, false) => {
+                        if modifiers.command {
+                            msgs.push(Message::ItemSelectAll);
+                        } else {
+                            msgs.push(Message::ToggleItemSelected(None));
+                        }
+                    }
+                    (Key::B, true, false, false) => msgs.push(Message::ToggleSidePanel),
+                    (Key::E, true, false, false) => msgs.push(Message::GoToEnd { viewport_idx: 0 }),
+                    (Key::F, true, false, false) => {
+                        msgs.push(Message::ShowCommandPrompt(Some("item_focus ".to_string())))
+                    }
                     (Key::G, true, true, false) => {
                         if modifiers.command {
                             msgs.push(Message::ShowCommandPrompt(None))
@@ -78,12 +95,44 @@ impl SystemState {
                         before: None,
                         items: None,
                     }),
-                    (Key::Escape, true, false, false) => {
+                    (Key::H, true, false, false) => msgs.push(Message::MoveCursorToTransition {
+                        next: false,
+                        variable: None,
+                        skip_zero: modifiers.shift,
+                    }),
+                    (Key::J, true, false, false) => {
+                        if modifiers.alt {
+                            msgs.push(Message::MoveFocus(
+                                MoveDir::Down,
+                                self.get_count(),
+                                modifiers.shift,
+                            ));
+                        } else if modifiers.command {
+                            msgs.push(Message::MoveFocusedItem(MoveDir::Down, self.get_count()));
+                        } else {
+                            msgs.push(Message::VerticalScroll(MoveDir::Down, self.get_count()));
+                        }
                         msgs.push(Message::InvalidateCount);
-                        msgs.push(Message::ItemSelectionClear);
                     }
-                    (Key::Escape, true, _, true) => msgs.push(Message::SetFilterFocused(false)),
-                    (Key::B, true, false, false) => msgs.push(Message::ToggleSidePanel),
+                    (Key::K, true, false, false) => {
+                        if modifiers.alt {
+                            msgs.push(Message::MoveFocus(
+                                MoveDir::Up,
+                                self.get_count(),
+                                modifiers.shift,
+                            ));
+                        } else if modifiers.command {
+                            msgs.push(Message::MoveFocusedItem(MoveDir::Up, self.get_count()));
+                        } else {
+                            msgs.push(Message::VerticalScroll(MoveDir::Up, self.get_count()));
+                        }
+                        msgs.push(Message::InvalidateCount);
+                    }
+                    (Key::L, true, false, false) => msgs.push(Message::MoveCursorToTransition {
+                        next: true,
+                        variable: None,
+                        skip_zero: modifiers.shift,
+                    }),
                     (Key::M, true, false, false) => {
                         if modifiers.alt {
                             msgs.push(Message::ToggleMenu)
@@ -108,22 +157,39 @@ impl SystemState {
                             }
                         }
                     }
-                    (Key::T, true, false, false) => msgs.push(Message::ToggleToolbar),
-                    (Key::F2, true, false, _) => {
-                        if let Some(waves) = &self.user.waves {
-                            msgs.push(Message::RenameItem(waves.focused_item));
+                    (Key::N, true, true, false) => {
+                        if modifiers.command {
+                            msgs.push(Message::SelectNextCommand);
                         }
                     }
-                    (Key::F11, true, false, _) => msgs.push(Message::ToggleFullscreen),
+                    (Key::O, true, false, false) if modifiers.command => {
+                        let mode = if modifiers.shift {
+                            crate::file_dialog::OpenMode::Switch
+                        } else {
+                            crate::file_dialog::OpenMode::Open
+                        };
+                        msgs.push(Message::OpenFileDialog(mode));
+                    }
+                    (Key::P, true, true, false) => {
+                        if modifiers.command {
+                            msgs.push(Message::SelectPrevCommand);
+                        }
+                    }
+                    (Key::R, true, false, false) => msgs.push(Message::ReloadWaveform(
+                        self.user.config.behavior.keep_during_reload,
+                    )),
+                    (Key::S, true, false, false) => {
+                        if modifiers.command {
+                            msgs.push(Message::SaveStateFile(self.user.state_file.clone()));
+                        } else {
+                            msgs.push(Message::GoToStart { viewport_idx: 0 });
+                        }
+                    }
+                    (Key::T, true, false, false) => msgs.push(Message::ToggleToolbar),
                     (Key::U, true, false, false) => {
                         if modifiers.shift {
                             msgs.push(Message::Redo(self.get_count()));
                         } else {
-                            msgs.push(Message::Undo(self.get_count()));
-                        }
-                    }
-                    (Key::Z, true, false, false) => {
-                        if modifiers.ctrl {
                             msgs.push(Message::Undo(self.get_count()));
                         }
                     }
@@ -132,37 +198,17 @@ impl SystemState {
                             msgs.push(Message::Redo(self.get_count()));
                         }
                     }
-                    (Key::F, true, false, false) => {
-                        msgs.push(Message::ShowCommandPrompt(Some("item_focus ".to_string())))
-                    }
-                    (Key::S, true, false, false) => {
-                        if modifiers.command {
-                            msgs.push(Message::SaveStateFile(self.user.state_file.clone()));
-                        } else {
-                            msgs.push(Message::GoToStart { viewport_idx: 0 });
+                    (Key::Z, true, false, false) => {
+                        if modifiers.ctrl {
+                            msgs.push(Message::Undo(self.get_count()));
                         }
                     }
-                    (Key::A, true, false, false) => {
-                        if modifiers.command {
-                            msgs.push(Message::ItemSelectAll);
-                        } else {
-                            msgs.push(Message::ToggleItemSelected(None));
+                    (Key::F2, true, false, _) => {
+                        if let Some(waves) = &self.user.waves {
+                            msgs.push(Message::RenameItem(waves.focused_item));
                         }
                     }
-                    (Key::E, true, false, false) => msgs.push(Message::GoToEnd { viewport_idx: 0 }),
-                    (Key::R, true, false, false) => msgs.push(Message::ReloadWaveform(
-                        self.user.config.behavior.keep_during_reload,
-                    )),
-                    (Key::H, true, false, false) => msgs.push(Message::MoveCursorToTransition {
-                        next: false,
-                        variable: None,
-                        skip_zero: modifiers.shift,
-                    }),
-                    (Key::L, true, false, false) => msgs.push(Message::MoveCursorToTransition {
-                        next: true,
-                        variable: None,
-                        skip_zero: modifiers.shift,
-                    }),
+                    (Key::F11, true, false, _) => msgs.push(Message::ToggleFullscreen),
                     (Key::Minus, true, false, false) => {
                         if modifiers.ctrl && cfg!(not(target_arch = "wasm32")) {
                             let mut next_factor = 0f32;
@@ -247,34 +293,7 @@ impl SystemState {
                             },
                         });
                     }
-                    (Key::J, true, false, false) => {
-                        if modifiers.alt {
-                            msgs.push(Message::MoveFocus(
-                                MoveDir::Down,
-                                self.get_count(),
-                                modifiers.shift,
-                            ));
-                        } else if modifiers.command {
-                            msgs.push(Message::MoveFocusedItem(MoveDir::Down, self.get_count()));
-                        } else {
-                            msgs.push(Message::VerticalScroll(MoveDir::Down, self.get_count()));
-                        }
-                        msgs.push(Message::InvalidateCount);
-                    }
-                    (Key::K, true, false, false) => {
-                        if modifiers.alt {
-                            msgs.push(Message::MoveFocus(
-                                MoveDir::Up,
-                                self.get_count(),
-                                modifiers.shift,
-                            ));
-                        } else if modifiers.command {
-                            msgs.push(Message::MoveFocusedItem(MoveDir::Up, self.get_count()));
-                        } else {
-                            msgs.push(Message::VerticalScroll(MoveDir::Up, self.get_count()));
-                        }
-                        msgs.push(Message::InvalidateCount);
-                    }
+                    (Key::ArrowDown, true, true, false) => msgs.push(Message::SelectNextCommand),
                     (Key::ArrowDown, true, false, false) => {
                         if modifiers.alt {
                             msgs.push(Message::MoveFocus(
@@ -289,6 +308,7 @@ impl SystemState {
                         }
                         msgs.push(Message::InvalidateCount);
                     }
+                    (Key::ArrowUp, true, true, false) => msgs.push(Message::SelectPrevCommand),
                     (Key::ArrowUp, true, false, false) => {
                         if modifiers.alt {
                             msgs.push(Message::MoveFocus(
@@ -318,18 +338,6 @@ impl SystemState {
                             }
 
                             msgs.push(Message::RemoveItems(remove_ids));
-                        }
-                    }
-                    (Key::ArrowUp, true, true, false) => msgs.push(Message::SelectPrevCommand),
-                    (Key::P, true, true, false) => {
-                        if modifiers.command {
-                            msgs.push(Message::SelectPrevCommand);
-                        }
-                    }
-                    (Key::ArrowDown, true, true, false) => msgs.push(Message::SelectNextCommand),
-                    (Key::N, true, true, false) => {
-                        if modifiers.command {
-                            msgs.push(Message::SelectNextCommand);
                         }
                     }
                     _ => {}
