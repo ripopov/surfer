@@ -205,7 +205,7 @@ impl SystemState {
                     }
                     (Key::F2, true, false, _) => {
                         if let Some(waves) = &self.user.waves {
-                            msgs.push(Message::RenameItem(waves.focused_item));
+                            msgs.push(Message::OpenRenameDialog(waves.focused_item));
                         }
                     }
                     (Key::F11, true, false, _) => msgs.push(Message::ToggleFullscreen),
