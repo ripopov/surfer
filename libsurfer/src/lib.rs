@@ -466,11 +466,7 @@ impl SystemState {
                 let waves = self.user.waves.as_mut()?;
                 waves.focused_item = None;
             }
-            Message::RenameItem(vidx) => {
-                self.save_current_canvas(format!(
-                    "Rename item to {}",
-                    self.item_renaming_string.borrow()
-                ));
+            Message::OpenRenameDialog(vidx) => {
                 let waves = self.user.waves.as_mut()?;
                 let vidx = vidx.or(waves.focused_item)?;
                 self.user.rename_target = Some(vidx);
