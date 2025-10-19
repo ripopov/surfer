@@ -162,6 +162,14 @@ impl SystemState {
                             msgs.push(Message::SelectNextCommand);
                         }
                     }
+                    (Key::O, true, false, false) if modifiers.command => {
+                        let mode = if modifiers.shift {
+                            crate::file_dialog::OpenMode::Switch
+                        } else {
+                            crate::file_dialog::OpenMode::Open
+                        };
+                        msgs.push(Message::OpenFileDialog(mode));
+                    }
                     (Key::P, true, true, false) => {
                         if modifiers.command {
                             msgs.push(Message::SelectPrevCommand);

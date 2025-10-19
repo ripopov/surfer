@@ -93,8 +93,11 @@ impl SystemState {
         let waves_loaded = self.user.waves.is_some();
 
         ui.menu_button("File", |ui| {
-            b("Open file...", Message::OpenFileDialog(OpenMode::Open)).add_closing_menu(msgs, ui);
+            b("Open file...", Message::OpenFileDialog(OpenMode::Open))
+                .shortcut("Ctrl+o")
+                .add_closing_menu(msgs, ui);
             b("Switch file...", Message::OpenFileDialog(OpenMode::Switch))
+                .shortcut("Ctrl+Shift+O")
                 .add_closing_menu(msgs, ui);
             b(
                 "Reload",
