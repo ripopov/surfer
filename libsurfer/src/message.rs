@@ -94,7 +94,7 @@ pub enum Message {
     SetItemSelected(VisibleItemIndex, bool),
     /// Unfocus a wave/item.
     UnfocusItem,
-    RenameItem(Option<VisibleItemIndex>),
+    OpenRenameDialog(Option<VisibleItemIndex>),
     MoveFocus(MoveDir, CommandCount, bool),
     MoveFocusedItem(MoveDir, CommandCount),
     FocusTransaction(Option<TransactionRef>, Option<Transaction>),
