@@ -1527,6 +1527,7 @@ impl VariableExt for String {
             (ValueKind::Undef, _) => (0.5, None),
             (ValueKind::DontCare, _) => (0.5, None),
             (ValueKind::Warn, _) => (0.5, None),
+            (ValueKind::Error, _) => (0.5, None),
             (ValueKind::Custom(_), _) => (0.5, None),
             (ValueKind::Weak, other) => {
                 if other.to_lowercase() == "l" {

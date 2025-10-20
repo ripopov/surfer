@@ -36,14 +36,10 @@ fn match_variable_type_name(
     variable_type_name: &Option<String>,
     candidates: &'static [&'static str],
 ) -> bool {
-    if let Some(type_name) = variable_type_name {
-        for candidate in candidates {
-            if type_name.eq_ignore_ascii_case(candidate) {
-                return true;
-            }
-        }
-    }
-    false
+    variable_type_name
+        .as_ref()
+        .map(|type_name| candidates.iter().any(|c| type_name.eq_ignore_ascii_case(c)))
+        .unwrap_or(false)
 }
 
 #[inline]
@@ -98,18 +94,7 @@ impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
     }
 
     fn basic_translate(&self, num_bits: u64, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(
-            |v| {
-                let signweight = BigUint::from(1u8) << (num_bits - 1);
-                if v < signweight {
-                    format!("{v}")
-                } else {
-                    let v2 = (signweight << 1) - v;
-                    format!("-{v2}")
-                }
-            },
-            v,
-        )
+        translate_numeric(|val| compute_signed_value(&val, num_bits), v)
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -120,6 +105,17 @@ impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
         } else {
             translates_all_bit_types(variable)
         }
+    }
+}
+
+/// Computes the signed value string for a given BigUint and bit width.
+fn compute_signed_value(v: &BigUint, num_bits: u64) -> String {
+    let signweight = BigUint::from(1u8) << (num_bits - 1);
+    if v < &signweight {
+        format!("{v}")
+    } else {
+        let v2 = (signweight << 1) - v;
+        format!("-{v2}")
     }
 }
 
