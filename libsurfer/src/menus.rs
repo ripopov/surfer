@@ -9,6 +9,7 @@ use surfer_translation_types::{TranslationPreference, Translator};
 use crate::config::{PrimaryMouseDrag, TransitionValue};
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation, ScopeExpandType};
+use crate::keyboard_shortcuts::ShortcutAction;
 use crate::message::MessageTarget;
 use crate::wave_container::{FieldRef, VariableRefExt};
 use crate::wave_data::ScopeType;
@@ -94,16 +95,31 @@ impl SystemState {
 
         ui.menu_button("File", |ui| {
             b("Open file...", Message::OpenFileDialog(OpenMode::Open))
-                .shortcut("Ctrl+o")
+                .shortcut(
+                    self.user
+                        .config
+                        .shortcuts
+                        .format_shortcut(ShortcutAction::OpenFile),
+                )
                 .add_closing_menu(msgs, ui);
             b("Switch file...", Message::OpenFileDialog(OpenMode::Switch))
-                .shortcut("Ctrl+Shift+O")
+                .shortcut(
+                    self.user
+                        .config
+                        .shortcuts
+                        .format_shortcut(ShortcutAction::SwitchFile),
+                )
                 .add_closing_menu(msgs, ui);
             b(
                 "Reload",
                 Message::ReloadWaveform(self.user.config.behavior.keep_during_reload),
             )
-            .shortcut("r")
+            .shortcut(
+                self.user
+                    .config
+                    .shortcuts
+                    .format_shortcut(ShortcutAction::ReloadWaveform),
+            )
             .enabled(self.user.waves.is_some())
             .add_closing_menu(msgs, ui);
 
@@ -119,7 +135,12 @@ impl SystemState {
                     save_text,
                     Message::SaveStateFile(self.user.state_file.clone()),
                 )
-                .shortcut("Ctrl+s")
+                .shortcut(
+                    self.user
+                        .config
+                        .shortcuts
+                        .format_shortcut(ShortcutAction::SaveStateFile),
+                )
                 .add_closing_menu(msgs, ui);
             }
             b("Save state as...", Message::SaveStateFile(None)).add_closing_menu(msgs, ui);
@@ -171,7 +192,12 @@ impl SystemState {
                     viewport_idx: 0,
                 },
             )
-            .shortcut("+")
+            .shortcut(
+                self.user
+                    .config
+                    .shortcuts
+                    .format_shortcut(ShortcutAction::UiZoomIn),
+            )
             .enabled(waves_loaded)
             .add_leave_menu(msgs, ui);
 
@@ -183,7 +209,12 @@ impl SystemState {
                     viewport_idx: 0,
                 },
             )
-            .shortcut("-")
+            .shortcut(
+                self.user
+                    .config
+                    .shortcuts
+                    .format_shortcut(ShortcutAction::UiZoomOut),
+            )
             .enabled(waves_loaded)
             .add_leave_menu(msgs, ui);
 
@@ -194,11 +225,21 @@ impl SystemState {
             ui.separator();
 
             b("Go to start", Message::GoToStart { viewport_idx: 0 })
-                .shortcut("s")
+                .shortcut(
+                    self.user
+                        .config
+                        .shortcuts
+                        .format_shortcut(ShortcutAction::GoToStart),
+                )
                 .enabled(waves_loaded)
                 .add_closing_menu(msgs, ui);
             b("Go to end", Message::GoToEnd { viewport_idx: 0 })
-                .shortcut("e")
+                .shortcut(
+                    self.user
+                        .config
+                        .shortcuts
+                        .format_shortcut(ShortcutAction::GoToEnd),
+                )
                 .enabled(waves_loaded)
                 .add_closing_menu(msgs, ui);
             ui.separator();
@@ -214,16 +255,31 @@ impl SystemState {
                 "Toggle side panel",
                 Message::SetSidePanelVisible(!self.show_hierarchy()),
             )
-            .shortcut("b")
+            .shortcut(
+                self.user
+                    .config
+                    .shortcuts
+                    .format_shortcut(ShortcutAction::ToggleSidePanel),
+            )
             .add_closing_menu(msgs, ui);
             b("Toggle menu", Message::SetMenuVisible(!self.show_menu()))
-                .shortcut("Alt+m")
+                .shortcut(
+                    self.user
+                        .config
+                        .shortcuts
+                        .format_shortcut(ShortcutAction::ToggleMenu),
+                )
                 .add_closing_menu(msgs, ui);
             b(
                 "Toggle toolbar",
                 Message::SetToolbarVisible(!self.show_toolbar()),
             )
-            .shortcut("t")
+            .shortcut(
+                self.user
+                    .config
+                    .shortcuts
+                    .format_shortcut(ShortcutAction::ToggleToolbar),
+            )
             .add_closing_menu(msgs, ui);
             b(
                 "Toggle overview",
@@ -477,7 +533,7 @@ impl SystemState {
                     .then(|| {
                         msgs.push(Message::ItemColorChange(
                             group_target,
-                            Some(color_name.clone()),
+                            Some(color_name.to_string()),
                         ));
                     });
             }
@@ -497,7 +553,7 @@ impl SystemState {
                     .then(|| {
                         msgs.push(Message::ItemBackgroundColorChange(
                             group_target,
-                            Some(color_name.clone()),
+                            Some(color_name.to_string()),
                         ));
                     });
             }

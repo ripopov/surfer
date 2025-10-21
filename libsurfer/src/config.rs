@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation};
+use crate::keyboard_shortcuts::{SurferShortcuts, deserialize_shortcuts};
 use crate::mousegestures::GestureZones;
 use crate::time::TimeFormat;
 use crate::wave_container::VariableMeta;
@@ -141,6 +142,9 @@ pub struct SurferConfig {
     /// Maximum URL length for remote connections.
     /// Should only be changed in case you are behind a proxy that limits the URL length
     pub max_url_length: u16,
+    /// Keyboard shortcuts
+    #[serde(deserialize_with = "deserialize_shortcuts")]
+    pub shortcuts: SurferShortcuts,
 }
 
 impl SurferConfig {
@@ -1169,7 +1173,7 @@ where
 /// are found, they will be returned in a `Vec<PathBuf>` in a pre-order of most top-level to most
 /// local. All plain files are ignored.
 #[cfg(not(target_arch = "wasm32"))]
-fn find_local_configs() -> Vec<PathBuf> {
+pub fn find_local_configs() -> Vec<PathBuf> {
     use crate::util::search_upward;
     match std::env::current_dir() {
         Ok(dir) => search_upward(dir, "/", LOCAL_DIR)

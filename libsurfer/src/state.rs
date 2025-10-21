@@ -146,6 +146,7 @@ impl UserState {
     pub fn new(force_default_config: bool) -> Result<UserState> {
         let config = SurferConfig::new(force_default_config)
             .with_context(|| "Failed to load config file")?;
+
         Ok(UserState {
             config,
             ..Default::default()
