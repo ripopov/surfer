@@ -79,6 +79,20 @@ build_book:
         - cp snapshots/theme_*.png docs/configuration/themes
         - /builds/${CI_PROJECT_PATH}/cargo/bin/mdbook build
 
+msrv:
+  stage: test
+  image:
+    name: foresterre/cargo-msrv:latest
+    entrypoint: [""]
+  before_script:
+    - apt-get update -y
+    - apt-get install -y openssl libssl-dev pkg-config
+    - rustc --version
+    - cargo --version
+    - cargo msrv --version
+  script:
+    - cargo msrv --path surver verify
+    - cargo msrv --path surfer verify
 
 test:
     stage: test
