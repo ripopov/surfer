@@ -1,7 +1,5 @@
 mod field_ref;
 pub mod plugin_types;
-#[cfg(feature = "pyo3")]
-pub mod python;
 mod result;
 mod scope_ref;
 pub mod translator;
