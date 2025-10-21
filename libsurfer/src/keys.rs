@@ -12,6 +12,9 @@ use crate::{
 
 impl SystemState {
     pub fn handle_pressed_keys(&self, ctx: &Context, msgs: &mut Vec<Message>) {
+        if !(self.command_prompt.visible | self.user.variable_name_filter_focused) {
+            self.user.shortcuts.update(ctx, msgs, self);
+        }
         ctx.input(|i| {
             i.events.iter().for_each(|event| match event {
                 Event::Key {
@@ -26,35 +29,25 @@ impl SystemState {
                     self.command_prompt.visible,
                     self.user.variable_name_filter_focused,
                 ) {
-                    (Key::Num0, true, false, false) => {
-                        handle_digit(0, modifiers, msgs);
-                    }
-                    (Key::Num1, true, false, false) => {
-                        handle_digit(1, modifiers, msgs);
-                    }
-                    (Key::Num2, true, false, false) => {
-                        handle_digit(2, modifiers, msgs);
-                    }
-                    (Key::Num3, true, false, false) => {
-                        handle_digit(3, modifiers, msgs);
-                    }
-                    (Key::Num4, true, false, false) => {
-                        handle_digit(4, modifiers, msgs);
-                    }
-                    (Key::Num5, true, false, false) => {
-                        handle_digit(5, modifiers, msgs);
-                    }
-                    (Key::Num6, true, false, false) => {
-                        handle_digit(6, modifiers, msgs);
-                    }
-                    (Key::Num7, true, false, false) => {
-                        handle_digit(7, modifiers, msgs);
-                    }
-                    (Key::Num8, true, false, false) => {
-                        handle_digit(8, modifiers, msgs);
-                    }
-                    (Key::Num9, true, false, false) => {
-                        handle_digit(9, modifiers, msgs);
+                    // Consolidate numeric key handling into a single arm using helper
+                    (k, true, false, false)
+                        if matches!(
+                            k,
+                            Key::Num0
+                                | Key::Num1
+                                | Key::Num2
+                                | Key::Num3
+                                | Key::Num4
+                                | Key::Num5
+                                | Key::Num6
+                                | Key::Num7
+                                | Key::Num8
+                                | Key::Num9
+                        ) =>
+                    {
+                        if let Some(d) = key_to_digit(k) {
+                            handle_digit(d, modifiers, msgs);
+                        }
                     }
                     (Key::Home, true, false, false) => msgs.push(Message::ScrollToItem(0)),
                     (Key::End, true, false, false) => {
@@ -80,8 +73,6 @@ impl SystemState {
                             msgs.push(Message::ToggleItemSelected(None));
                         }
                     }
-                    (Key::B, true, false, false) => msgs.push(Message::ToggleSidePanel),
-                    (Key::E, true, false, false) => msgs.push(Message::GoToEnd { viewport_idx: 0 }),
                     (Key::F, true, false, false) => {
                         msgs.push(Message::ShowCommandPrompt(Some("item_focus ".to_string())))
                     }
@@ -178,31 +169,6 @@ impl SystemState {
                     (Key::R, true, false, false) => msgs.push(Message::ReloadWaveform(
                         self.user.config.behavior.keep_during_reload,
                     )),
-                    (Key::S, true, false, false) => {
-                        if modifiers.command {
-                            msgs.push(Message::SaveStateFile(self.user.state_file.clone()));
-                        } else {
-                            msgs.push(Message::GoToStart { viewport_idx: 0 });
-                        }
-                    }
-                    (Key::T, true, false, false) => msgs.push(Message::ToggleToolbar),
-                    (Key::U, true, false, false) => {
-                        if modifiers.shift {
-                            msgs.push(Message::Redo(self.get_count()));
-                        } else {
-                            msgs.push(Message::Undo(self.get_count()));
-                        }
-                    }
-                    (Key::Y, true, false, false) => {
-                        if modifiers.ctrl {
-                            msgs.push(Message::Redo(self.get_count()));
-                        }
-                    }
-                    (Key::Z, true, false, false) => {
-                        if modifiers.ctrl {
-                            msgs.push(Message::Undo(self.get_count()));
-                        }
-                    }
                     (Key::F2, true, false, _) => {
                         if let Some(waves) = &self.user.waves {
                             msgs.push(Message::RenameItem(waves.focused_item));
@@ -351,20 +317,40 @@ impl SystemState {
     }
 
     pub fn get_count(&self) -> usize {
-        if let Some(count) = &self.user.count {
-            count.parse::<usize>().unwrap_or(1)
-        } else {
-            1
-        }
+        self.user
+            .count
+            .as_deref()
+            .map(str::trim)
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(1)
     }
 }
 
 fn handle_digit(digit: u8, modifiers: &Modifiers, msgs: &mut Vec<Message>) {
     if modifiers.alt {
-        msgs.push(Message::AddCount((digit + 48) as char));
+        // Convert 0..9 to '0'..'9' safely and clearly
+        if let Some(c) = std::char::from_digit(digit as u32, 10) {
+            msgs.push(Message::AddCount(c));
+        }
     } else if modifiers.command {
         msgs.push(Message::MoveMarkerToCursor(digit));
     } else {
         msgs.push(Message::GoToMarkerPosition(digit, 0));
+    }
+}
+
+fn key_to_digit(key: &Key) -> Option<u8> {
+    match key {
+        Key::Num0 => Some(0),
+        Key::Num1 => Some(1),
+        Key::Num2 => Some(2),
+        Key::Num3 => Some(3),
+        Key::Num4 => Some(4),
+        Key::Num5 => Some(5),
+        Key::Num6 => Some(6),
+        Key::Num7 => Some(7),
+        Key::Num8 => Some(8),
+        Key::Num9 => Some(9),
+        _ => None,
     }
 }
