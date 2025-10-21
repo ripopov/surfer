@@ -740,7 +740,7 @@ where
 /// are found, they will be returned in a `Vec<PathBuf>` in a pre-order of most top-level to most
 /// local. All plain files are ignored.
 #[cfg(not(target_arch = "wasm32"))]
-fn find_local_configs() -> Vec<PathBuf> {
+pub fn find_local_configs() -> Vec<PathBuf> {
     use crate::util::search_upward;
     match std::env::current_dir() {
         Ok(dir) => search_upward(dir, "/", ".surfer")
