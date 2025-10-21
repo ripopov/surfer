@@ -12,3 +12,5 @@ To add additional decoders to Surfer, create a `decoders` directory in Surfer's 
 
 To add a new decoder, create a subdirectory and add the required toml files.
 You can also add project-specific decoders to `.surfer/decoders` directories.
+
+The decoders show up as additional formats.
