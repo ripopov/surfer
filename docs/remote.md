@@ -46,10 +46,11 @@ Arguments:
   <WAVE_FILE>  Waveform file in VCD, FST, or GHW format
 
 Options:
-      --port <PORT>    Port on which server will listen
-      --token <TOKEN>  Token used by the client to authenticate to the server
-  -h, --help           Print help
-  -V, --version        Print version
+      --port <PORT>                  Port on which server will listen
+      --bind-address <BIND_ADDRESS>  IP address to bind the server to
+      --token <TOKEN>                Token used by the client to authenticate to the server
+  -h, --help                         Print help
+  -V, --version                      Print version
 ```
 
 or
