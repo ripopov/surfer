@@ -1,0 +1,5 @@
+open = ["Ctrl+O"]
+undo = ["Ctrl+Z", "U"]
+redo = ["Ctrl+Shift+Z", "Shift+U"]
+toggle_side_panel = ["B"]
+toggle_toolbar = ["T"]
