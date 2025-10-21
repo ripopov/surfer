@@ -8,12 +8,12 @@ use directories::ProjectDirs;
 use extism::{host_fn, Manifest, Plugin, PluginBuilder, Wasm, PTR};
 use extism_manifest::MemoryOptions;
 use eyre::{anyhow, Context};
-use log::{error, warn};
 use surfer_translation_types::plugin_types::TranslateParams;
 use surfer_translation_types::{
     TranslationPreference, TranslationResult, Translator, VariableInfo, VariableMeta,
     VariableNameInfo, VariableValue,
 };
+use tracing::{error, warn};
 
 use crate::message::Message;
 use crate::wave_container::{ScopeId, VarId};

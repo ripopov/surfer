@@ -1,7 +1,7 @@
 use camino::Utf8PathBuf;
 use eyre::Context as _;
 use futures::FutureExt as _;
-use log::{error, info, trace};
+use tracing::{error, info, trace};
 
 use crate::{
     command_parser::get_parser,

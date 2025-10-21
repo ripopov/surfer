@@ -2,7 +2,7 @@ use super::HierarchyResponse;
 use bincode::Options;
 use eyre::Result;
 use eyre::{bail, eyre};
-use log::info;
+use tracing::info;
 use wellen::CompressedTimeTable;
 
 use surver::{

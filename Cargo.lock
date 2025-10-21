@@ -3062,7 +3062,6 @@ dependencies = [
  "lazy_static",
  "leb128",
  "local-impl",
- "log",
  "lz4_flex",
  "notify",
  "num",
@@ -3086,10 +3085,10 @@ dependencies = [
  "test-log",
  "tokio",
  "tokio-stream",
- "toml 0.8.23",
+ "toml 0.9.8",
  "tracing",
- "tracing-log",
  "tracing-subscriber",
+ "tracing-wasm",
  "vergen-gitcl",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -5622,6 +5621,17 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "tracing-wasm"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4575c663a174420fa2d78f4108ff68f65bf2fbb7dd89f33749b6e826b3626e07"
+dependencies = [
+ "tracing",
+ "tracing-subscriber",
+ "wasm-bindgen",
 ]
 
 [[package]]

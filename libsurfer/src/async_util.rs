@@ -2,8 +2,8 @@
 ///
 /// As wasm32 and most other platforms behave differently, there are these wrappers.
 use futures_core::Future;
-use log::info;
 use serde::Deserialize;
+use tracing::info;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub enum AsyncJob {

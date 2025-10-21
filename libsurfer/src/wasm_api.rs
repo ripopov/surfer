@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use futures::executor::block_on;
 use lazy_static::lazy_static;
-use log::{error, warn};
 use num::BigInt;
 use tokio::sync::Mutex;
+use tracing::{error, warn};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -69,14 +69,7 @@ impl WebHandle {
     #[allow(clippy::new_without_default)]
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        let web_log_config = fern::Dispatch::new()
-            .level(log::LevelFilter::Info)
-            .format(move |out, message, record| {
-                out.finish(format_args!("[{}] {}", record.level(), message))
-            })
-            .chain(Box::new(eframe::WebLogger::new(log::LevelFilter::Debug)) as Box<dyn log::Log>);
-
-        logs::setup_logging(web_log_config).unwrap();
+        tracing_wasm::set_as_global_default();
 
         wasm_panic::set_once();
 

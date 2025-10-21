@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::BTreeMap, sync::Mutex};
+use std::{collections::BTreeMap, sync::Mutex};
 
 use ecolor::Color32;
 use egui::{self, RichText, TextWrapMode};
@@ -31,15 +31,6 @@ pub struct LogMessage {
 }
 
 struct EguiLogger {}
-
-impl EguiLogger {
-    pub fn records(&self) -> Vec<LogMessage> {
-        RECORD_MUTEX
-            .lock()
-            .expect("Failed to lock logger. Thread poisoned?")
-            .to_vec()
-    }
-}
 
 struct FieldVisitor<'a>(&'a mut BTreeMap<String, String>);
 
@@ -151,8 +142,6 @@ pub fn start_logging() -> Result<()> {
     use std::io::stdout;
 
     use tracing_subscriber::{fmt, layer::SubscriberExt, Registry};
-
-    tracing_log::LogTracer::init()?;
 
     let filter =
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
