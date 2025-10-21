@@ -729,7 +729,12 @@ impl SystemState {
         };
         match active_stream {
             StreamScopeRef::Root => {
-                for stream in inner.get_streams() {
+                let streams = inner.get_streams();
+                let sorted_streams = streams
+                    .iter()
+                    .sorted_by(|a, b| numeric_sort::cmp(&a.name, &b.name))
+                    .collect_vec();
+                for stream in sorted_streams {
                     ui.with_layout(
                         Layout::top_down(Align::LEFT).with_cross_justify(true),
                         |ui| {
@@ -750,7 +755,17 @@ impl SystemState {
             }
             StreamScopeRef::Stream(stream_ref) => {
                 if let Some(stream) = inner.get_stream(stream_ref.stream_id) {
-                    for gen_id in &stream.generators {
+                    let sorted_generators = stream
+                        .generators
+                        .iter()
+                        .sorted_by(|a, b| {
+                            numeric_sort::cmp(
+                                &inner.get_generator(**a).unwrap().name,
+                                &inner.get_generator(**b).unwrap().name,
+                            )
+                        })
+                        .collect_vec();
+                    for gen_id in sorted_generators {
                         if let Some(generator) = inner.get_generator(*gen_id) {
                             let gen_name = generator.name.clone();
                             ui.with_layout(
