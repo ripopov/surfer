@@ -11,6 +11,7 @@ use crate::{
     dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog},
     displayed_item_tree::{DisplayedItemTree, VisibleItemIndex},
     hierarchy::HierarchyStyle,
+    keyboard_shortcuts::SurferShortcuts,
     message::Message,
     system_state::SystemState,
     time::{TimeStringFormatting, TimeUnit},
@@ -36,6 +37,8 @@ use surfer_translation_types::Translator;
 pub struct UserState {
     #[serde(skip)]
     pub config: SurferConfig,
+    #[serde(skip)]
+    pub shortcuts: SurferShortcuts,
 
     /// Overrides for the config show_* fields. Defaults to `config.show_*` if not present
     pub(crate) show_hierarchy: Option<bool>,
