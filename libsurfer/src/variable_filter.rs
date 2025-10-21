@@ -1,5 +1,6 @@
 //! Filtering of the variable list.
 use derive_more::Display;
+use egui::collapsing_header::CollapsingState;
 use egui::{Button, Layout, TextEdit, Ui};
 use egui_remixicon::icons;
 use emath::{Align, Vec2};
@@ -8,6 +9,7 @@ use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use itertools::Itertools;
 use regex::{escape, Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 
 use crate::data_container::DataContainer::Transactions;
 use crate::transaction_container::{StreamScopeRef, TransactionStreamRef};
@@ -34,7 +36,7 @@ pub enum VariableNameFilterType {
     Contain,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct VariableFilter {
     pub(crate) name_filter_type: VariableNameFilterType,
     pub(crate) name_filter_str: String,
@@ -46,6 +48,17 @@ pub struct VariableFilter {
     pub(crate) include_others: bool,
 
     pub(crate) group_by_direction: bool,
+    #[serde(skip)]
+    cache: RefCell<VariableFilterRegexCache>,
+}
+
+// Lightweight cache for compiled regex and fuzzy matcher to avoid repeated compilation
+#[derive(Default)]
+struct VariableFilterRegexCache {
+    // For regex-based filters (Regex, Start, Contain)
+    regex_pattern: Option<String>,
+    regex_case_insensitive: bool,
+    regex: Option<Regex>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -75,6 +88,7 @@ impl VariableFilter {
             include_others: true,
 
             group_by_direction: false,
+            cache: RefCell::new(Default::default()),
         }
     }
 
@@ -83,44 +97,63 @@ impl VariableFilter {
             return Box::new(|_var_name| true);
         }
 
-        match self.name_filter_type {
+        // Copy the decisions/inputs out of self so the borrow of self.cache can be short-lived.
+        let filter_type = &self.name_filter_type;
+        let filter_str = self.name_filter_str.clone();
+        let case_insensitive = self.name_filter_case_insensitive;
+
+        // Prepare owned clones that we will move into the returned closure.
+        let mut owned_regex: Option<Regex> = None;
+
+        if *filter_type != VariableNameFilterType::Fuzzy
+        // Short-lived borrow of the cache to potentially rebuild and to clone out owned values.
+        {
+            let mut cache = self.cache.borrow_mut();
+
+            let pat = match filter_type {
+                VariableNameFilterType::Regex => filter_str.clone(),
+                VariableNameFilterType::Start => format!("^{}", escape(&filter_str)),
+                VariableNameFilterType::Contain => escape(&filter_str),
+                _ => unreachable!(),
+            };
+            let rebuild = cache
+                .regex_pattern
+                .as_ref()
+                .map(|p| p != &pat)
+                .unwrap_or(true)
+                || cache.regex_case_insensitive != case_insensitive
+                || cache.regex.is_none();
+
+            if rebuild {
+                cache.regex_pattern = Some(pat.clone());
+                cache.regex_case_insensitive = case_insensitive;
+                cache.regex = RegexBuilder::new(&pat)
+                    .case_insensitive(case_insensitive)
+                    .build()
+                    .ok();
+            }
+
+            if let Some(r) = cache.regex.as_ref() {
+                owned_regex = Some(r.clone());
+            }
+        } // cache borrow ends here
+
+        // Now build the closure using only owned values (no borrow of cache/self remains).
+        match filter_type {
             VariableNameFilterType::Fuzzy => {
-                let matcher = if self.name_filter_case_insensitive {
-                    SkimMatcherV2::default().ignore_case()
+                let mut matcher = SkimMatcherV2::default();
+                matcher = if case_insensitive {
+                    matcher.ignore_case()
                 } else {
-                    SkimMatcherV2::default().respect_case()
+                    matcher.respect_case()
                 };
-
-                // Make a copy of the filter string to move into the closure below
-                let filter_str_clone = self.name_filter_str.clone();
-
-                Box::new(move |var_name| matcher.fuzzy_match(var_name, &filter_str_clone).is_some())
+                let pat = filter_str;
+                Box::new(move |var_name| matcher.fuzzy_match(var_name, &pat).is_some())
             }
-            VariableNameFilterType::Regex => {
-                if let Ok(regex) = RegexBuilder::new(&self.name_filter_str)
-                    .case_insensitive(self.name_filter_case_insensitive)
-                    .build()
-                {
-                    Box::new(move |var_name| regex.is_match(var_name))
-                } else {
-                    Box::new(|_var_name| false)
-                }
-            }
-            VariableNameFilterType::Start => {
-                if let Ok(regex) = RegexBuilder::new(&format!("^{}", escape(&self.name_filter_str)))
-                    .case_insensitive(self.name_filter_case_insensitive)
-                    .build()
-                {
-                    Box::new(move |var_name| regex.is_match(var_name))
-                } else {
-                    Box::new(|_var_name| false)
-                }
-            }
-            VariableNameFilterType::Contain => {
-                if let Ok(regex) = RegexBuilder::new(&escape(&self.name_filter_str))
-                    .case_insensitive(self.name_filter_case_insensitive)
-                    .build()
-                {
+            VariableNameFilterType::Regex
+            | VariableNameFilterType::Start
+            | VariableNameFilterType::Contain => {
+                if let Some(regex) = owned_regex {
                     Box::new(move |var_name| regex.is_match(var_name))
                 } else {
                     Box::new(|_var_name| false)
@@ -170,127 +203,138 @@ impl SystemState {
         msgs: &mut Vec<Message>,
         full_path: bool,
     ) {
-        ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-            let default_padding = ui.spacing().button_padding;
-            ui.spacing_mut().button_padding = Vec2 {
-                x: 0.,
-                y: default_padding.y,
-            };
-            ui.button(icons::ADD_FILL)
-                .on_hover_text("Add all variables from active Scope")
-                .clicked()
-                .then(|| {
-                    if let Some(waves) = self.user.waves.as_ref() {
-                        if full_path {
-                            let variables = waves.inner.as_waves().unwrap().variables(false);
+        ui.with_layout(Layout::top_down(Align::LEFT), |ui| {
+            CollapsingState::load_with_default_open(
+                ui.ctx(),
+                ui.make_persistent_id("variable_filter"),
+                false,
+            )
+            .show_header(ui, |ui| {
+                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
+                    let default_padding = ui.spacing().button_padding;
+                    ui.spacing_mut().button_padding = Vec2 {
+                        x: 0.,
+                        y: default_padding.y,
+                    };
+                    ui.button(icons::ADD_FILL)
+                        .on_hover_text("Add all variables from active Scope")
+                        .clicked()
+                        .then(|| {
+                            self.add_filtered_variables(msgs, full_path);
+                        });
+                    ui.add_enabled(
+                        !self.user.variable_filter.name_filter_str.is_empty(),
+                        Button::new(icons::CLOSE_FILL),
+                    )
+                    .on_hover_text("Clear filter")
+                    .clicked()
+                    .then(|| self.user.variable_filter.name_filter_str.clear());
+
+                    // Check if regex and if an incorrect regex, change background color
+                    if self.user.variable_filter.name_filter_type == VariableNameFilterType::Regex
+                        && Regex::new(&self.user.variable_filter.name_filter_str).is_err()
+                    {
+                        ui.style_mut().visuals.extreme_bg_color =
+                            self.user.config.theme.accent_error.background;
+                    }
+                    // Create text edit
+                    let response = ui.add(
+                        TextEdit::singleline(&mut self.user.variable_filter.name_filter_str)
+                            .hint_text("Filter"),
+                    );
+                    // Handle focus
+                    if response.gained_focus() {
+                        msgs.push(Message::SetFilterFocused(true));
+                    }
+                    if response.lost_focus() {
+                        msgs.push(Message::SetFilterFocused(false));
+                    }
+                    ui.spacing_mut().button_padding = default_padding;
+                });
+            })
+            .body(|ui| self.variable_filter_type_menu(ui, msgs));
+        });
+    }
+
+    fn add_filtered_variables(&mut self, msgs: &mut Vec<Message>, full_path: bool) {
+        if let Some(waves) = self.user.waves.as_ref() {
+            if full_path {
+                let variables = waves.inner.as_waves().unwrap().variables(false);
+                msgs.push(Message::AddVariables(
+                    self.filtered_variables(&variables, false),
+                ));
+            } else {
+                // Iterate over the reversed list to get
+                // waves in the same order as the variable
+                // list
+                if let Some(active_scope) = waves.active_scope.as_ref() {
+                    match active_scope {
+                        ScopeType::WaveScope(active_scope) => {
+                            let variables = waves
+                                .inner
+                                .as_waves()
+                                .unwrap()
+                                .variables_in_scope(active_scope);
                             msgs.push(Message::AddVariables(
                                 self.filtered_variables(&variables, false),
                             ));
-                        } else {
-                            // Iterate over the reversed list to get
-                            // waves in the same order as the variable
-                            // list
-                            if let Some(active_scope) = waves.active_scope.as_ref() {
+                        }
+                        ScopeType::StreamScope(active_scope) => {
+                            if let Transactions(inner) = &waves.inner {
                                 match active_scope {
-                                    ScopeType::WaveScope(active_scope) => {
-                                        let variables = waves
-                                            .inner
-                                            .as_waves()
-                                            .unwrap()
-                                            .variables_in_scope(active_scope);
-                                        msgs.push(Message::AddVariables(
-                                            self.filtered_variables(&variables, false),
-                                        ));
-                                    }
-                                    ScopeType::StreamScope(active_scope) => {
-                                        let Transactions(inner) = &waves.inner else {
-                                            return;
-                                        };
-                                        match active_scope {
-                                            StreamScopeRef::Root => {
-                                                for stream in inner.get_streams() {
-                                                    msgs.push(Message::AddStreamOrGenerator(
-                                                        TransactionStreamRef::new_stream(
-                                                            stream.id,
-                                                            stream.name.clone(),
-                                                        ),
-                                                    ));
-                                                }
-                                            }
-                                            StreamScopeRef::Stream(s) => {
-                                                for gen_id in &inner
-                                                    .get_stream(s.stream_id)
-                                                    .unwrap()
-                                                    .generators
-                                                {
-                                                    let gen = inner.get_generator(*gen_id).unwrap();
-
-                                                    msgs.push(Message::AddStreamOrGenerator(
-                                                        TransactionStreamRef::new_gen(
-                                                            gen.stream_id,
-                                                            gen.id,
-                                                            gen.name.clone(),
-                                                        ),
-                                                    ));
-                                                }
-                                            }
-                                            StreamScopeRef::Empty(_) => {}
+                                    StreamScopeRef::Root => {
+                                        for stream in inner.get_streams() {
+                                            msgs.push(Message::AddStreamOrGenerator(
+                                                TransactionStreamRef::new_stream(
+                                                    stream.id,
+                                                    stream.name.clone(),
+                                                ),
+                                            ));
                                         }
                                     }
+                                    StreamScopeRef::Stream(s) => {
+                                        for gen_id in
+                                            &inner.get_stream(s.stream_id).unwrap().generators
+                                        {
+                                            let gen = inner.get_generator(*gen_id).unwrap();
+
+                                            msgs.push(Message::AddStreamOrGenerator(
+                                                TransactionStreamRef::new_gen(
+                                                    gen.stream_id,
+                                                    gen.id,
+                                                    gen.name.clone(),
+                                                ),
+                                            ));
+                                        }
+                                    }
+                                    StreamScopeRef::Empty(_) => {}
                                 }
                             }
                         }
                     }
-                });
-            ui.add(
-                Button::new(icons::FONT_SIZE)
-                    .selected(!self.user.variable_filter.name_filter_case_insensitive),
-            )
-            .on_hover_text("Case sensitive filter")
+                }
+            }
+        }
+    }
+
+    pub fn variable_filter_type_menu(&self, ui: &mut Ui, msgs: &mut Vec<Message>) {
+        // Checkbox wants a mutable bool reference but we don't have mutable self to give it a
+        // mutable 'group_by_direction' directly. Plus we want to update things via a message. So
+        // make a copy of the flag here that can be mutable and just ensure we update the actual
+        // flag on a click.
+        let mut name_filter_case_insensitive =
+            self.user.variable_filter.name_filter_case_insensitive;
+
+        ui.checkbox(&mut name_filter_case_insensitive, "Case insensitive")
             .clicked()
             .then(|| {
                 msgs.push(Message::SetVariableNameFilterCaseInsensitive(
                     !self.user.variable_filter.name_filter_case_insensitive,
-                ));
+                ))
             });
-            ui.menu_button(icons::FILTER_FILL, |ui| {
-                self.variable_filter_type_menu(ui, msgs);
-            });
-            ui.add_enabled(
-                !self.user.variable_filter.name_filter_str.is_empty(),
-                Button::new(icons::CLOSE_FILL),
-            )
-            .on_hover_text("Clear filter")
-            .clicked()
-            .then(|| self.user.variable_filter.name_filter_str.clear());
 
-            // Check if regex and if an incorrect regex, change background color
-            if self.user.variable_filter.name_filter_type == VariableNameFilterType::Regex
-                && Regex::new(&self.user.variable_filter.name_filter_str).is_err()
-            {
-                ui.style_mut().visuals.extreme_bg_color =
-                    self.user.config.theme.accent_error.background;
-            }
-            // Create text edit
-            let response = ui.add(
-                TextEdit::singleline(&mut self.user.variable_filter.name_filter_str)
-                    .hint_text("Filter (context menu for type)"),
-            );
-            response.context_menu(|ui| {
-                self.variable_filter_type_menu(ui, msgs);
-            });
-            // Handle focus
-            if response.gained_focus() {
-                msgs.push(Message::SetFilterFocused(true));
-            }
-            if response.lost_focus() {
-                msgs.push(Message::SetFilterFocused(false));
-            }
-            ui.spacing_mut().button_padding = default_padding;
-        });
-    }
+        ui.separator();
 
-    pub fn variable_filter_type_menu(&self, ui: &mut Ui, msgs: &mut Vec<Message>) {
         for filter_type in enum_iterator::all::<VariableNameFilterType>() {
             ui.radio(
                 self.user.variable_filter.name_filter_type == filter_type,
