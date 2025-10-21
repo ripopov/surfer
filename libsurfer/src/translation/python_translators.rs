@@ -17,11 +17,11 @@ pub struct PythonTranslator {
 impl PythonTranslator {
     pub fn new(code: &CStr) -> Result<Vec<Self>> {
         info!("Loading Python translator");
-        Python::with_gil(|py| -> pyo3::PyResult<_> {
+        Python::attach(|py| -> pyo3::PyResult<_> {
             let surfer_module = PyModule::new(py, "surfer")?;
             surfer_pyo3_module(&surfer_module)?;
             let sys = PyModule::import(py, "sys")?;
-            let py_modules: Bound<'_, PyDict> = sys.getattr("modules")?.downcast_into()?;
+            let py_modules: Bound<'_, PyDict> = sys.getattr("modules")?.cast_into()?;
             py_modules.set_item("surfer", surfer_module)?;
             let filename = CString::new("plugin.py")?;
             let modulename = CString::new("plugin")?;
@@ -48,7 +48,7 @@ impl PythonTranslator {
 
 impl BasicTranslator<VarId, ScopeId> for PythonTranslator {
     fn name(&self) -> String {
-        let name = Python::with_gil(|py| {
+        let name = Python::attach(|py| {
             self.module
                 .bind(py)
                 .getattr(self.class_name.as_str())
@@ -64,21 +64,16 @@ impl BasicTranslator<VarId, ScopeId> for PythonTranslator {
     }
 
     fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
-        let result = Python::with_gil(|py| -> pyo3::PyResult<_> {
+        let result = Python::attach(|py| -> pyo3::PyResult<_> {
             let ret = self
                 .module
                 .bind(py)
                 .getattr(self.class_name.as_str())?
                 .getattr("basic_translate")?
                 .call((num_bits, value.to_string()), None)?;
-            let ret = ret.downcast()?;
+            let ret = ret.cast()?;
             let v = ret.get_item(0).unwrap().extract().unwrap();
-            let k = ValueKind::from(
-                ret.get_item(1)?
-                    .downcast::<PythonValueKind>()?
-                    .get()
-                    .clone(),
-            );
+            let k = ValueKind::from(ret.get_item(1)?.cast::<PythonValueKind>()?.get().clone());
             Ok((v, k))
         });
         match result {
