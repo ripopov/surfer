@@ -181,7 +181,7 @@ pub(crate) fn render_and_compare_inner(
 pub(crate) fn render_and_compare(filename: &Path, state: impl Fn() -> SystemState) {
     // Lowered threshold_score to 0.99 when transitioning to egui 0.32, maybe should go back to 0.99999 when
     // all images are recreated
-    render_and_compare_inner(filename, state, Vec2::new(1280., 720.), false, 0.99)
+    render_and_compare_inner(filename, state, Vec2::new(1280., 720.), false, 0.99999)
 }
 
 macro_rules! snapshot_ui {
