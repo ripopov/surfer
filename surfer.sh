@@ -23,20 +23,6 @@ if [ -n "$WSL_DISTRO_NAME" ]; then
             args+=("-c")
             args+=("$SCRIPT")
             ;;
-         --spade-state)
-            SPADE_STATE=$(wslpath -w $2)
-            shift # past argument
-            shift # past value
-            args+=("--spade-state")
-            args+=("$SPADE_STATE")
-            ;;
-         --spade-top)
-            SPADE_TOP=$2
-            shift # past argument
-            shift # past value
-            args+=("--spade-top")
-            args+=("$SPADE_TOP")
-            ;;
          -s|--state-file)
             STATE_FILE=$(wslpath -w $2)
             shift # past argument
@@ -44,7 +30,14 @@ if [ -n "$WSL_DISTRO_NAME" ]; then
             args+=("-s")
             args+=("$STATE_FILE")
             ;;
-         --help)
+         --wcp-initiate)
+            WCP_PORT=$(wslpath -w $2)
+            shift # past argument
+            shift # past value
+            args+=("--wcp-initiate")
+            args+=("$WCP_PORT")
+            ;;
+         -h|--help)
             shift # past argument
             args+=("--help")
             ;;
