@@ -53,7 +53,7 @@ enum-iterator = "2.1"
 epaint = "0.33"
 eyre = "0.6.12"
 fern = { version = "0.7.1", features = ["colored"] }
-ftr_parser = "0.1.2"
+ftr_parser = "0.2.0"
 futures = "0.3.31"
 futures-core = "0.3.31"
 futures-util = "0.3.31"
