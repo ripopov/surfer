@@ -12,6 +12,7 @@ use crate::spawn;
 use crate::util::get_multi_extension;
 use camino::{Utf8Path, Utf8PathBuf};
 use eyre::Result;
+use eyre::Report;
 use eyre::{anyhow, WrapErr};
 use ftr_parser::parse;
 use futures_util::FutureExt;
@@ -228,7 +229,7 @@ impl SystemState {
         bytes: Vec<u8>,
         load_options: LoadOptions,
     ) {
-        if parse::is_ftr(&mut Cursor::new(&bytes)) {
+        if parse::is_ftr(&mut Cursor::new(&bytes)).is_ok_and(|is_ftr| is_ftr) {
             self.load_transactions_from_bytes(source, bytes, load_options);
         } else {
             self.load_wave_from_bytes(source, bytes, load_options);
@@ -417,7 +418,7 @@ impl SystemState {
                     load_options,
                 ))
                 .unwrap(),
-            Err(e) => sender.send(Message::Error(e)).unwrap(),
+            Err(e) => sender.send(Message::Error(Report::msg(e))).unwrap(),
         }
         Ok(())
     }
@@ -442,7 +443,7 @@ impl SystemState {
                     load_options,
                 ))
                 .unwrap(),
-            Err(e) => sender.send(Message::Error(e)).unwrap(),
+            Err(e) => sender.send(Message::Error(Report::msg(e))).unwrap(),
         }
     }
     fn get_hierarchy_from_server(
