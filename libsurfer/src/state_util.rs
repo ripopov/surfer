@@ -7,7 +7,7 @@ use crate::{
     clock_highlighting::ClockHighlightType,
     config::{ArrowKeyBindings, AutoLoad, PrimaryMouseDrag},
     displayed_item::DisplayedItem,
-    hierarchy::HierarchyStyle,
+    hierarchy::{HierarchyStyle, ParameterDisplayLocation},
     SystemState,
 };
 
@@ -105,13 +105,6 @@ impl SystemState {
     }
 
     #[inline]
-    pub fn show_parameters_in_scopes(&self) -> bool {
-        self.user
-            .show_parameters_in_scopes
-            .unwrap_or_else(|| self.user.config.layout.show_parameters_in_scopes())
-    }
-
-    #[inline]
     pub fn show_default_timeline(&self) -> bool {
         self.user
             .show_default_timeline
@@ -181,5 +174,12 @@ impl SystemState {
         self.user
             .autoload_sibling_state_files
             .unwrap_or_else(|| self.user.config.autoload_sibling_state_files())
+    }
+
+    #[inline]
+    pub fn parameter_display_location(&self) -> ParameterDisplayLocation {
+        self.user
+            .parameter_display_location
+            .unwrap_or_else(|| self.user.config.layout.parameter_display_location())
     }
 }

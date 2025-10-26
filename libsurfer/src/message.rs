@@ -13,6 +13,7 @@ use crate::async_util::AsyncJob;
 use crate::config::PrimaryMouseDrag;
 use crate::displayed_item_tree::{ItemIndex, VisibleItemIndex};
 use crate::graphics::{Graphic, GraphicId};
+use crate::hierarchy::ParameterDisplayLocation;
 use crate::state::UserState;
 use crate::transaction_container::{
     StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
@@ -250,7 +251,7 @@ pub enum Message {
     ToggleIndices,
     ToggleDirection,
     ToggleEmptyScopes,
-    ToggleParametersInScopes,
+    SetParameterDisplayLocation(ParameterDisplayLocation),
     ToggleSidePanel,
     ToggleItemSelected(Option<VisibleItemIndex>),
     ToggleDefaultTimeline,
