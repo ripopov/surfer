@@ -32,6 +32,14 @@ pub enum HierarchyStyle {
     Variables,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Display, FromStr, PartialEq, Eq, Serialize, Sequence)]
+pub enum ParameterDisplayLocation {
+    Variables,
+    Scopes,
+    Tooltips,
+    None,
+}
+
 impl SystemState {
     /// Scopes and variables in two separate lists
     pub fn separate(&mut self, ui: &mut Ui, msgs: &mut Vec<Message>) {
@@ -89,7 +97,7 @@ impl SystemState {
                     let variables =
                         self.filtered_variables(&wave_container.variables_in_scope(scope), false);
                     // Parameters shown in variable list
-                    if !self.show_parameters_in_scopes() {
+                    if self.parameter_display_location() == ParameterDisplayLocation::Variables {
                         let parameters = wave_container.parameters_in_scope(scope);
                         if !parameters.is_empty() {
                             ScrollArea::both()
@@ -332,7 +340,11 @@ impl SystemState {
         if self.show_scope_tooltip() {
             response = response.on_hover_ui(|ui| {
                 ui.set_max_width(ui.spacing().tooltip_width);
-                ui.add(egui::Label::new(scope_tooltip_text(wave, scope)));
+                ui.add(egui::Label::new(scope_tooltip_text(
+                    wave,
+                    scope,
+                    self.parameter_display_location() == ParameterDisplayLocation::Tooltips,
+                )));
             });
         }
         response.context_menu(|ui| {
@@ -410,7 +422,9 @@ impl SystemState {
                     );
                 })
                 .body(|ui| {
-                    if draw_variables || self.show_parameters_in_scopes() {
+                    if draw_variables
+                        || self.parameter_display_location() == ParameterDisplayLocation::Scopes
+                    {
                         let parameters = wave_container.parameters_in_scope(scope);
                         if !parameters.is_empty() {
                             egui::collapsing_header::CollapsingState::load_with_default_open(
