@@ -15,6 +15,7 @@ use crate::displayed_item::{
 use crate::displayed_item_tree::{DisplayedItemTree, ItemIndex, TargetPosition, VisibleItemIndex};
 use crate::graphics::{Graphic, GraphicId};
 use crate::transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef};
+use crate::transactions::calculate_rows_of_stream;
 use crate::translation::{DynTranslator, TranslatorList, VariableInfoExt};
 use crate::variable_name_type::VariableNameType;
 use crate::view::ItemDrawingInfo;
@@ -944,26 +945,5 @@ impl WaveData {
                     None
                 }
             })
-    }
-}
-
-fn calculate_rows_of_stream(
-    transactions: &Vec<Transaction>,
-    last_times_on_row: &mut Vec<(BigUint, BigUint)>,
-) {
-    for transaction in transactions {
-        let mut curr_row = 0;
-        let start_time = transaction.get_start_time();
-        let end_time = transaction.get_end_time();
-
-        while start_time > last_times_on_row[curr_row].0
-            && start_time < last_times_on_row[curr_row].1
-        {
-            curr_row += 1;
-            if last_times_on_row.len() <= curr_row {
-                last_times_on_row.push((BigUint::ZERO, BigUint::ZERO));
-            }
-        }
-        last_times_on_row[curr_row] = (start_time, end_time);
     }
 }

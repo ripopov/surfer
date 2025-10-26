@@ -74,7 +74,6 @@ build_book:
     extends: .build-dependencies
     before_script:
         - cargo install --no-default-features --features search --locked mdbook
-        - cargo install mdbook-footnote --locked
     script:
         - cp snapshots/theme_*.png docs/configuration/themes
         - /builds/${CI_PROJECT_PATH}/cargo/bin/mdbook build
