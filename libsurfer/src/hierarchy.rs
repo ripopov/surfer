@@ -305,7 +305,7 @@ impl SystemState {
         let _ = response.interact(egui::Sense::click_and_drag());
         response.drag_started().then(|| {
             msgs.push(Message::VariableDragStarted(VisibleItemIndex(
-                self.user.waves.as_ref().unwrap().display_item_ref_counter,
+                wave.display_item_ref_counter,
             )))
         });
 
@@ -318,11 +318,7 @@ impl SystemState {
                 > self.user.sidepanel_width.unwrap_or_default()
             {
                 let scope_t = ScopeType::WaveScope(scope.clone());
-                let variables = self
-                    .user
-                    .waves
-                    .as_ref()
-                    .unwrap()
+                let variables = wave
                     .inner
                     .variables_in_scope(&scope_t)
                     .iter()
