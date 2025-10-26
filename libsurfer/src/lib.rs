@@ -1183,8 +1183,8 @@ impl SystemState {
             Message::ToggleEmptyScopes => {
                 self.user.show_empty_scopes = Some(!self.show_empty_scopes())
             }
-            Message::ToggleParametersInScopes => {
-                self.user.show_parameters_in_scopes = Some(!self.show_parameters_in_scopes())
+            Message::SetParameterDisplayLocation(location) => {
+                self.user.parameter_display_location = Some(location);
             }
             Message::ToggleStatusbar => self.user.show_statusbar = Some(!self.show_statusbar()),
             Message::ToggleTickLines => self.user.show_ticks = Some(!self.show_ticks()),
