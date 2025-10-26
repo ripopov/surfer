@@ -1,6 +1,6 @@
 use crate::time::{TimeScale, TimeUnit};
 use crate::wave_container::MetaData;
-use ftr_parser::types::{TxGenerator, TxStream, FTR};
+use ftr_parser::types::{Transaction, TxGenerator, TxStream, FTR};
 use itertools::Itertools;
 use num::BigUint;
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,14 @@ impl TransactionContainer {
 
     pub fn get_generators(&self) -> Vec<&TxGenerator> {
         self.inner.tx_generators.values().collect()
+    }
+
+    pub fn get_transaction(&self, transaction_ref: &TransactionRef) -> Option<&Transaction> {
+        self.inner.tx_generators.values().find_map(|gen| {
+            gen.transactions
+                .iter()
+                .find(|tx| tx.get_tx_id() == transaction_ref.id)
+        })
     }
 
     pub fn get_generator(&self, gen_id: usize) -> Option<&TxGenerator> {

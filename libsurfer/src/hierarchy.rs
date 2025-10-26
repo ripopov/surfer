@@ -3,8 +3,9 @@ use crate::data_container::{DataContainer, VariableType as VarType};
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::message::Message;
 use crate::tooltips::{scope_tooltip_text, variable_tooltip_text};
-use crate::transaction_container::{StreamScopeRef, TransactionStreamRef};
-use crate::variable_direction::VariableDirectionExt;
+use crate::transaction_container::StreamScopeRef;
+use crate::transactions::{draw_transaction_root, draw_transaction_variable_list};
+use crate::variable_direction::get_direction_string;
 use crate::view::draw_true_name;
 use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, WaveContainer};
 use crate::wave_data::{ScopeType, WaveData};
@@ -15,7 +16,6 @@ use egui::{
     CentralPanel, Color32, Frame, Layout, Margin, ScrollArea, TextFormat, TextStyle, TextWrapMode,
     TopBottomPanel, Ui,
 };
-use egui_remixicon::icons;
 use emath::Align;
 use enum_iterator::Sequence;
 use eyre::Context;
@@ -161,7 +161,7 @@ impl SystemState {
                         .auto_shrink([false; 2])
                         .id_salt("variables")
                         .show(ui, |ui| {
-                            self.draw_transaction_variable_list(msgs, waves, ui, s);
+                            draw_transaction_variable_list(msgs, waves, ui, s);
                         });
                 }
             }
@@ -276,7 +276,7 @@ impl SystemState {
                     );
                 }
                 ScopeType::StreamScope(_) => {
-                    self.draw_transaction_root(msgs, wave, ui);
+                    draw_transaction_root(msgs, wave, ui);
                 }
             }
         }
@@ -562,11 +562,7 @@ impl SystemState {
             .unwrap();
         let char_width_mono = ui.fonts_mut(|fonts| {
             fonts
-                .layout_no_wrap(
-                    " ".to_string(),
-                    monospace_font.clone(),
-                    Color32::from_rgb(0, 0, 0),
-                )
+                .layout_no_wrap(" ".to_string(), monospace_font.clone(), Color32::BLACK)
                 .size()
                 .x
         });
@@ -587,36 +583,11 @@ impl SystemState {
                 .unwrap_or_default();
 
             // Get direction icon
-            let direction = if self.show_variable_direction() {
-                meta.as_ref()
-                    .and_then(|meta| meta.direction)
-                    .map(|direction| {
-                        format!(
-                            "{} ",
-                            // Icon based on direction
-                            direction.get_icon().unwrap_or_else(|| {
-                                if meta.as_ref().is_some_and(|meta| {
-                                    meta.variable_type == Some(VariableType::VCDParameter)
-                                }) {
-                                    // If parameter
-                                    icons::MAP_PIN_2_LINE
-                                } else {
-                                    // Align other items (can be improved)
-                                    // The padding depends on if we will render monospace or not
-                                    if name_info.is_some() {
-                                        "  "
-                                    } else {
-                                        "    "
-                                    }
-                                }
-                            })
-                        )
-                    })
-                    .unwrap_or_default()
-            } else {
-                String::new()
-            };
-
+            let direction = self
+                .show_variable_direction()
+                .then(|| get_direction_string(&meta, &name_info))
+                .flatten()
+                .unwrap_or_default();
             // Get value in case of parameter
             let value = if meta
                 .as_ref()
@@ -733,137 +704,5 @@ impl SystemState {
             }
         }
         false
-    }
-
-    pub fn draw_transaction_variable_list(
-        &self,
-        msgs: &mut Vec<Message>,
-        streams: &WaveData,
-        ui: &mut egui::Ui,
-        active_stream: &StreamScopeRef,
-    ) {
-        let inner = match streams.inner.as_transactions() {
-            Some(tx) => tx,
-            None => return,
-        };
-        match active_stream {
-            StreamScopeRef::Root => {
-                let streams = inner.get_streams();
-                let sorted_streams = streams
-                    .iter()
-                    .sorted_by(|a, b| numeric_sort::cmp(&a.name, &b.name))
-                    .collect_vec();
-                for stream in sorted_streams {
-                    ui.with_layout(
-                        Layout::top_down(Align::LEFT).with_cross_justify(true),
-                        |ui| {
-                            let response =
-                                ui.add(egui::Button::selectable(false, stream.name.clone()));
-
-                            response.clicked().then(|| {
-                                msgs.push(Message::AddStreamOrGenerator(
-                                    TransactionStreamRef::new_stream(
-                                        stream.id,
-                                        stream.name.clone(),
-                                    ),
-                                ));
-                            });
-                        },
-                    );
-                }
-            }
-            StreamScopeRef::Stream(stream_ref) => {
-                if let Some(stream) = inner.get_stream(stream_ref.stream_id) {
-                    let sorted_generators = stream
-                        .generators
-                        .iter()
-                        .sorted_by(|a, b| {
-                            numeric_sort::cmp(
-                                &inner.get_generator(**a).unwrap().name,
-                                &inner.get_generator(**b).unwrap().name,
-                            )
-                        })
-                        .collect_vec();
-                    for gen_id in sorted_generators {
-                        if let Some(generator) = inner.get_generator(*gen_id) {
-                            let gen_name = generator.name.clone();
-                            ui.with_layout(
-                                Layout::top_down(Align::LEFT).with_cross_justify(true),
-                                |ui| {
-                                    let response =
-                                        ui.add(egui::Button::selectable(false, &gen_name));
-
-                                    response.clicked().then(|| {
-                                        msgs.push(Message::AddStreamOrGenerator(
-                                            TransactionStreamRef::new_gen(
-                                                stream_ref.stream_id,
-                                                *gen_id,
-                                                gen_name,
-                                            ),
-                                        ));
-                                    });
-                                },
-                            );
-                        }
-                    }
-                }
-            }
-            StreamScopeRef::Empty(_) => {}
-        }
-    }
-
-    pub fn draw_transaction_root(
-        &self,
-        msgs: &mut Vec<Message>,
-        streams: &WaveData,
-        ui: &mut egui::Ui,
-    ) {
-        egui::collapsing_header::CollapsingState::load_with_default_open(
-            ui.ctx(),
-            egui::Id::from("Streams"),
-            false,
-        )
-        .show_header(ui, |ui| {
-            ui.with_layout(
-                Layout::top_down(Align::LEFT).with_cross_justify(true),
-                |ui| {
-                    let root_name = String::from("tr");
-                    let response = ui.add(egui::Button::selectable(
-                        streams.active_scope == Some(ScopeType::StreamScope(StreamScopeRef::Root)),
-                        root_name,
-                    ));
-
-                    response.clicked().then(|| {
-                        msgs.push(Message::SetActiveScope(ScopeType::StreamScope(
-                            StreamScopeRef::Root,
-                        )));
-                    });
-                },
-            );
-        })
-        .body(|ui| {
-            if let Some(tx_container) = streams.inner.as_transactions() {
-                for (id, stream) in &tx_container.inner.tx_streams {
-                    let name = stream.name.clone();
-                    let response = ui.add(egui::Button::selectable(
-                        streams.active_scope.as_ref().is_some_and(|s| {
-                            if let ScopeType::StreamScope(StreamScopeRef::Stream(scope_stream)) = s
-                            {
-                                scope_stream.stream_id == *id
-                            } else {
-                                false
-                            }
-                        }),
-                        name.clone(),
-                    ));
-
-                    response.clicked().then(|| {
-                        msgs.push(Message::SetActiveScope(ScopeType::StreamScope(
-                            StreamScopeRef::Stream(TransactionStreamRef::new_stream(*id, name)),
-                        )));
-                    });
-                }
-            }
-        });
     }
 }
