@@ -10,7 +10,7 @@ use crate::{
     data_container::DataContainer,
     dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog},
     displayed_item_tree::{DisplayedItemTree, VisibleItemIndex},
-    hierarchy::HierarchyStyle,
+    hierarchy::{HierarchyStyle, ParameterDisplayLocation},
     message::Message,
     system_state::SystemState,
     time::{TimeStringFormatting, TimeUnit},
@@ -52,6 +52,8 @@ pub struct UserState {
     pub(crate) show_variable_direction: Option<bool>,
     pub(crate) show_empty_scopes: Option<bool>,
     pub(crate) show_parameters_in_scopes: Option<bool>,
+    #[serde(default)]
+    pub(crate) parameter_display_location: Option<ParameterDisplayLocation>,
     #[serde(default)]
     pub(crate) highlight_focused: Option<bool>,
     #[serde(default)]

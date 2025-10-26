@@ -1,6 +1,7 @@
 use egui::{Response, Ui};
 use egui_extras::{Column, TableBuilder};
 use ftr_parser::types::Transaction;
+use num::BigUint;
 
 use crate::{
     transaction_container::{TransactionRef, TransactionStreamRef},
@@ -27,13 +28,27 @@ pub fn variable_tooltip_text(meta: &Option<VariableMeta>, variable: &VariableRef
     }
 }
 
-pub fn scope_tooltip_text(wave: &WaveData, scope: &ScopeRef) -> String {
-    let other = wave.inner.as_waves().unwrap().get_scope_tooltip_data(scope);
-    if other.is_empty() {
-        format!("{scope}")
-    } else {
-        format!("{scope}\n{other}")
+pub fn scope_tooltip_text(wave: &WaveData, scope: &ScopeRef, include_parameters: bool) -> String {
+    let mut parts = vec![format!("{scope}")];
+    if let Some(wave_container) = &wave.inner.as_waves() {
+        if include_parameters {
+            if let Some(waves) = &wave.inner.as_waves() {
+                for param in waves.parameters_in_scope(scope).iter() {
+                    let value = wave_container
+                        .query_variable(param, &BigUint::ZERO)
+                        .ok()
+                        .and_then(|o| o.and_then(|q| q.current.map(|v| format!("{}", v.1))))
+                        .unwrap_or_else(|| "Undefined".to_string());
+                    parts.push(format!("{}: {}", param.name, value));
+                }
+            }
+        }
+        let other = wave_container.get_scope_tooltip_data(scope);
+        if !other.is_empty() {
+            parts.push(other);
+        }
     }
+    parts.join("\n")
 }
 
 pub fn handle_transaction_tooltip(
