@@ -16,7 +16,7 @@ use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
-use crate::hierarchy::HierarchyStyle;
+use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation};
 use crate::mousegestures::GestureZones;
 use crate::time::TimeFormat;
 use crate::{clock_highlighting::ClockHighlightType, variable_name_type::VariableNameType};
@@ -126,8 +126,8 @@ pub struct SurferLayout {
     show_default_timeline: bool,
     /// Flag to show/hide empty scopes
     show_empty_scopes: bool,
-    /// Flag to show parameters in scope view
-    show_parameters_in_scopes: bool,
+    /// Where to show parameters in the hierarchy
+    parameter_display_location: ParameterDisplayLocation,
     /// Initial window height
     pub window_height: usize,
     /// Initial window width
@@ -205,8 +205,8 @@ impl SurferLayout {
     pub fn show_empty_scopes(&self) -> bool {
         self.show_empty_scopes
     }
-    pub fn show_parameters_in_scopes(&self) -> bool {
-        self.show_parameters_in_scopes
+    pub fn parameter_display_location(&self) -> ParameterDisplayLocation {
+        self.parameter_display_location
     }
     pub fn highlight_focused(&self) -> bool {
         self.highlight_focused
