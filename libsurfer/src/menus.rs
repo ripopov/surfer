@@ -8,7 +8,7 @@ use surfer_translation_types::{TranslationPreference, Translator, VariableType};
 
 use crate::config::PrimaryMouseDrag;
 use crate::displayed_item_tree::VisibleItemIndex;
-use crate::hierarchy::HierarchyStyle;
+use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation};
 use crate::message::MessageTarget;
 use crate::wave_container::{FieldRef, VariableRefExt};
 use crate::wave_data::ScopeType;
@@ -351,13 +351,17 @@ impl SystemState {
                     msgs.push(Message::ToggleEmptyScopes);
                 });
 
-            ui.radio(
-                self.show_parameters_in_scopes(),
-                "Show parameters in scopes",
-            )
-            .clicked()
-            .then(|| {
-                msgs.push(Message::ToggleParametersInScopes);
+            ui.menu_button("Parameter display location", |ui| {
+                for location in enum_iterator::all::<ParameterDisplayLocation>() {
+                    ui.radio(
+                        self.parameter_display_location() == location,
+                        location.to_string(),
+                    )
+                    .clicked()
+                    .then(|| {
+                        msgs.push(Message::SetParameterDisplayLocation(location));
+                    });
+                }
             });
 
             ui.radio(self.highlight_focused(), "Highlight focused")

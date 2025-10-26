@@ -160,6 +160,7 @@ impl SystemState {
                 show_variable_indices: None,
                 show_empty_scopes: None,
                 show_parameters_in_scopes: None,
+                parameter_display_location: None,
                 highlight_focused: None,
                 fill_high_values: None,
                 drag_started: false,
