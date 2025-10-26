@@ -433,7 +433,7 @@ impl SystemState {
                     .as_ref()
                     .unwrap()
                     .focused_transaction
-                    .1
+                    .0
                     .is_some()
                 {
                     egui::SidePanel::right("Transaction Details")

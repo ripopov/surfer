@@ -546,11 +546,7 @@ impl SystemState {
             .unwrap();
         let char_width_mono = ui.fonts_mut(|fonts| {
             fonts
-                .layout_no_wrap(
-                    " ".to_string(),
-                    monospace_font.clone(),
-                    Color32::from_rgb(0, 0, 0),
-                )
+                .layout_no_wrap(" ".to_string(), monospace_font.clone(), Color32::BLACK)
                 .size()
                 .x
         });
