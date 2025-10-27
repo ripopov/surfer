@@ -540,6 +540,12 @@ impl SystemState {
             )));
         }
 
+        if displayed_item.has_overwritten_name() {
+            if ui.button("Reset Name").clicked() {
+                msgs.push(Message::ItemNameChange(Some(vidx), None))
+            }
+        }
+
         if ui.button("Remove").clicked() {
             msgs.push(
                 if waves
