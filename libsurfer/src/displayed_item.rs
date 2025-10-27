@@ -410,6 +410,18 @@ impl DisplayedItem {
         }
     }
 
+    pub fn has_overwritten_name(&self) -> bool {
+        match self {
+            DisplayedItem::Variable(variable) => variable.manual_name.is_some(),
+            DisplayedItem::Placeholder(placeholder) => placeholder.manual_name.is_some(),
+            DisplayedItem::Stream(stream) => stream.manual_name.is_some(),
+            DisplayedItem::Divider(_)
+            | DisplayedItem::Marker(_)
+            | DisplayedItem::TimeLine(_)
+            | DisplayedItem::Group(_) => false,
+        }
+    }
+
     pub fn background_color(&self) -> Option<&str> {
         match self {
             DisplayedItem::Variable(variable) => variable.background_color.as_deref(),
