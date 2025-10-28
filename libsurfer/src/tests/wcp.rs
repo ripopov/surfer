@@ -412,7 +412,7 @@ wcp_test! {
 
         send_commands(&tx, vec![
             WcpCommand::add_scope {scope: "tb".to_string(), recursive: false},
-            WcpCommand::set_viewport_range_to { start: BigInt::from(70), end: BigInt::from(120) },
+            WcpCommand::set_viewport_range { start: BigInt::from(70), end: BigInt::from(120) },
         ]).await?;
         expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope{ ids: _ }));
         expect_ack(&mut rx).await?;
