@@ -90,11 +90,16 @@ impl SystemState {
                             msgs.push(Message::ShowCommandPrompt(None))
                         }
                     }
-                    (Key::G, true, false, false) => msgs.push(Message::GroupNew {
-                        name: None,
-                        before: None,
-                        items: None,
-                    }),
+                    (Key::G, true, false, false) => {
+                        msgs.push(Message::GroupNew {
+                            name: None,
+                            before: None,
+                            items: None,
+                        });
+                        if modifiers.shift {
+                            msgs.push(Message::ShowCommandPrompt(Some("item_rename ".to_owned())))
+                        }
+                    }
                     (Key::H, true, false, false) => msgs.push(Message::MoveCursorToTransition {
                         next: false,
                         variable: None,
