@@ -94,7 +94,6 @@ pub enum Message {
     SetItemSelected(VisibleItemIndex, bool),
     /// Unfocus a wave/item.
     UnfocusItem,
-    OpenRenameDialog(Option<VisibleItemIndex>),
     MoveFocus(MoveDir, CommandCount, bool),
     MoveFocusedItem(MoveDir, CommandCount),
     FocusTransaction(Option<TransactionRef>, Option<Transaction>),
@@ -291,7 +290,6 @@ pub enum Message {
         #[debug(skip)] Option<Box<dyn Fn(String) -> Message + Send + 'static>>,
     ),
     SetLicenseVisible(bool),
-    SetRenameItemVisible(bool),
     SetLogsVisible(bool),
     SetMouseGestureDragStart(Option<Pos2>),
     SetMeasureDragStart(Option<Pos2>),
