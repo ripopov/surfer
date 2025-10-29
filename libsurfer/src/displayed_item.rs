@@ -1,18 +1,16 @@
 //! The items that are drawn in the main wave form view: waves, dividers, etc.
 use ecolor::Color32;
-use egui::{Context, FontSelection, Key, RichText, Style, WidgetText, Window};
+use egui::{FontSelection, RichText, Style, WidgetText};
 use emath::Align;
 use epaint::text::LayoutJob;
 use serde::{Deserialize, Serialize};
 use surfer_translation_types::VariableInfo;
 
 use crate::config::SurferConfig;
-use crate::displayed_item_tree::VisibleItemIndex;
 use crate::transaction_container::TransactionStreamRef;
 use crate::wave_container::{FieldRef, VariableRef, VariableRefExt, WaveContainer};
 use crate::{
-    marker::DEFAULT_MARKER_NAME, message::Message, time::DEFAULT_TIMELINE_NAME,
-    variable_name_type::VariableNameType,
+    marker::DEFAULT_MARKER_NAME, time::DEFAULT_TIMELINE_NAME, variable_name_type::VariableNameType,
 };
 
 const DEFAULT_DIVIDER_NAME: &str = "";
@@ -477,44 +475,5 @@ impl DisplayedItem {
             }
             _ => {}
         }
-    }
-}
-
-pub fn draw_rename_window(
-    ctx: &Context,
-    msgs: &mut Vec<Message>,
-    vidx: VisibleItemIndex,
-    name: &mut String,
-) {
-    let mut open = true;
-    Window::new("Rename item")
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(true)
-        .show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                let response = ui.text_edit_singleline(name);
-                if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                    msgs.push(Message::ItemNameChange(Some(vidx), Some(name.clone())));
-                    msgs.push(Message::SetRenameItemVisible(false));
-                }
-                response.request_focus();
-                ui.horizontal(|ui| {
-                    if ui.button("Rename").clicked() {
-                        msgs.push(Message::ItemNameChange(Some(vidx), Some(name.clone())));
-                        msgs.push(Message::SetRenameItemVisible(false));
-                    }
-                    if ui.button("Default").clicked() {
-                        msgs.push(Message::ItemNameChange(Some(vidx), None));
-                        msgs.push(Message::SetRenameItemVisible(false));
-                    }
-                    if ui.button("Cancel").clicked() {
-                        msgs.push(Message::SetRenameItemVisible(false));
-                    }
-                });
-            });
-        });
-    if !open {
-        msgs.push(Message::SetRenameItemVisible(false));
     }
 }
