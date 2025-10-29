@@ -210,7 +210,11 @@ impl SystemState {
                     }
                     (Key::F2, true, false, _) => {
                         if let Some(waves) = &self.user.waves {
-                            msgs.push(Message::OpenRenameDialog(waves.focused_item));
+                            if waves.focused_item.is_some() {
+                                msgs.push(Message::ShowCommandPrompt(Some(
+                                    "rename_item ".to_owned(),
+                                )));
+                            }
                         }
                     }
                     (Key::F11, true, false, _) => msgs.push(Message::ToggleFullscreen),
