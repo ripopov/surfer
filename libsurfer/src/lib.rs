@@ -1227,7 +1227,8 @@ impl SystemState {
             }
             Message::ShowCommandPrompt(text) => {
                 if let Some(init_text) = text {
-                    self.command_prompt.new_cursor_pos = Some(init_text.len());
+                    self.command_prompt.cursor_update =
+                        Some(command_prompt::Cursor::Position(init_text.len()));
                     *self.command_prompt_text.borrow_mut() = init_text;
                     self.command_prompt.visible = true;
                 } else {
@@ -1236,6 +1237,12 @@ impl SystemState {
                     self.command_prompt.selected = self.command_prompt.previous_commands.len();
                     self.command_prompt.visible = false;
                 }
+            }
+            Message::ShowCommandPromptPreSelected(text, start, end) => {
+                self.command_prompt.cursor_update =
+                    Some(command_prompt::Cursor::Selection(start, end));
+                *self.command_prompt_text.borrow_mut() = text;
+                self.command_prompt.visible = true;
             }
             Message::FileDownloaded(url, bytes, load_options) => {
                 self.load_from_bytes(WaveSource::Url(url), bytes.to_vec(), load_options)
