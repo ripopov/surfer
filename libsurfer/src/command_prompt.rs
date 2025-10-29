@@ -21,13 +21,18 @@ pub fn run_fuzzy_parser(input: &str, state: &SystemState, msgs: &mut Vec<Message
     });
 }
 
+pub enum Cursor {
+    Position(usize),
+    Selection(usize, usize),
+}
+
 #[derive(Default)]
 pub struct CommandPrompt {
     pub visible: bool,
     pub suggestions: Vec<(String, Vec<bool>)>,
     pub selected: usize,
     pub new_selection: Option<usize>,
-    pub new_cursor_pos: Option<usize>,
+    pub cursor_update: Option<Cursor>,
     pub previous_commands: Vec<(String, Vec<bool>)>,
 }
 
@@ -72,12 +77,25 @@ pub fn show_command_prompt(
                     }
                 };
 
+                let select_range = |start, end, ui: &mut egui::Ui| {
+                    if let Some(mut state) = TextEdit::load_state(ui.ctx(), response.id) {
+                        let start = CCursor::new(start);
+                        let end = CCursor::new(end);
+                        state
+                            .cursor
+                            .set_char_range(Some(CCursorRange::two(start, end)));
+                        state.store(ui.ctx(), response.id);
+                        ui.ctx().memory_mut(|m| m.request_focus(response.id));
+                    }
+                };
+
                 if response.ctx.input(|i| i.key_pressed(Key::ArrowUp)) {
                     set_cursor_to_pos(input.chars().count(), ui);
                 }
-                if let Some(new_pos) = state.command_prompt.new_cursor_pos {
-                    set_cursor_to_pos(new_pos, ui);
-                    state.command_prompt.new_cursor_pos = None;
+                match state.command_prompt.cursor_update.take() {
+                    Some(Cursor::Position(pos)) => set_cursor_to_pos(pos, ui),
+                    Some(Cursor::Selection(start, end)) => select_range(start, end, ui),
+                    _ => (),
                 }
 
                 let suggestions = state
