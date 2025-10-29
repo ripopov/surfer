@@ -195,6 +195,7 @@ pub enum Message {
     /// specified variable
     BlacklistTranslator(VariableRef, String),
     ShowCommandPrompt(Option<String>),
+    ShowCommandPromptPreSelected(String, usize, usize),
     /// Message sent when file is loadedropped onto Surfer.
     FileDropped(DroppedFile),
     #[serde(skip)]
