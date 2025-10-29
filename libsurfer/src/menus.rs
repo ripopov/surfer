@@ -535,10 +535,9 @@ impl SystemState {
         if ui.button("Rename").clicked() {
             let name = displayed_item.name();
             msgs.push(Message::FocusItem(vidx));
-            let prompt = format!("item_rename {name}").to_owned();
-            let prompt_len = prompt.len();
-            msgs.push(Message::ShowCommandPromptPreSelected(
-                prompt, 12, prompt_len,
+            msgs.push(Message::ShowCommandPrompt(
+                "item_rename ".to_owned(),
+                Some(name),
             ));
         }
 

@@ -21,18 +21,13 @@ pub fn run_fuzzy_parser(input: &str, state: &SystemState, msgs: &mut Vec<Message
     });
 }
 
-pub enum Cursor {
-    Position(usize),
-    Selection(usize, usize),
-}
-
 #[derive(Default)]
 pub struct CommandPrompt {
     pub visible: bool,
     pub suggestions: Vec<(String, Vec<bool>)>,
     pub selected: usize,
     pub new_selection: Option<usize>,
-    pub cursor_update: Option<Cursor>,
+    pub new_text: Option<(String, String)>,
     pub previous_commands: Vec<(String, Vec<bool>)>,
 }
 
@@ -50,11 +45,13 @@ pub fn show_command_prompt(
         .resizable(true)
         .show(ctx, |ui| {
             egui::Frame::NONE.show(ui, |ui| {
+                let text_update = state.command_prompt.new_text.take();
                 let input = &mut *state.command_prompt_text.borrow_mut();
-                let new_c = *state.char_to_add_to_prompt.borrow();
-                if let Some(c) = new_c {
+                if let Some(c) = state.char_to_add_to_prompt.take() {
                     input.push(c);
-                    *state.char_to_add_to_prompt.borrow_mut() = None;
+                }
+                if let Some((normal, selected)) = &text_update {
+                    *input = normal.clone() + selected;
                 }
                 let response = ui.add(
                     TextEdit::singleline(input)
@@ -92,10 +89,14 @@ pub fn show_command_prompt(
                 if response.ctx.input(|i| i.key_pressed(Key::ArrowUp)) {
                     set_cursor_to_pos(input.chars().count(), ui);
                 }
-                match state.command_prompt.cursor_update.take() {
-                    Some(Cursor::Position(pos)) => set_cursor_to_pos(pos, ui),
-                    Some(Cursor::Selection(start, end)) => select_range(start, end, ui),
-                    _ => (),
+                if let Some((normal, selected)) = text_update {
+                    let normal_cnt = normal.chars().count();
+                    if selected.is_empty() {
+                        set_cursor_to_pos(normal_cnt, ui);
+                    } else {
+                        let selected_cnt = selected.chars().count();
+                        select_range(normal_cnt, normal_cnt + selected_cnt, ui);
+                    }
                 }
 
                 let suggestions = state
@@ -160,7 +161,7 @@ pub fn show_command_prompt(
                     );
 
                     if let Ok(cmd) = parsed.1 {
-                        msgs.push(Message::ShowCommandPrompt(None));
+                        msgs.push(Message::HideCommandPrompt);
                         msgs.push(Message::CommandPromptClear);
                         msgs.push(Message::CommandPromptPushPrevious(parsed.0));
                         msgs.push(cmd);
@@ -326,7 +327,7 @@ pub fn show_command_prompt(
                                 );
 
                                 if let Ok(cmd) = result.1 {
-                                    msgs.push(Message::ShowCommandPrompt(None));
+                                    msgs.push(Message::HideCommandPrompt);
                                     msgs.push(Message::CommandPromptClear);
                                     msgs.push(Message::CommandPromptPushPrevious(expanded));
                                     msgs.push(cmd);

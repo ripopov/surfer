@@ -1225,23 +1225,14 @@ impl SystemState {
             Message::SetHighlightFocused(highlight) => {
                 self.user.highlight_focused = Some(highlight);
             }
-            Message::ShowCommandPrompt(text) => {
-                if let Some(init_text) = text {
-                    self.command_prompt.cursor_update =
-                        Some(command_prompt::Cursor::Position(init_text.len()));
-                    *self.command_prompt_text.borrow_mut() = init_text;
-                    self.command_prompt.visible = true;
-                } else {
-                    *self.command_prompt_text.borrow_mut() = "".to_string();
-                    self.command_prompt.suggestions = vec![];
-                    self.command_prompt.selected = self.command_prompt.previous_commands.len();
-                    self.command_prompt.visible = false;
-                }
+            Message::HideCommandPrompt => {
+                *self.command_prompt_text.borrow_mut() = "".to_string();
+                self.command_prompt.suggestions = vec![];
+                self.command_prompt.selected = self.command_prompt.previous_commands.len();
+                self.command_prompt.visible = false;
             }
-            Message::ShowCommandPromptPreSelected(text, start, end) => {
-                self.command_prompt.cursor_update =
-                    Some(command_prompt::Cursor::Selection(start, end));
-                *self.command_prompt_text.borrow_mut() = text;
+            Message::ShowCommandPrompt(text, selected) => {
+                self.command_prompt.new_text = Some((text, selected.unwrap_or("".to_owned())));
                 self.command_prompt.visible = true;
             }
             Message::FileDownloaded(url, bytes, load_options) => {
