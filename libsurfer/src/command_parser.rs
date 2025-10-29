@@ -583,7 +583,21 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                 "item_unset_background_color" => Some(Command::Terminal(
                     Message::ItemBackgroundColorChange(MessageTarget::CurrentSelection, None),
                 )),
-                "item_rename" => Some(Command::Terminal(Message::RenameItem(None))),
+                "item_rename" => Some(Command::NonTerminal(
+                    ParamGreed::Rest,
+                    vec![],
+                    Box::new(|query, _| {
+                        log::error!("in item_rename, query: {query:?}");
+                        if query.is_empty() {
+                            Some(Command::Terminal(Message::OpenRenameDialog(None)))
+                        } else {
+                            Some(Command::Terminal(Message::ItemNameChange(
+                                None,
+                                Some(query.to_owned()),
+                            )))
+                        }
+                    }),
+                )),
                 "variable_set_name_type" => single_word(
                     vec![
                         "Local".to_string(),

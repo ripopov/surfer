@@ -90,11 +90,16 @@ impl SystemState {
                             msgs.push(Message::ShowCommandPrompt(None))
                         }
                     }
-                    (Key::G, true, false, false) => msgs.push(Message::GroupNew {
-                        name: None,
-                        before: None,
-                        items: None,
-                    }),
+                    (Key::G, true, false, false) => {
+                        msgs.push(Message::GroupNew {
+                            name: None,
+                            before: None,
+                            items: None,
+                        });
+                        if modifiers.shift {
+                            msgs.push(Message::ShowCommandPrompt(Some("item_rename ".to_owned())))
+                        }
+                    }
                     (Key::H, true, false, false) => msgs.push(Message::MoveCursorToTransition {
                         next: false,
                         variable: None,
@@ -205,7 +210,11 @@ impl SystemState {
                     }
                     (Key::F2, true, false, _) => {
                         if let Some(waves) = &self.user.waves {
-                            msgs.push(Message::RenameItem(waves.focused_item));
+                            if waves.focused_item.is_some() {
+                                msgs.push(Message::ShowCommandPrompt(Some(
+                                    "rename_item ".to_owned(),
+                                )));
+                            }
                         }
                     }
                     (Key::F11, true, false, _) => msgs.push(Message::ToggleFullscreen),
