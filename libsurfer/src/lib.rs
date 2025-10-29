@@ -1801,10 +1801,13 @@ impl SystemState {
                     },
                 ) {
                     dump_tree(waves);
-                    waves.remove_displayed_item(group_ref);
                     error!("failed to move items into group: {e:?}")
                 }
                 waves.items_tree.xselect_all_visible(false);
+                waves.focused_item = waves
+                    .items_tree
+                    .iter_visible_extra()
+                    .find_map(|info| (info.node.item_ref == group_ref).then_some(info.vidx))
             }
             Message::GroupDissolve(item_ref) => {
                 self.save_current_canvas("Dissolve group".to_owned());
