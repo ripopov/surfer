@@ -74,7 +74,6 @@ pub struct SystemState {
     pub(crate) url: RefCell<String>,
     pub(crate) command_prompt_text: RefCell<String>,
     pub(crate) last_canvas_rect: RefCell<Option<Rect>>,
-    pub(crate) item_renaming_string: RefCell<String>,
 
     /// These items should be expanded into subfields in the next frame. Cleared after each
     /// frame
@@ -139,7 +138,6 @@ impl SystemState {
                 time_string_format: None,
                 show_url_entry: false,
                 show_quick_start: false,
-                rename_target: None,
                 show_reload_suggestion: None,
                 variable_name_filter_focused: false,
                 variable_filter: VariableFilter::new(),
@@ -193,7 +191,6 @@ impl SystemState {
             draw_data: RefCell::new(vec![None]),
             variable_name_info_cache: RefCell::new(HashMap::new()),
             last_canvas_rect: RefCell::new(None),
-            item_renaming_string: RefCell::new(String::new()),
 
             items_to_expand: RefCell::new(vec![]),
             char_to_add_to_prompt: RefCell::new(None),

@@ -466,17 +466,6 @@ impl SystemState {
                 let waves = self.user.waves.as_mut()?;
                 waves.focused_item = None;
             }
-            Message::OpenRenameDialog(vidx) => {
-                let waves = self.user.waves.as_mut()?;
-                let vidx = vidx.or(waves.focused_item)?;
-                self.user.rename_target = Some(vidx);
-                *self.item_renaming_string.borrow_mut() = waves
-                    .items_tree
-                    .get_visible(vidx)
-                    .and_then(|node| waves.displayed_items.get(&node.item_ref))
-                    .map(displayed_item::DisplayedItem::name)
-                    .unwrap_or_default();
-            }
             Message::MoveFocus(direction, count, select) => {
                 let waves = self.user.waves.as_mut()?;
                 let visible_item_cnt = waves.items_tree.iter_visible().count();
@@ -1489,7 +1478,6 @@ impl SystemState {
             }
             Message::SetLicenseVisible(s) => self.user.show_license = s,
             Message::SetQuickStartVisible(s) => self.user.show_quick_start = s,
-            Message::SetRenameItemVisible(_) => self.user.rename_target = None,
             Message::SetPerformanceVisible(s) => {
                 if !s {
                     self.continuous_redraw = false;
