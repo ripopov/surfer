@@ -473,11 +473,7 @@ impl SystemState {
                 let waves = self.user.waves.as_mut()?;
                 waves.focused_item = None;
             }
-            Message::RenameItem(vidx) => {
-                self.save_current_canvas(format!(
-                    "Rename item to {}",
-                    self.item_renaming_string.borrow()
-                ));
+            Message::OpenRenameDialog(vidx) => {
                 let waves = self.user.waves.as_mut()?;
                 let vidx = vidx.or(waves.focused_item)?;
                 self.user.rename_target = Some(vidx);
@@ -1229,17 +1225,15 @@ impl SystemState {
             Message::SetHighlightFocused(highlight) => {
                 self.user.highlight_focused = Some(highlight);
             }
-            Message::ShowCommandPrompt(text) => {
-                if let Some(init_text) = text {
-                    self.command_prompt.new_cursor_pos = Some(init_text.len());
-                    *self.command_prompt_text.borrow_mut() = init_text;
-                    self.command_prompt.visible = true;
-                } else {
-                    *self.command_prompt_text.borrow_mut() = "".to_string();
-                    self.command_prompt.suggestions = vec![];
-                    self.command_prompt.selected = self.command_prompt.previous_commands.len();
-                    self.command_prompt.visible = false;
-                }
+            Message::HideCommandPrompt => {
+                *self.command_prompt_text.borrow_mut() = "".to_string();
+                self.command_prompt.suggestions = vec![];
+                self.command_prompt.selected = self.command_prompt.previous_commands.len();
+                self.command_prompt.visible = false;
+            }
+            Message::ShowCommandPrompt(text, selected) => {
+                self.command_prompt.new_text = Some((text, selected.unwrap_or("".to_owned())));
+                self.command_prompt.visible = true;
             }
             Message::FileDownloaded(url, bytes, load_options) => {
                 self.load_from_bytes(WaveSource::Url(url), bytes.to_vec(), load_options)
@@ -1805,10 +1799,13 @@ impl SystemState {
                     },
                 ) {
                     dump_tree(waves);
-                    waves.remove_displayed_item(group_ref);
                     error!("failed to move items into group: {e:?}")
                 }
                 waves.items_tree.xselect_all_visible(false);
+                waves.focused_item = waves
+                    .items_tree
+                    .iter_visible_extra()
+                    .find_map(|info| (info.node.item_ref == group_ref).then_some(info.vidx))
             }
             Message::GroupDissolve(item_ref) => {
                 self.save_current_canvas("Dissolve group".to_owned());
