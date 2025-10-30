@@ -13,13 +13,13 @@ use tokio::net::{TcpListener, TcpStream};
 
 #[cfg(target_arch = "wasm32")]
 use crate::channels::IngressSender;
-use log::{error, info, warn};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::Receiver;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
+use tracing::{error, info, warn};
 
 use super::{proto::WcpCSMessage, proto::WcpCommand, proto::WcpSCMessage};
 

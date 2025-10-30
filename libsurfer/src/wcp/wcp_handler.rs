@@ -9,9 +9,9 @@ use crate::{
 
 use futures::executor::block_on;
 use itertools::Itertools;
-use log::{trace, warn};
 use std::sync::atomic::Ordering;
 use surfer_translation_types::ScopeRef;
+use tracing::{trace, warn};
 
 use super::proto::{ItemInfo, WcpCSMessage, WcpCommand, WcpResponse, WcpSCMessage};
 

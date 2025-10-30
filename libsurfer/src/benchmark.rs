@@ -7,7 +7,7 @@ use std::{
 
 use egui_plot::{Legend, Line, Plot, PlotPoints, PlotUi};
 use itertools::Itertools;
-use log::warn;
+use tracing::warn;
 
 use crate::{message::Message, SystemState};
 

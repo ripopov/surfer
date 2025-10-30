@@ -1,11 +1,11 @@
 use std::{collections::VecDeque, io::Write};
 
 use eyre::{Context, Result};
-use log::{error, info, trace};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::mpsc,
 };
+use tracing::{error, info, trace};
 
 use crate::channels::IngressSender;
 

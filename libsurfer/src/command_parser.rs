@@ -20,7 +20,7 @@ use crate::{
     SystemState,
 };
 use itertools::Itertools;
-use log::warn;
+use tracing::warn;
 
 type RestCommand = Box<dyn Fn(&str) -> Option<Command<Message>>>;
 
