@@ -1,13 +1,13 @@
 #[cfg(not(target_arch = "wasm32"))]
 use camino::Utf8Path;
 #[cfg(all(not(windows), not(target_arch = "wasm32")))]
-use log::{error, info};
-#[cfg(all(not(windows), not(target_arch = "wasm32")))]
 use notify::Error;
 #[cfg(all(not(windows), not(target_arch = "wasm32")))]
 use notify::{event::ModifyKind, Config, Event, EventKind, RecursiveMode, Watcher};
 #[cfg(all(not(windows), not(target_arch = "wasm32")))]
 use std::time::Duration;
+#[cfg(all(not(windows), not(target_arch = "wasm32")))]
+use tracing::{error, info};
 
 /// Watches a provided file for changes.
 /// Currently, this only works for Unix-like systems (tested on linux and macOS).

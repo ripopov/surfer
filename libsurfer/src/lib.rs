@@ -84,7 +84,6 @@ use ftr_parser::types::Transaction;
 use futures::executor::block_on;
 use itertools::Itertools;
 use lazy_static::lazy_static;
-use log::{error, info, warn};
 use message::MessageTarget;
 use num::BigInt;
 use serde::Deserialize;
@@ -92,6 +91,7 @@ use surfer_translation_types::Translator;
 pub use system_state::SystemState;
 #[cfg(target_arch = "wasm32")]
 use tokio_stream as _;
+use tracing::{error, info, warn};
 #[cfg(all(not(target_arch = "wasm32"), feature = "wasm_plugins"))]
 use translation::wasm_translator::PluginTranslator;
 use wave_container::ScopeRef;
@@ -261,13 +261,6 @@ struct CanvasState {
 
 impl SystemState {
     pub fn update(&mut self, message: Message) -> Option<()> {
-        if log::log_enabled!(log::Level::Trace)
-            && !matches!(message, Message::CommandPromptUpdate { .. })
-        {
-            let mut s = format!("{message:?}");
-            s.shrink_to(100);
-            log::info!("{s}");
-        }
         match message {
             Message::SetActiveScope(scope) => {
                 let waves = self.user.waves.as_mut()?;
