@@ -23,9 +23,7 @@ use surfer_translation_types::{
 use crate::benchmark::NUM_PERF_SAMPLES;
 use crate::command_parser::get_parser;
 use crate::config::SurferTheme;
-use crate::displayed_item::{
-    draw_rename_window, DisplayedFieldRef, DisplayedItem, DisplayedItemRef,
-};
+use crate::displayed_item::{DisplayedFieldRef, DisplayedItem, DisplayedItemRef};
 use crate::displayed_item_tree::{ItemIndex, VisibleItemIndex};
 use crate::help::{
     draw_about_window, draw_control_help_window, draw_license_window, draw_quickstart_help_window,
@@ -314,15 +312,6 @@ impl SystemState {
             }
         }
 
-        if let Some(idx) = self.user.rename_target {
-            draw_rename_window(
-                ctx,
-                &mut msgs,
-                idx,
-                &mut self.item_renaming_string.borrow_mut(),
-            );
-        }
-
         if self
             .user
             .show_menu
@@ -539,10 +528,7 @@ impl SystemState {
         });
 
         // If some dialogs are open, skip decoding keypresses
-        if !self.user.show_url_entry
-            && self.user.rename_target.is_none()
-            && self.user.show_reload_suggestion.is_none()
-        {
+        if !self.user.show_url_entry && self.user.show_reload_suggestion.is_none() {
             self.handle_pressed_keys(ctx, &mut msgs);
         }
         msgs

@@ -94,7 +94,6 @@ pub enum Message {
     SetItemSelected(VisibleItemIndex, bool),
     /// Unfocus a wave/item.
     UnfocusItem,
-    RenameItem(Option<VisibleItemIndex>),
     MoveFocus(MoveDir, CommandCount, bool),
     MoveFocusedItem(MoveDir, CommandCount),
     FocusTransaction(Option<TransactionRef>, Option<Transaction>),
@@ -194,7 +193,8 @@ pub enum Message {
     /// Take note that the specified translator errored on a `translates` call on the
     /// specified variable
     BlacklistTranslator(VariableRef, String),
-    ShowCommandPrompt(Option<String>),
+    HideCommandPrompt,
+    ShowCommandPrompt(String, Option<String>),
     /// Message sent when file is loadedropped onto Surfer.
     FileDropped(DroppedFile),
     #[serde(skip)]
@@ -290,7 +290,6 @@ pub enum Message {
         #[debug(skip)] Option<Box<dyn Fn(String) -> Message + Send + 'static>>,
     ),
     SetLicenseVisible(bool),
-    SetRenameItemVisible(bool),
     SetLogsVisible(bool),
     SetMouseGestureDragStart(Option<Pos2>),
     SetMeasureDragStart(Option<Pos2>),
