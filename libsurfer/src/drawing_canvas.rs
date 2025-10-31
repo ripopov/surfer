@@ -5,7 +5,6 @@ use epaint::{CornerRadiusF32, CubicBezierShape, PathShape, PathStroke, RectShape
 use eyre::WrapErr;
 use ftr_parser::types::{Transaction, TxGenerator};
 use itertools::Itertools;
-use log::{error, warn};
 use num::bigint::{ToBigInt, ToBigUint};
 use num::{BigInt, BigUint, ToPrimitive};
 use rayon::prelude::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
@@ -15,6 +14,7 @@ use std::f32::consts::PI;
 use surfer_translation_types::{
     SubFieldFlatTranslationResult, TranslatedValue, ValueKind, VariableInfo, VariableType,
 };
+use tracing::{error, warn};
 
 use crate::clock_highlighting::draw_clock_edge_marks;
 use crate::config::SurferTheme;

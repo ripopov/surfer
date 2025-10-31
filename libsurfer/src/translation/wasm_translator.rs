@@ -8,12 +8,12 @@ use directories::ProjectDirs;
 use extism::{host_fn, Manifest, Plugin, PluginBuilder, Wasm, PTR};
 use extism_manifest::MemoryOptions;
 use eyre::{anyhow, Context};
-use log::{error, warn};
 use surfer_translation_types::plugin_types::TranslateParams;
 use surfer_translation_types::{
     TranslationPreference, TranslationResult, Translator, VariableInfo, VariableMeta,
     VariableNameInfo, VariableValue,
 };
+use tracing::{error, warn};
 
 use crate::message::Message;
 use crate::wave_container::{ScopeId, VarId};
@@ -91,6 +91,7 @@ impl PluginTranslator {
         let manifest = Manifest::new([Wasm::data(data)])
             .with_memory_options(MemoryOptions::new().with_max_var_bytes(1024 * 1024 * 10));
         let mut plugin = PluginBuilder::new(manifest)
+            .with_debug_info()
             .with_function(
                 "read_file",
                 [PTR],

@@ -23,7 +23,7 @@ impl SystemState {
         {
             Ok(s) => vec![Message::LoadState(s, path)],
             Err(e) => {
-                log::error!("Failed to load state: {e:#?}");
+                tracing::error!("Failed to load state: {e:#?}");
                 vec![]
             }
         };
@@ -47,12 +47,12 @@ impl SystemState {
                 {
                     Ok(s) => vec![Message::LoadState(s, Some(path))],
                     Err(e) => {
-                        log::error!("Failed to load state: {e:#?}");
+                        tracing::error!("Failed to load state: {e:#?}");
                         vec![]
                     }
                 }
             } else {
-                log::error!("Failed to load state file: {path:#?}");
+                tracing::error!("Failed to load state file: {path:#?}");
                 vec![]
             }
         };
@@ -83,7 +83,7 @@ impl SystemState {
             destination
                 .write(encoded.as_bytes())
                 .await
-                .map_err(|e| log::error!("Failed to write state to {destination:#?} {e:#?}"))
+                .map_err(|e| tracing::error!("Failed to write state to {destination:#?} {e:#?}"))
                 .ok();
             vec![
                 Message::SetStateFile(destination.path().into()),
@@ -121,7 +121,7 @@ impl SystemState {
             destination
                 .write(encoded.as_bytes())
                 .await
-                .map_err(|e| log::error!("Failed to write state to {destination:#?} {e:#?}"))
+                .map_err(|e| tracing::error!("Failed to write state to {destination:#?} {e:#?}"))
                 .ok();
             vec![Message::AsyncDone(AsyncJob::SaveState)]
         };
@@ -140,7 +140,7 @@ impl SystemState {
 
         opt.to_string_pretty(&self.user, ron::ser::PrettyConfig::default())
             .context("Failed to encode state")
-            .map_err(|e| log::error!("Failed to encode state. {e:#?}"))
+            .map_err(|e| tracing::error!("Failed to encode state. {e:#?}"))
             .ok()
     }
 }

@@ -9,10 +9,10 @@ use base64::{engine::general_purpose, Engine};
 use egui_skia_renderer::{create_surface, draw_onto_surface, EncodedImageFormat};
 use emath::Vec2;
 use image::{DynamicImage, ImageFormat};
-use log::info;
 use num::{bigint::ToBigInt, BigInt};
 use project_root::get_project_root;
 use test_log::test;
+use tracing::info;
 
 use crate::{
     async_util::AsyncJob,

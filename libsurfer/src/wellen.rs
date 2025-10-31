@@ -3,11 +3,11 @@ use std::fmt::Write;
 
 use derive_more::Debug;
 use eyre::{anyhow, bail, Result};
-use log::warn;
 use num::{BigUint, ToPrimitive};
 use surfer_translation_types::{
     VariableDirection, VariableEncoding, VariableIndex, VariableType, VariableValue,
 };
+use tracing::warn;
 use wellen::{
     FileFormat, Hierarchy, ScopeType, Signal, SignalEncoding, SignalRef, SignalSource, Time,
     TimeTable, TimeTableIdx, Timescale, TimescaleUnit, Var, VarRef, VarType,
