@@ -794,16 +794,16 @@ snapshot_ui_with_file_and_msgs! {toggle_tick_lines, "examples/counter.vcd", [
 
 snapshot_ui_with_file_and_msgs! {command_prompt, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
-    Message::ShowCommandPrompt(Some("".to_string()))
+    Message::ShowCommandPrompt("".to_string(), None)
 ]}
 
 snapshot_ui_with_file_and_msgs! {command_prompt_with_init_text, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
-    Message::ShowCommandPrompt(Some("test ".to_string()))
+    Message::ShowCommandPrompt("test ".to_string(), None)
 ]}
 
 snapshot_ui_with_file_and_msgs! {command_prompt_next_command, "examples/counter.vcd", [
-    Message::ShowCommandPrompt(Some("".to_string())),
+    Message::ShowCommandPrompt("".to_string(), None),
     Message::CommandPromptUpdate { suggestions: vec![("test".to_string(), vec![true, true, false, false]); 10] },
     Message::SelectNextCommand,
     Message::SelectNextCommand,
@@ -813,7 +813,7 @@ snapshot_ui_with_file_and_msgs! {command_prompt_next_command, "examples/counter.
 ]}
 
 snapshot_ui_with_file_and_msgs! {command_prompt_prev_command, "examples/counter.vcd", [
-    Message::ShowCommandPrompt(Some("".to_string())),
+    Message::ShowCommandPrompt("".to_string(), None),
     Message::CommandPromptUpdate { suggestions: vec![("test".to_string(), vec![true, true, false, false]); 10] },
     Message::SelectNextCommand,
     Message::SelectNextCommand,
@@ -855,7 +855,7 @@ snapshot_ui_with_file_and_msgs!(
     command_prompt_scroll_bounds_prev,
     "examples/counter.vcd",
     [
-        Message::ShowCommandPrompt(Some("".to_string())),
+        Message::ShowCommandPrompt("".to_string(), None),
         Message::CommandPromptUpdate {
             suggestions: vec![("test".to_string(), vec![true, true, false, false]); 5]
         },
@@ -867,7 +867,7 @@ snapshot_ui_with_file_and_msgs!(
     command_prompt_scroll_bounds_next,
     "examples/counter.vcd",
     [
-        Message::ShowCommandPrompt(Some("".to_string())),
+        Message::ShowCommandPrompt("".to_string(), None),
         Message::CommandPromptUpdate {
             suggestions: vec![("test".to_string(), vec![true, true, false, false]); 5]
         },

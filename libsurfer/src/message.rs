@@ -194,8 +194,8 @@ pub enum Message {
     /// Take note that the specified translator errored on a `translates` call on the
     /// specified variable
     BlacklistTranslator(VariableRef, String),
-    ShowCommandPrompt(Option<String>),
-    ShowCommandPromptPreSelected(String, usize, usize),
+    HideCommandPrompt,
+    ShowCommandPrompt(String, Option<String>),
     /// Message sent when file is loadedropped onto Surfer.
     FileDropped(DroppedFile),
     #[serde(skip)]
