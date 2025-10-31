@@ -631,7 +631,7 @@ impl SurferConfig {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn new(force_default_config: bool) -> eyre::Result<Self> {
         use eyre::anyhow;
-        use log::warn;
+        use tracing::warn;
 
         let default_config = String::from(include_str!("../../default_config.toml"));
 

@@ -6,13 +6,13 @@ use std::{
 use tokio::sync::mpsc;
 
 use eyre::Result;
-use log::{error, info};
 use num::{
     bigint::{ToBigInt, ToBigUint},
     BigUint,
 };
 use serde::Deserialize;
 use surfer_translation_types::VariableEncoding;
+use tracing::{error, info};
 
 use crate::wave_container::ScopeRefExt;
 use crate::{
@@ -157,7 +157,7 @@ impl CxxrtlData {
 macro_rules! expect_response {
     ($expected:pat, $response:expr) => {
         let $expected = $response else {
-            log::error!(
+            tracing::error!(
                 "Got unexpected response. Got {:?} expected {}",
                 $response,
                 stringify!(expected)

@@ -20,11 +20,11 @@ use emath::Align;
 use enum_iterator::Sequence;
 use eyre::Context;
 use itertools::Itertools;
-use log::warn;
 use num::BigUint;
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 use surfer_translation_types::VariableType;
+use tracing::warn;
 #[derive(Clone, Copy, Debug, Deserialize, Display, FromStr, PartialEq, Eq, Serialize, Sequence)]
 pub enum HierarchyStyle {
     Separate,

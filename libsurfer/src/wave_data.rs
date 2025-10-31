@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use eyre::{Result, WrapErr};
-use log::{error, info, warn};
 use num::bigint::ToBigInt as _;
 use num::{BigInt, BigUint, Zero};
 use serde::{Deserialize, Serialize};
 use surfer_translation_types::{TranslationPreference, Translator, VariableValue};
+use tracing::{error, info, warn};
 
 use crate::data_container::DataContainer;
 use crate::displayed_item::{

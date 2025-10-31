@@ -8,9 +8,9 @@ use directories::ProjectDirs;
 use ecolor::Color32;
 use eyre::Result;
 #[cfg(not(target_arch = "wasm32"))]
-use log::warn;
-#[cfg(not(target_arch = "wasm32"))]
 use toml::Table;
+#[cfg(not(target_arch = "wasm32"))]
+use tracing::warn;
 
 mod basic_translators;
 pub mod clock;
@@ -164,7 +164,7 @@ fn find_user_decoders() -> Vec<Box<DynBasicTranslator>> {
 /// Look for user defined decoders in path.
 #[cfg(not(target_arch = "wasm32"))]
 fn find_user_decoders_at_path(path: &Path) -> Vec<Box<DynBasicTranslator>> {
-    use log::error;
+    use tracing::error;
 
     let mut decoders: Vec<Box<DynBasicTranslator>> = vec![];
     let Ok(decoder_dirs) = std::fs::read_dir(path.join("decoders")) else {
@@ -388,7 +388,7 @@ impl TranslatorList {
 
     #[cfg(feature = "python")]
     pub fn load_python_translator(&mut self, filename: camino::Utf8PathBuf) -> Result<()> {
-        log::debug!("Reading Python code from disk: {filename}");
+        tracing::debug!("Reading Python code from disk: {filename}");
         let code = std::ffi::CString::new(std::fs::read_to_string(&filename)?)?;
         let mut translators = python_translators::PythonTranslator::new(&code.as_c_str())?;
         if translators.len() != 1 {
