@@ -65,9 +65,9 @@ impl SystemState {
                         }
                     }
                     (Key::Space, true, false, false) => {
-                        msgs.push(Message::ShowCommandPrompt(Some("".to_string())))
+                        msgs.push(Message::ShowCommandPrompt("".to_string(), None))
                     }
-                    (Key::Escape, true, true, false) => msgs.push(Message::ShowCommandPrompt(None)),
+                    (Key::Escape, true, true, false) => msgs.push(Message::HideCommandPrompt),
                     (Key::Escape, true, false, false) => {
                         msgs.push(Message::InvalidateCount);
                         msgs.push(Message::ItemSelectionClear);
@@ -83,11 +83,11 @@ impl SystemState {
                     (Key::B, true, false, false) => msgs.push(Message::ToggleSidePanel),
                     (Key::E, true, false, false) => msgs.push(Message::GoToEnd { viewport_idx: 0 }),
                     (Key::F, true, false, false) => {
-                        msgs.push(Message::ShowCommandPrompt(Some("item_focus ".to_string())))
+                        msgs.push(Message::ShowCommandPrompt("item_focus ".to_string(), None))
                     }
                     (Key::G, true, true, false) => {
                         if modifiers.command {
-                            msgs.push(Message::ShowCommandPrompt(None))
+                            msgs.push(Message::HideCommandPrompt)
                         }
                     }
                     (Key::G, true, false, false) => {
@@ -96,7 +96,7 @@ impl SystemState {
                             before: None,
                             items: None,
                         });
-                        msgs.push(Message::ShowCommandPrompt(Some("item_rename ".to_owned())))
+                        msgs.push(Message::ShowCommandPrompt("item_rename ".to_owned(), None))
                     }
                     (Key::H, true, false, false) => msgs.push(Message::MoveCursorToTransition {
                         next: false,
@@ -210,7 +210,7 @@ impl SystemState {
                         if let Some(waves) = &self.user.waves {
                             if waves.focused_item.is_some() {
                                 msgs.push(Message::ShowCommandPrompt(
-                                    Some("rename_item ".to_owned()),
+                                    "rename_item ".to_owned(),
                                     None,
                                 ));
                             }
