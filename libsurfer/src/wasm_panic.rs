@@ -19,7 +19,7 @@ extern "C" {
 
 #[cfg(target_arch = "wasm32")]
 fn panic_hook(info: &panic::PanicHookInfo) {
-    use log::warn;
+    use tracing::warn;
 
     let mut msg = info.to_string();
 
@@ -57,7 +57,7 @@ fn panic_hook(info: &panic::PanicHookInfo) {
 pub fn set_once() {
     use std::sync::Once;
 
-    use log::info;
+    use tracing::info;
     static SET_HOOK: Once = Once::new();
     SET_HOOK.call_once(|| {
         info!("Hook set up");

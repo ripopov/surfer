@@ -16,8 +16,8 @@ use eyre::Result;
 use eyre::{anyhow, WrapErr};
 use ftr_parser::parse;
 use futures_util::FutureExt;
-use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
+use tracing::{error, info, warn};
 use web_time::Instant;
 
 use crate::transaction_container::TransactionContainer;
@@ -115,7 +115,7 @@ pub fn url_to_wavesource(url: &str) -> Option<WaveSource> {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            log::warn!("Loading waves from cxxrtl via tcp is unsupported in WASM builds.");
+            tracing::warn!("Loading waves from cxxrtl via tcp is unsupported in WASM builds.");
             None
         }
     } else {

@@ -1,8 +1,7 @@
 //! Code for the `surver` executable.
 use clap::Parser;
 use eyre::Result;
-use fern::colors::ColoredLevelConfig;
-use fern::Dispatch;
+use tracing_subscriber::Layer;
 
 #[derive(clap::Parser, Default)]
 #[command(version, about)]
@@ -23,28 +22,20 @@ struct Args {
 /// Starts the logging and error handling. Can be used by unittests to get more insights.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn start_logging() -> Result<()> {
-    let colors = ColoredLevelConfig::new()
-        .error(fern::colors::Color::Red)
-        .warn(fern::colors::Color::Yellow)
-        .info(fern::colors::Color::Green)
-        .debug(fern::colors::Color::Blue)
-        .trace(fern::colors::Color::White);
+    use std::io::stdout;
 
-    let stdout_config = fern::Dispatch::new()
-        .level(log::LevelFilter::Info)
-        .level_for("surver", log::LevelFilter::Trace)
-        .format(move |out, message, record| {
-            out.finish(format_args!(
-                "[{}] {}",
-                colors.color(record.level()),
-                message
-            ));
-        })
-        .chain(std::io::stdout());
+    use tracing_subscriber::{fmt, layer::SubscriberExt, Registry};
 
-    Dispatch::new().chain(stdout_config).apply()?;
+    let filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    let subscriber = Registry::default().with(
+        fmt::layer()
+            .without_time()
+            .with_writer(stdout)
+            .with_filter(filter.clone()),
+    );
 
-    simple_eyre::install()?;
+    tracing::subscriber::set_global_default(subscriber).expect("unable to set global subscriber");
 
     Ok(())
 }

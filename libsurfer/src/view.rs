@@ -12,7 +12,7 @@ use epaint::{
     CornerRadiusF32, Margin, Stroke,
 };
 use itertools::Itertools;
-use log::info;
+use tracing::info;
 
 use surfer_translation_types::{
     translator::{TrueName, VariableNameInfo},

@@ -7,7 +7,6 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
-use log::{error, info, warn};
 use std::collections::HashMap;
 use std::io::{BufRead, Seek};
 use std::iter::repeat_with;
@@ -16,6 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
 use tokio::net::TcpListener;
+use tracing::{error, info, warn};
 use wellen::{
     viewers, CompressedSignal, CompressedTimeTable, FileFormat, Hierarchy, Signal, SignalRef, Time,
 };

@@ -27,9 +27,9 @@ use egui::{
     CornerRadius, Stroke, Visuals,
 };
 use itertools::Itertools;
-use log::{error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use surfer_translation_types::Translator;
+use tracing::{error, info, trace, warn};
 
 /// The parts of the program state that need to be serialized when loading/saving state
 #[derive(Serialize, Deserialize)]
