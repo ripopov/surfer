@@ -204,10 +204,10 @@ impl eframe::App for SystemState {
 
         #[cfg(feature = "performance_plot")]
         self.timing.borrow_mut().start("handle_async_messages");
+        self.handle_async_messages();
         #[cfg(feature = "performance_plot")]
         self.timing.borrow_mut().end("handle_async_messages");
 
-        self.handle_async_messages();
         self.handle_batch_commands();
         #[cfg(target_arch = "wasm32")]
         self.handle_wasm_external_messages();
@@ -447,17 +447,19 @@ impl SystemState {
                 }
 
                 egui::SidePanel::left("variable values")
-                    .frame(Frame {
-                        inner_margin: Margin::ZERO,
-                        outer_margin: Margin::ZERO,
-                        ..Default::default()
-                    })
+                    .frame(
+                        egui::Frame::default()
+                            .inner_margin(0)
+                            .outer_margin(0)
+                            .fill(self.user.config.theme.primary_ui_color.background),
+                    )
                     .default_width(100.)
                     .width_range(10.0..=max_width)
                     .show(ctx, |ui| {
                         ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                         self.handle_pointer_in_ui(ui, &mut msgs);
                         let response = ScrollArea::both()
+                            .auto_shrink([false; 2])
                             .vertical_scroll_offset(scroll_offset)
                             .show(ui, |ui| self.draw_var_values(ui, &mut msgs));
                         if (scroll_offset - response.state.offset.y).abs() > 5. {
@@ -1321,7 +1323,8 @@ impl SystemState {
         let Some(waves) = &self.user.waves else {
             return;
         };
-        let (response, mut painter) = ui.allocate_painter(ui.available_size(), Sense::click());
+        let response = ui.allocate_response(ui.available_size(), Sense::click());
+        let mut painter = ui.painter().clone();
         let rect = response.rect;
         let container_rect = Rect::from_min_size(Pos2::ZERO, rect.size());
         let to_screen = RectTransform::from_to(container_rect, rect);
@@ -1332,11 +1335,6 @@ impl SystemState {
         );
         let frame_width = rect.width();
 
-        painter.rect_filled(
-            rect,
-            CornerRadiusF32::ZERO,
-            self.user.config.theme.secondary_ui_color.background,
-        );
         let ctx = DrawingContext {
             painter: &mut painter,
             cfg: &cfg,
@@ -1353,7 +1351,7 @@ impl SystemState {
         // Add default margin as it was removed when creating the frame
         let rect_with_margin = Rect {
             min: rect.min + ui.spacing().item_spacing,
-            max: rect.max,
+            max: rect.max + Vec2::new(0.0, 40.0),
         };
 
         let builder = UiBuilder::new().max_rect(rect_with_margin);
@@ -1397,9 +1395,19 @@ impl SystemState {
                             &ucursor,
                         );
                         if let Some(v) = v {
-                            ui.label(RichText::new(v).color(
-                                *self.user.config.theme.get_best_text_color(backgroundcolor),
-                            ))
+                            ui.label(
+                                RichText::new(v)
+                                    .color(
+                                        *self
+                                            .user
+                                            .config
+                                            .theme
+                                            .get_best_text_color(backgroundcolor),
+                                    )
+                                    .line_height(Some(
+                                        self.user.config.layout.waveforms_line_height,
+                                    )),
+                            )
                             .context_menu(|ui| {
                                 self.item_context_menu(
                                     Some(&FieldRef::without_fields(
