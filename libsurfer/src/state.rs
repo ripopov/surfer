@@ -101,7 +101,6 @@ pub struct UserState {
     pub(crate) show_open_sibling_state_file_suggestion: Option<OpenSiblingStateFileDialog>,
     pub(crate) variable_name_filter_focused: bool,
     pub(crate) variable_filter: VariableFilter,
-    pub(crate) rename_target: Option<VisibleItemIndex>,
     //Sidepanel width
     pub(crate) sidepanel_width: Option<f32>,
     /// UI zoom factor if set by the user
@@ -423,7 +422,6 @@ impl SystemState {
 
         // use just loaded path since path is not part of the export as it might have changed anyways
         self.user.state_file = path;
-        self.user.rename_target = None;
 
         self.invalidate_draw_commands();
         if let Some(waves) = &mut self.user.waves {

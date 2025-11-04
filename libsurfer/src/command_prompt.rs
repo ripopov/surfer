@@ -27,7 +27,7 @@ pub struct CommandPrompt {
     pub suggestions: Vec<(String, Vec<bool>)>,
     pub selected: usize,
     pub new_selection: Option<usize>,
-    pub new_cursor_pos: Option<usize>,
+    pub new_text: Option<(String, String)>,
     pub previous_commands: Vec<(String, Vec<bool>)>,
 }
 
@@ -45,11 +45,13 @@ pub fn show_command_prompt(
         .resizable(true)
         .show(ctx, |ui| {
             egui::Frame::NONE.show(ui, |ui| {
+                let text_update = state.command_prompt.new_text.take();
                 let input = &mut *state.command_prompt_text.borrow_mut();
-                let new_c = *state.char_to_add_to_prompt.borrow();
-                if let Some(c) = new_c {
+                if let Some(c) = state.char_to_add_to_prompt.take() {
                     input.push(c);
-                    *state.char_to_add_to_prompt.borrow_mut() = None;
+                }
+                if let Some((normal, selected)) = &text_update {
+                    *input = normal.clone() + selected;
                 }
                 let response = ui.add(
                     TextEdit::singleline(input)
@@ -72,12 +74,29 @@ pub fn show_command_prompt(
                     }
                 };
 
+                let select_range = |start, end, ui: &mut egui::Ui| {
+                    if let Some(mut state) = TextEdit::load_state(ui.ctx(), response.id) {
+                        let start = CCursor::new(start);
+                        let end = CCursor::new(end);
+                        state
+                            .cursor
+                            .set_char_range(Some(CCursorRange::two(start, end)));
+                        state.store(ui.ctx(), response.id);
+                        ui.ctx().memory_mut(|m| m.request_focus(response.id));
+                    }
+                };
+
                 if response.ctx.input(|i| i.key_pressed(Key::ArrowUp)) {
                     set_cursor_to_pos(input.chars().count(), ui);
                 }
-                if let Some(new_pos) = state.command_prompt.new_cursor_pos {
-                    set_cursor_to_pos(new_pos, ui);
-                    state.command_prompt.new_cursor_pos = None;
+                if let Some((normal, selected)) = text_update {
+                    let normal_cnt = normal.chars().count();
+                    if selected.is_empty() {
+                        set_cursor_to_pos(normal_cnt, ui);
+                    } else {
+                        let selected_cnt = selected.chars().count();
+                        select_range(normal_cnt, normal_cnt + selected_cnt, ui);
+                    }
                 }
 
                 let suggestions = state
@@ -142,7 +161,7 @@ pub fn show_command_prompt(
                     );
 
                     if let Ok(cmd) = parsed.1 {
-                        msgs.push(Message::ShowCommandPrompt(None));
+                        msgs.push(Message::HideCommandPrompt);
                         msgs.push(Message::CommandPromptClear);
                         msgs.push(Message::CommandPromptPushPrevious(parsed.0));
                         msgs.push(cmd);
@@ -308,7 +327,7 @@ pub fn show_command_prompt(
                                 );
 
                                 if let Ok(cmd) = result.1 {
-                                    msgs.push(Message::ShowCommandPrompt(None));
+                                    msgs.push(Message::HideCommandPrompt);
                                     msgs.push(Message::CommandPromptClear);
                                     msgs.push(Message::CommandPromptPushPrevious(expanded));
                                     msgs.push(cmd);
