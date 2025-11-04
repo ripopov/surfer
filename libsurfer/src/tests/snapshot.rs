@@ -2564,3 +2564,14 @@ snapshot_ui_with_file_and_msgs! {wasm_translator_works, "examples/picorv32.vcd",
     ),
     Message::ExpandDrawnItem { item: DisplayedItemRef(1), levels: 1 }
 ]}
+
+snapshot_ui_with_file_and_msgs! {group_creation_shows_rename_dialog, "examples/picorv32.vcd", [
+    Message::AddScope(ScopeRef::from_strs(&["testbench"]), false),
+    Message::SetItemSelected(VisibleItemIndex(0), true),
+    Message::SetItemSelected(VisibleItemIndex(1), true),
+    Message::GroupNew {
+        name: None,
+        before: None,
+        items: None,
+    },
+]}
