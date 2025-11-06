@@ -20,7 +20,7 @@ surfer_major  = int(surfer_version[1])
 surfer_minor  = int(surfer_version[2])
 surfer_patch = int(surfer_version[3])
 # If -dev is present, decrement surfer_minor
-if len(surfer_version[4]) != 0:
+if surfer_version.groups()[3]:
     print(f"Surfer patch is {surfer_patch} and -dev is present. Decrementing patch")
     surfer_minor = surfer_minor- 1
 

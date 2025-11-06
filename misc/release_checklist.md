@@ -1,10 +1,5 @@
 # Release procedure
 
-## Preparation
-
-A few days before: write a post on blog.surfer-project.org highlighting important changes. Possibly also
-take the opportunity to highlight other stuff that normally doesn't fit in a blog post, like new projects, publications? etc.
-
 ## Pre release procedure
 
 - [ ] Surfer
