@@ -9,6 +9,85 @@ released as a new version.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.0] - 2025-11-06
+
+## Added
+
+- New commands `goto_cursor`, `cursor_set`, `marker_set`, `marker_remove`. Markers can be accessed through their names or numbers as `#3` etc.
+- It is possible to pan with the right/secondary mouse button.
+- Change the relative size of the Scope and Variable lists.
+- Fixed-point translators based on index value (fractional bits have negative indices), suitable for `sfixed` VHDL-types etc.
+- Add grouping of variables (and groups).
+- It is possible to add scopes as groups, possibly recursively.
+- Surfer automatically select a corresponding translator for the VHDL types `signed`, `unsigned`, `sfixed`, and `ufixed`.
+- It is now possible to drop state files onto Surfer to load them.
+- A script, `surfer.sh`, that can be used to easily start Windows Surfer from WSL. Download from repo and follow the instructions in the script.
+- It is now possible to copy the variable name of the focused variable by right-clicking on the name.
+- Right-click menu for scopes to add variables in scopes.
+- `Ctrl+s` now saves the state file.
+- If there is a file ending with `.surf.ron` in the current directory, there will be a dialog asking if it should be loaded (configurable to either ask, always load, or never load).
+- The variable filter can now filter based on port direction and optionally group based on port direction.
+- Measure time by holding shift and left-click (primary mouse button). Configure color and line width using `measure` in theme. Can be changed to not need shift by setting the config `primary_button_drag_behavior` to `Measure` (dragging the cursor will now require shift) or by menu entry.
+- The arrow between transactions can now be fully configured, including line width and arrow properties.
+- The maximum size of the "X" between vector transitions can be configured using `vector_transition_width´ (default 6).
+- It is possible to configure the mouse gestures.
+- LoongArch64 (LA64) instruction translator.
+- The height of the waves can be modified by right-clicking on the variable name and use the "Height" submenu. The available options can be configured using `waveforms_line_height_multiples`.
+- There is now an app_id for use with Wayland to identify the Surfer window: `org.surfer-project.surfer`.
+- It is now possible to run a command file/script using the menu, toolbar, or the new commands: `run_command_file` or `run_command_file_from_url`.
+- New config of wide signal fill: `wide_opacity`
+- Translators can now be written in WASM and loaded at runtime.
+- Translators an now translate variable names into source code locations
+- Right click now pans the view
+- "Expand scope" in variable context menu selects the containing scope and expand the tree.
+- Two accessible color themes, one light and one dark, based on Petroff.
+- You can now scale the UI with `ctrl/+ and ctrl/-`
+- Various changes to the Waveform Control Protocol
+    - Add `add_scope_recursive`
+    - Add `add_scope`
+    - Fix greetings
+    - Send waveforms_loaded on loads not triggered by WCP
+    - Add sources to waveforms_loaded
+    - Require greetings
+    - Change the WCP injection API to be more similar to CXXRTL
+    - Adds events for drivers and loads to a signal
+
+## Changed
+
+- `surver` now sends data in a compressed format.
+- The scope list is sorted.
+- `m` now adds a marker (next number), while toggling the menu is changed to `Alt+m`.
+- Surfer state-files now ends with `.surf.ron`.
+- To drag the cursor, you now need to hold shift.
+- BREAKING: Mouse gesture line style moved from config to theme.
+- BREAKING: Arrow between transactions can be fully configured, so `relation_arrow` is now a subsection and not a simple color.
+- BREAKING: The config settings `autoreload_files` and `auto_load_sibling_state_files` have changed format from `Option<bool>` to an enum with the values `Always`, `Never`, and `Ask`.
+
+## Fixed
+
+- Crash when adding too many viewports/trying to draw zero-sized viewports.
+- It is again possible to correctly build Surfer with or without selected features.
+- Wellen backend updated with better support for GHW-files and incomplete FST-files among other things.
+- Loading files with many variables should now be significantly faster.
+- It is no longer possible to zoom in arbitrarily much, avoiding some issues related to that.
+- Crash when using automatic time scale and underlying waveform file has very high resolution.
+- The mouse gesture zoom in now starts at the exact click location in x-direction.
+- Surfer should be more responsible when having an active scope with a large number of variables.
+- Time scale is no longer reset after reload.
+- Adding many variables (recursive scopes etc) in one go, should be significantly faster.
+- Add background to multi-bit signals. (Enabled in themes, default in the light theme)
+- The right-most clock edge line is now drawn.
+- More settings are saved in the state.
+- Crash when zooming before waveform file is fully loaded.
+
+## Removed
+
+## Other
+
+- egui is updated to 0.33. This can lead to minor visual changes, including more clear text rendering. If something looks worse, please report!
+
+
+
 ## [0.3.0] - 2024-12-20
 
 ## Added
@@ -130,7 +209,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Initial numbered version
 
 
-[Unreleased]: https://gitlab.com/surfer-project/surfer/-/compare/v0.3.0...main
+[Unreleased]: https://gitlab.com/surfer-project/surfer/-/compare/v0.4.0...main
+[0.4.0]: https://gitlab.com/surfer-project/surfer/-/tree/v0.4.0
 [0.3.0]: https://gitlab.com/surfer-project/surfer/-/tree/v0.3.0
 [0.2.0]: https://gitlab.com/surfer-project/surfer/-/tree/v0.2.0
 [0.1.0]: https://gitlab.com/surfer-project/surfer/-/tree/v0.1.0
