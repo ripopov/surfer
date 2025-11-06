@@ -5,17 +5,14 @@ import tomllib
 import json
 import subprocess
 
-with open("surfer/Cargo.toml", "rb") as f:
+with open("../Cargo.toml", "rb") as f:
     data = tomllib.load(f)
     print(data["workspace"]["package"]["version"])
     surfer_version_raw = data['workspace']["package"]["version"]
 
 surfer_git_rev_list_raw = subprocess.check_output([
     "git", "rev-list", "HEAD"
-], encoding="utf-8", cwd="surfer").split()
-local_git_rev_list_raw = subprocess.check_output([
-    "git", "rev-list", "HEAD"
-], encoding="utf-8").split()
+], encoding="utf-8", cwd="..").split()
 
 
 surfer_version = re.match(r"^(\d+)\.(\d+).(\d+)?(-dev)?$", surfer_version_raw)
@@ -27,7 +24,7 @@ if len(surfer_version[4]) != 0:
     print(f"Surfer patch is {surfer_patch} and -dev is present. Decrementing patch")
     surfer_minor = surfer_minor- 1
 
-version = f"{surfer_major}.{surfer_minor}.1{surfer_patch:02}{len(surfer_git_rev_list_raw):04}{len(local_git_rev_list_raw):03}"
+version = f"{surfer_major}.{surfer_minor}.1{surfer_patch:02}{len(surfer_git_rev_list_raw):04}"
 print(f"version {version}")
 
 with open("extension/package-in.json", "rt") as f:
