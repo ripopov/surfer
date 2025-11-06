@@ -520,6 +520,41 @@ upload:
     - |
       curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file surfer_macos-aarch64.zip "${PACKAGE_REGISTRY_URL}/surfer_macos-aarch64_${CI_COMMIT_TAG}.zip"
 
+vscode-prepare-publish:
+  stage: test
+  script:
+    - cd surfer-vscode
+    - apt update
+    - apt install -y npm
+    - wget -qO- https://github.com/trunk-rs/trunk/releases/download/v0.21.14/trunk-x86_64-unknown-linux-gnu.tar.gz | tar -xzf-
+    - ls ./trunk
+    - chmod +x trunk
+    - mkdir trunk-install
+    - mv trunk trunk-install
+    - rustup target add wasm32-unknown-unknown
+    - PATH=$PATH:$(pwd)/trunk-install ./build_extension.sh
+    - npm install -g @vscode/vsce
+    - cd extension
+    - npm install
+    - vsce package -o extension.vsix
+  artifacts:
+    paths:
+        - surfer-vscode/extension/extension.vsix
+
+vscode-publish:
+  needs: [vscode-prepare-publish]
+  dependencies: [vscode-prepare-publish]
+  stage: test
+  script:
+    - apt update
+    - apt install -y npm
+    - npm install -g @vscode/vsce
+    - npm install -g ovsx
+    - vsce publish -i surfer-vscode/extension/extension.vsix  ${VSCE_PAT}
+    - npx ovsx publish surfer-vscode/extension/extension.vsix -p ${VSIX_PAT}
+  # only:
+  #   - main
+
 release:
   # Caution, as of 2021-02-02 these assets links require a login, see:
   # https://gitlab.com/gitlab-org/gitlab/-/issues/299384
