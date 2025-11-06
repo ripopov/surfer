@@ -520,6 +520,26 @@ upload:
     - |
       curl --header "JOB-TOKEN: ${CI_JOB_TOKEN}" --upload-file surfer_macos-aarch64.zip "${PACKAGE_REGISTRY_URL}/surfer_macos-aarch64_${CI_COMMIT_TAG}.zip"
 
+vscode-publish:
+  stage: test
+  script:
+    - apt update
+    - apt install -y npm
+    - cd surfer-vscode
+    - cargo install trunk
+    - rustup target add wasm32-unknown-unknown
+    - ./build_extension.sh
+    - cd extension
+    - npm install -g @vscode/vscode
+    # Publish to the Microsoft vscode marketplace
+    - vsce publish ${VSCE_PAT}
+    # Publish to open vsx
+    - vsce-package -o extension.vsix
+    - npm install -g ovsx
+    - npx ovsx publish extension.vsix -p ${VSIX_PAT}
+  # only:
+  #   - main
+
 release:
   # Caution, as of 2021-02-02 these assets links require a login, see:
   # https://gitlab.com/gitlab-org/gitlab/-/issues/299384
