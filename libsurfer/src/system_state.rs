@@ -13,6 +13,7 @@ use crate::{
     command_prompt,
     config::SurferConfig,
     displayed_item::DisplayedItemRef,
+    keyboard_shortcuts::SurferShortcuts,
     message::Message,
     state::UserState,
     time::TimeUnit,
@@ -116,6 +117,8 @@ impl SystemState {
         let config = SurferConfig::new(force_default_config)
             .with_context(|| "Failed to load config file")?;
         let channels = Channels::new();
+        let shortcuts = SurferShortcuts::new(force_default_config)
+            .with_context(|| "Failed to load shortcuts file")?;
 
         // Basic translators that we can load quickly
         let translators = all_translators();
@@ -123,6 +126,7 @@ impl SystemState {
         let result = SystemState {
             user: UserState {
                 config,
+                shortcuts,
                 waves: None,
                 previous_waves: None,
                 count: None,
