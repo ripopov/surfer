@@ -329,9 +329,8 @@ impl SystemState {
             }
             Message::AddScopeAsGroup(scope, recursive) => {
                 self.save_current_canvas(format!("Add scope {} as group", scope.name()));
-
                 let waves = self.user.waves.as_mut()?;
-                let passed_or_focused = waves.focused_insert_position();
+                let passed_or_focused = waves.insert_position(waves.focused_item);
                 let target = passed_or_focused.unwrap_or_else(|| waves.end_insert_position());
 
                 self.add_scope_as_group(scope, target, recursive);
@@ -1725,7 +1724,7 @@ impl SystemState {
                             .map(|node| node.level)
                             .map(|level| TargetPosition { before, level })
                     })
-                    .or_else(|| waves.focused_insert_position());
+                    .or_else(|| waves.insert_position(waves.focused_item));
                 let final_target = passed_or_focused.unwrap_or_else(|| waves.end_insert_position());
 
                 let mut item_refs = items.unwrap_or_else(|| {
