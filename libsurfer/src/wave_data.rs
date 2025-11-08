@@ -405,7 +405,7 @@ impl WaveData {
 
         // initialize translator and add display item
         let mut target_position = target_position
-            .or_else(|| self.focused_insert_position())
+            .or_else(|| self.insert_position(self.focused_item))
             .unwrap_or(self.end_insert_position());
         for variable in variables {
             let Ok(meta) = self
@@ -505,7 +505,7 @@ impl WaveData {
                 background_color: None,
                 name,
             }),
-            self.vidx_insert_position(vidx),
+            self.insert_position(vidx),
             true,
         );
     }
@@ -517,7 +517,7 @@ impl WaveData {
                 background_color: None,
                 name: None,
             }),
-            self.vidx_insert_position(vidx),
+            self.insert_position(vidx),
             true,
         );
     }
@@ -653,27 +653,14 @@ impl WaveData {
         }
     }
 
-    fn vidx_insert_position(&self, vidx: Option<VisibleItemIndex>) -> Option<TargetPosition> {
-        let vidx = vidx?;
-        let info = self.items_tree.get_visible_extra(vidx)?;
-        let level = match self.displayed_items.get(&info.node.item_ref)? {
-            DisplayedItem::Group(_) if info.node.unfolded => info.node.level + 1,
-            _ => info.node.level,
-        };
-        Some(TargetPosition {
-            before: ItemIndex(info.idx.0 + 1),
-            level,
-        })
-    }
-
-    /// Return an insert position based on the focused item
+    /// Return an insert position based on item
     ///
-    /// If an item is focused, and it is
+    /// If an item is passed, and it is
     /// - an unfolded group, insert index is to the first element of the group
     /// - a folded group, insert index is to before the next sibling (if exists)
     /// - otherwise insert index is past it on the same level
-    pub fn focused_insert_position(&self) -> Option<TargetPosition> {
-        let vidx = self.focused_item?;
+    pub fn insert_position(&self, vidx: Option<VisibleItemIndex>) -> Option<TargetPosition> {
+        let vidx = vidx?;
         let item_index = self.items_tree.to_displayed(vidx)?;
         let node = self.items_tree.get(item_index)?;
         let item = self.displayed_items.get(&node.item_ref)?;
@@ -696,6 +683,7 @@ impl WaveData {
         })
     }
 
+    /// Return insert position as last item
     pub fn end_insert_position(&self) -> TargetPosition {
         TargetPosition {
             before: ItemIndex(self.items_tree.len()),
@@ -729,7 +717,7 @@ impl WaveData {
         move_focus: bool,
     ) -> DisplayedItemRef {
         let target_position = target_position
-            .or_else(|| self.focused_insert_position())
+            .or_else(|| self.insert_position(self.focused_item))
             .unwrap_or_else(|| self.end_insert_position());
 
         let item_ref = self.next_displayed_item_ref();
