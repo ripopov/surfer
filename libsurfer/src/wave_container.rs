@@ -368,6 +368,17 @@ impl WaveContainer {
         }
     }
 
+    /// Query the value of the variable at a certain time step.
+    /// Returns `None` if we do not have any values for the variable.
+    /// That generally happens if the corresponding variable is still being loaded.
+    pub fn time_value_vector(&self, variable: &VariableRef) -> Vec<(BigUint, VariableValue)> {
+        match self {
+            WaveContainer::Wellen(f) => f.time_value_vector(variable),
+            WaveContainer::Empty => vec![],
+            WaveContainer::Cxxrtl(_) => vec![],
+        }
+    }
+
     /// Looks up the variable _by name_ and returns a new reference with an updated `id` if the variable is found.
     pub fn update_variable_ref(&self, variable: &VariableRef) -> Option<VariableRef> {
         match self {

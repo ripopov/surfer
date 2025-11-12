@@ -532,6 +532,33 @@ impl WellenContainer {
         Ok(Some(result))
     }
 
+    pub fn time_value_vector(&self, variable: &VariableRef) -> Vec<(BigUint, VariableValue)> {
+        let h = &self.hierarchy;
+        // find variable from string
+        let var_ref = self.get_var_ref(variable).unwrap();
+        // map variable to variable ref
+        let signal_ref = h[var_ref].signal_ref();
+        let sig = match self.signals.get(&signal_ref) {
+            Some(sig) => sig,
+            None => {
+                // if the signal has not been loaded yet, we return an empty result
+                return vec![];
+            }
+        };
+        let time_table = &self.time_table;
+
+        let mut res: Vec<(BigUint, VariableValue)> = vec![];
+
+        for (time_idx, value) in sig.iter_changes() {
+            res.push((
+                BigUint::from(time_table[time_idx as usize]),
+                convert_variable_value(value),
+            ));
+        }
+
+        res
+    }
+
     pub fn scope_names(&self) -> Vec<String> {
         self.scopes.clone()
     }

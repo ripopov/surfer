@@ -1,5 +1,7 @@
 #![deny(unused_crate_dependencies)]
 
+#[cfg(feature = "analysis")]
+pub mod analysis;
 pub mod async_util;
 pub mod batch_commands;
 #[cfg(feature = "performance_plot")]
@@ -465,6 +467,14 @@ impl SystemState {
                 let waves = self.user.waves.as_mut()?;
                 waves.focused_item = None;
             }
+            #[cfg(feature = "analysis")]
+            Message::OpenStateWindow(vidx) => {
+                self.handle_open_analysis(vidx, analysis::AnalysisWindows::State)?;
+            }
+            #[cfg(feature = "analysis")]
+            Message::OpenHistogramWindow(vidx) => {
+                self.handle_open_analysis(vidx, analysis::AnalysisWindows::Histogram)?;
+            }
             Message::MoveFocus(direction, count, select) => {
                 let waves = self.user.waves.as_mut()?;
                 let visible_item_cnt = waves.items_tree.iter_visible().count();
@@ -521,6 +531,12 @@ impl SystemState {
             Message::SetCursorWindowVisible(visibility) => {
                 self.user.show_cursor_window = visibility
             }
+            #[cfg(feature = "analysis")]
+            Message::SetHistogramWindowVisible(visibility) => {
+                self.show_histogram_window = visibility
+            }
+            #[cfg(feature = "analysis")]
+            Message::SetStateWindowVisible(visibility) => self.show_state_window = visibility,
             Message::VerticalScroll(direction, count) => {
                 let waves = self.user.waves.as_mut()?;
                 let current_item = waves.get_top_item();

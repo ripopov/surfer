@@ -94,6 +94,10 @@ pub enum Message {
     SetItemSelected(VisibleItemIndex, bool),
     /// Unfocus a wave/item.
     UnfocusItem,
+    #[cfg(feature = "analysis")]
+    OpenStateWindow(Option<VisibleItemIndex>),
+    #[cfg(feature = "analysis")]
+    OpenHistogramWindow(Option<VisibleItemIndex>),
     MoveFocus(MoveDir, CommandCount, bool),
     MoveFocusedItem(MoveDir, CommandCount),
     FocusTransaction(Option<TransactionRef>, Option<Transaction>),
@@ -302,6 +306,10 @@ pub enum Message {
     SetPerformanceVisible(bool),
     SetContinuousRedraw(bool),
     SetCursorWindowVisible(bool),
+    #[cfg(feature = "analysis")]
+    SetHistogramWindowVisible(bool),
+    #[cfg(feature = "analysis")]
+    SetStateWindowVisible(bool),
     SetHierarchyStyle(HierarchyStyle),
     SetArrowKeyBindings(ArrowKeyBindings),
     SetPrimaryMouseDragBehavior(PrimaryMouseDrag),

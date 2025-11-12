@@ -492,6 +492,16 @@ impl SystemState {
                 }
             });
 
+            #[cfg(feature = "analysis")]
+            ui.menu_button("Analysis", |ui| {
+                if ui.button("State").clicked() {
+                    msgs.push(Message::OpenStateWindow(Some(vidx)));
+                }
+                if ui.button("Histogram").clicked() {
+                    msgs.push(Message::OpenHistogramWindow(Some(vidx)));
+                }
+            });
+
             if self.wcp_greeted_signal.load(Ordering::Relaxed) {
                 if self.wcp_client_capabilities.goto_declaration
                     && ui.button("Go to declaration").clicked()
