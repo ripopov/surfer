@@ -565,14 +565,14 @@ impl WaveData {
             }
         }
 
-        let gen = self
+        let generator = self
             .inner
             .as_transactions()
             .unwrap()
             .get_generator(gen_id)
             .unwrap();
         let mut last_times_on_row = vec![(BigUint::ZERO, BigUint::ZERO)];
-        calculate_rows_of_stream(&gen.transactions, &mut last_times_on_row);
+        calculate_rows_of_stream(&generator.transactions, &mut last_times_on_row);
 
         let new_gen = DisplayedItem::Stream(DisplayedStream {
             display_name: gen_ref.name.clone(),
@@ -621,13 +621,13 @@ impl WaveData {
         let mut last_times_on_row = vec![(BigUint::ZERO, BigUint::ZERO)];
 
         for gen_id in &stream.generators {
-            let gen = self
+            let generator = self
                 .inner
                 .as_transactions()
                 .unwrap()
                 .get_generator(*gen_id)
                 .unwrap();
-            calculate_rows_of_stream(&gen.transactions, &mut last_times_on_row);
+            calculate_rows_of_stream(&generator.transactions, &mut last_times_on_row);
         }
 
         let new_stream = DisplayedItem::Stream(DisplayedStream {
