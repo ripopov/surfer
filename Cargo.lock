@@ -5046,6 +5046,7 @@ dependencies = [
  "simple-eyre",
  "surver",
  "tokio",
+ "vergen-gitcl",
  "wasm-bindgen-futures",
 ]
 
@@ -5084,6 +5085,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "vergen-gitcl",
  "web-time",
  "wellen",
  "whoami",
