@@ -6,6 +6,7 @@ categories.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
+build = "../build.rs"
 
 [dependencies]
 clap.workspace = true
@@ -19,6 +20,9 @@ tokio = { workspace = true, features = ["rt", "time", "macros"] }
 ron.workspace = true
 simple-eyre.workspace = true
 surver.workspace = true
+
+[build-dependencies]
+vergen-gitcl = { workspace = true, features = ["build"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen-futures.workspace = true
