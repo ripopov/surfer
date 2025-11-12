@@ -32,6 +32,14 @@ pub enum HierarchyStyle {
     Variables,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Display, FromStr, PartialEq, Eq, Serialize, Sequence)]
+pub enum ParameterDisplayLocation {
+    Variables,
+    Scopes,
+    Tooltips,
+    None,
+}
+
 impl SystemState {
     /// Scopes and variables in two separate lists
     pub fn separate(&mut self, ui: &mut Ui, msgs: &mut Vec<Message>) {
@@ -89,7 +97,7 @@ impl SystemState {
                     let variables =
                         self.filtered_variables(&wave_container.variables_in_scope(scope), false);
                     // Parameters shown in variable list
-                    if !self.show_parameters_in_scopes() {
+                    if self.parameter_display_location() == ParameterDisplayLocation::Variables {
                         let parameters = wave_container.parameters_in_scope(scope);
                         if !parameters.is_empty() {
                             ScrollArea::both()
@@ -110,7 +118,7 @@ impl SystemState {
                                     );
                                 })
                                 .body(|ui| {
-                                    self.draw_variable_list(
+                                    self.filter_and_draw_variable_list(
                                         msgs,
                                         wave_container,
                                         ui,
@@ -118,7 +126,7 @@ impl SystemState {
                                         None,
                                     );
                                 });
-                                self.draw_filtered_variable_list(
+                                self.draw_variable_list(
                                     msgs,
                                     wave_container,
                                     ui,
@@ -138,7 +146,7 @@ impl SystemState {
                         .auto_shrink([false; 2])
                         .id_salt("variables")
                         .show_rows(ui, row_height, variables.len(), |ui, row_range| {
-                            self.draw_filtered_variable_list(
+                            self.draw_variable_list(
                                 msgs,
                                 wave_container,
                                 ui,
@@ -224,7 +232,7 @@ impl SystemState {
                         .auto_shrink([false; 2])
                         .id_salt("variables")
                         .show_rows(ui, row_height, variables.len(), |ui, row_range| {
-                            self.draw_filtered_variable_list(
+                            self.draw_variable_list(
                                 msgs,
                                 wave_container,
                                 ui,
@@ -276,7 +284,7 @@ impl SystemState {
             if let Some(wave_container) = wave.inner.as_waves() {
                 let scope = ScopeRef::empty();
                 let variables = wave_container.variables_in_scope(&scope);
-                self.draw_variable_list(msgs, wave_container, ui, &variables, None);
+                self.filter_and_draw_variable_list(msgs, wave_container, ui, &variables, None);
             }
         }
     }
@@ -297,7 +305,7 @@ impl SystemState {
         let _ = response.interact(egui::Sense::click_and_drag());
         response.drag_started().then(|| {
             msgs.push(Message::VariableDragStarted(VisibleItemIndex(
-                self.user.waves.as_ref().unwrap().display_item_ref_counter,
+                wave.display_item_ref_counter,
             )))
         });
 
@@ -310,11 +318,7 @@ impl SystemState {
                 > self.user.sidepanel_width.unwrap_or_default()
             {
                 let scope_t = ScopeType::WaveScope(scope.clone());
-                let variables = self
-                    .user
-                    .waves
-                    .as_ref()
-                    .unwrap()
+                let variables = wave
                     .inner
                     .variables_in_scope(&scope_t)
                     .iter()
@@ -332,7 +336,11 @@ impl SystemState {
         if self.show_scope_tooltip() {
             response = response.on_hover_ui(|ui| {
                 ui.set_max_width(ui.spacing().tooltip_width);
-                ui.add(egui::Label::new(scope_tooltip_text(wave, scope)));
+                ui.add(egui::Label::new(scope_tooltip_text(
+                    wave,
+                    scope,
+                    self.parameter_display_location() == ParameterDisplayLocation::Tooltips,
+                )));
             });
         }
         response.context_menu(|ui| {
@@ -410,7 +418,9 @@ impl SystemState {
                     );
                 })
                 .body(|ui| {
-                    if draw_variables || self.show_parameters_in_scopes() {
+                    if draw_variables
+                        || self.parameter_display_location() == ParameterDisplayLocation::Scopes
+                    {
                         let parameters = wave_container.parameters_in_scope(scope);
                         if !parameters.is_empty() {
                             egui::collapsing_header::CollapsingState::load_with_default_open(
@@ -427,7 +437,7 @@ impl SystemState {
                                 );
                             })
                             .body(|ui| {
-                                self.draw_variable_list(
+                                self.filter_and_draw_variable_list(
                                     msgs,
                                     wave_container,
                                     ui,
@@ -440,7 +450,13 @@ impl SystemState {
                     self.draw_root_scope_view(msgs, wave, scope, draw_variables, ui);
                     if draw_variables {
                         let variables = wave_container.variables_in_scope(scope);
-                        self.draw_variable_list(msgs, wave_container, ui, &variables, None);
+                        self.filter_and_draw_variable_list(
+                            msgs,
+                            wave_container,
+                            ui,
+                            &variables,
+                            None,
+                        );
                     }
                 });
         }
@@ -479,36 +495,36 @@ impl SystemState {
         }
     }
 
-    fn draw_variable_list(
+    fn filter_and_draw_variable_list(
         &self,
         msgs: &mut Vec<Message>,
         wave_container: &WaveContainer,
         ui: &mut egui::Ui,
-        all_variables: &[VariableRef],
+        variables: &[VariableRef],
         row_range: Option<Range<usize>>,
     ) {
-        let all_variables = self.filtered_variables(all_variables, false);
-        self.draw_filtered_variable_list(
+        let filtered_variables = self.filtered_variables(variables, false);
+        self.draw_variable_list(
             msgs,
             wave_container,
             ui,
-            &all_variables,
+            &filtered_variables,
             row_range,
             false,
         );
     }
 
-    fn draw_filtered_variable_list(
+    fn draw_variable_list(
         &self,
         msgs: &mut Vec<Message>,
         wave_container: &WaveContainer,
         ui: &mut egui::Ui,
-        all_variables: &[VariableRef],
+        variables: &[VariableRef],
         row_range: Option<Range<usize>>,
-        full_path: bool,
+        display_full_path: bool,
     ) {
-        // Get filtered variables
-        let variables = all_variables
+        // Get iterator with more info about each variable
+        let variable_infos = variables
             .iter()
             .map(|var| {
                 let meta = wave_container.variable_meta(var).ok();
@@ -526,7 +542,7 @@ impl SystemState {
                 row_range
                     .as_ref()
                     .map(|r| r.end - r.start)
-                    .unwrap_or(all_variables.len()),
+                    .unwrap_or(variables.len()),
             );
 
         // Precompute common font metrics once per frame to avoid expensive per-row work.
@@ -556,7 +572,8 @@ impl SystemState {
         });
 
         // Draw variables
-        for (variable, meta, name_info) in variables {
+        for (variable, meta, name_info) in variable_infos {
+            // Get index string
             let index = meta
                 .as_ref()
                 .and_then(|meta| meta.index)
@@ -569,6 +586,7 @@ impl SystemState {
                 })
                 .unwrap_or_default();
 
+            // Get direction icon
             let direction = if self.show_variable_direction() {
                 meta.as_ref()
                     .and_then(|meta| meta.direction)
@@ -599,6 +617,7 @@ impl SystemState {
                 String::new()
             };
 
+            // Get value in case of parameter
             let value = if meta
                 .as_ref()
                 .is_some_and(|meta| meta.variable_type == Some(VariableType::VCDParameter))
@@ -653,7 +672,7 @@ impl SystemState {
                                 color: self.user.config.theme.foreground,
                                 ..Default::default()
                             };
-                            let name = if full_path {
+                            let name = if display_full_path {
                                 variable.full_path().join(".")
                             } else {
                                 variable.name.clone()

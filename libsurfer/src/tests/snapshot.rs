@@ -21,7 +21,7 @@ use crate::{
     displayed_item::{DisplayedFieldRef, DisplayedItemRef},
     displayed_item_tree::VisibleItemIndex,
     graphics::{Direction, GrPoint, Graphic, GraphicId},
-    hierarchy::HierarchyStyle,
+    hierarchy::{HierarchyStyle, ParameterDisplayLocation},
     message::MessageTarget,
     setup_custom_font,
     state::UserState,
@@ -2291,7 +2291,7 @@ snapshot_ui_with_file_and_msgs! {parameter_in_scopes, "examples/picorv32.vcd", [
 
 snapshot_ui_with_file_and_msgs! {parameter_in_variables, "examples/picorv32.vcd", [
     Message::ToggleSidePanel,
-    Message::ToggleParametersInScopes,
+    Message::SetParameterDisplayLocation(ParameterDisplayLocation::Variables),
     Message::SetActiveScope(ScopeType::WaveScope(ScopeRef::from_strs(&[
         "testbench",
         "top",
@@ -2306,7 +2306,7 @@ snapshot_ui_with_file_and_msgs! {parameter_in_variables, "examples/picorv32.vcd"
 
 snapshot_ui_with_file_and_msgs! {parameter_in_variables_expanded, "examples/picorv32.vcd", [
     Message::ToggleSidePanel,
-    Message::ToggleParametersInScopes,
+    Message::SetParameterDisplayLocation(ParameterDisplayLocation::Variables),
     Message::ExpandParameterSection,
     Message::SetActiveScope(ScopeType::WaveScope(ScopeRef::from_strs(&[
         "testbench",
