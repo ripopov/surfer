@@ -26,6 +26,7 @@ ecolor.workspace = true
 eframe.workspace = true
 egui.workspace = true
 egui_extras.workspace = true
+egui_graphs = { workspace = true, optional = true }
 egui_plot = { workspace = true, optional = true }
 egui-remixicon.workspace = true
 emath.workspace = true
@@ -44,6 +45,7 @@ local-impl.workspace = true
 lz4_flex.workspace = true
 num.workspace = true
 numeric-sort.workspace = true
+petgraph = { workspace = true, optional = true }
 pure-rust-locales.workspace = true
 pyo3 = { workspace = true, optional = true }
 rayon.workspace = true
@@ -69,6 +71,7 @@ tokio-stream = "0.1.17"
 default = ["performance_plot"]
 accesskit = ["eframe/accesskit", "eframe/web_screen_reader"]
 f128 = ["dep:f128"]
+analysis = ["dep:egui_graphs", "dep:egui_plot", "dep:petgraph", "dep:getrandom"]
 performance_plot = ["dep:egui_plot"]
 python = ["pyo3", "surfer-translation-types/pyo3"]
 wasm_plugins = [
@@ -89,6 +92,7 @@ extism-manifest = { version = "1.11.1", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 futures.workspace = true
+getrandom = { version = "0.3", features = ["wasm_js"], optional = true }
 tokio = { workspace = true, features = ["sync"] }
 wasm-bindgen = "0.2.91"
 wasm-bindgen-futures.workspace = true
