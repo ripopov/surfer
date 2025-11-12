@@ -1,3 +1,5 @@
+#[cfg(feature = "analysis")]
+use crate::analysis::AnalysisWindow;
 use crate::{fzcmd::expand_command, tooltips::variable_tooltip_text};
 use ecolor::Color32;
 #[cfg(not(target_arch = "wasm32"))]
@@ -310,6 +312,24 @@ impl SystemState {
             if let Some(waves) = &self.user.waves {
                 self.draw_marker_window(waves, ctx, &mut msgs);
             }
+        }
+
+        #[cfg(feature = "analysis")]
+        if *self
+            .show_analysis_window
+            .get(&AnalysisWindow::Histogram)
+            .unwrap_or(&false)
+        {
+            self.draw_histogram_window(ctx, &mut msgs);
+        }
+
+        #[cfg(feature = "analysis")]
+        if *self
+            .show_analysis_window
+            .get(&AnalysisWindow::State)
+            .unwrap_or(&false)
+        {
+            self.draw_state_window(ctx, &mut msgs);
         }
 
         if self

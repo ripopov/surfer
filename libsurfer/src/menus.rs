@@ -492,6 +492,22 @@ impl SystemState {
                 }
             });
 
+            #[cfg(feature = "analysis")]
+            ui.menu_button("Analysis", |ui| {
+                if ui.button("State").clicked() {
+                    msgs.push(Message::OpenAnalysisWindow(
+                        Some(vidx),
+                        crate::analysis::AnalysisWindow::State,
+                    ));
+                }
+                if ui.button("Histogram").clicked() {
+                    msgs.push(Message::OpenAnalysisWindow(
+                        Some(vidx),
+                        crate::analysis::AnalysisWindow::Histogram,
+                    ));
+                }
+            });
+
             if self.wcp_greeted_signal.load(Ordering::Relaxed) {
                 if self.wcp_client_capabilities.goto_declaration
                     && ui.button("Go to declaration").clicked()
