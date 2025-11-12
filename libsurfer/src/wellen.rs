@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use derive_more::Debug;
-use eyre::{anyhow, bail, Result};
+use eyre::{Result, anyhow, bail};
 use num::{BigUint, ToPrimitive};
 use surfer_translation_types::{
     VariableDirection, VariableEncoding, VariableIndex, VariableType, VariableValue,
@@ -159,7 +159,9 @@ impl WellenContainer {
         match body {
             BodyResult::Local(body) => {
                 if self.server.is_some() {
-                    bail!("We are connected to a server, but also received the result of parsing a file locally. Something is going wrong here!");
+                    bail!(
+                        "We are connected to a server, but also received the result of parsing a file locally. Something is going wrong here!"
+                    );
                 }
                 self.time_table = body.time_table;
                 self.source = Some(body.source);

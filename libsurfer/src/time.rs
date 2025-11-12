@@ -8,14 +8,14 @@ use epaint::{FontId, Stroke};
 use ftr_parser::types::Timescale;
 use itertools::Itertools;
 use num::{BigInt, BigRational, ToPrimitive};
-use pure_rust_locales::{locale_match, Locale};
+use pure_rust_locales::{Locale, locale_match};
 use serde::{Deserialize, Serialize};
 use sys_locale::get_locale;
 
 use crate::config::SurferConfig;
 use crate::viewport::Viewport;
 use crate::wave_data::WaveData;
-use crate::{translation::group_n_chars, view::DrawingContext, Message, SystemState};
+use crate::{Message, SystemState, translation::group_n_chars, view::DrawingContext};
 
 #[derive(Serialize, Deserialize)]
 pub struct TimeScale {
@@ -465,7 +465,7 @@ impl SystemState {
 mod test {
     use num::BigInt;
 
-    use crate::time::{time_string, TimeFormat, TimeScale, TimeStringFormatting, TimeUnit};
+    use crate::time::{TimeFormat, TimeScale, TimeStringFormatting, TimeUnit, time_string};
 
     #[test]
     fn print_time_standard() {

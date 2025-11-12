@@ -1,4 +1,4 @@
-use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use regex::Regex;
 
 use lazy_static::lazy_static;

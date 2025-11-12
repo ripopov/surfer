@@ -1,9 +1,9 @@
-use extism_pdk::{plugin_fn, FnResult, Json};
+use extism_pdk::{FnResult, Json, plugin_fn};
 pub use surfer_translation_types::plugin_types::TranslateParams;
 use surfer_translation_types::{
-    translator::{TrueName, VariableNameInfo},
     SubFieldTranslationResult, TranslationPreference, TranslationResult, ValueKind, VariableInfo,
     VariableMeta, VariableValue,
+    translator::{TrueName, VariableNameInfo},
 };
 
 #[plugin_fn]

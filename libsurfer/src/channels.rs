@@ -1,9 +1,9 @@
 use tokio::sync::{
+    RwLock,
     mpsc::{
         self,
         error::{SendError, TryRecvError},
     },
-    RwLock,
 };
 
 use crate::{EGUI_CONTEXT, OUTSTANDING_TRANSACTIONS};

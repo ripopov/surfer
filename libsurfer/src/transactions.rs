@@ -43,7 +43,7 @@ impl SystemState {
                                 ui.label("Type");
                             });
                             row.col(|ui| {
-                                let gen = self
+                                let generator = self
                                     .user
                                     .waves
                                     .as_ref()
@@ -53,7 +53,7 @@ impl SystemState {
                                     .unwrap()
                                     .get_generator(focused_transaction.get_gen_id())
                                     .unwrap();
-                                ui.label(gen.name.to_string());
+                                ui.label(generator.name.to_string());
                             });
                         });
                         body.row(row_height, |mut row| {

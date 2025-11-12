@@ -8,17 +8,18 @@ use egui::{
 };
 use emath::{Align, GuiRounding, Pos2, Rect, RectTransform, Vec2};
 use epaint::{
-    text::{LayoutJob, TextWrapMode},
     CornerRadiusF32, Margin, Stroke,
+    text::{LayoutJob, TextWrapMode},
 };
 use itertools::Itertools;
 use tracing::info;
 
 use surfer_translation_types::{
-    translator::{TrueName, VariableNameInfo},
     SubFieldFlatTranslationResult, TranslatedValue, Translator, VariableInfo,
+    translator::{TrueName, VariableNameInfo},
 };
 
+use crate::OUTSTANDING_TRANSACTIONS;
 #[cfg(feature = "performance_plot")]
 use crate::benchmark::NUM_PERF_SAMPLES;
 use crate::command_parser::get_parser;
@@ -33,10 +34,9 @@ use crate::transaction_container::TransactionStreamRef;
 use crate::translation::TranslationResultExt;
 use crate::util::uint_idx_to_alpha_idx;
 use crate::wave_container::{FieldRef, FieldRefExt, VariableRef, WaveContainer};
-use crate::OUTSTANDING_TRANSACTIONS;
 use crate::{
-    command_prompt::show_command_prompt, hierarchy::HierarchyStyle, wave_data::WaveData, Message,
-    MoveDir, SystemState,
+    Message, MoveDir, SystemState, command_prompt::show_command_prompt, hierarchy::HierarchyStyle,
+    wave_data::WaveData,
 };
 
 pub struct DrawingContext<'a> {
@@ -726,11 +726,7 @@ impl SystemState {
                                 let levels_to_force_expand =
                                     self.items_to_expand.borrow().iter().find_map(
                                         |(id, levels)| {
-                                            if item_ref == id {
-                                                Some(*levels)
-                                            } else {
-                                                None
-                                            }
+                                            if item_ref == id { Some(*levels) } else { None }
                                         },
                                     );
 

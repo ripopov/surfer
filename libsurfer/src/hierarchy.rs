@@ -1,4 +1,5 @@
 //! Functions for drawing the left hand panel showing scopes and variables.
+use crate::SystemState;
 use crate::data_container::{DataContainer, VariableType as VarType};
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::message::Message;
@@ -8,7 +9,6 @@ use crate::variable_direction::VariableDirectionExt;
 use crate::view::draw_true_name;
 use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, WaveContainer};
 use crate::wave_data::{ScopeType, WaveData};
-use crate::SystemState;
 use derive_more::{Display, FromStr};
 use egui::text::LayoutJob;
 use egui::{
@@ -585,11 +585,7 @@ impl SystemState {
                                 } else {
                                     // Align other items (can be improved)
                                     // The padding depends on if we will render monospace or not
-                                    if name_info.is_some() {
-                                        "  "
-                                    } else {
-                                        "    "
-                                    }
+                                    if name_info.is_some() { "  " } else { "    " }
                                 }
                             })
                         )

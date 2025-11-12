@@ -5,9 +5,9 @@ use emath::Vec2;
 use crate::config::ArrowKeyBindings;
 use crate::message::MessageTarget;
 use crate::{
+    MoveDir, SystemState,
     message::Message,
     wave_data::{PER_SCROLL_EVENT, SCROLL_EVENTS_PER_PAGE},
-    MoveDir, SystemState,
 };
 
 impl SystemState {

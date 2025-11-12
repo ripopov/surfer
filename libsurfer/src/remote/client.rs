@@ -6,7 +6,7 @@ use tracing::info;
 use wellen::CompressedTimeTable;
 
 use surver::{
-    Status, BINCODE_OPTIONS, HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, SURFER_VERSION,
+    BINCODE_OPTIONS, HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, SURFER_VERSION, Status,
     WELLEN_VERSION, X_SURFER_VERSION, X_WELLEN_VERSION,
 };
 
@@ -26,7 +26,9 @@ fn check_response(server_url: &str, response: &reqwest::Response) -> Result<()> 
         .to_str()?;
     if surfer_version != SURFER_VERSION {
         // this mismatch may be OK as long as the wellen version matches
-        info!("Surfer version on the server: {surfer_version} does not match client version {SURFER_VERSION}");
+        info!(
+            "Surfer version on the server: {surfer_version} does not match client version {SURFER_VERSION}"
+        );
     }
     let wellen_version = response
         .headers()
@@ -34,7 +36,9 @@ fn check_response(server_url: &str, response: &reqwest::Response) -> Result<()> 
         .ok_or(eyre!("no wellen version header"))?
         .to_str()?;
     if wellen_version != WELLEN_VERSION {
-        bail!("Version incompatibility! The server uses wellen {wellen_version}, our client uses wellen {WELLEN_VERSION}");
+        bail!(
+            "Version incompatibility! The server uses wellen {wellen_version}, our client uses wellen {WELLEN_VERSION}"
+        );
     }
     Ok(())
 }

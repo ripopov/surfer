@@ -12,6 +12,14 @@ use tracing::{error, warn};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+use crate::DisplayedItem;
+use crate::EGUI_CONTEXT;
+use crate::Message;
+use crate::StartupParams;
+use crate::SystemState;
+use crate::WCP_CS_HANDLER;
+use crate::WCP_SC_HANDLER;
+use crate::WaveSource;
 use crate::channels::{GlobalChannelTx, IngressHandler};
 use crate::displayed_item::DisplayedItemRef;
 use crate::graphics::Anchor;
@@ -25,14 +33,6 @@ use crate::setup_custom_font;
 use crate::wasm_panic;
 use crate::wave_container::VariableRefExt;
 use crate::wave_source::CxxrtlKind;
-use crate::DisplayedItem;
-use crate::Message;
-use crate::StartupParams;
-use crate::SystemState;
-use crate::WaveSource;
-use crate::EGUI_CONTEXT;
-use crate::WCP_CS_HANDLER;
-use crate::WCP_SC_HANDLER;
 
 lazy_static! {
     pub(crate) static ref MESSAGE_QUEUE: Mutex<Vec<Message>> = Mutex::new(vec![]);

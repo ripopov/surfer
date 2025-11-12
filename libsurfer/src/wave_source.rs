@@ -1,10 +1,10 @@
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::io::Cursor;
-use std::sync::atomic::AtomicU64;
-use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::sync::mpsc::Sender;
 
 use crate::async_util::{perform_async_work, perform_work, sleep_ms};
 use crate::cxxrtl_container::CxxrtlContainer;
@@ -13,7 +13,7 @@ use crate::util::get_multi_extension;
 use camino::{Utf8Path, Utf8PathBuf};
 use eyre::Report;
 use eyre::Result;
-use eyre::{anyhow, WrapErr};
+use eyre::{WrapErr, anyhow};
 use ftr_parser::parse;
 use futures_util::FutureExt;
 use serde::{Deserialize, Serialize};
@@ -25,8 +25,8 @@ use crate::wave_container::WaveContainer;
 use crate::wellen::{
     BodyResult, HeaderResult, LoadSignalPayload, LoadSignalsCmd, LoadSignalsResult,
 };
-use crate::{message::Message, SystemState};
-use surver::{Status, HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, WELLEN_SURFER_DEFAULT_OPTIONS};
+use crate::{SystemState, message::Message};
+use surver::{HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, Status, WELLEN_SURFER_DEFAULT_OPTIONS};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum CxxrtlKind {

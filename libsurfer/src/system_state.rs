@@ -2,7 +2,7 @@ use eyre::{Context, Result};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet, VecDeque},
-    sync::{atomic::AtomicBool, Arc},
+    sync::{Arc, atomic::AtomicBool},
 };
 use tokio::task::JoinHandle;
 
@@ -10,17 +10,16 @@ use egui::{Pos2, Rect};
 use surfer_translation_types::translator::VariableNameInfo;
 
 use crate::{
-    command_prompt,
+    CachedDrawData, CanvasState, Channels, WcpClientCapabilities, command_prompt,
     config::SurferConfig,
     displayed_item::DisplayedItemRef,
     message::Message,
     state::UserState,
     time::TimeUnit,
-    translation::{all_translators, TranslatorList},
+    translation::{TranslatorList, all_translators},
     variable_filter::VariableFilter,
     wave_container::{ScopeRef, VariableRef},
     wave_source::LoadProgress,
-    CachedDrawData, CanvasState, Channels, WcpClientCapabilities,
 };
 
 #[cfg(feature = "performance_plot")]

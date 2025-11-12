@@ -5,9 +5,9 @@ use egui::{Button, Layout, TextEdit, Ui};
 use egui_remixicon::icons;
 use emath::{Align, Vec2};
 use enum_iterator::Sequence;
-use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use itertools::Itertools;
-use regex::{escape, Regex, RegexBuilder};
+use regex::{Regex, RegexBuilder, escape};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 
@@ -16,7 +16,7 @@ use crate::transaction_container::{StreamScopeRef, TransactionStreamRef};
 use crate::variable_direction::VariableDirectionExt;
 use crate::wave_container::WaveContainer;
 use crate::wave_data::ScopeType;
-use crate::{message::Message, wave_container::VariableRef, SystemState};
+use crate::{SystemState, message::Message, wave_container::VariableRef};
 use surfer_translation_types::VariableDirection;
 
 use std::cmp::Ordering;
@@ -304,13 +304,13 @@ impl SystemState {
                                         for gen_id in
                                             &inner.get_stream(s.stream_id).unwrap().generators
                                         {
-                                            let gen = inner.get_generator(*gen_id).unwrap();
+                                            let generator = inner.get_generator(*gen_id).unwrap();
 
                                             msgs.push(Message::AddStreamOrGenerator(
                                                 TransactionStreamRef::new_gen(
-                                                    gen.stream_id,
-                                                    gen.id,
-                                                    gen.name.clone(),
+                                                    generator.stream_id,
+                                                    generator.id,
+                                                    generator.name.clone(),
                                                 ),
                                             ));
                                         }

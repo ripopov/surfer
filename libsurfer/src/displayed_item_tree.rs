@@ -2,8 +2,8 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 
-use crate::displayed_item::DisplayedItemRef;
 use crate::MoveDir;
+use crate::displayed_item::DisplayedItemRef;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Node {

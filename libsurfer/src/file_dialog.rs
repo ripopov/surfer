@@ -7,10 +7,10 @@ use camino::Utf8PathBuf;
 use rfd::{AsyncFileDialog, FileHandle};
 use serde::Deserialize;
 
+use crate::SystemState;
 use crate::async_util::perform_async_work;
 use crate::message::Message;
 use crate::wave_source::LoadOptions;
-use crate::SystemState;
 
 #[derive(Debug, Deserialize)]
 pub enum OpenMode {

@@ -12,12 +12,12 @@ use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, VariableRefExt};
 use crate::wave_data::ScopeType;
 use crate::wave_source::LoadOptions;
 use crate::{
+    SystemState,
     clock_highlighting::ClockHighlightType,
     displayed_item::DisplayedItem,
     message::Message,
     util::{alpha_idx_to_uint_idx, uint_idx_to_alpha_idx},
     variable_name_type::VariableNameType,
-    SystemState,
 };
 use itertools::Itertools;
 use tracing::warn;

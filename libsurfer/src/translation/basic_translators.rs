@@ -5,7 +5,7 @@ use eyre::Result;
 use itertools::Itertools;
 use num::Zero;
 use surfer_translation_types::{
-    check_vector_variable, extend_string, BasicTranslator, VariableValue,
+    BasicTranslator, VariableValue, check_vector_variable, extend_string,
 };
 
 /// Splits a string into groups of `n` characters.

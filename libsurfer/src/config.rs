@@ -647,7 +647,9 @@ impl SurferConfig {
             }
 
             if Path::new("surfer.toml").exists() {
-                warn!("Configuration in 'surfer.toml' is deprecated. Please move your configuration to '.surfer/config.toml'.");
+                warn!(
+                    "Configuration in 'surfer.toml' is deprecated. Please move your configuration to '.surfer/config.toml'."
+                );
             }
 
             // `surfer.toml` will not be searched for upward, as it is deprecated.

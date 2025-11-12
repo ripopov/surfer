@@ -7,8 +7,8 @@ use tokio::sync::mpsc;
 
 use eyre::Result;
 use num::{
-    bigint::{ToBigInt, ToBigUint},
     BigUint,
+    bigint::{ToBigInt, ToBigUint},
 };
 use serde::Deserialize;
 use surfer_translation_types::VariableEncoding;

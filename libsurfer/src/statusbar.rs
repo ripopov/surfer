@@ -4,7 +4,7 @@ use web_time::{Duration, Instant};
 
 use crate::time::{time_string, timeunit_menu};
 use crate::wave_source::draw_progress_information;
-use crate::{message::Message, wave_data::WaveData, SystemState};
+use crate::{SystemState, message::Message, wave_data::WaveData};
 
 /// Spacing between status bar elements (in pixels)
 const STATUS_SPACING: f32 = 10.0;

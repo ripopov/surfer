@@ -1,10 +1,10 @@
 // tests for the surfer:remote submodule
 
 use super::snapshot::{render_and_compare, wait_for_waves_fully_loaded};
+use crate::SystemState;
 use crate::message::Message;
 use crate::wave_container::{ScopeRef, ScopeRefExt};
 use crate::wave_source::LoadOptions;
-use crate::SystemState;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
