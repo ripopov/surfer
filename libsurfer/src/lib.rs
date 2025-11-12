@@ -106,14 +106,14 @@ use crate::displayed_item_tree::VisibleItemIndex;
 use crate::drawing_canvas::TxDrawingCommands;
 use crate::message::Message;
 use crate::transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef};
-use crate::translation::{all_translators, AnyTranslator};
+use crate::translation::{AnyTranslator, all_translators};
 use crate::variable_filter::{VariableIOFilterType, VariableNameFilterType};
 use crate::viewport::Viewport;
 use crate::wave_container::VariableRefExt;
 use crate::wave_container::{ScopeRefExt, WaveContainer};
 use crate::wave_data::{ScopeType, WaveData};
 use crate::wave_source::{LoadOptions, WaveFormat, WaveSource};
-use crate::wellen::{convert_format, HeaderResult};
+use crate::wellen::{HeaderResult, convert_format};
 
 lazy_static! {
     pub static ref EGUI_CONTEXT: RwLock<Option<Arc<egui::Context>>> = RwLock::new(None);
@@ -377,7 +377,7 @@ impl SystemState {
                     Some(StreamScopeRef::Stream(stream)) => {
                         let (stream_id, id, name) = inner
                             .get_generator_from_name(Some(stream.stream_id), name)
-                            .map(|gen| (gen.stream_id, gen.id, gen.name.clone()))
+                            .map(|g| (g.stream_id, g.id, g.name.clone()))
                             .unwrap();
 
                         waves.add_generator(TransactionStreamRef::new_gen(stream_id, id, name));
@@ -386,7 +386,7 @@ impl SystemState {
                     None => {
                         let (stream_id, id, name) = inner
                             .get_generator_from_name(None, name)
-                            .map(|gen| (gen.stream_id, gen.id, gen.name.clone()))
+                            .map(|g| (g.stream_id, g.id, g.name.clone()))
                             .unwrap();
 
                         waves.add_generator(TransactionStreamRef::new_gen(stream_id, id, name));
@@ -406,7 +406,7 @@ impl SystemState {
                         .generators
                         .iter()
                         .map(|gen_id| inner.get_generator(*gen_id).unwrap())
-                        .map(|gen| (gen.stream_id, gen.id, gen.name.clone()))
+                        .map(|g| (g.stream_id, g.id, g.name.clone()))
                         .collect_vec();
 
                     for (stream_id, id, name) in gens {
@@ -431,7 +431,8 @@ impl SystemState {
                     waves.focused_item = Some(idx);
                 } else {
                     error!(
-                        "Can not focus variable {} because only {visible_items_len} variables are visible.", idx.0
+                        "Can not focus variable {} because only {visible_items_len} variables are visible.",
+                        idx.0
                     );
                 }
             }
