@@ -39,7 +39,7 @@ mod main_impl {
     }
 
     #[derive(clap::Parser, Default)]
-    #[command(version, about)]
+    #[command(version = concat!(env!("CARGO_PKG_VERSION"), " (git: ", env!("VERGEN_GIT_DESCRIBE"), ")"), about)]
     struct Args {
         /// Waveform file in VCD, FST, or GHW format.
         wave_file: Option<String>,
