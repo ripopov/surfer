@@ -895,23 +895,18 @@ impl SystemState {
                             .get_best_text_color(&background_color);
                         let height_scaling_factor = displayed_item
                             .map(super::displayed_item::DisplayedItem::height_scaling_factor)
-                            .unwrap();
+                            .unwrap_or(1.0);
 
                         let color = *color.unwrap_or_else(|| {
                             if let Some(DisplayedItem::Variable(variable)) = displayed_item {
                                 waves
                                     .inner
                                     .as_waves()
-                                    .unwrap()
-                                    .variable_meta(&variable.variable_ref)
-                                    .ok()
+                                    .and_then(|w| w.variable_meta(&variable.variable_ref).ok())
                                     .and_then(|meta| meta.variable_type)
                                     .and_then(|var_type| {
-                                        if var_type == VariableType::VCDParameter {
-                                            Some(&self.user.config.theme.variable_parameter)
-                                        } else {
-                                            None
-                                        }
+                                        (var_type == VariableType::VCDParameter)
+                                            .then_some(&self.user.config.theme.variable_parameter)
                                     })
                                     .unwrap_or(&self.user.config.theme.variable_default)
                             } else {
@@ -1457,14 +1452,17 @@ impl SystemState {
                             .unwrap()
                             .query_variable(&variable.variable_ref, &utimestamp)
                         {
-                            let prev_time = if let Some(v) = res.current {
-                                v.0.to_bigint().unwrap()
-                            } else {
-                                BigInt::ZERO
-                            };
-                            let next_time = &res.next.unwrap_or_default().to_bigint().unwrap();
+                            let prev_time = &res
+                                .current
+                                .and_then(|v| v.0.to_bigint())
+                                .unwrap_or(BigInt::ZERO);
+                            let next_time = &res
+                                .next
+                                .unwrap_or_default()
+                                .to_bigint()
+                                .unwrap_or(BigInt::ZERO);
                             let prev =
-                                viewport.pixel_from_time(&prev_time, frame_width, &num_timestamps);
+                                viewport.pixel_from_time(prev_time, frame_width, &num_timestamps);
                             let next =
                                 viewport.pixel_from_time(next_time, frame_width, &num_timestamps);
                             if (prev - pos.x).abs() < (next - pos.x).abs() {

@@ -40,9 +40,8 @@ impl FileWatcher {
         F: Fn() + Send + Sync + 'static,
     {
         let std_path = path.as_std_path().to_owned();
-        let binding = std_path.clone();
-        let Some(parent) = binding.parent() else {
-            return Err(Error::new(notify::ErrorKind::PathNotFound).add_path(std_path));
+        let Some(parent) = std_path.parent() else {
+            return Err(Error::new(notify::ErrorKind::PathNotFound).add_path(std_path.clone()));
         };
         let mut watcher = notify::RecommendedWatcher::new(
             move |res| match res {
@@ -57,13 +56,13 @@ impl FileWatcher {
                     }
                 }
                 Ok(_) => {}
-                Err(e) => error!("Error while watching fil\n{}", e),
+                Err(e) => error!("Error while watching file: {}", e),
             },
             Config::default().with_poll_interval(Duration::from_secs(1)),
         )?;
 
         watcher.watch(parent, RecursiveMode::NonRecursive)?;
-        info!("Watching file {} for changes", binding.display());
+        info!("Watching file {} for changes", std_path.display());
 
         Ok(FileWatcher { _inner: watcher })
     }
