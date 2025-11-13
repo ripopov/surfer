@@ -9,6 +9,20 @@ use crate::{
     wave_data::WaveData,
 };
 
+// Try to locate a transaction for the tooltip without panicking
+fn find_transaction<'a>(
+    waves: &'a WaveData,
+    gen_ref: &TransactionStreamRef,
+    tx_ref: &TransactionRef,
+) -> Option<&'a Transaction> {
+    let txs = waves.inner.as_transactions()?;
+    let gen_id = gen_ref.gen_id?;
+    let gen = txs.get_generator(gen_id)?;
+    gen.transactions
+        .iter()
+        .find(|transaction| transaction.get_tx_id() == tx_ref.id)
+}
+
 pub fn variable_tooltip_text(meta: &Option<VariableMeta>, variable: &VariableRef) -> String {
     if let Some(meta) = meta {
         format!(
@@ -59,42 +73,32 @@ pub fn handle_transaction_tooltip(
 ) -> Response {
     response
         .on_hover_ui(|ui| {
-            let tx = waves
-                .inner
-                .as_transactions()
-                .unwrap()
-                .get_generator(gen_ref.gen_id.unwrap())
-                .unwrap()
-                .transactions
-                .iter()
-                .find(|transaction| transaction.get_tx_id() == tx_ref.id)
-                .unwrap();
-
-            ui.set_max_width(ui.spacing().tooltip_width);
-            ui.add(egui::Label::new(transaction_tooltip_text(waves, tx)));
+            if let Some(tx) = find_transaction(waves, gen_ref, tx_ref) {
+                ui.set_max_width(ui.spacing().tooltip_width);
+                ui.add(egui::Label::new(transaction_tooltip_text(waves, tx)));
+            } else {
+                ui.label("Transaction unavailable");
+            }
         })
         .on_hover_ui(|ui| {
             // Seemingly a bit redundant to determine tx twice, but since the
             // alternative is to do it every frame for every transaction, this
             // is most likely still a better approach.
             // Feel free to use some Rust magic to only do it once though...
-            let tx = waves
-                .inner
-                .as_transactions()
-                .unwrap()
-                .get_generator(gen_ref.gen_id.unwrap())
-                .unwrap()
-                .transactions
-                .iter()
-                .find(|transaction| transaction.get_tx_id() == tx_ref.id)
-                .unwrap();
-
-            transaction_tooltip_table(ui, tx)
+            if let Some(tx) = find_transaction(waves, gen_ref, tx_ref) {
+                transaction_tooltip_table(ui, tx)
+            } else {
+                ui.label("Transaction details unavailable");
+            }
         })
 }
 
 fn transaction_tooltip_text(waves: &WaveData, tx: &Transaction) -> String {
-    let time_scale = waves.inner.as_transactions().unwrap().inner.time_scale;
+    let time_scale = waves
+        .inner
+        .as_transactions()
+        .map(|t| t.inner.time_scale.to_string())
+        .unwrap_or_default();
 
     format!(
         "tx#{}: {}{} - {}{}\nType: {}",
@@ -106,11 +110,9 @@ fn transaction_tooltip_text(waves: &WaveData, tx: &Transaction) -> String {
         waves
             .inner
             .as_transactions()
-            .unwrap()
-            .get_generator(tx.get_gen_id())
-            .unwrap()
-            .name
-            .clone(),
+            .and_then(|t| t.get_generator(tx.get_gen_id()))
+            .map(|g| g.name.clone())
+            .unwrap_or_else(|| "unknown".to_string()),
     )
 }
 
@@ -130,13 +132,14 @@ fn transaction_tooltip_table(ui: &mut Ui, tx: &Transaction) {
             let total_rows = tx.attributes.len();
             let attributes = &tx.attributes;
             body.rows(15., total_rows, |mut row| {
-                let attribute = attributes.get(row.index()).unwrap();
-                row.col(|ui| {
-                    ui.label(attribute.name.clone());
-                });
-                row.col(|ui| {
-                    ui.label(attribute.value());
-                });
+                if let Some(attribute) = attributes.get(row.index()) {
+                    row.col(|ui| {
+                        ui.label(attribute.name.clone());
+                    });
+                    row.col(|ui| {
+                        ui.label(attribute.value());
+                    });
+                }
             });
         });
 }

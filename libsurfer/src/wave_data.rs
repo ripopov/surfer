@@ -858,9 +858,11 @@ impl WaveData {
                                 }
                             } else {
                                 // No next transition, go to end
-                                self.cursor = Some(self.num_timestamps().expect(
-                                    "No timestamp count even though waveforms should be loaded",
-                                ));
+                                if let Some(end_time) = self.num_timestamps() {
+                                    self.cursor = Some(end_time);
+                                } else {
+                                    warn!("Set cursor at transition: No timestamp count even though waveforms should be loaded");
+                                }
                             }
                         } else if let Some(stime) = res.current.unwrap().0.to_bigint() {
                             let bigone = BigInt::from(1);
