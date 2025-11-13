@@ -40,26 +40,38 @@ impl SystemState {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn load_state_file(&mut self, path: Option<PathBuf>) {
         let messages = move |path: PathBuf| {
-            let source = Utf8PathBuf::from_path_buf(path.clone()).unwrap();
-            if let Ok(bytes) = std::fs::read(source.clone()) {
-                match ron::de::from_bytes(&bytes)
-                    .context(format!("Failed loading {}", source.file_name().unwrap()))
+            let source = match Utf8PathBuf::from_path_buf(path.clone()) {
+                Ok(p) => p,
+                Err(_) => {
+                    let err = eyre::eyre!("File path '{}' contains invalid UTF-8", path.display());
+                    tracing::error!("{err:#?}");
+                    return vec![Message::Error(err)];
+                }
+            };
+
+            match std::fs::read(source.as_std_path()) {
+                Ok(bytes) => match ron::de::from_bytes(&bytes)
+                    .context(format!("Failed loading {}", source.as_str()))
                 {
                     Ok(s) => vec![Message::LoadState(s, Some(path))],
                     Err(e) => {
                         tracing::error!("Failed to load state: {e:#?}");
-                        vec![]
+                        vec![Message::Error(e)]
                     }
+                },
+                Err(e) => {
+                    tracing::error!("Failed to load state file: {path:#?} {e:#?}");
+                    vec![Message::Error(eyre::eyre!(
+                        "Failed to read state file '{}': {e}",
+                        path.display()
+                    ))]
                 }
-            } else {
-                tracing::error!("Failed to load state file: {path:#?}");
-                vec![]
             }
         };
         if let Some(path) = path {
             let sender = self.channels.msg_sender.clone();
             for message in messages(path) {
-                sender.send(message).unwrap();
+                let _ = sender.send(message);
             }
         } else {
             self.file_dialog_open(
@@ -94,7 +106,7 @@ impl SystemState {
             let sender = self.channels.msg_sender.clone();
             perform_async_work(async move {
                 for message in messages(path.into()).await {
-                    sender.send(message).unwrap();
+                    let _ = sender.send(message);
                 }
             });
         } else {
@@ -102,7 +114,7 @@ impl SystemState {
                 "Save state",
                 (
                     format!("Surfer state files (*.{STATE_FILE_EXTENSION})"),
-                    ([STATE_FILE_EXTENSION.to_string()]).to_vec(),
+                    vec![STATE_FILE_EXTENSION.to_string()],
                 ),
                 messages,
             );
@@ -129,7 +141,7 @@ impl SystemState {
             "Save state",
             (
                 format!("Surfer state files (*.{STATE_FILE_EXTENSION})"),
-                ([STATE_FILE_EXTENSION.to_string()]).to_vec(),
+                vec![STATE_FILE_EXTENSION.to_string()],
             ),
             messages,
         );
