@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use camino::Utf8PathBuf;
 use rfd::{AsyncFileDialog, FileHandle};
 use serde::Deserialize;
+use tracing::error;
 
 use crate::async_util::perform_async_work;
 use crate::message::Message;
@@ -33,7 +34,9 @@ impl SystemState {
         perform_async_work(async move {
             if let Some(file) = create_file_dialog(filter, title).pick_file().await {
                 for message in messages(file.path().to_path_buf()) {
-                    sender.send(message).unwrap();
+                    if let Err(e) = sender.send(message) {
+                        error!("Failed to send message: {e}");
+                    }
                 }
             }
         });
@@ -53,7 +56,9 @@ impl SystemState {
         perform_async_work(async move {
             if let Some(file) = create_file_dialog(filter, title).pick_file().await {
                 for message in messages(file.read().await) {
-                    sender.send(message).unwrap();
+                    if let Err(e) = sender.send(message) {
+                        error!("Failed to send message: {e}");
+                    }
                 }
             }
         });
@@ -75,7 +80,9 @@ impl SystemState {
             if let Some(file) = create_file_dialog(filter, title).save_file().await {
                 let msgs = messages(file).await;
                 for message in msgs {
-                    sender.send(message).unwrap();
+                    if let Err(e) = sender.send(message) {
+                        error!("Failed to send message: {e}");
+                    }
                 }
             }
         });
@@ -97,7 +104,9 @@ impl SystemState {
             if let Some(file) = create_file_dialog(filter, title).save_file().await {
                 let msgs = messages(file).await;
                 for message in msgs {
-                    sender.send(message).unwrap();
+                    if let Err(e) = sender.send(message) {
+                        error!("Failed to send message: {e}");
+                    }
                 }
             }
         });
@@ -111,14 +120,20 @@ impl SystemState {
         };
 
         #[cfg(not(target_arch = "wasm32"))]
-        let message = move |file: PathBuf| {
-            vec![Message::LoadFile(
-                Utf8PathBuf::from_path_buf(file).unwrap(),
+        let message = move |file: PathBuf| match Utf8PathBuf::from_path_buf(file.clone()) {
+            Ok(utf8_path) => vec![Message::LoadFile(
+                utf8_path,
                 LoadOptions {
                     keep_variables,
                     keep_unavailable,
                 },
-            )]
+            )],
+            Err(_) => {
+                vec![Message::Error(eyre::eyre!(
+                    "File path '{}' contains invalid UTF-8",
+                    file.display()
+                ))]
+            }
         };
 
         #[cfg(target_arch = "wasm32")]
@@ -149,10 +164,14 @@ impl SystemState {
 
     pub fn open_command_file_dialog(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
-        let message = move |file: PathBuf| {
-            vec![Message::LoadCommandFile(
-                Utf8PathBuf::from_path_buf(file).unwrap(),
-            )]
+        let message = move |file: PathBuf| match Utf8PathBuf::from_path_buf(file.clone()) {
+            Ok(utf8_path) => vec![Message::LoadCommandFile(utf8_path)],
+            Err(_) => {
+                vec![Message::Error(eyre::eyre!(
+                    "File path '{}' contains invalid UTF-8",
+                    file.display()
+                ))]
+            }
         };
 
         #[cfg(target_arch = "wasm32")]
@@ -173,10 +192,14 @@ impl SystemState {
         self.file_dialog_open(
             "Open Python translator file",
             ("Python files (*.py)".to_string(), vec!["py".to_string()]),
-            |file| {
-                vec![Message::LoadPythonTranslator(
-                    Utf8PathBuf::from_path_buf(file).unwrap(),
-                )]
+            |file| match Utf8PathBuf::from_path_buf(file.clone()) {
+                Ok(utf8_path) => vec![Message::LoadPythonTranslator(utf8_path)],
+                Err(_) => {
+                    vec![Message::Error(eyre::eyre!(
+                        "File path '{}' contains invalid UTF-8",
+                        file.display()
+                    ))]
+                }
             },
         );
     }

@@ -23,10 +23,13 @@ fn add_toolbar_button(
     enabled: bool,
 ) {
     let button = Button::new(RichText::new(icon_string).heading()).frame(false);
-    ui.add_enabled(enabled, button)
+    if ui
+        .add_enabled(enabled, button)
         .on_hover_text(hover_text)
         .clicked()
-        .then(|| msgs.push(message));
+    {
+        msgs.push(message);
+    }
 }
 
 impl SystemState {
@@ -75,10 +78,18 @@ impl SystemState {
         let wave_loaded = self.user.waves.is_some();
         let undo_available = !self.undo_stack.is_empty();
         let redo_available = !self.redo_stack.is_empty();
-        let item_selected = wave_loaded && self.user.waves.as_ref().unwrap().focused_item.is_some();
-        let cursor_set = wave_loaded && self.user.waves.as_ref().unwrap().cursor.is_some();
-        let multiple_viewports =
-            wave_loaded && (self.user.waves.as_ref().unwrap().viewports.len() > 1);
+
+        let (item_selected, cursor_set, multiple_viewports) = if let Some(waves) = &self.user.waves
+        {
+            (
+                waves.focused_item.is_some(),
+                waves.cursor.is_some(),
+                waves.viewports.len() > 1,
+            )
+        } else {
+            (false, false, false)
+        };
+
         ui.with_layout(Layout::left_to_right(Align::LEFT), |ui| {
             if !self.show_menu() {
                 // Menu

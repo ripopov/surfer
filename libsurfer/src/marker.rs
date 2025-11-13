@@ -17,6 +17,9 @@ use crate::{
 };
 
 pub const DEFAULT_MARKER_NAME: &str = "Marker";
+const MAX_MARKERS: usize = 255;
+const MAX_MARKER_INDEX: u8 = 254;
+const CURSOR_MARKER_IDX: u8 = 255;
 
 impl WaveData {
     /// Get the color for a marker by its index, falling back to cursor color if not found
@@ -84,7 +87,7 @@ impl WaveData {
     }
 
     pub fn can_add_marker(&self) -> bool {
-        self.markers.len() < 255
+        self.markers.len() < MAX_MARKERS
     }
 
     pub fn add_marker(&mut self, location: &BigInt, name: Option<String>, move_focus: bool) {
@@ -92,9 +95,11 @@ impl WaveData {
             return;
         }
 
-        let idx = (0..=254)
-            .find(|idx| !self.markers.contains_key(idx))
-            .unwrap();
+        let Some(idx) = (0..=MAX_MARKER_INDEX).find(|idx| !self.markers.contains_key(idx)) else {
+            // This shouldn't happen since can_add_marker() was already checked,
+            // but handle it gracefully
+            return;
+        };
 
         self.insert_item(
             DisplayedItem::Marker(DisplayedMarker {
@@ -206,11 +211,8 @@ impl WaveData {
                 _ => None,
             })
         {
-            let background_color = displayed_item
-                .color
-                .as_ref()
-                .and_then(|color| theme.get_color(color))
-                .unwrap_or(&theme.cursor.color);
+            let item = DisplayedItem::Marker(displayed_item.clone());
+            let background_color = get_marker_background_color(&item, theme);
 
             let x = self.numbered_marker_location(displayed_item.idx, viewport, size.x);
             let idx_string = displayed_item.idx.to_string();
@@ -232,7 +234,7 @@ impl WaveData {
 impl SystemState {
     /// Generate the message for a marker click based on its index
     fn marker_click_message(marker_idx: u8, cursor: &Option<BigInt>) -> Message {
-        if marker_idx < 255 {
+        if marker_idx < CURSOR_MARKER_IDX {
             Message::GoToMarkerPosition(marker_idx, 0)
         } else {
             Message::GoToTime(cursor.clone(), 0)
@@ -249,7 +251,7 @@ impl SystemState {
             .into_iter()
             .map(|cursor| {
                 (
-                    255u8,
+                    CURSOR_MARKER_IDX,
                     cursor,
                     WidgetText::RichText(RichText::new("Primary").into()),
                 )
@@ -287,25 +289,24 @@ impl SystemState {
                         .show(ui, |ui| {
                             ui.label("");
                             for (marker_idx, _, widget_text) in &markers {
-                                ui.selectable_label(false, widget_text.clone())
-                                    .clicked()
-                                    .then(|| {
-                                        msgs.push(Self::marker_click_message(
-                                            *marker_idx,
-                                            &waves.cursor,
-                                        ));
-                                    });
+                                if ui.selectable_label(false, widget_text.clone()).clicked() {
+                                    msgs.push(Self::marker_click_message(
+                                        *marker_idx,
+                                        &waves.cursor,
+                                    ));
+                                }
                             }
                             ui.end_row();
                             for (marker_idx, row_marker_time, row_widget_text) in &markers {
-                                ui.selectable_label(false, row_widget_text.clone())
+                                if ui
+                                    .selectable_label(false, row_widget_text.clone())
                                     .clicked()
-                                    .then(|| {
-                                        msgs.push(Self::marker_click_message(
-                                            *marker_idx,
-                                            &waves.cursor,
-                                        ));
-                                    });
+                                {
+                                    msgs.push(Self::marker_click_message(
+                                        *marker_idx,
+                                        &waves.cursor,
+                                    ));
+                                }
                                 for (_, col_marker_time, _) in &markers {
                                     ui.label(time_string(
                                         &(*row_marker_time - *col_marker_time),
@@ -357,10 +358,7 @@ impl SystemState {
             let y_offset = drawing_info.top - y_zero;
             let y_bottom = drawing_info.bottom - y_zero;
 
-            let background_color = item
-                .color()
-                .and_then(|color| self.user.config.theme.get_color(color))
-                .unwrap_or(&self.user.config.theme.cursor.color);
+            let background_color = get_marker_background_color(item, &self.user.config.theme);
 
             let x = waves.numbered_marker_location(drawing_info.idx, viewport, view_width);
 
@@ -404,4 +402,11 @@ impl SystemState {
             );
         }
     }
+}
+
+/// Get the background color for a marker or cursor, with fallback to theme cursor color
+fn get_marker_background_color<'a>(item: &DisplayedItem, theme: &'a SurferTheme) -> &'a Color32 {
+    item.color()
+        .and_then(|color| theme.get_color(color))
+        .unwrap_or(&theme.cursor.color)
 }

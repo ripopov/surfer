@@ -126,11 +126,12 @@ impl TimeUnit {
 /// Create menu for selecting preferred time unit.
 pub fn timeunit_menu(ui: &mut Ui, msgs: &mut Vec<Message>, wanted_timeunit: &TimeUnit) {
     for timeunit in enum_iterator::all::<TimeUnit>() {
-        ui.radio(*wanted_timeunit == timeunit, timeunit.to_string())
+        if ui
+            .radio(*wanted_timeunit == timeunit, timeunit.to_string())
             .clicked()
-            .then(|| {
-                msgs.push(Message::SetTimeUnit(timeunit));
-            });
+        {
+            msgs.push(Message::SetTimeUnit(timeunit));
+        }
     }
 }
 
@@ -174,21 +175,22 @@ impl TimeFormat {
 /// Draw the menu for selecting the time format.
 pub fn timeformat_menu(ui: &mut Ui, msgs: &mut Vec<Message>, current_timeformat: &TimeFormat) {
     for time_string_format in enum_iterator::all::<TimeStringFormatting>() {
-        ui.radio(
-            current_timeformat.format == time_string_format,
-            if time_string_format == TimeStringFormatting::Locale {
-                format!(
-                    "{time_string_format} ({locale})",
-                    locale = get_locale().unwrap_or_else(|| "unknown".to_string())
-                )
-            } else {
-                time_string_format.to_string()
-            },
-        )
-        .clicked()
-        .then(|| {
+        if ui
+            .radio(
+                current_timeformat.format == time_string_format,
+                if time_string_format == TimeStringFormatting::Locale {
+                    format!(
+                        "{time_string_format} ({locale})",
+                        locale = get_locale().unwrap_or_else(|| "unknown".to_string())
+                    )
+                } else {
+                    time_string_format.to_string()
+                },
+            )
+            .clicked()
+        {
             msgs.push(Message::SetTimeStringFormatting(Some(time_string_format)));
-        });
+        }
     }
 }
 
@@ -227,10 +229,7 @@ fn split_and_format_number(time: String, format: &TimeStringFormatting) -> Strin
 }
 
 fn format_si(time: String) -> String {
-    if time.contains('.') {
-        let mut parts = time.split('.');
-        let integer_part = parts.next().unwrap();
-        let fractional_part = parts.next().unwrap();
+    if let Some((integer_part, fractional_part)) = time.split_once('.') {
         let integer_result = if integer_part.len() > 4 {
             group_n_chars(integer_part, 3).join(THIN_SPACE)
         } else {
@@ -262,12 +261,10 @@ fn format_locale(time: String) -> String {
         // "\u{202f}" (non-breaking thin space) does not exist in used font, replace with "\u{2009}" (thin space)
         let thousands_sep =
             locale_match!(locale => LC_NUMERIC::THOUSANDS_SEP).replace('\u{202f}', THIN_SPACE);
-        if time.contains('.') {
+        if let Some((integer_part, fractional_part)) = time.split_once('.') {
             let decimal_point = locale_match!(locale => LC_NUMERIC::DECIMAL_POINT);
-            let mut parts = time.split('.');
-            let integer_result = group_n_chars(parts.next().unwrap(), grouping[0] as usize)
-                .join(thousands_sep.as_str());
-            let fractional_part = parts.next().unwrap();
+            let integer_result =
+                group_n_chars(integer_part, grouping[0] as usize).join(thousands_sep.as_str());
             format!("{integer_result}{decimal_point}{fractional_part}")
         } else {
             group_n_chars(&time, grouping[0] as usize).join(thousands_sep.as_str())

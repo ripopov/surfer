@@ -503,8 +503,8 @@ impl SurferTheme {
         let mut add_themes_from_dir = |dir: ReadDir| {
             for theme in dir.flatten() {
                 if let Ok(theme_path) = theme.file_name().into_string() {
-                    if theme_path.ends_with(".toml") {
-                        let fname = theme_path.strip_suffix(".toml").unwrap().to_string();
+                    if let Some(fname_str) = theme_path.strip_suffix(".toml") {
+                        let fname = fname_str.to_string();
                         if !fname.is_empty() && !theme_names.contains(&fname) {
                             theme_names.push(fname);
                         }

@@ -200,13 +200,9 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
             let id = id_str.parse::<u8>().ok()?;
             Some(id)
         } else {
-            markers.iter().find_map(|(name, idx)| {
-                if name.is_some() && name.as_ref().unwrap() == query {
-                    Some(*idx)
-                } else {
-                    None
-                }
-            })
+            markers
+                .iter()
+                .find_map(|(name, idx)| name.as_ref().and_then(|n| (n == query).then_some(*idx)))
         }
     }
 
