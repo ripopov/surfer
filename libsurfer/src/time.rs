@@ -108,17 +108,17 @@ impl TimeUnit {
         }
     }
     /// Convert a power-of-ten exponent to a time unit.
-    fn from_exponent(exponent: i8) -> Self {
+    fn from_exponent(exponent: i8) -> Option<Self> {
         match exponent {
-            -21 => TimeUnit::ZeptoSeconds,
-            -18 => TimeUnit::AttoSeconds,
-            -15 => TimeUnit::FemtoSeconds,
-            -12 => TimeUnit::PicoSeconds,
-            -9 => TimeUnit::NanoSeconds,
-            -6 => TimeUnit::MicroSeconds,
-            -3 => TimeUnit::MilliSeconds,
-            0 => TimeUnit::Seconds,
-            _ => panic!("Invalid exponent"),
+            -21 => Some(TimeUnit::ZeptoSeconds),
+            -18 => Some(TimeUnit::AttoSeconds),
+            -15 => Some(TimeUnit::FemtoSeconds),
+            -12 => Some(TimeUnit::PicoSeconds),
+            -9 => Some(TimeUnit::NanoSeconds),
+            -6 => Some(TimeUnit::MicroSeconds),
+            -3 => Some(TimeUnit::MilliSeconds),
+            0 => Some(TimeUnit::Seconds),
+            _ => None,
         }
     }
 }
@@ -285,7 +285,9 @@ fn find_auto_scale(time: &BigInt, timescale: &TimeScale) -> TimeUnit {
     let start_digits = -timescale.unit.exponent();
     for e in (3..=start_digits).step_by(3).rev() {
         if (time % (BigInt::from(10).pow(e as u32 - multiplier_digits))) == BigInt::from(0) {
-            return TimeUnit::from_exponent(e - start_digits);
+            if let Some(unit) = TimeUnit::from_exponent(e - start_digits) {
+                return unit;
+            }
         }
     }
     timescale.unit
@@ -746,6 +748,341 @@ mod test {
                 }
             ),
             "220"
+        );
+    }
+
+    #[test]
+    fn test_strip_trailing_zeros_and_period() {
+        use crate::time::strip_trailing_zeros_and_period;
+
+        assert_eq!(strip_trailing_zeros_and_period("123.000".into()), "123");
+        assert_eq!(strip_trailing_zeros_and_period("123.450".into()), "123.45");
+        assert_eq!(strip_trailing_zeros_and_period("123.456".into()), "123.456");
+        assert_eq!(strip_trailing_zeros_and_period("123.".into()), "123");
+        assert_eq!(strip_trailing_zeros_and_period("123".into()), "123");
+        assert_eq!(strip_trailing_zeros_and_period("0.000".into()), "0");
+        assert_eq!(strip_trailing_zeros_and_period("0.100".into()), "0.1");
+        assert_eq!(strip_trailing_zeros_and_period("".into()), "");
+    }
+
+    #[test]
+    fn test_format_si() {
+        use crate::time::format_si;
+
+        // 4-digit rule: no grouping for 4 digits or less
+        assert_eq!(format_si("1234.56".to_string()), "1234.56");
+        assert_eq!(format_si("123.4".to_string()), "123.4");
+
+        // Grouping for 5+ digits
+        assert_eq!(format_si("12345.67".to_string()), "12\u{2009}345.67");
+        assert_eq!(
+            format_si("1234567.89".to_string()),
+            "1\u{2009}234\u{2009}567.89"
+        );
+        // No decimal part
+        assert_eq!(format_si("12345".to_string()), "12\u{2009}345");
+        assert_eq!(format_si("123".to_string()), "123");
+
+        // Empty inputs
+        assert_eq!(format_si("0.123".to_string()), "0.123");
+        assert_eq!(format_si("".to_string()), "");
+
+        // Decimal grouping
+        assert_eq!(
+            format_si("123.4567890".to_string()),
+            "123.456\u{2009}789\u{2009}0"
+        );
+    }
+
+    #[test]
+    fn test_time_unit_exponent() {
+        // Test exponent method
+        assert_eq!(TimeUnit::Seconds.exponent(), 0);
+        assert_eq!(TimeUnit::MilliSeconds.exponent(), -3);
+        assert_eq!(TimeUnit::MicroSeconds.exponent(), -6);
+        assert_eq!(TimeUnit::NanoSeconds.exponent(), -9);
+        assert_eq!(TimeUnit::PicoSeconds.exponent(), -12);
+        assert_eq!(TimeUnit::FemtoSeconds.exponent(), -15);
+        assert_eq!(TimeUnit::AttoSeconds.exponent(), -18);
+        assert_eq!(TimeUnit::ZeptoSeconds.exponent(), -21);
+
+        // Test from_exponent roundtrip
+        for unit in [
+            TimeUnit::Seconds,
+            TimeUnit::MilliSeconds,
+            TimeUnit::MicroSeconds,
+            TimeUnit::NanoSeconds,
+            TimeUnit::PicoSeconds,
+            TimeUnit::FemtoSeconds,
+            TimeUnit::AttoSeconds,
+            TimeUnit::ZeptoSeconds,
+        ] {
+            assert_eq!(TimeUnit::from_exponent(unit.exponent()), Some(unit));
+        }
+
+        // Invalid exponents
+        assert_eq!(TimeUnit::from_exponent(-5), None);
+        assert_eq!(TimeUnit::from_exponent(1), None);
+    }
+
+    #[test]
+    fn test_time_string_zero() {
+        // Test zero values
+        assert_eq!(
+            time_string(
+                &BigInt::from(0),
+                &TimeScale {
+                    multiplier: Some(1),
+                    unit: TimeUnit::MicroSeconds
+                },
+                &TimeUnit::MicroSeconds,
+                &TimeFormat::default()
+            ),
+            "0 μs"
+        );
+
+        assert_eq!(
+            time_string(
+                &BigInt::from(0),
+                &TimeScale {
+                    multiplier: Some(1),
+                    unit: TimeUnit::Seconds
+                },
+                &TimeUnit::Auto,
+                &TimeFormat::default()
+            ),
+            "0 s"
+        );
+    }
+
+    #[test]
+    fn test_time_string_large_numbers() {
+        // Test very large numbers with SI formatting
+        assert_eq!(
+            time_string(
+                &BigInt::from(999_999_999_999i64),
+                &TimeScale {
+                    multiplier: Some(1),
+                    unit: TimeUnit::NanoSeconds
+                },
+                &TimeUnit::Seconds,
+                &TimeFormat {
+                    format: TimeStringFormatting::SI,
+                    show_space: true,
+                    show_unit: true
+                }
+            ),
+            "999.999\u{2009}999\u{2009}999 s"
+        );
+    }
+
+    #[test]
+    fn test_time_string_no_multiplier() {
+        // Test with None multiplier (raw ticks)
+        assert_eq!(
+            time_string(
+                &BigInt::from(1234),
+                &TimeScale {
+                    multiplier: None,
+                    unit: TimeUnit::NanoSeconds
+                },
+                &TimeUnit::NanoSeconds,
+                &TimeFormat::default()
+            ),
+            "1234 ns"
+        );
+    }
+
+    #[test]
+    fn test_time_format_variations() {
+        let value = BigInt::from(123456);
+        let scale = TimeScale {
+            multiplier: Some(1),
+            unit: TimeUnit::NanoSeconds,
+        };
+
+        // Test all format variations
+        assert_eq!(
+            time_string(
+                &value,
+                &scale,
+                &TimeUnit::NanoSeconds,
+                &TimeFormat {
+                    format: TimeStringFormatting::No,
+                    show_space: true,
+                    show_unit: true
+                }
+            ),
+            "123456 ns"
+        );
+
+        assert_eq!(
+            time_string(
+                &value,
+                &scale,
+                &TimeUnit::NanoSeconds,
+                &TimeFormat {
+                    format: TimeStringFormatting::No,
+                    show_space: false,
+                    show_unit: true
+                }
+            ),
+            "123456ns"
+        );
+
+        assert_eq!(
+            time_string(
+                &value,
+                &scale,
+                &TimeUnit::NanoSeconds,
+                &TimeFormat {
+                    format: TimeStringFormatting::No,
+                    show_space: true,
+                    show_unit: false
+                }
+            ),
+            "123456 "
+        );
+
+        assert_eq!(
+            time_string(
+                &value,
+                &scale,
+                &TimeUnit::NanoSeconds,
+                &TimeFormat {
+                    format: TimeStringFormatting::SI,
+                    show_space: true,
+                    show_unit: true
+                }
+            ),
+            "123\u{2009}456 ns"
+        );
+    }
+
+    #[test]
+    fn test_find_auto_scale_seconds_passthrough() {
+        use crate::time::find_auto_scale;
+
+        let ts = TimeScale {
+            unit: TimeUnit::Seconds,
+            multiplier: Some(1),
+        };
+        assert_eq!(find_auto_scale(&BigInt::from(1), &ts), TimeUnit::Seconds);
+        assert_eq!(
+            find_auto_scale(&BigInt::from(1_234_567), &ts),
+            TimeUnit::Seconds
+        );
+    }
+
+    #[test]
+    fn test_find_auto_scale_nanoseconds() {
+        use crate::time::find_auto_scale;
+
+        let ts = TimeScale {
+            unit: TimeUnit::NanoSeconds,
+            multiplier: Some(1),
+        };
+
+        // Divisible by 10^9 -> seconds
+        assert_eq!(
+            find_auto_scale(&BigInt::from(1_000_000_000i64), &ts),
+            TimeUnit::Seconds
+        );
+        // Divisible by 10^6 -> milliseconds
+        assert_eq!(
+            find_auto_scale(&BigInt::from(1_000_000), &ts),
+            TimeUnit::MilliSeconds
+        );
+        // Divisible by 10^3 -> microseconds
+        assert_eq!(
+            find_auto_scale(&BigInt::from(1_000), &ts),
+            TimeUnit::MicroSeconds
+        );
+        // Not divisible by 10^3 -> stay at nanos
+        assert_eq!(
+            find_auto_scale(&BigInt::from(1234), &ts),
+            TimeUnit::NanoSeconds
+        );
+    }
+
+    #[test]
+    fn test_find_auto_scale_microseconds_with_multiplier() {
+        use crate::time::find_auto_scale;
+
+        // multiplier: None (treated as 1)
+        let ts_none = TimeScale {
+            unit: TimeUnit::MicroSeconds,
+            multiplier: None,
+        };
+        assert_eq!(
+            find_auto_scale(&BigInt::from(1_000_000), &ts_none),
+            TimeUnit::Seconds
+        );
+        assert_eq!(
+            find_auto_scale(&BigInt::from(1_000), &ts_none),
+            TimeUnit::MilliSeconds
+        );
+        assert_eq!(
+            find_auto_scale(&BigInt::from(123), &ts_none),
+            TimeUnit::MicroSeconds
+        );
+
+        // multiplier: Some(10) -> reduces required divisibility by 10^1
+        let ts_mul10 = TimeScale {
+            unit: TimeUnit::MicroSeconds,
+            multiplier: Some(10),
+        };
+        assert_eq!(
+            find_auto_scale(&BigInt::from(100_000), &ts_mul10),
+            TimeUnit::Seconds
+        );
+        assert_eq!(
+            find_auto_scale(&BigInt::from(100), &ts_mul10),
+            TimeUnit::MilliSeconds
+        );
+        assert_eq!(
+            find_auto_scale(&BigInt::from(123), &ts_mul10),
+            TimeUnit::MicroSeconds
+        );
+    }
+
+    #[test]
+    fn test_find_auto_scale_femtoseconds() {
+        use crate::time::find_auto_scale;
+
+        let ts = TimeScale {
+            unit: TimeUnit::FemtoSeconds,
+            multiplier: Some(1),
+        };
+        // 10^15 fs = 1 s
+        assert_eq!(
+            find_auto_scale(&BigInt::from(10_i128.pow(15)), &ts),
+            TimeUnit::Seconds
+        );
+        // 10^12 fs = 1 ms
+        assert_eq!(
+            find_auto_scale(&BigInt::from(10_i128.pow(12)), &ts),
+            TimeUnit::MilliSeconds
+        );
+        // 10^9 fs = 1 μs
+        assert_eq!(
+            find_auto_scale(&BigInt::from(10_i128.pow(9)), &ts),
+            TimeUnit::MicroSeconds
+        );
+        // 10^6 fs = 1 ns
+        assert_eq!(
+            find_auto_scale(&BigInt::from(10_i128.pow(6)), &ts),
+            TimeUnit::NanoSeconds
+        );
+        // 10^3 fs = 1 ps
+        assert_eq!(
+            find_auto_scale(&BigInt::from(10_i128.pow(3)), &ts),
+            TimeUnit::PicoSeconds
+        );
+        // Not divisible by 10^3 -> stay at fs
+        assert_eq!(
+            find_auto_scale(&BigInt::from(1), &ts),
+            TimeUnit::FemtoSeconds
         );
     }
 }

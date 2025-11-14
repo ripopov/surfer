@@ -287,9 +287,11 @@ fn fuzzy_match(alternatives: &[String], query: &str) -> Vec<(String, Vec<bool>)>
 }
 
 fn fuzzy_score(line: &str, query: &str) -> (i64, Vec<bool>) {
-    let (score, indices) = SkimMatcherV2::default()
-        .fuzzy_indices(line, query)
-        .unwrap_or_default();
+    lazy_static! {
+        static ref MATCHER: SkimMatcherV2 = SkimMatcherV2::default();
+    }
+
+    let (score, indices) = MATCHER.fuzzy_indices(line, query).unwrap_or_default();
 
     let mut matches = vec![false; line.len()];
     for i in indices {
@@ -487,5 +489,133 @@ mod tests {
             "cpu",
             ["cpu", "cpu_test_harness"]
         )
+    }
+
+    #[test]
+    fn separate_first_word_handles_empty_string() {
+        let result = separate_first_word("");
+        assert_eq!(result, ("".into(), "".into(), "".into(), "".into()));
+    }
+
+    #[test]
+    fn separate_first_word_handles_whitespace_only() {
+        let result = separate_first_word("   ");
+        assert_eq!(result, ("   ".into(), "".into(), "".into(), "".into()));
+    }
+
+    #[test]
+    fn separate_first_word_handles_single_word() {
+        let result = separate_first_word("test");
+        assert_eq!(result, ("".into(), "test".into(), "".into(), "".into()));
+    }
+
+    #[test]
+    fn separate_first_word_handles_word_with_trailing() {
+        let result = separate_first_word("test hello");
+        assert_eq!(
+            result,
+            ("".into(), "test".into(), " ".into(), "hello".into())
+        );
+    }
+
+    #[test]
+    fn separate_until_comma_handles_empty_string() {
+        let result = separate_until_comma("");
+        assert_eq!(result, ("".into(), "".into(), "".into(), "".into()));
+    }
+
+    #[test]
+    fn separate_until_comma_handles_no_comma() {
+        let result = separate_until_comma("test");
+        assert_eq!(result, ("".into(), "test".into(), "".into(), "".into()));
+    }
+
+    #[test]
+    fn separate_until_comma_handles_with_comma() {
+        let result = separate_until_comma("first,second");
+        assert_eq!(
+            result,
+            ("".into(), "first".into(), ",".into(), "second".into())
+        );
+    }
+
+    #[test]
+    fn fuzzy_score_handles_empty_query() {
+        let result = fuzzy_score("test", "");
+        assert_eq!(result.0, 0);
+        assert_eq!(result.1, vec![false, false, false, false]);
+    }
+
+    #[test]
+    fn fuzzy_score_handles_empty_line() {
+        let result = fuzzy_score("", "query");
+        assert_eq!(result.0, 0);
+        assert_eq!(result.1, Vec::<bool>::new());
+    }
+
+    #[test]
+    fn fuzzy_score_handles_exact_match() {
+        let result = fuzzy_score("test", "test");
+        assert!(result.0 > 0);
+        assert_eq!(result.1, vec![true, true, true, true]);
+    }
+
+    #[test]
+    fn fuzzy_match_handles_empty_alternatives() {
+        let result = fuzzy_match(&[], "query");
+        assert_eq!(result, vec![]);
+    }
+
+    #[test]
+    fn fuzzy_match_handles_empty_query() {
+        let alternatives = vec!["test".to_string(), "other".to_string()];
+        let result = fuzzy_match(&alternatives, "");
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn parse_command_rejects_extra_parameters_for_terminal() {
+        let command = Command::Terminal(CommandOutputs::NoParams);
+        let result = parse_command("extra stuff", command);
+        assert_eq!(
+            result,
+            Err(ParseError::ExtraParameters("extra stuff".into()))
+        );
+    }
+
+    #[test]
+    fn parse_command_handles_missing_parameters() {
+        let parser = get_parser();
+        let result = parse_command("oneparam", parser);
+        assert_eq!(result, Err(ParseError::MissingParameters));
+    }
+
+    #[test]
+    fn parse_command_handles_invalid_parameter() {
+        let parser = get_parser();
+        let result = parse_command("parsedparam notanumber", parser);
+        assert_eq!(
+            result,
+            Err(ParseError::InvalidParameter("notanumber".into()))
+        );
+    }
+
+    #[test]
+    fn expand_command_handles_terminal() {
+        let command = Command::Terminal(CommandOutputs::NoParams);
+        let result = expand_command("", command);
+        assert_eq!(result.expanded, "");
+        assert!(matches!(
+            result.suggestions,
+            Err(FuzzyError::ReachedTerminal)
+        ));
+    }
+
+    #[test]
+    fn expand_command_handles_empty_query() {
+        let parser = get_parser();
+        let result = expand_command("", parser);
+        assert_eq!(result.expanded, "");
+        assert!(result.suggestions.is_ok());
     }
 }

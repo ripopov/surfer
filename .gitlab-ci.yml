@@ -150,6 +150,16 @@ test-oldest-supported:
         - cargo -V
         - cargo test --features python --color=always --locked -- --include-ignored
 
+test-surver-oldest-supported:
+    # This version should match rust-version in surver/Cargo.toml
+    image: rust:1.85
+    stage: test
+    extends: .snapshots
+    script:
+        - rustc -V
+        - cargo -V
+        - cargo test -p surver --color=always --locked -- --include-ignored
+
 test-beta:
     image: "instrumentisto/rust:beta"
     stage: test
