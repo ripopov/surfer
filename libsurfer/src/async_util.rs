@@ -5,6 +5,8 @@ use futures_core::Future;
 use serde::Deserialize;
 use tracing::info;
 
+use crate::spawn;
+
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub enum AsyncJob {
     SaveState,
@@ -16,23 +18,11 @@ pub fn perform_work<F>(f: F)
 where
     F: FnOnce() + Send + 'static,
 {
-    #[cfg(target_arch = "wasm32")]
-    {
-        wasm_bindgen_futures::spawn_local(async {
-            info!("Starting async task");
-            f();
-        });
-        info!("Returning from perform work")
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        tokio::spawn(async {
-            info!("Starting async task");
-            f();
-        });
-        info!("Returning from perform work");
-    }
+    spawn! {async {
+        info!("Starting async task");
+        f();
+    }}
+    info!("Returning from perform work")
 }
 
 // NOTE: wasm32 does not require a Send bound.

@@ -99,12 +99,20 @@ impl SystemState {
                     // loaded when the corresponding message is processed, leading to
                     // a different position in the processing than expected.
                     #[cfg(not(target_arch = "wasm32"))]
-                    self.add_batch_commands(read_command_file(
-                        &Utf8PathBuf::from_path_buf(
-                            command.split_ascii_whitespace().nth(1).unwrap().into(),
-                        )
-                        .unwrap(),
-                    ));
+                    {
+                        if let Some(path_str) = command.split_ascii_whitespace().nth(1) {
+                            match Utf8PathBuf::from_path_buf(path_str.into()) {
+                                Ok(utf8_path) => {
+                                    self.add_batch_commands(read_command_file(&utf8_path));
+                                }
+                                Err(_) => {
+                                    error!("Invalid UTF-8 path in run_command_file on line {no}: {path_str}");
+                                }
+                            }
+                        } else {
+                            error!("Missing file path in run_command_file command on line {no}");
+                        }
+                    }
                     #[cfg(target_arch = "wasm32")]
                     error!("Cannot use run_command_file in command files running on WASM");
                     None
@@ -132,7 +140,9 @@ impl SystemState {
             let response: reqwest::Response = match maybe_response {
                 Ok(r) => r,
                 Err(e) => {
-                    sender.send(Message::Error(e)).unwrap();
+                    if let Err(e) = sender.send(Message::Error(e)) {
+                        error!("Failed to send error message: {e}");
+                    }
                     return;
                 }
             };
@@ -144,10 +154,17 @@ impl SystemState {
                 .await;
 
             match bytes {
-                Ok(b) => sender.send(Message::CommandFileDownloaded(url, b)),
-                Err(e) => sender.send(Message::Error(e)),
-            }
-            .unwrap();
+                Ok(b) => {
+                    if let Err(e) = sender.send(Message::CommandFileDownloaded(url, b)) {
+                        error!("Failed to send message: {e}");
+                    }
+                }
+                Err(e) => {
+                    if let Err(e) = sender.send(Message::Error(e)) {
+                        error!("Failed to send error message: {e}");
+                    }
+                }
+            };
         };
         spawn!(task);
 

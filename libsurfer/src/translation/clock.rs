@@ -30,7 +30,7 @@ impl Translator<VarId, ScopeId, Message> for ClockTranslator {
 
     fn translate(
         &self,
-        variable: &surfer_translation_types::VariableMeta<VarId, ScopeId>,
+        variable: &VariableMeta,
         value: &VariableValue,
     ) -> eyre::Result<TranslationResult> {
         self.inner.translate(variable, value)

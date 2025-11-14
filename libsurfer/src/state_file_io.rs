@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use camino::Utf8PathBuf;
 use eyre::Context;
 use rfd::FileHandle;
+use tracing::error;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::async_util::perform_async_work;
@@ -71,7 +72,9 @@ impl SystemState {
         if let Some(path) = path {
             let sender = self.channels.msg_sender.clone();
             for message in messages(path) {
-                let _ = sender.send(message);
+                if let Err(e) = sender.send(message) {
+                    error!("Failed to send message: {e}");
+                }
             }
         } else {
             self.file_dialog_open(
@@ -106,7 +109,9 @@ impl SystemState {
             let sender = self.channels.msg_sender.clone();
             perform_async_work(async move {
                 for message in messages(path.into()).await {
-                    let _ = sender.send(message);
+                    if let Err(e) = sender.send(message) {
+                        error!("Failed to send message: {e}");
+                    }
                 }
             });
         } else {

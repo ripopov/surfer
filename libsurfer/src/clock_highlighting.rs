@@ -44,19 +44,17 @@ pub fn draw_clock_edge_marks(
         }
         ClockHighlightType::Cycle => {
             // Process clock edges in pairs: every other cycle gets highlighted
-            for (idx, &x_tmp) in clock_edges.iter().enumerate() {
-                if idx % 2 == 1 {
-                    // Highlight the region from the previous edge to this one
-                    let x_start = clock_edges[idx - 1];
+            for chunk in clock_edges.chunks(2) {
+                if let [x_start, x_end] = chunk {
                     let Pos2 {
-                        x: x_end,
+                        x: x_end_screen,
                         y: y_start,
-                    } = (ctx.to_screen)(x_tmp, 0.);
+                    } = (ctx.to_screen)(*x_end, 0.);
                     ctx.painter.rect_filled(
                         Rect {
-                            min: (ctx.to_screen)(x_start, 0.),
+                            min: (ctx.to_screen)(*x_start, 0.),
                             max: Pos2 {
-                                x: x_end,
+                                x: x_end_screen,
                                 y: ctx.cfg.canvas_height + y_start,
                             },
                         },
@@ -76,13 +74,14 @@ pub fn clock_highlight_type_menu(
     clock_highlight_type: ClockHighlightType,
 ) {
     for highlight_type in enum_iterator::all::<ClockHighlightType>() {
-        ui.radio(
-            highlight_type == clock_highlight_type,
-            highlight_type.to_string(),
-        )
-        .clicked()
-        .then(|| {
+        if ui
+            .radio(
+                highlight_type == clock_highlight_type,
+                highlight_type.to_string(),
+            )
+            .clicked()
+        {
             msgs.push(Message::SetClockHighlightType(highlight_type));
-        });
+        }
     }
 }
