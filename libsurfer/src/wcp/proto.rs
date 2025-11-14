@@ -57,6 +57,7 @@ pub enum WcpResponse {
     add_items { ids: Vec<DisplayedItemRef> },
     add_variables { ids: Vec<DisplayedItemRef> },
     add_scope { ids: Vec<DisplayedItemRef> },
+    add_markers { ids: Vec<DisplayedItemRef> },
     ack,
 }
 
@@ -105,6 +106,14 @@ impl WcpSCMessage {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub struct MarkerInfo {
+    #[serde(deserialize_with = "deserialize_timestamp")]
+    pub time: BigInt,
+    pub name: Option<String>,
+    pub move_focus: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(tag = "command")]
 #[allow(non_camel_case_types)]
 pub enum WcpCommand {
@@ -146,6 +155,11 @@ pub enum WcpCommand {
         #[serde(default)]
         recursive: bool,
     },
+    /// Adds the specified markers to the view.
+    /// Responds with [WcpResponse::add_markers] which contains a list of the item references
+    /// that can be used to reference the added items later
+    /// Responds with an error if no waveforms are loaded
+    add_markers { markers: Vec<MarkerInfo> },
     /// Reloads the waveform from disk if this is possible for the current waveform format.
     /// If it is not possible, this has no effect.
     /// Responds instantly with [WcpResponse::ack]
@@ -157,6 +171,15 @@ pub enum WcpCommand {
     set_viewport_to {
         #[serde(deserialize_with = "deserialize_timestamp")]
         timestamp: BigInt,
+    },
+    /// Moves the viewport to center it on the specified timestamps range. Does affect the zoom
+    /// level.
+    /// Responds with [WcpResponse::ack]
+    set_viewport_range {
+        #[serde(deserialize_with = "deserialize_timestamp")]
+        start: BigInt,
+        #[serde(deserialize_with = "deserialize_timestamp")]
+        end: BigInt,
     },
     /// Removes the specified items from the view.
     /// Responds with [WcpResponse::ack]

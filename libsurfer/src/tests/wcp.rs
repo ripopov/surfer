@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use crate::message::Message;
 use crate::tests::snapshot::render_and_compare;
-use crate::wcp::proto::{self, WcpCSMessage, WcpCommand, WcpEvent, WcpResponse, WcpSCMessage};
+use crate::wcp::proto::{
+    self, MarkerInfo, WcpCSMessage, WcpCommand, WcpEvent, WcpResponse, WcpSCMessage,
+};
 use crate::SystemState;
 use itertools::Itertools;
 
@@ -168,6 +170,8 @@ async fn greet(tx: &Sender<WcpCSMessage>, rx: &mut Receiver<WcpSCMessage>) -> Re
         "clear",
         "load",
         "zoom_to_fit",
+        "add_markers",
+        "set_viewport_range_to",
     ];
     assert_eq!(commands, e_commands);
 
@@ -290,7 +294,21 @@ wcp_test! {
         expect_response!(rx, WcpSCMessage::response(WcpResponse::add_items{ ids: indices }));
 
         assert_eq!(indices.len(), 5);
+        Ok(())
+    }
+}
 
+wcp_test! {
+    add_markers,
+    (tx, rx) {
+        load_file(&tx, &mut rx, "../examples/counter.vcd").await?;
+
+        send_commands(&tx, vec![
+            WcpCommand::add_scope {scope: "tb".to_string(), recursive: false},
+            WcpCommand::add_markers { markers: vec![MarkerInfo { time: BigInt::from(100), name: Some("marker".into()), move_focus: false }] },
+        ]).await?;
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope{ ids: _ }));
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_markers{ ids: _ }));
         Ok(())
     }
 }
@@ -382,6 +400,21 @@ wcp_test! {
             WcpCommand::set_viewport_to { timestamp: BigInt::from(70) },
         ]).await?;
         expect_response!(rx, WcpSCMessage::response(WcpResponse::add_items{ ids: _ }));
+        expect_ack(&mut rx).await?;
+        Ok(())
+    }
+}
+
+wcp_test! {
+    set_viewport_range_to,
+    (tx, rx) {
+        load_file(&tx, &mut rx, "../examples/counter.vcd").await?;
+
+        send_commands(&tx, vec![
+            WcpCommand::add_scope {scope: "tb".to_string(), recursive: false},
+            WcpCommand::set_viewport_range { start: BigInt::from(70), end: BigInt::from(120) },
+        ]).await?;
+        expect_response!(rx, WcpSCMessage::response(WcpResponse::add_scope{ ids: _ }));
         expect_ack(&mut rx).await?;
         Ok(())
     }
