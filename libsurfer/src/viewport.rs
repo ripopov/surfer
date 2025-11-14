@@ -160,48 +160,11 @@ impl Viewport {
         time.round().to_integer()
     }
 
-    pub fn to_time_f64(&self, x: f64, view_width: f32, num_timestamps: &BigInt) -> Absolute {
-        let time_spacing = self.width_absolute(num_timestamps) / view_width as f64;
-
-        self.curr_left.absolute(num_timestamps) + time_spacing * x
-    }
-
-    pub fn to_time_bigint(&self, x: f32, view_width: f32, num_timestamps: &BigInt) -> BigInt {
-        let Viewport {
-            curr_left: left,
-            curr_right: right,
-            ..
-        } = &self;
-
-        let big_right = BigRational::from_f64(right.absolute(num_timestamps).0)
-            .unwrap_or_else(|| BigRational::from_u8(1).unwrap());
-        let big_left = BigRational::from_f64(left.absolute(num_timestamps).0)
-            .unwrap_or_else(|| BigRational::from_u8(1).unwrap());
-        let big_width =
-            BigRational::from_f32(view_width).unwrap_or_else(|| BigRational::from_u8(1).unwrap());
-        let big_x = BigRational::from_f32(x).unwrap_or_else(|| BigRational::from_u8(1).unwrap());
-
-        let time = big_left.clone() + (big_right - big_left) / big_width * big_x;
-        time.round().to_integer()
-    }
-
     /// Computes which x-pixel corresponds to the specified time adduming the viewport is rendered
     /// into a viewport of `view_width`
     pub fn pixel_from_time(&self, time: &BigInt, view_width: f32, num_timestamps: &BigInt) -> f32 {
         let distance_from_left =
             Absolute(time.to_f64().unwrap()) - self.curr_left.absolute(num_timestamps);
-
-        (((distance_from_left / self.width_absolute(num_timestamps)).0) * (view_width as f64))
-            as f32
-    }
-
-    pub fn pixel_from_time_f64(
-        &self,
-        time: Absolute,
-        view_width: f32,
-        num_timestamps: &BigInt,
-    ) -> f32 {
-        let distance_from_left = time - self.curr_left.absolute(num_timestamps);
 
         (((distance_from_left / self.width_absolute(num_timestamps)).0) * (view_width as f64))
             as f32
@@ -506,4 +469,98 @@ pub fn ease_in_out_size(r: RangeInclusive<f64>, t: f64) -> f64 {
 pub enum ViewportStrategy {
     Instant,
     EaseInOut { duration: f32 },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use num::BigInt;
+
+    fn bi(n: i64) -> BigInt {
+        BigInt::from(n)
+    }
+
+    #[test]
+    fn ease_in_out_endpoints_and_mid() {
+        let r = 0.0..=10.0;
+        let s0 = ease_in_out_size(r.clone(), 0.0);
+        let s05 = ease_in_out_size(r.clone(), 0.5);
+        let s1 = ease_in_out_size(r.clone(), 1.0);
+        assert!((s0 - 0.0).abs() < 1e-12);
+        assert!((s05 - 5.0).abs() < 1e-12);
+        assert!((s1 - 10.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn relative_absolute_roundtrip() {
+        let n = bi(1000);
+        let r = Relative(0.25);
+        let abs = r.absolute(&n);
+        // 0.25 * 1000 = 250.0
+        assert!((abs.0 - 250.0).abs() < 1e-9);
+        let back = abs.relative(&n);
+        assert!((back.0 - r.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pixel_from_time_consistency() {
+        let vp = Viewport::default();
+        let n = bi(1000);
+        let view_w = 1000.0_f32;
+        let time_abs = Absolute(250.0);
+        let x1 = vp.pixel_from_absolute_time(time_abs, view_w, &n);
+        let x2 = vp.pixel_from_time(&bi(250), view_w, &n);
+        assert!((x1 - 250.0).abs() < 1e-6);
+        assert!((x2 - 250.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn set_viewport_min_width_enforced() {
+        let mut vp = Viewport::default();
+        let n = bi(1000);
+        // Try to set zero-width viewport at center
+        let center = Relative(0.5);
+        vp.set_viewport_to_clipped(center, center, &n);
+        // width must be at least min_width.relative(n)
+        let rel_min = vp.min_width.relative(&n).0;
+        let width = (vp.curr_right - vp.curr_left).0;
+        assert!(
+            width + f64::EPSILON >= rel_min,
+            "width {} < min {}",
+            width,
+            rel_min
+        );
+    }
+
+    #[test]
+    fn go_to_start_and_end_preserve_width() {
+        let mut vp = Viewport::default();
+        let w0 = (vp.curr_right - vp.curr_left).0;
+        vp.go_to_end();
+        let w1 = (vp.curr_right - vp.curr_left).0;
+        assert!((w0 - w1).abs() < 1e-12);
+        assert!((vp.curr_right.0 - 1.0).abs() < 1e-12);
+        vp.go_to_start();
+        let w2 = (vp.curr_right - vp.curr_left).0;
+        assert!((w0 - w2).abs() < 1e-12);
+        assert!((vp.curr_left.0 - 0.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn move_viewport_ease_in_out_reaches_target() {
+        let mut vp = Viewport::default();
+        vp.move_strategy = ViewportStrategy::EaseInOut { duration: 0.3 };
+        let n = bi(1000);
+        // request a move
+        vp.set_viewport_to_clipped(Relative(0.1), Relative(0.3), &n);
+        let mut t = 0.0;
+        // step in a few frames
+        while vp.is_moving() && t < 1.0 {
+            vp.move_viewport(0.05);
+            t += 0.05;
+        }
+        assert!(!vp.is_moving());
+        assert!((vp.curr_left.0 - 0.1).abs() < 1e-6);
+        assert!((vp.curr_right.0 - 0.3).abs() < 1e-6);
+    }
 }

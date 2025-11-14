@@ -127,7 +127,7 @@ pub enum ValueKind {
 
 #[cfg_attr(feature = "wasm_plugins", derive(FromBytes, ToBytes))]
 #[cfg_attr(feature = "wasm_plugins", encoding(Json))]
-#[derive(PartialEq, Deserialize, Serialize)]
+#[derive(PartialEq, Deserialize, Serialize, Debug)]
 pub enum TranslationPreference {
     /// This translator prefers translating the variable, so it will be selected
     /// as the default translator for the variable
