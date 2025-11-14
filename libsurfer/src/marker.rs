@@ -103,7 +103,7 @@ impl WaveData {
         let Some(idx) = (0..=MAX_MARKER_INDEX).find(|idx| !self.markers.contains_key(idx)) else {
             // This shouldn't happen since can_add_marker() was already checked,
             // but handle it gracefully
-            return;
+            return None;
         };
 
         let item_ref = self.insert_item(
@@ -153,10 +153,9 @@ impl WaveData {
     }
 
     pub fn move_marker_to_cursor(&mut self, idx: u8) {
-        let Some(location) = self.cursor.clone() else {
-            return;
+        if let Some(location) = self.cursor.clone() {
+            self.set_marker_position(idx, &location);
         };
-        self.set_marker_position(idx, &location);
     }
 
     /// Draw text with background box at the specified position
