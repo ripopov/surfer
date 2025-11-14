@@ -226,19 +226,23 @@ impl SystemState {
                         x: 0.,
                         y: default_padding.y,
                     };
-                    ui.button(icons::ADD_FILL)
+                    if ui
+                        .button(icons::ADD_FILL)
                         .on_hover_text("Add all variables from active Scope")
                         .clicked()
-                        .then(|| {
-                            self.add_filtered_variables(msgs, full_path);
-                        });
-                    ui.add_enabled(
-                        !self.user.variable_filter.name_filter_str.is_empty(),
-                        Button::new(icons::CLOSE_FILL),
-                    )
-                    .on_hover_text("Clear filter")
-                    .clicked()
-                    .then(|| self.user.variable_filter.name_filter_str.clear());
+                    {
+                        self.add_filtered_variables(msgs, full_path);
+                    }
+                    if ui
+                        .add_enabled(
+                            !self.user.variable_filter.name_filter_str.is_empty(),
+                            Button::new(icons::CLOSE_FILL),
+                        )
+                        .on_hover_text("Clear filter")
+                        .clicked()
+                    {
+                        self.user.variable_filter.name_filter_str.clear();
+                    }
 
                     // Check if regex and if an incorrect regex, change background color
                     if self.user.variable_filter.is_regex_and_invalid() {
@@ -333,25 +337,27 @@ impl SystemState {
         let mut name_filter_case_insensitive =
             self.user.variable_filter.name_filter_case_insensitive;
 
-        ui.checkbox(&mut name_filter_case_insensitive, "Case insensitive")
+        if ui
+            .checkbox(&mut name_filter_case_insensitive, "Case insensitive")
             .clicked()
-            .then(|| {
-                msgs.push(Message::SetVariableNameFilterCaseInsensitive(
-                    !self.user.variable_filter.name_filter_case_insensitive,
-                ))
-            });
+        {
+            msgs.push(Message::SetVariableNameFilterCaseInsensitive(
+                !self.user.variable_filter.name_filter_case_insensitive,
+            ));
+        }
 
         ui.separator();
 
         for filter_type in enum_iterator::all::<VariableNameFilterType>() {
-            ui.radio(
-                self.user.variable_filter.name_filter_type == filter_type,
-                filter_type.to_string(),
-            )
-            .clicked()
-            .then(|| {
+            if ui
+                .radio(
+                    self.user.variable_filter.name_filter_type == filter_type,
+                    filter_type.to_string(),
+                )
+                .clicked()
+            {
                 msgs.push(Message::SetVariableNameFilterType(filter_type));
-            });
+            }
         }
 
         ui.separator();
@@ -362,13 +368,14 @@ impl SystemState {
         // flag on a click.
         let mut group_by_direction = self.user.variable_filter.group_by_direction;
 
-        ui.checkbox(&mut group_by_direction, "Group by direction")
+        if ui
+            .checkbox(&mut group_by_direction, "Group by direction")
             .clicked()
-            .then(|| {
-                msgs.push(Message::SetVariableGroupByDirection(
-                    !self.user.variable_filter.group_by_direction,
-                ))
-            });
+        {
+            msgs.push(Message::SetVariableGroupByDirection(
+                !self.user.variable_filter.group_by_direction,
+            ));
+        }
 
         ui.separator();
 
@@ -377,56 +384,61 @@ impl SystemState {
             let output = VariableDirection::Output;
             let inout = VariableDirection::InOut;
 
-            ui.add(
-                Button::new(input.get_icon().unwrap())
-                    .selected(self.user.variable_filter.include_inputs),
-            )
-            .on_hover_text("Show inputs")
-            .clicked()
-            .then(|| {
+            if ui
+                .add(
+                    Button::new(input.get_icon().unwrap())
+                        .selected(self.user.variable_filter.include_inputs),
+                )
+                .on_hover_text("Show inputs")
+                .clicked()
+            {
                 msgs.push(Message::SetVariableIOFilter(
                     VariableIOFilterType::Input,
                     !self.user.variable_filter.include_inputs,
                 ));
-            });
+            }
 
-            ui.add(
-                Button::new(output.get_icon().unwrap())
-                    .selected(self.user.variable_filter.include_outputs),
-            )
-            .on_hover_text("Show outputs")
-            .clicked()
-            .then(|| {
+            if ui
+                .add(
+                    Button::new(output.get_icon().unwrap())
+                        .selected(self.user.variable_filter.include_outputs),
+                )
+                .on_hover_text("Show outputs")
+                .clicked()
+            {
                 msgs.push(Message::SetVariableIOFilter(
                     VariableIOFilterType::Output,
                     !self.user.variable_filter.include_outputs,
                 ));
-            });
+            }
 
-            ui.add(
-                Button::new(inout.get_icon().unwrap())
-                    .selected(self.user.variable_filter.include_inouts),
-            )
-            .on_hover_text("Show inouts")
-            .clicked()
-            .then(|| {
+            if ui
+                .add(
+                    Button::new(inout.get_icon().unwrap())
+                        .selected(self.user.variable_filter.include_inouts),
+                )
+                .on_hover_text("Show inouts")
+                .clicked()
+            {
                 msgs.push(Message::SetVariableIOFilter(
                     VariableIOFilterType::InOut,
                     !self.user.variable_filter.include_inouts,
                 ));
-            });
+            }
 
-            ui.add(
-                Button::new(icons::GLOBAL_LINE).selected(self.user.variable_filter.include_others),
-            )
-            .on_hover_text("Show others")
-            .clicked()
-            .then(|| {
+            if ui
+                .add(
+                    Button::new(icons::GLOBAL_LINE)
+                        .selected(self.user.variable_filter.include_others),
+                )
+                .on_hover_text("Show others")
+                .clicked()
+            {
                 msgs.push(Message::SetVariableIOFilter(
                     VariableIOFilterType::Other,
                     !self.user.variable_filter.include_others,
                 ));
-            });
+            }
         });
     }
 

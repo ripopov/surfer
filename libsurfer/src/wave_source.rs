@@ -263,9 +263,15 @@ impl SystemState {
                         load_options,
                         HeaderResult::LocalFile(Box::new(header)),
                     );
-                    sender.send(msg).unwrap();
+                    if let Err(e) = sender.send(msg) {
+                        error!("Failed to send message: {e}");
+                    }
                 }
-                Err(e) => sender.send(Message::Error(e)).unwrap(),
+                Err(e) => {
+                    if let Err(err) = sender.send(Message::Error(e)) {
+                        error!("Failed to send error message: {err}");
+                    }
+                }
             }
         });
 
@@ -355,7 +361,9 @@ impl SystemState {
                     let response: reqwest::Response = match maybe_response {
                         Ok(r) => r,
                         Err(e) => {
-                            sender.send(Message::Error(e)).unwrap();
+                            if let Err(e) = sender.send(Message::Error(e)) {
+                                error!("Failed to send error message: {e}");
+                            }
                             return;
                         }
                     };
@@ -382,10 +390,19 @@ impl SystemState {
                         .await;
 
                     match bytes {
-                        Ok(b) => sender.send(Message::FileDownloaded(url, b, load_options)),
-                        Err(e) => sender.send(Message::Error(e)),
-                    }
-                    .unwrap();
+                        Ok(b) => {
+                            if let Err(err) =
+                                sender.send(Message::FileDownloaded(url, b, load_options))
+                            {
+                                error!("Failed to send message: {err}");
+                            }
+                        }
+                        Err(e) => {
+                            if let Err(err) = sender.send(Message::Error(e)) {
+                                error!("Failed to send error message: {err}");
+                            }
+                        }
+                    };
                 };
                 spawn!(task);
 
@@ -418,7 +435,11 @@ impl SystemState {
                     load_options,
                 ))
                 .unwrap(),
-            Err(e) => sender.send(Message::Error(Report::msg(e))).unwrap(),
+            Err(e) => {
+                if let Err(e) = sender.send(Message::Error(Report::msg(e))) {
+                    error!("Failed to send error message: {e}");
+                }
+            }
         }
         Ok(())
     }
@@ -443,7 +464,11 @@ impl SystemState {
                     load_options,
                 ))
                 .unwrap(),
-            Err(e) => sender.send(Message::Error(Report::msg(e))).unwrap(),
+            Err(e) => {
+                if let Err(e) = sender.send(Message::Error(Report::msg(e))) {
+                    error!("Failed to send error message: {e}");
+                }
+            }
         }
     }
     fn get_hierarchy_from_server(
@@ -466,9 +491,15 @@ impl SystemState {
                 Ok(h) => {
                     let header = HeaderResult::Remote(Arc::new(h.hierarchy), h.file_format, server);
                     let msg = Message::WaveHeaderLoaded(start, source, load_options, header);
-                    sender.send(msg).unwrap();
+                    if let Err(e) = sender.send(msg) {
+                        error!("Failed to send message: {e}");
+                    }
                 }
-                Err(e) => sender.send(Message::Error(e)).unwrap(),
+                Err(e) => {
+                    if let Err(err) = sender.send(Message::Error(e)) {
+                        error!("Failed to send error message: {err}");
+                    }
+                }
             }
         };
         spawn!(task);
@@ -490,9 +521,15 @@ impl SystemState {
                 Ok(table) => {
                     let msg =
                         Message::WaveBodyLoaded(start, source, BodyResult::Remote(table, server));
-                    sender.send(msg).unwrap();
+                    if let Err(e) = sender.send(msg) {
+                        error!("Failed to send message: {e}");
+                    }
                 }
-                Err(e) => sender.send(Message::Error(e)).unwrap(),
+                Err(e) => {
+                    if let Err(err) = sender.send(Message::Error(e)) {
+                        error!("Failed to send error message: {err}");
+                    }
+                }
             }
         };
         spawn!(task);
@@ -510,9 +547,15 @@ impl SystemState {
             match res {
                 Ok(status) => {
                     let msg = Message::SurferServerStatus(start, server, status);
-                    sender.send(msg).unwrap();
+                    if let Err(e) = sender.send(msg) {
+                        error!("Failed to send message: {e}");
+                    }
                 }
-                Err(e) => sender.send(Message::Error(e)).unwrap(),
+                Err(e) => {
+                    if let Err(err) = sender.send(Message::Error(e)) {
+                        error!("Failed to send error message: {err}");
+                    }
+                }
             }
         };
         spawn!(task);
@@ -568,18 +611,25 @@ impl SystemState {
             };
 
             match container {
-                Ok(c) => sender.send(Message::WavesLoaded(
-                    WaveSource::Cxxrtl(kind),
-                    WaveFormat::CxxRtl,
-                    Box::new(WaveContainer::Cxxrtl(Box::new(Mutex::new(c)))),
-                    LoadOptions {
-                        keep_variables,
-                        keep_unavailable: false,
-                    },
-                )),
-                Err(e) => sender.send(Message::Error(e)),
+                Ok(c) => {
+                    if let Err(err) = sender.send(Message::WavesLoaded(
+                        WaveSource::Cxxrtl(kind),
+                        WaveFormat::CxxRtl,
+                        Box::new(WaveContainer::Cxxrtl(Box::new(Mutex::new(c)))),
+                        LoadOptions {
+                            keep_variables,
+                            keep_unavailable: false,
+                        },
+                    )) {
+                        error!("Failed to send message: {err}");
+                    }
+                }
+                Err(e) => {
+                    if let Err(err) = sender.send(Message::Error(e)) {
+                        error!("Failed to send error message: {err}");
+                    }
+                }
             }
-            .unwrap()
         };
         #[cfg(not(target_arch = "wasm32"))]
         futures::executor::block_on(task);
@@ -610,9 +660,15 @@ impl SystemState {
                         load_options,
                         HeaderResult::LocalBytes(Box::new(header)),
                     );
-                    sender.send(msg).unwrap();
+                    if let Err(e) = sender.send(msg) {
+                        error!("Failed to send message: {e}");
+                    }
                 }
-                Err(e) => sender.send(Message::Error(e)).unwrap(),
+                Err(e) => {
+                    if let Err(err) = sender.send(Message::Error(e)) {
+                        error!("Failed to send error message: {err}");
+                    }
+                }
             }
         });
 
@@ -658,9 +714,15 @@ impl SystemState {
                 match body_result {
                     Ok(body) => {
                         let msg = Message::WaveBodyLoaded(start, source, BodyResult::Local(body));
-                        sender.send(msg).unwrap();
+                        if let Err(e) = sender.send(msg) {
+                            error!("Failed to send message: {e}");
+                        }
                     }
-                    Err(e) => sender.send(Message::Error(e)).unwrap(),
+                    Err(e) => {
+                        if let Err(err) = sender.send(Message::Error(e)) {
+                            error!("Failed to send error message: {err}");
+                        }
+                    }
                 }
             };
             if let Some(pool) = pool {
@@ -695,7 +757,9 @@ impl SystemState {
                         let loaded = source.load_signals(&signals, &hierarchy, true);
                         let res = LoadSignalsResult::local(source, loaded, from_unique_id);
                         let msg = Message::SignalsLoaded(start, res);
-                        sender.send(msg).unwrap();
+                        if let Err(e) = sender.send(msg) {
+                            error!("Failed to send message: {e}");
+                        }
                     };
                     if let Some(pool) = pool {
                         pool.install(action);
@@ -717,9 +781,15 @@ impl SystemState {
                         Ok(loaded) => {
                             let res = LoadSignalsResult::remote(server, loaded, from_unique_id);
                             let msg = Message::SignalsLoaded(start, res);
-                            sender.send(msg).unwrap();
+                            if let Err(e) = sender.send(msg) {
+                                error!("Failed to send message: {e}");
+                            }
                         }
-                        Err(e) => sender.send(Message::Error(e)).unwrap(),
+                        Err(e) => {
+                            if let Err(err) = sender.send(Message::Error(e)) {
+                                error!("Failed to send error message: {err}");
+                            }
+                        }
                     }
                 };
                 spawn!(task);
