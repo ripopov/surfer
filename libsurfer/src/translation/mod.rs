@@ -666,13 +666,78 @@ impl Translator<VarId, ScopeId, Message> for StringTranslator {
 }
 
 fn check_single_wordlength(num_bits: Option<u32>, required: u32) -> Result<TranslationPreference> {
-    if let Some(num_bits) = num_bits {
-        if num_bits == required {
-            Ok(TranslationPreference::Yes)
-        } else {
-            Ok(TranslationPreference::No)
-        }
+    if Some(required) == num_bits {
+        Ok(TranslationPreference::Yes)
     } else {
         Ok(TranslationPreference::No)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_single_wordlength_exact_match() {
+        let result = check_single_wordlength(Some(32), 32).unwrap();
+        assert_eq!(result, TranslationPreference::Yes);
+    }
+
+    #[test]
+    fn check_single_wordlength_mismatch() {
+        let result = check_single_wordlength(Some(64), 32).unwrap();
+        assert_eq!(result, TranslationPreference::No);
+    }
+
+    #[test]
+    fn check_single_wordlength_none() {
+        let result = check_single_wordlength(None, 32).unwrap();
+        assert_eq!(result, TranslationPreference::No);
+    }
+
+    #[test]
+    fn translator_list_basic_operations() {
+        let translators = all_translators();
+
+        // Check that we have some translators
+        assert!(!translators.all_translator_names().is_empty());
+
+        // Check default translator exists
+        assert!(translators
+            .all_translator_names()
+            .contains(&translators.default.as_str()));
+
+        // Check we can get a translator by name
+        let hex_translator = translators.get_translator("Hexadecimal");
+        assert_eq!(hex_translator.name(), "Hexadecimal");
+
+        // Check basic translator names subset
+        let basic_names = translators.basic_translator_names();
+        assert!(basic_names.contains(&"Hexadecimal"));
+        assert!(basic_names.contains(&"Binary"));
+    }
+
+    #[test]
+    fn variable_info_has_subpath() {
+        use surfer_translation_types::VariableInfo;
+
+        let info = VariableInfo::Compound {
+            subfields: vec![
+                ("field1".to_string(), VariableInfo::Bits),
+                (
+                    "field2".to_string(),
+                    VariableInfo::Compound {
+                        subfields: vec![("nested".to_string(), VariableInfo::Bool)],
+                    },
+                ),
+            ],
+        };
+
+        assert!(info.has_subpath(&[]));
+        assert!(info.has_subpath(&["field1".to_string()]));
+        assert!(info.has_subpath(&["field2".to_string()]));
+        assert!(info.has_subpath(&["field2".to_string(), "nested".to_string()]));
+        assert!(!info.has_subpath(&["nonexistent".to_string()]));
+        assert!(!info.has_subpath(&["field2".to_string(), "nonexistent".to_string()]));
     }
 }
