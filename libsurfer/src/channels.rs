@@ -8,6 +8,8 @@ use tokio::sync::{
 
 use crate::{EGUI_CONTEXT, OUTSTANDING_TRANSACTIONS};
 
+const CHANNEL_SIZE: usize = 100;
+
 pub struct IngressReceiver<T> {
     sc_messages: mpsc::Receiver<T>,
 }
@@ -60,7 +62,7 @@ pub(crate) struct IngressHandler<T> {
 impl<T> IngressHandler<T> {
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn new() -> Self {
-        let (tx, rx) = mpsc::channel(100);
+        let (tx, rx) = mpsc::channel(CHANNEL_SIZE);
         Self {
             tx: IngressSender::new(tx),
             rx: RwLock::new(Some(IngressReceiver::new(rx))),
@@ -77,7 +79,7 @@ pub(crate) struct GlobalChannelTx<T> {
 #[cfg(target_arch = "wasm32")]
 impl<T> GlobalChannelTx<T> {
     pub fn new() -> Self {
-        let (tx, rx) = mpsc::channel(100);
+        let (tx, rx) = mpsc::channel(CHANNEL_SIZE);
         Self {
             tx,
             rx: RwLock::new(rx),
