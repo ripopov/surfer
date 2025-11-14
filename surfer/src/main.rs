@@ -68,16 +68,46 @@ mod main_impl {
     }
 
     impl Args {
-        pub fn command_file(&self) -> &Option<Utf8PathBuf> {
-            if self.script.is_some() && self.command_file.is_some() {
-                error!("At most one of --command_file and --script can be used");
-                return &None;
+        pub fn command_file(&self) -> Option<&Utf8PathBuf> {
+            match (&self.command_file, &self.script) {
+                (Some(_), Some(_)) => {
+                    error!("At most one of --command_file and --script can be used");
+                    None
+                }
+                (Some(cf), None) => Some(cf),
+                (None, Some(sc)) => Some(sc),
+                (None, None) => None,
             }
-            if self.command_file.is_some() {
-                &self.command_file
-            } else {
-                &self.script
-            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn command_file_prefers_single_sources() {
+            // Only --command_file
+            let args = Args::parse_from(["surfer", "--command-file", "C:/tmp/cmds.sucl"]);
+            let cf = args.command_file().unwrap();
+            assert!(cf.ends_with("cmds.sucl"));
+
+            // Only --script
+            let args = Args::parse_from(["surfer", "--script", "C:/tmp/scr.sucl"]);
+            let cf = args.command_file().unwrap();
+            assert!(cf.ends_with("scr.sucl"));
+        }
+
+        #[test]
+        fn command_file_conflict_returns_none() {
+            let args = Args::parse_from([
+                "surfer",
+                "--command-file",
+                "C:/tmp/cmds.sucl",
+                "--script",
+                "C:/tmp/scr.sucl",
+            ]);
+            assert!(args.command_file().is_none());
         }
     }
 
