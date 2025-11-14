@@ -10,6 +10,7 @@ use enum_iterator::Sequence;
 use epaint::Stroke;
 use eyre::Report;
 use eyre::{Context, Result};
+use lazy_static::lazy_static;
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
@@ -20,6 +21,35 @@ use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation};
 use crate::mousegestures::GestureZones;
 use crate::time::TimeFormat;
 use crate::{clock_highlighting::ClockHighlightType, variable_name_type::VariableNameType};
+
+lazy_static! {
+    /// Built-in theme names and their corresponding embedded content
+    static ref BUILTIN_THEMES: HashMap<&'static str, &'static str> = {
+        HashMap::from([
+            ("dark+", include_str!("../../themes/dark+.toml")),
+            (
+                "dark-high-contrast",
+                include_str!("../../themes/dark-high-contrast.toml"),
+            ),
+            ("ibm", include_str!("../../themes/ibm.toml")),
+            ("light+", include_str!("../../themes/light+.toml")),
+            (
+                "light-high-contrast",
+                include_str!("../../themes/light-high-contrast.toml"),
+            ),
+            ("okabe/ito", include_str!("../../themes/okabe-ito.toml")),
+            (
+                "petroff-dark",
+                include_str!("../../themes/petroff-dark.toml"),
+            ),
+            (
+                "petroff-light",
+                include_str!("../../themes/petroff-light.toml"),
+            ),
+            ("solarized", include_str!("../../themes/solarized.toml")),
+        ])
+    };
+}
 
 /// Select the function of the arrow keys
 #[derive(Clone, Copy, Debug, Deserialize, Display, FromStr, PartialEq, Eq, Sequence, Serialize)]
@@ -457,22 +487,13 @@ impl SurferTheme {
 
         let theme_names = all_theme_names();
 
-        let override_theme = match theme_name.clone().unwrap_or_default().as_str() {
-            "dark+" => include_str!("../../themes/dark+.toml"),
-            "dark-high-contrast" => include_str!("../../themes/dark-high-contrast.toml"),
-            "ibm" => include_str!("../../themes/ibm.toml"),
-            "light+" => include_str!("../../themes/light+.toml"),
-            "light-high-contrast" => include_str!("../../themes/light-high-contrast.toml"),
-            "okabe/ito" => include_str!("../../themes/okabe-ito.toml"),
-            "petroff-dark" => include_str!("../../themes/petroff-dark.toml"),
-            "petroff-light" => include_str!("../../themes/petroff-light.toml"),
-            "solarized" => include_str!("../../themes/solarized.toml"),
-            _ => "",
-        }
-        .to_string();
+        let override_theme = theme_name
+            .as_ref()
+            .and_then(|name| BUILTIN_THEMES.get(name.as_str()).copied())
+            .unwrap_or("");
 
         theme = theme.add_source(config::File::from_str(
-            &override_theme,
+            override_theme,
             config::FileFormat::Toml,
         ));
         (theme, theme_names)
@@ -531,11 +552,9 @@ impl SurferTheme {
             .filter_map(|p| std::fs::read_dir(p.join("themes")).ok())
             .for_each(add_themes_from_dir);
 
-        if theme_name
-            .clone()
-            .is_some_and(|theme_name| !theme_name.is_empty())
-        {
-            let theme_path = Path::new("themes").join(theme_name.unwrap() + ".toml");
+        if matches!(theme_name, Some(ref name) if !name.is_empty()) {
+            let theme_path =
+                Path::new("themes").join(theme_name.as_ref().unwrap().to_owned() + ".toml");
 
             // First filter out all the existing local themes and add them in the aforementioned
             // order.
@@ -705,17 +724,7 @@ fn hex_string_to_color32(mut str: String) -> Result<Color32> {
 }
 
 fn all_theme_names() -> Vec<String> {
-    vec![
-        "dark+".to_string(),
-        "dark-high-contrast".to_string(),
-        "ibm".to_string(),
-        "light+".to_string(),
-        "light-high-contrast".to_string(),
-        "okabe/ito".to_string(),
-        "petroff-dark".to_string(),
-        "petroff-light".to_string(),
-        "solarized".to_string(),
-    ]
+    BUILTIN_THEMES.keys().map(|s| s.to_string()).collect()
 }
 
 fn deserialize_hex_color<'de, D>(deserializer: D) -> Result<Color32, D::Error>

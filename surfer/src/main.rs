@@ -174,7 +174,9 @@ mod main_impl {
             // as soon as we start up, no need to wait for the waveform to load
             let sender = state.channels.msg_sender.clone();
             for message in discover_wasm_translators() {
-                sender.send(message).unwrap();
+                if let Err(e) = sender.send(message) {
+                    error!("Failed to send message: {e}");
+                }
             }
         }
         // install a file watcher that emits a `SuggestReloadWaveform` message
@@ -183,11 +185,8 @@ mod main_impl {
             Some(WaveSource::File(path)) => {
                 let sender = state.channels.msg_sender.clone();
                 FileWatcher::new(&path, move || {
-                    match sender.send(Message::SuggestReloadWaveform) {
-                        Ok(_) => {}
-                        Err(err) => {
-                            error!("Message ReloadWaveform did not send:\n{err}")
-                        }
+                    if let Err(err) = sender.send(Message::SuggestReloadWaveform) {
+                        error!("Message ReloadWaveform did not send:\n{err}")
                     }
                 })
                 .inspect_err(|err| error!("Cannot set up the file watcher:\n{err}"))
