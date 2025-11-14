@@ -603,7 +603,7 @@ pub struct ServerConfig {
 }
 
 fn default_colors() -> HashMap<String, Color32> {
-    vec![
+    [
         ("Green", "a7e47e"),
         ("Red", "c52e2e"),
         ("Yellow", "f3d54a"),
