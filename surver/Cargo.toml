@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 categories.workspace = true
-rust-version = "1.74.1"
+rust-version = "1.85"
 description = "Server for the Surfer waveform viewer"
 repository.workspace = true
 build = "../build.rs"
@@ -36,3 +36,7 @@ hyper = { version = "1.4", features = ["http1", "server"] }
 hyper-util = { version = "0.1.6", features = ["tokio"] }
 tokio = {workspace = true, features = ["net"]}
 whoami = "1.5.1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "time", "macros", "rt-multi-thread"] }
+reqwest = { workspace = true }

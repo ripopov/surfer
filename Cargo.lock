@@ -5079,6 +5079,7 @@ dependencies = [
  "leb128",
  "log",
  "lz4_flex",
+ "reqwest",
  "serde",
  "serde_json",
  "simple-eyre",

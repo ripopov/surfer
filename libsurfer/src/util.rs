@@ -84,15 +84,10 @@ pub fn search_upward(
         .collect()
 }
 
-pub fn get_multi_extension_from_filename(filename: &str) -> Option<String> {
+fn get_multi_extension_from_filename(filename: &str) -> Option<String> {
     filename
-        .as_bytes()
-        .iter()
-        .position(|&c| c == b'.')
-        .map(|pos| {
-            let iter = filename.chars().skip(pos + 1);
-            iter.collect::<String>()
-        })
+        .find('.')
+        .map(|pos| filename[pos + 1..].to_string())
 }
 
 /// Get the full extension of a path, including all extensions.
@@ -104,4 +99,141 @@ pub fn get_multi_extension(path: &Utf8PathBuf) -> Option<String> {
         return get_multi_extension_from_filename(filename);
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_uint_idx_to_alpha_idx_basic_width_1() {
+        // nvariables determines hex width: width = ilog16(nvariables) + 1
+        // For nvariables = 1 => width = 1
+        assert_eq!(uint_idx_to_alpha_idx(VisibleItemIndex(0), 1), "a");
+        assert_eq!(uint_idx_to_alpha_idx(VisibleItemIndex(9), 1), "j");
+        assert_eq!(uint_idx_to_alpha_idx(VisibleItemIndex(15), 1), "p");
+    }
+
+    #[test]
+    fn test_uint_idx_to_alpha_idx_zero_padded_width_2() {
+        // nvariables = 16 => width = 2 (since ilog16(16) == 1)
+        assert_eq!(uint_idx_to_alpha_idx(VisibleItemIndex(0x0), 16), "aa");
+        assert_eq!(uint_idx_to_alpha_idx(VisibleItemIndex(0x1), 16), "ab");
+        assert_eq!(uint_idx_to_alpha_idx(VisibleItemIndex(0xf), 16), "ap");
+        assert_eq!(uint_idx_to_alpha_idx(VisibleItemIndex(0x10), 16), "ba");
+        assert_eq!(uint_idx_to_alpha_idx(VisibleItemIndex(0x1f), 16), "bp");
+    }
+
+    #[test]
+    fn test_alpha_idx_to_uint_idx_roundtrip() {
+        // Try a selection across multiple widths
+        let cases = [
+            (VisibleItemIndex(0x0), 1),
+            (VisibleItemIndex(0x9), 1),
+            (VisibleItemIndex(0xf), 1),
+            (VisibleItemIndex(0x10), 16),
+            (VisibleItemIndex(0x2a), 256),
+            (VisibleItemIndex(0xabc), 4096),
+        ];
+
+        for (vidx, nvars) in cases {
+            let s = uint_idx_to_alpha_idx(vidx, nvars);
+            let back = alpha_idx_to_uint_idx(s).expect("should parse back");
+            assert_eq!(back, vidx);
+        }
+    }
+
+    #[test]
+    fn test_alpha_idx_to_uint_idx_invalid_input() {
+        // Contains invalid character 'r' which is outside a-p
+        assert!(alpha_idx_to_uint_idx("ar".to_string()).is_none());
+        // Empty string should fail to parse as hex
+        assert!(alpha_idx_to_uint_idx("".to_string()).is_none());
+        // Mixed case / unexpected chars
+        assert!(alpha_idx_to_uint_idx("A".to_string()).is_none());
+        assert!(alpha_idx_to_uint_idx("-".to_string()).is_none());
+    }
+
+    #[test]
+    fn test_get_multi_extension_from_filename() {
+        assert_eq!(
+            get_multi_extension_from_filename("foo.tar.gz"),
+            Some("tar.gz".to_string())
+        );
+        assert_eq!(
+            get_multi_extension_from_filename("foo.txt"),
+            Some("txt".to_string())
+        );
+        assert_eq!(get_multi_extension_from_filename("foo"), None);
+        // Leading dot files: first dot at 0, extension is the remainder
+        assert_eq!(
+            get_multi_extension_from_filename(".bashrc"),
+            Some("bashrc".to_string())
+        );
+        // Trailing dot: extension becomes empty string
+        assert_eq!(
+            get_multi_extension_from_filename("foo."),
+            Some("".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_multi_extension_from_path() {
+        let p = Utf8PathBuf::from("/tmp/foo/bar.tar.gz");
+        assert_eq!(get_multi_extension(&p), Some("tar.gz".to_string()));
+        let p = Utf8PathBuf::from("/tmp/foo/bar");
+        assert_eq!(get_multi_extension(&p), None);
+    }
+
+    #[test]
+    fn test_get_multi_extension_with_unicode() {
+        // Ensure Unicode before the first dot does not break slicing
+        // (previous implementation mixed byte and char indexing)
+        let name = "åäö.archive.tar.gz"; // multibyte chars before '.'
+        assert_eq!(
+            get_multi_extension_from_filename(name),
+            Some("archive.tar.gz".to_string())
+        );
+
+        // Only Unicode and then dot
+        let name2 = "ß.";
+        assert_eq!(
+            get_multi_extension_from_filename(name2),
+            Some("".to_string())
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn test_search_upward_finds_closest_first() {
+        use std::fs;
+        use std::io::Write;
+        use std::path::Path;
+
+        // Create a temporary directory structure: root/a/b/c
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        let a = root.join("a");
+        let b = a.join("b");
+        let c = b.join("c");
+        fs::create_dir_all(&c).expect("dirs");
+
+        // Place target file at c and at a
+        let item_name = Path::new("target.txt");
+        let item_c = c.join(item_name);
+        let item_a = a.join(item_name);
+        {
+            let mut f = fs::File::create(&item_c).expect("create c");
+            writeln!(f, "hello").unwrap();
+        }
+        {
+            let mut f = fs::File::create(&item_a).expect("create a");
+            writeln!(f, "world").unwrap();
+        }
+
+        // Start searching from c upwards, but only within root
+        let found = search_upward(&c, root, &item_name);
+        // Expect closest-first order: c/target.txt, then a/target.txt
+        assert_eq!(found, vec![item_c, item_a]);
+    }
 }
