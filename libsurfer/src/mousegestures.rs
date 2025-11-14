@@ -539,7 +539,7 @@ fn gesture_type(zones: &GestureZones, delta: Vec2) -> GestureKind {
     } else if delta.y > 0.0 && delta.x > tan225y {
         // South east
         zones.southeast
-    } else if delta.y > 0.0 {
+    } else if delta.y < 0.0 {
         // North
         zones.north
     } else {
@@ -571,4 +571,119 @@ fn draw_gesture_text(
 
     ctx.painter
         .galley(pos, galley, theme.primary_ui_color.foreground);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_zones() -> GestureZones {
+        GestureZones {
+            north: GestureKind::ZoomToFit,
+            northeast: GestureKind::ZoomIn,
+            east: GestureKind::GoToEnd,
+            southeast: GestureKind::ZoomOut,
+            south: GestureKind::Cancel,
+            southwest: GestureKind::ZoomOut,
+            west: GestureKind::GoToStart,
+            northwest: GestureKind::ZoomIn,
+        }
+    }
+
+    #[test]
+    fn gesture_type_cardinal_directions() {
+        let zones = default_zones();
+
+        // Pure cardinal directions
+        assert_eq!(
+            gesture_type(&zones, Vec2::new(100.0, 0.0)),
+            GestureKind::GoToEnd
+        ); // East
+        assert_eq!(
+            gesture_type(&zones, Vec2::new(-100.0, 0.0)),
+            GestureKind::GoToStart
+        ); // West
+        assert_eq!(
+            gesture_type(&zones, Vec2::new(0.0, -100.0)),
+            GestureKind::ZoomToFit
+        ); // North
+        assert_eq!(
+            gesture_type(&zones, Vec2::new(0.0, 100.0)),
+            GestureKind::Cancel
+        ); // South
+    }
+
+    #[test]
+    fn gesture_type_diagonal_directions() {
+        let zones = default_zones();
+
+        // 45-degree diagonals (should be in the diagonal zones)
+        assert_eq!(
+            gesture_type(&zones, Vec2::new(100.0, -100.0)),
+            GestureKind::ZoomIn
+        ); // Northeast
+        assert_eq!(
+            gesture_type(&zones, Vec2::new(100.0, 100.0)),
+            GestureKind::ZoomOut
+        ); // Southeast
+        assert_eq!(
+            gesture_type(&zones, Vec2::new(-100.0, 100.0)),
+            GestureKind::ZoomOut
+        ); // Southwest
+        assert_eq!(
+            gesture_type(&zones, Vec2::new(-100.0, -100.0)),
+            GestureKind::ZoomIn
+        ); // Northwest
+    }
+
+    #[test]
+    fn gesture_type_boundary_zones() {
+        let zones = default_zones();
+
+        // Test vectors just inside the east zone boundary (tan(22.5°) ≈ 0.414)
+        // For east: |y| < tan(22.5°) * x
+        assert_eq!(
+            gesture_type(&zones, Vec2::new(100.0, 40.0)),
+            GestureKind::GoToEnd
+        ); // East
+        assert_eq!(
+            gesture_type(&zones, Vec2::new(100.0, -40.0)),
+            GestureKind::GoToEnd
+        ); // East
+
+        // Test vectors just outside the east zone boundary (should be southeast/northeast)
+        assert_eq!(
+            gesture_type(&zones, Vec2::new(100.0, 50.0)),
+            GestureKind::ZoomOut
+        ); // Southeast
+        assert_eq!(
+            gesture_type(&zones, Vec2::new(100.0, -50.0)),
+            GestureKind::ZoomIn
+        ); // Northeast
+    }
+
+    #[test]
+    fn gesture_type_west_boundary_zones() {
+        let zones = default_zones();
+
+        // Test vectors just inside the west zone boundary
+        assert_eq!(
+            gesture_type(&zones, Vec2::new(-100.0, 40.0)),
+            GestureKind::GoToStart
+        ); // West
+        assert_eq!(
+            gesture_type(&zones, Vec2::new(-100.0, -40.0)),
+            GestureKind::GoToStart
+        ); // West
+
+        // Test vectors just outside the west zone boundary
+        assert_eq!(
+            gesture_type(&zones, Vec2::new(-100.0, 50.0)),
+            GestureKind::ZoomOut
+        ); // Southwest
+        assert_eq!(
+            gesture_type(&zones, Vec2::new(-100.0, -50.0)),
+            GestureKind::ZoomIn
+        ); // Northwest
+    }
 }
