@@ -388,7 +388,7 @@ impl SystemState {
             "load",
             "zoom_to_fit",
             "add_markers",
-            "set_viewport_range",
+            "set_viewport_range_to",
         ]
         .into_iter()
         .map(str::to_string)
