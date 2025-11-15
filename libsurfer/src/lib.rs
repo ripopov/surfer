@@ -1000,7 +1000,11 @@ impl SystemState {
                 let sender = self.channels.msg_sender.clone();
                 perform_work(
                     move || match PluginTranslator::new(path.into_std_path_buf()) {
-                        Ok(t) => sender.send(Message::TranslatorLoaded(Box::new(t))).unwrap(),
+                        Ok(t) => {
+                            if let Err(e) = sender.send(Message::TranslatorLoaded(Box::new(t))) {
+                                error!("Failed to send message: {e}");
+                            }
+                        }
                         Err(e) => {
                             error!("Failed to load wasm translator {e:#}")
                         }
