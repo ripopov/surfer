@@ -28,6 +28,10 @@ pub struct Status {
     pub wellen_version: String,
     pub surfer_version: String,
     pub file_format: wellen::FileFormat,
+    pub reloading: bool,
+    pub last_reload_ok: bool,
+    // Seconds since last successful reload, if known
+    pub last_reload_time: Option<u64>,
 }
 
 pub static BINCODE_OPTIONS: LazyLock<bincode::DefaultOptions> =

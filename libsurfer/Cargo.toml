@@ -18,7 +18,7 @@ bincode.workspace = true
 bytes.workspace = true
 bytesize.workspace = true
 camino.workspace = true
-chrono = { version = "0.4.31", default-features = false }
+chrono = { workspace = true, default-features =  false }
 eyre.workspace = true
 config.workspace = true
 derive_more.workspace = true
@@ -57,6 +57,7 @@ softposit.workspace = true
 surfer-translation-types = { path = "../surfer-translation-types", default-features = false }
 surver.workspace = true
 sys-locale.workspace = true
+thiserror.workspace = true
 toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

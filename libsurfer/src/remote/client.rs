@@ -2,8 +2,10 @@ use super::HierarchyResponse;
 use bincode::Options;
 use eyre::Result;
 use eyre::{bail, eyre};
+use reqwest::StatusCode;
 use std::sync::OnceLock;
-use tracing::info;
+use thiserror::Error;
+use tracing::{info, warn};
 use wellen::CompressedTimeTable;
 
 use surver::{
@@ -15,6 +17,22 @@ use surver::{
 fn get_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(reqwest::Client::new)
+}
+
+#[derive(Debug, Error)]
+pub enum ReloadError {
+    #[error("Reload requested too frequently, please wait before trying again")]
+    TooFrequent,
+    #[error("File unchanged since last reload")]
+    FileUnchanged,
+    #[error("Unexpected response code: {0}")]
+    UnexpectedStatus(StatusCode),
+    #[error("Network error: {0}")]
+    Network(#[from] reqwest::Error),
+    #[error("Parse error: {0}")]
+    Parse(#[from] serde_json::Error),
+    #[error("Response validation error: {0}")]
+    Validation(#[from] eyre::Report),
 }
 
 fn check_response(server_url: &str, response: &reqwest::Response) -> Result<()> {
@@ -57,6 +75,33 @@ pub async fn get_status(server: String) -> Result<Status> {
     let body = response.text().await?;
     let status = serde_json::from_str::<Status>(&body)?;
     Ok(status)
+}
+
+pub async fn reload(server: String) -> std::result::Result<Status, ReloadError> {
+    let client = reqwest::Client::new();
+    let response = client.get(format!("{server}/reload")).send().await?;
+    check_response(&server, &response)?;
+    let status_code = response.status();
+    let body = response.text().await?;
+    match status_code {
+        StatusCode::TOO_MANY_REQUESTS => {
+            info!("Reload too frequent");
+            Err(ReloadError::TooFrequent)
+        }
+        StatusCode::NOT_MODIFIED => {
+            info!("File unchanged");
+            Err(ReloadError::FileUnchanged)
+        }
+        StatusCode::ACCEPTED => {
+            info!("File reloaded at server");
+            let status = serde_json::from_str::<Status>(&body)?;
+            Ok(status)
+        }
+        code => {
+            warn!("Unexpected response code: {code}");
+            Err(ReloadError::UnexpectedStatus(code))
+        }
+    }
 }
 
 pub async fn get_hierarchy(server: String) -> Result<HierarchyResponse> {

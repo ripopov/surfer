@@ -71,3 +71,4 @@ address = "127.0.0.1:54321"
 [server]
 bind_address = "127.0.0.1"
 port = 8911
+reload_guard = 1

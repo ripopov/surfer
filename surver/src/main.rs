@@ -17,6 +17,9 @@ struct Args {
     /// Token used by the client to authenticate to the server
     #[clap(long)]
     token: Option<String>,
+    #[clap(long)]
+    /// Seconds to guard against repeated reloads, default 1 s
+    reload_guard: Option<u64>,
 }
 
 /// Starts the logging and error handling. Can be used by unittests to get more insights.
@@ -55,6 +58,7 @@ fn main() -> Result<()> {
     // Use CLI override if provided, otherwise use hardcoded defaults
     let bind_addr = args.bind_address.unwrap_or_else(|| "127.0.0.1".to_string());
     let port = args.port.unwrap_or(8911);
+    let reload_guard = args.reload_guard.unwrap_or(1);
 
     runtime.block_on(surver::server_main(
         port,
@@ -62,5 +66,6 @@ fn main() -> Result<()> {
         args.token,
         args.wave_file,
         None,
+        reload_guard,
     ))
 }

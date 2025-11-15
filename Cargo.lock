@@ -3029,6 +3029,7 @@ dependencies = [
  "sys-locale",
  "tempfile",
  "test-log",
+ "thiserror 2.0.17",
  "tokio",
  "tokio-stream",
  "toml 0.9.8",
@@ -5025,6 +5026,7 @@ version = "0.5.0-dev"
 dependencies = [
  "bincode",
  "bytesize",
+ "chrono",
  "clap",
  "eyre",
  "fastrand",
