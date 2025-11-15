@@ -123,6 +123,9 @@ pub struct SurferConfig {
     pub animation_time: f32,
     /// UI animation enabled
     pub animation_enabled: bool,
+    /// Maximum URL length for remote connections.
+    /// Should only be changed in case you are behind a proxy that limits the URL length
+    pub max_url_length: u16,
 }
 
 impl SurferConfig {
