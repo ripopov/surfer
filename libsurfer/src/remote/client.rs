@@ -99,7 +99,7 @@ pub async fn get_signals(
 
     for signal in signals.iter() {
         // Each signal adds: "/" + digits
-        let signal_len = signal.index().ilog10() as usize + 2; // +2 for '/' and ilog10 rounds down
+        let signal_len = signal.index().checked_ilog10().unwrap_or(1) as usize + 2; // 0 needs 1 digit, +1 for '/', +1 as ilog10 rounds down
 
         // Check if adding this signal would exceed the limit
         if current_url_len + signal_len > MAX_URL_LENGTH && !current_batch.is_empty() {
