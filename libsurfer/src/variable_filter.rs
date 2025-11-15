@@ -59,6 +59,7 @@ struct VariableFilterRegexCache {
     regex_pattern: Option<String>,
     regex_case_insensitive: bool,
     regex: Option<Regex>,
+    regex_error: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -94,6 +95,13 @@ impl VariableFilter {
 
     fn name_filter_fn(&self) -> Box<dyn FnMut(&str) -> bool> {
         if self.name_filter_str.is_empty() {
+            if self.name_filter_type == VariableNameFilterType::Regex {
+                // Clear cached regex when filter string is empty
+                let mut cache = self.cache.borrow_mut();
+                cache.regex_pattern = None;
+                cache.regex = None;
+                cache.regex_error = None;
+            }
             return Box::new(|_var_name| true);
         }
 
@@ -127,10 +135,19 @@ impl VariableFilter {
             if rebuild {
                 cache.regex_pattern = Some(pat.clone());
                 cache.regex_case_insensitive = case_insensitive;
-                cache.regex = RegexBuilder::new(&pat)
+                match RegexBuilder::new(&pat)
                     .case_insensitive(case_insensitive)
                     .build()
-                    .ok();
+                {
+                    Ok(r) => {
+                        cache.regex = Some(r);
+                        cache.regex_error = None;
+                    }
+                    Err(e) => {
+                        cache.regex = None;
+                        cache.regex_error = Some(e.to_string());
+                    }
+                }
             }
 
             if let Some(r) = cache.regex.as_ref() {
@@ -202,7 +219,17 @@ impl VariableFilter {
             return false;
         }
         let cache = self.cache.borrow();
-        cache.regex.is_none()
+        cache.regex_error.is_some()
+    }
+
+    /// Returns the regex error message if the current filter type is Regex and
+    /// the regex compilation failed.
+    pub fn regex_error(&self) -> Option<String> {
+        if self.name_filter_type != VariableNameFilterType::Regex {
+            return None;
+        }
+        let cache = self.cache.borrow();
+        cache.regex_error.clone()
     }
 }
 
@@ -244,16 +271,35 @@ impl SystemState {
                         self.user.variable_filter.name_filter_str.clear();
                     }
 
-                    // Check if regex and if an incorrect regex, change background color
-                    if self.user.variable_filter.is_regex_and_invalid() {
+                    // Create text edit with isolated style for invalid regex
+                    let is_invalid = self.user.variable_filter.is_regex_and_invalid();
+                    let error_msg = self.user.variable_filter.regex_error();
+
+                    // Save original style to restore after
+                    let original_bg = ui.style().visuals.extreme_bg_color;
+
+                    if is_invalid {
                         ui.style_mut().visuals.extreme_bg_color =
                             self.user.config.theme.accent_error.background;
                     }
-                    // Create text edit
-                    let response = ui.add(
+
+                    let mut response = ui.add(
                         TextEdit::singleline(&mut self.user.variable_filter.name_filter_str)
                             .hint_text("Filter"),
                     );
+
+                    // Restore original style immediately after rendering
+                    ui.style_mut().visuals.extreme_bg_color = original_bg;
+
+                    // Add hover text with error message if regex is invalid
+                    if let Some(err) = error_msg {
+                        response = response.on_hover_ui(|ui| {
+                            ui.label(egui::RichText::new("Invalid regex:"));
+                            // Use monospace font for error details as it contains position information
+                            ui.label(egui::RichText::new(err).family(egui::FontFamily::Monospace));
+                        });
+                    }
+
                     // Handle focus
                     if response.gained_focus() {
                         msgs.push(Message::SetFilterFocused(true));
@@ -491,5 +537,281 @@ fn get_variable_direction(
                 m.direction.unwrap_or(VariableDirection::Unknown)
             }),
         None => VariableDirection::Unknown,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_empty_filter_matches_all() {
+        let filter = VariableFilter::new();
+        assert!(filter.name_filter_str.is_empty());
+
+        let mut filter_fn = filter.name_filter_fn();
+        // Empty filter should match everything
+        assert!(filter_fn("test"));
+        assert!(filter_fn("anything"));
+        assert!(filter_fn(""));
+    }
+
+    #[test]
+    fn test_contain_filter_basic() {
+        let mut filter = VariableFilter::new();
+        filter.name_filter_type = VariableNameFilterType::Contain;
+        filter.name_filter_str = "clock".to_string();
+        filter.name_filter_case_insensitive = false;
+
+        let mut filter_fn = filter.name_filter_fn();
+        assert!(filter_fn("clock"));
+        assert!(filter_fn("my_clock"));
+        assert!(filter_fn("clock_signal"));
+        assert!(filter_fn("sys_clock_div"));
+        assert!(!filter_fn("clk"));
+        assert!(!filter_fn("CLOCK")); // Case sensitive
+    }
+
+    #[test]
+    fn test_contain_filter_case_insensitive() {
+        let mut filter = VariableFilter::new();
+        filter.name_filter_type = VariableNameFilterType::Contain;
+        filter.name_filter_str = "Clock".to_string();
+        filter.name_filter_case_insensitive = true;
+
+        let mut filter_fn = filter.name_filter_fn();
+        assert!(filter_fn("clock"));
+        assert!(filter_fn("CLOCK"));
+        assert!(filter_fn("ClOcK"));
+        assert!(filter_fn("my_Clock_signal"));
+        assert!(!filter_fn("clk"));
+    }
+
+    #[test]
+    fn test_start_filter() {
+        let mut filter = VariableFilter::new();
+        filter.name_filter_type = VariableNameFilterType::Start;
+        filter.name_filter_str = "sys".to_string();
+        filter.name_filter_case_insensitive = false;
+
+        let mut filter_fn = filter.name_filter_fn();
+        assert!(filter_fn("sys"));
+        assert!(filter_fn("sys_clock"));
+        assert!(filter_fn("system"));
+        assert!(!filter_fn("my_sys"));
+        assert!(!filter_fn("SYS")); // Case sensitive
+    }
+
+    #[test]
+    fn test_start_filter_case_insensitive() {
+        let mut filter = VariableFilter::new();
+        filter.name_filter_type = VariableNameFilterType::Start;
+        filter.name_filter_str = "Sys".to_string();
+        filter.name_filter_case_insensitive = true;
+
+        let mut filter_fn = filter.name_filter_fn();
+        assert!(filter_fn("sys"));
+        assert!(filter_fn("SYS_CLOCK"));
+        assert!(filter_fn("System"));
+        assert!(!filter_fn("my_sys"));
+    }
+
+    #[test]
+    fn test_regex_filter_valid() {
+        let mut filter = VariableFilter::new();
+        filter.name_filter_type = VariableNameFilterType::Regex;
+        filter.name_filter_str = r"^clk_\d+$".to_string();
+        filter.name_filter_case_insensitive = false;
+
+        let mut filter_fn = filter.name_filter_fn();
+        assert!(filter_fn("clk_0"));
+        assert!(filter_fn("clk_123"));
+        assert!(!filter_fn("clk_"));
+        assert!(!filter_fn("clk_abc"));
+        assert!(!filter_fn("my_clk_0"));
+    }
+
+    #[test]
+    fn test_regex_filter_invalid() {
+        let mut filter = VariableFilter::new();
+        filter.name_filter_type = VariableNameFilterType::Regex;
+        filter.name_filter_str = "[invalid(".to_string(); // Invalid regex
+        filter.name_filter_case_insensitive = false;
+
+        // Should not match anything when regex is invalid
+        let mut filter_fn = filter.name_filter_fn();
+        assert!(!filter_fn("anything"));
+        assert!(!filter_fn("test"));
+
+        // Should report as invalid
+        assert!(filter.is_regex_and_invalid());
+
+        // Should have an error message
+        let error = filter.regex_error();
+        assert!(error.is_some());
+        assert!(error.unwrap().contains("unclosed"));
+    }
+
+    #[test]
+    fn test_is_regex_and_invalid_only_for_regex_type() {
+        let mut filter = VariableFilter::new();
+        filter.name_filter_str = "[invalid(".to_string();
+
+        // Not regex type, so should return false even with invalid pattern
+        filter.name_filter_type = VariableNameFilterType::Contain;
+        // Cache rebuild
+        let _ = filter.name_filter_fn();
+        assert!(!filter.is_regex_and_invalid());
+
+        filter.name_filter_type = VariableNameFilterType::Start;
+        // Cache rebuild
+        let _ = filter.name_filter_fn();
+        assert!(!filter.is_regex_and_invalid());
+
+        filter.name_filter_type = VariableNameFilterType::Fuzzy;
+        // Cache rebuild
+        let _ = filter.name_filter_fn();
+        assert!(!filter.is_regex_and_invalid());
+
+        // Only regex type should check validity
+        filter.name_filter_type = VariableNameFilterType::Regex;
+        // Cache rebuild
+        let _ = filter.name_filter_fn();
+        assert!(filter.is_regex_and_invalid());
+    }
+
+    #[test]
+    fn test_regex_error_only_for_regex_type() {
+        let mut filter = VariableFilter::new();
+        filter.name_filter_str = "[invalid(".to_string();
+
+        // Force cache rebuild
+        filter.name_filter_type = VariableNameFilterType::Regex;
+        let _ = filter.name_filter_fn();
+
+        // Now switch to non-regex types
+        filter.name_filter_type = VariableNameFilterType::Contain;
+        assert!(filter.regex_error().is_none());
+
+        filter.name_filter_type = VariableNameFilterType::Start;
+        assert!(filter.regex_error().is_none());
+
+        // Back to regex should show error
+        filter.name_filter_type = VariableNameFilterType::Regex;
+        assert!(filter.regex_error().is_some());
+    }
+
+    #[test]
+    fn test_fuzzy_filter() {
+        let mut filter = VariableFilter::new();
+        filter.name_filter_type = VariableNameFilterType::Fuzzy;
+        filter.name_filter_str = "clk".to_string();
+        filter.name_filter_case_insensitive = true;
+
+        let mut filter_fn = filter.name_filter_fn();
+        // Fuzzy should match with characters in order
+        assert!(filter_fn("clock"));
+        assert!(filter_fn("c_l_k"));
+        assert!(filter_fn("call_lock"));
+        assert!(!filter_fn("kclc")); // Wrong order
+    }
+
+    #[test]
+    fn test_special_chars_escaped_in_contain() {
+        let mut filter = VariableFilter::new();
+        filter.name_filter_type = VariableNameFilterType::Contain;
+        // These are regex special chars that should be escaped
+        filter.name_filter_str = "sig[0]".to_string();
+        filter.name_filter_case_insensitive = false;
+
+        let mut filter_fn = filter.name_filter_fn();
+        assert!(filter_fn("sig[0]"));
+        assert!(filter_fn("my_sig[0]_data"));
+        assert!(!filter_fn("sig0")); // Should require literal brackets
+        assert!(!filter_fn("siga")); // [0] is escaped, not a regex char class
+    }
+
+    #[test]
+    fn test_special_chars_escaped_in_start() {
+        let mut filter = VariableFilter::new();
+        filter.name_filter_type = VariableNameFilterType::Start;
+        filter.name_filter_str = "data.value".to_string();
+        filter.name_filter_case_insensitive = false;
+
+        let mut filter_fn = filter.name_filter_fn();
+        assert!(filter_fn("data.value"));
+        assert!(filter_fn("data.value_out"));
+        assert!(!filter_fn("dataxvalue")); // Dot should be literal
+        assert!(!filter_fn("my_data.value")); // Must start with pattern
+    }
+
+    #[test]
+    fn test_cache_reuses_compiled_regex() {
+        let mut filter = VariableFilter::new();
+        filter.name_filter_type = VariableNameFilterType::Regex;
+        filter.name_filter_str = r"\d+".to_string();
+        filter.name_filter_case_insensitive = false;
+
+        // First call compiles
+        let mut fn1 = filter.name_filter_fn();
+        assert!(fn1("123"));
+
+        // Second call should reuse cached regex
+        let mut fn2 = filter.name_filter_fn();
+        assert!(fn2("456"));
+
+        // Verify cache has the pattern
+        let cache = filter.cache.borrow();
+        assert_eq!(cache.regex_pattern.as_ref().unwrap(), r"\d+");
+        assert!(cache.regex.is_some());
+    }
+
+    #[test]
+    fn test_cache_rebuilds_on_pattern_change() {
+        let mut filter = VariableFilter::new();
+        filter.name_filter_type = VariableNameFilterType::Contain;
+        filter.name_filter_str = "old".to_string();
+        filter.name_filter_case_insensitive = false;
+
+        let mut fn1 = filter.name_filter_fn();
+        assert!(fn1("old_value"));
+
+        // Change pattern
+        filter.name_filter_str = "new".to_string();
+        let mut fn2 = filter.name_filter_fn();
+        assert!(fn2("new_value"));
+        assert!(!fn2("old_value"));
+    }
+
+    #[test]
+    fn test_cache_rebuilds_on_case_sensitivity_change() {
+        let mut filter = VariableFilter::new();
+        filter.name_filter_type = VariableNameFilterType::Contain;
+        filter.name_filter_str = "Test".to_string();
+        filter.name_filter_case_insensitive = false;
+
+        let mut fn1 = filter.name_filter_fn();
+        assert!(!fn1("test")); // Case sensitive
+
+        // Change case sensitivity
+        filter.name_filter_case_insensitive = true;
+        let mut fn2 = filter.name_filter_fn();
+        assert!(fn2("test")); // Now case insensitive
+    }
+
+    #[test]
+    fn test_default_filter_settings() {
+        let filter = VariableFilter::new();
+
+        assert_eq!(filter.name_filter_type, VariableNameFilterType::Contain);
+        assert_eq!(filter.name_filter_str, "");
+        assert!(filter.name_filter_case_insensitive);
+
+        assert!(filter.include_inputs);
+        assert!(filter.include_outputs);
+        assert!(filter.include_inouts);
+        assert!(filter.include_others);
+
+        assert!(!filter.group_by_direction);
     }
 }
