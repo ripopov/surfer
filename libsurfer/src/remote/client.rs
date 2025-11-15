@@ -113,6 +113,10 @@ pub async fn get_signals(
 
         // Check if adding this signal would exceed the limit
         if current_url_len + signal_len > max_url_length && !current_batch.is_empty() {
+            info!(
+                "Fetching batch of {} signals due to URL length limit",
+                current_batch.len()
+            );
             // Fetch current batch
             let batch_results = get_signals_batch(&base_url, &current_batch).await?;
             all_results.extend(batch_results);
