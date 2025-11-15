@@ -2,6 +2,7 @@ use super::HierarchyResponse;
 use bincode::Options;
 use eyre::Result;
 use eyre::{bail, eyre};
+use std::sync::OnceLock;
 use tracing::info;
 use wellen::CompressedTimeTable;
 
@@ -9,6 +10,12 @@ use surver::{
     Status, BINCODE_OPTIONS, HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, SURFER_VERSION,
     WELLEN_VERSION, X_SURFER_VERSION, X_WELLEN_VERSION,
 };
+
+/// Returns a shared reqwest client to reuse HTTP connections and reduce TLS overhead.
+fn get_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new)
+}
 
 fn check_response(server_url: &str, response: &reqwest::Response) -> Result<()> {
     let server = response
@@ -40,7 +47,7 @@ fn check_response(server_url: &str, response: &reqwest::Response) -> Result<()> 
 }
 
 pub async fn get_status(server: String) -> Result<Status> {
-    let client = reqwest::Client::new();
+    let client = get_client();
     let response = client.get(format!("{server}/get_status")).send().await?;
     check_response(&server, &response)?;
     let body = response.text().await?;
@@ -49,7 +56,7 @@ pub async fn get_status(server: String) -> Result<Status> {
 }
 
 pub async fn get_hierarchy(server: String) -> Result<HierarchyResponse> {
-    let client = reqwest::Client::new();
+    let client = get_client();
     let response = client.get(format!("{server}/get_hierarchy")).send().await?;
     check_response(&server, &response)?;
     let compressed = response.bytes().await?;
@@ -67,7 +74,7 @@ pub async fn get_hierarchy(server: String) -> Result<HierarchyResponse> {
 }
 
 pub async fn get_time_table(server: String) -> Result<Vec<wellen::Time>> {
-    let client = reqwest::Client::new();
+    let client = get_client();
     let response = client
         .get(format!("{server}/get_time_table"))
         .send()
@@ -83,14 +90,60 @@ pub async fn get_signals(
     server: String,
     signals: &[wellen::SignalRef],
 ) -> Result<Vec<(wellen::SignalRef, wellen::Signal)>> {
-    let client = reqwest::Client::new();
-    let mut url = format!("{server}/get_signals");
+    // Hyper supports URLs of 65534 bytes
+    const MAX_URL_LENGTH: usize = (u16::MAX - 1) as usize;
+
+    if signals.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let base_url = format!("{server}/get_signals");
+    let base_len = base_url.len();
+
+    let mut all_results = Vec::with_capacity(signals.len());
+    let mut current_batch = Vec::new();
+    let mut current_url_len = base_len;
+
+    for signal in signals.iter() {
+        // Each signal adds: "/" + digits
+        let signal_len = signal.index().checked_ilog10().unwrap_or(1) as usize + 2; // 0 needs 1 digit, +1 for '/', +1 as ilog10 rounds down
+
+        // Check if adding this signal would exceed the limit
+        if current_url_len + signal_len > MAX_URL_LENGTH && !current_batch.is_empty() {
+            // Fetch current batch
+            let batch_results = get_signals_batch(&base_url, &current_batch).await?;
+            all_results.extend(batch_results);
+
+            // Start new batch
+            current_batch.clear();
+            current_url_len = base_len;
+        }
+
+        current_batch.push(*signal);
+        current_url_len += signal_len;
+    }
+
+    // Fetch remaining batch
+    if !current_batch.is_empty() {
+        let batch_results = get_signals_batch(&base_url, &current_batch).await?;
+        all_results.extend(batch_results);
+    }
+
+    Ok(all_results)
+}
+
+async fn get_signals_batch(
+    base_url: &str,
+    signals: &[wellen::SignalRef],
+) -> Result<Vec<(wellen::SignalRef, wellen::Signal)>> {
+    let client = get_client();
+    let mut url = base_url.to_string();
     for signal in signals.iter() {
         url.push_str(&format!("/{}", signal.index()));
     }
 
     let response = client.get(url).send().await?;
-    check_response(&server, &response)?;
+    check_response(base_url, &response)?;
     let data = response.bytes().await?;
     let mut reader = std::io::Cursor::new(data);
     let num_ids: u64 = leb128::read::unsigned(&mut reader)?;
