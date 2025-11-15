@@ -692,7 +692,7 @@ impl SystemState {
         let num_signals = signals.len() as u64;
         let start = web_time::Instant::now();
         let sender = self.channels.msg_sender.clone();
-
+        let max_url_length = self.user.config.max_url_length;
         match payload {
             LoadSignalPayload::Local(mut source, hierarchy) => {
                 let pool = Self::get_thread_pool();
@@ -715,7 +715,7 @@ impl SystemState {
             }
             LoadSignalPayload::Remote(server) => {
                 let task = async move {
-                    let res = crate::remote::get_signals(server.clone(), &signals)
+                    let res = crate::remote::get_signals(server.clone(), &signals, max_url_length)
                         .await
                         .map_err(|e| anyhow!("{e:?}"))
                         .with_context(|| {
