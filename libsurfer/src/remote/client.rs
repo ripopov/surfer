@@ -2,6 +2,7 @@ use super::HierarchyResponse;
 use bincode::Options;
 use eyre::Result;
 use eyre::{bail, eyre};
+use std::sync::OnceLock;
 use tracing::info;
 use wellen::CompressedTimeTable;
 
@@ -9,6 +10,12 @@ use surver::{
     BINCODE_OPTIONS, HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, SURFER_VERSION, Status,
     WELLEN_VERSION, X_SURFER_VERSION, X_WELLEN_VERSION,
 };
+
+/// Returns a shared reqwest client to reuse HTTP connections and reduce TLS overhead.
+fn get_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new)
+}
 
 fn check_response(server_url: &str, response: &reqwest::Response) -> Result<()> {
     let server = response
@@ -44,7 +51,7 @@ fn check_response(server_url: &str, response: &reqwest::Response) -> Result<()> 
 }
 
 pub async fn get_status(server: String) -> Result<Status> {
-    let client = reqwest::Client::new();
+    let client = get_client();
     let response = client.get(format!("{server}/get_status")).send().await?;
     check_response(&server, &response)?;
     let body = response.text().await?;
@@ -53,7 +60,7 @@ pub async fn get_status(server: String) -> Result<Status> {
 }
 
 pub async fn get_hierarchy(server: String) -> Result<HierarchyResponse> {
-    let client = reqwest::Client::new();
+    let client = get_client();
     let response = client.get(format!("{server}/get_hierarchy")).send().await?;
     check_response(&server, &response)?;
     let compressed = response.bytes().await?;
@@ -71,7 +78,7 @@ pub async fn get_hierarchy(server: String) -> Result<HierarchyResponse> {
 }
 
 pub async fn get_time_table(server: String) -> Result<Vec<wellen::Time>> {
-    let client = reqwest::Client::new();
+    let client = get_client();
     let response = client
         .get(format!("{server}/get_time_table"))
         .send()
@@ -133,7 +140,7 @@ async fn get_signals_batch(
     base_url: &str,
     signals: &[wellen::SignalRef],
 ) -> Result<Vec<(wellen::SignalRef, wellen::Signal)>> {
-    let client = reqwest::Client::new();
+    let client = get_client();
     let mut url = base_url.to_string();
     for signal in signals.iter() {
         url.push_str(&format!("/{}", signal.index()));
