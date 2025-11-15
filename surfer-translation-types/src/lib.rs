@@ -298,3 +298,126 @@ impl<VarId1, ScopeId1> VariableMeta<VarId1, ScopeId1> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{check_vector_variable, extend_string, ValueKind};
+
+    #[test]
+    fn binary_only_returns_none() {
+        for s in ["0", "1", "0101", "1111", "000000", "101010"].iter() {
+            assert_eq!(check_vector_variable(s), None, "{s}");
+        }
+    }
+
+    #[test]
+    fn x_marks_undef() {
+        let res = check_vector_variable("10x01").unwrap();
+        assert_eq!(res.0, "UNDEF");
+        assert_eq!(res.1, ValueKind::Undef);
+    }
+
+    #[test]
+    fn u_marks_undef() {
+        for s in ["u", "10u", "uuuu"].iter() {
+            let res = check_vector_variable(s).unwrap();
+            assert_eq!(res.0, "UNDEF");
+            assert_eq!(res.1, ValueKind::Undef);
+        }
+    }
+
+    #[test]
+    fn z_marks_highimp() {
+        let res = check_vector_variable("zz01").unwrap();
+        assert_eq!(res.0, "HIGHIMP");
+        assert_eq!(res.1, ValueKind::HighImp);
+    }
+
+    #[test]
+    fn dash_marks_dont_care() {
+        let res = check_vector_variable("-01--").unwrap();
+        assert_eq!(res.0, "DON'T CARE");
+        assert_eq!(res.1, ValueKind::DontCare);
+    }
+
+    #[test]
+    fn w_marks_undef_weak() {
+        let res = check_vector_variable("w101").unwrap();
+        assert_eq!(res.0, "UNDEF WEAK");
+        assert_eq!(res.1, ValueKind::Undef); // intentionally Undef per implementation
+    }
+
+    #[test]
+    fn h_or_l_marks_weak() {
+        let res_h = check_vector_variable("h110").unwrap();
+        assert_eq!(res_h.0, "WEAK");
+        assert_eq!(res_h.1, ValueKind::Weak);
+
+        let res_l = check_vector_variable("l001").unwrap();
+        assert_eq!(res_l.0, "WEAK");
+        assert_eq!(res_l.1, ValueKind::Weak);
+    }
+
+    #[test]
+    fn unknown_values_fallback() {
+        for s in ["2", "a", "?", " "] {
+            let res = check_vector_variable(s).unwrap();
+            assert_eq!(res.0, "UNKNOWN VALUES");
+            assert_eq!(res.1, ValueKind::Undef);
+        }
+    }
+
+    #[test]
+    fn precedence_is_respected() {
+        // contains both x and z -> x handled first (UNDEF)
+        let res = check_vector_variable("xz").unwrap();
+        assert_eq!(res.0, "UNDEF");
+        assert_eq!(res.1, ValueKind::Undef);
+
+        // contains w and h -> w handled before h, yielding UNDEF WEAK not WEAK
+        let res = check_vector_variable("wh").unwrap();
+        assert_eq!(res.0, "UNDEF WEAK");
+        assert_eq!(res.1, ValueKind::Undef);
+    }
+
+    // ---------------- extend_string tests ----------------
+
+    #[test]
+    fn extend_string_zero_extend_from_0_and_1() {
+        // Leading '0' extends with '0'
+        assert_eq!(extend_string("001", 5), "00");
+        assert_eq!(extend_string("0", 3), "00");
+
+        // Leading '1' also extends with '0' per current implementation
+        assert_eq!(extend_string("101", 5), "00");
+        assert_eq!(extend_string("1", 4), "000");
+    }
+
+    #[test]
+    fn extend_string_x_and_z() {
+        // Leading 'x' extends with 'x'
+        assert_eq!(extend_string("x1", 4), "xx");
+        assert_eq!(extend_string("x", 3), "xx");
+
+        // Leading 'z' extends with 'z'
+        assert_eq!(extend_string("z0", 3), "z");
+        assert_eq!(extend_string("z", 5), "zzzz");
+    }
+
+    #[test]
+    fn extend_string_same_or_smaller_returns_empty() {
+        assert_eq!(extend_string("101", 3), "");
+        assert_eq!(extend_string("101", 2), "");
+        assert_eq!(extend_string("", 0), "");
+    }
+
+    #[test]
+    fn extend_string_weird_char_and_empty_input() {
+        // Unknown leading char results in no extension (empty), even if num_bits is larger
+        assert_eq!(extend_string("h101", 6), "");
+        assert_eq!(extend_string("?", 10), "");
+
+        // Empty input yields empty extension as there is no leading char to guide
+        assert_eq!(extend_string("", 5), "");
+    }
+}
