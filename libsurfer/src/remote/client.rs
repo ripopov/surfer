@@ -48,6 +48,15 @@ pub async fn get_status(server: String) -> Result<Status> {
     Ok(status)
 }
 
+pub async fn reload(server: String) -> Result<Status> {
+    let client = reqwest::Client::new();
+    let response = client.get(format!("{server}/reload")).send().await?;
+    check_response(&server, &response)?;
+    let body = response.text().await?;
+    let status = serde_json::from_str::<Status>(&body)?;
+    Ok(status)
+}
+
 pub async fn get_hierarchy(server: String) -> Result<HierarchyResponse> {
     let client = reqwest::Client::new();
     let response = client.get(format!("{server}/get_hierarchy")).send().await?;
