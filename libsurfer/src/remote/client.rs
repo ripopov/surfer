@@ -83,14 +83,60 @@ pub async fn get_signals(
     server: String,
     signals: &[wellen::SignalRef],
 ) -> Result<Vec<(wellen::SignalRef, wellen::Signal)>> {
+    // Hyper supports URLs of 65534 bytes
+    const MAX_URL_LENGTH: usize = (u16::MAX - 1) as usize;
+
+    if signals.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let base_url = format!("{server}/get_signals");
+    let base_len = base_url.len();
+
+    let mut all_results = Vec::with_capacity(signals.len());
+    let mut current_batch = Vec::new();
+    let mut current_url_len = base_len;
+
+    for signal in signals.iter() {
+        // Each signal adds: "/" + digits
+        let signal_len = signal.index().ilog10() as usize + 2; // +2 for '/' and ilog10 rounds down
+
+        // Check if adding this signal would exceed the limit
+        if current_url_len + signal_len > MAX_URL_LENGTH && !current_batch.is_empty() {
+            // Fetch current batch
+            let batch_results = get_signals_batch(&base_url, &current_batch).await?;
+            all_results.extend(batch_results);
+
+            // Start new batch
+            current_batch.clear();
+            current_url_len = base_len;
+        }
+
+        current_batch.push(*signal);
+        current_url_len += signal_len;
+    }
+
+    // Fetch remaining batch
+    if !current_batch.is_empty() {
+        let batch_results = get_signals_batch(&base_url, &current_batch).await?;
+        all_results.extend(batch_results);
+    }
+
+    Ok(all_results)
+}
+
+async fn get_signals_batch(
+    base_url: &str,
+    signals: &[wellen::SignalRef],
+) -> Result<Vec<(wellen::SignalRef, wellen::Signal)>> {
     let client = reqwest::Client::new();
-    let mut url = format!("{server}/get_signals");
+    let mut url = base_url.to_string();
     for signal in signals.iter() {
         url.push_str(&format!("/{}", signal.index()));
     }
 
     let response = client.get(url).send().await?;
-    check_response(&server, &response)?;
+    check_response(base_url, &response)?;
     let data = response.bytes().await?;
     let mut reader = std::io::Cursor::new(data);
     let num_ids: u64 = leb128::read::unsigned(&mut reader)?;
