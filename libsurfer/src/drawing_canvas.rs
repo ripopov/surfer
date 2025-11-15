@@ -21,7 +21,6 @@ use crate::clock_highlighting::draw_clock_edge_marks;
 use crate::config::SurferTheme;
 use crate::data_container::DataContainer;
 use crate::displayed_item::{DisplayedFieldRef, DisplayedItemRef, DisplayedVariable};
-use crate::displayed_item_tree::VisibleItemIndex;
 use crate::time::get_ticks;
 use crate::tooltips::handle_transaction_tooltip;
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
@@ -728,10 +727,15 @@ impl SystemState {
         // direction is also in absolute coordinates, so we need to
         // compensate for that
         let y_zero = to_screen.transform_pos(Pos2::ZERO).y;
-        for (vidx, drawing_info) in waves.drawing_infos.iter().enumerate() {
+        for (item_count, drawing_info) in waves
+            .drawing_infos
+            .iter()
+            .sorted_by_key(|o| o.top() as i32)
+            .enumerate()
+        {
             // Get background color
             let background_color =
-                &self.get_background_color(waves, drawing_info, VisibleItemIndex(vidx));
+                &self.get_background_color(waves, drawing_info, drawing_info.vidx(), item_count);
 
             self.draw_background(
                 drawing_info,
@@ -865,8 +869,13 @@ impl SystemState {
             );
         }
         let zero_y = (ctx.to_screen)(0., 0.).y;
-        for (vidx, drawing_info) in waves.drawing_infos.iter().enumerate() {
-            let vidx = VisibleItemIndex(vidx);
+        for (item_count, drawing_info) in waves
+            .drawing_infos
+            .iter()
+            .sorted_by_key(|o| o.top() as i32)
+            .enumerate()
+        {
+            let vidx = drawing_info.vidx();
             // We draw in absolute coords, but the variable offset in the y
             // direction is also in absolute coordinates, so we need to
             // compensate for that
@@ -874,7 +883,7 @@ impl SystemState {
 
             let displayed_item = waves
                 .items_tree
-                .get_visible(drawing_info.item_list_idx())
+                .get_visible(drawing_info.vidx())
                 .and_then(|node| waves.displayed_items.get(&node.item_ref));
             let color = displayed_item
                 .and_then(super::displayed_item::DisplayedItem::color)
@@ -884,7 +893,8 @@ impl SystemState {
                 ItemDrawingInfo::Variable(variable_info) => {
                     if let Some(commands) = draw_commands.get(&variable_info.displayed_field_ref) {
                         // Get background color and determine best text color
-                        let background_color = self.get_background_color(waves, drawing_info, vidx);
+                        let background_color =
+                            self.get_background_color(waves, drawing_info, vidx, item_count);
                         let text_color = self
                             .user
                             .config
@@ -948,6 +958,7 @@ impl SystemState {
                                 waves,
                                 drawing_info,
                                 vidx,
+                                item_count,
                             )),
                     );
                     waves.draw_ticks(
@@ -961,6 +972,7 @@ impl SystemState {
                 }
                 ItemDrawingInfo::Stream(_) => {}
                 ItemDrawingInfo::Group(_) => {}
+                ItemDrawingInfo::Placeholder(_) => {}
             }
         }
     }
@@ -1006,12 +1018,18 @@ impl SystemState {
         }
 
         let zero_y = (ctx.to_screen)(0., 0.).y;
-        for (vidx, drawing_info) in waves.drawing_infos.iter().enumerate() {
+        for (item_count, drawing_info) in waves
+            .drawing_infos
+            .iter()
+            .sorted_by_key(|o| o.top() as i32)
+            .enumerate()
+        {
+            let vidx = drawing_info.vidx();
             let y_offset = drawing_info.top() - zero_y;
 
             let displayed_item = waves
                 .items_tree
-                .get_visible(drawing_info.item_list_idx())
+                .get_visible(drawing_info.vidx())
                 .and_then(|node| waves.displayed_items.get(&node.item_ref));
             let color = displayed_item
                 .and_then(super::displayed_item::DisplayedItem::color)
@@ -1124,7 +1142,8 @@ impl SystemState {
                             .get_best_text_color(&self.get_background_color(
                                 waves,
                                 drawing_info,
-                                VisibleItemIndex(vidx),
+                                vidx,
+                                item_count,
                             )),
                     );
                     waves.draw_ticks(
@@ -1140,6 +1159,7 @@ impl SystemState {
                 ItemDrawingInfo::Divider(_) => {}
                 ItemDrawingInfo::Marker(_) => {}
                 ItemDrawingInfo::Group(_) => {}
+                ItemDrawingInfo::Placeholder(_) => {}
             }
         }
 

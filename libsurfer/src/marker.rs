@@ -364,7 +364,7 @@ impl SystemState {
         }) {
             let Some(item) = waves
                 .items_tree
-                .get_visible(drawing_info.item_list_idx)
+                .get_visible(drawing_info.vidx)
                 .and_then(|node| waves.displayed_items.get(&node.item_ref))
             else {
                 return;

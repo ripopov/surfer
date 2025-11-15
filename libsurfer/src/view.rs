@@ -72,21 +72,21 @@ impl DrawConfig {
 pub struct VariableDrawingInfo {
     pub field_ref: FieldRef,
     pub displayed_field_ref: DisplayedFieldRef,
-    pub item_list_idx: VisibleItemIndex,
+    pub vidx: VisibleItemIndex,
     pub top: f32,
     pub bottom: f32,
 }
 
 #[derive(Debug)]
 pub struct DividerDrawingInfo {
-    pub item_list_idx: VisibleItemIndex,
+    pub vidx: VisibleItemIndex,
     pub top: f32,
     pub bottom: f32,
 }
 
 #[derive(Debug)]
 pub struct MarkerDrawingInfo {
-    pub item_list_idx: VisibleItemIndex,
+    pub vidx: VisibleItemIndex,
     pub top: f32,
     pub bottom: f32,
     pub idx: u8,
@@ -94,7 +94,7 @@ pub struct MarkerDrawingInfo {
 
 #[derive(Debug)]
 pub struct TimeLineDrawingInfo {
-    pub item_list_idx: VisibleItemIndex,
+    pub vidx: VisibleItemIndex,
     pub top: f32,
     pub bottom: f32,
 }
@@ -102,14 +102,21 @@ pub struct TimeLineDrawingInfo {
 #[derive(Debug)]
 pub struct StreamDrawingInfo {
     pub transaction_stream_ref: TransactionStreamRef,
-    pub item_list_idx: VisibleItemIndex,
+    pub vidx: VisibleItemIndex,
     pub top: f32,
     pub bottom: f32,
 }
 
 #[derive(Debug)]
 pub struct GroupDrawingInfo {
-    pub item_list_idx: VisibleItemIndex,
+    pub vidx: VisibleItemIndex,
+    pub top: f32,
+    pub bottom: f32,
+}
+
+#[derive(Debug)]
+pub struct PlaceholderDrawingInfo {
+    pub vidx: VisibleItemIndex,
     pub top: f32,
     pub bottom: f32,
 }
@@ -121,6 +128,7 @@ pub enum ItemDrawingInfo {
     TimeLine(TimeLineDrawingInfo),
     Stream(StreamDrawingInfo),
     Group(GroupDrawingInfo),
+    Placeholder(PlaceholderDrawingInfo),
 }
 
 impl ItemDrawingInfo {
@@ -132,6 +140,7 @@ impl ItemDrawingInfo {
             ItemDrawingInfo::TimeLine(drawing_info) => drawing_info.top,
             ItemDrawingInfo::Stream(drawing_info) => drawing_info.top,
             ItemDrawingInfo::Group(drawing_info) => drawing_info.top,
+            ItemDrawingInfo::Placeholder(drawing_info) => drawing_info.top,
         }
     }
     pub fn bottom(&self) -> f32 {
@@ -142,16 +151,18 @@ impl ItemDrawingInfo {
             ItemDrawingInfo::TimeLine(drawing_info) => drawing_info.bottom,
             ItemDrawingInfo::Stream(drawing_info) => drawing_info.bottom,
             ItemDrawingInfo::Group(drawing_info) => drawing_info.bottom,
+            ItemDrawingInfo::Placeholder(drawing_info) => drawing_info.bottom,
         }
     }
-    pub fn item_list_idx(&self) -> VisibleItemIndex {
+    pub fn vidx(&self) -> VisibleItemIndex {
         match self {
-            ItemDrawingInfo::Variable(drawing_info) => drawing_info.item_list_idx,
-            ItemDrawingInfo::Divider(drawing_info) => drawing_info.item_list_idx,
-            ItemDrawingInfo::Marker(drawing_info) => drawing_info.item_list_idx,
-            ItemDrawingInfo::TimeLine(drawing_info) => drawing_info.item_list_idx,
-            ItemDrawingInfo::Stream(drawing_info) => drawing_info.item_list_idx,
-            ItemDrawingInfo::Group(drawing_info) => drawing_info.item_list_idx,
+            ItemDrawingInfo::Variable(drawing_info) => drawing_info.vidx,
+            ItemDrawingInfo::Divider(drawing_info) => drawing_info.vidx,
+            ItemDrawingInfo::Marker(drawing_info) => drawing_info.vidx,
+            ItemDrawingInfo::TimeLine(drawing_info) => drawing_info.vidx,
+            ItemDrawingInfo::Stream(drawing_info) => drawing_info.vidx,
+            ItemDrawingInfo::Group(drawing_info) => drawing_info.vidx,
+            ItemDrawingInfo::Placeholder(drawing_info) => drawing_info.vidx,
         }
     }
 }
@@ -945,7 +956,7 @@ impl SystemState {
                 drawing_infos.push(ItemDrawingInfo::Variable(VariableDrawingInfo {
                     displayed_field_ref,
                     field_ref: field.clone(),
-                    item_list_idx: vidx,
+                    vidx,
                     top: response.0.rect.top(),
                     bottom: response.0.rect.bottom(),
                 }));
@@ -973,7 +984,7 @@ impl SystemState {
                 drawing_infos.push(ItemDrawingInfo::Variable(VariableDrawingInfo {
                     displayed_field_ref,
                     field_ref: field.clone(),
-                    item_list_idx: vidx,
+                    vidx,
                     top: label.rect.top(),
                     bottom: label.rect.bottom(),
                 }));
@@ -1219,14 +1230,14 @@ impl SystemState {
         match displayed_item {
             DisplayedItem::Divider(_) => {
                 drawing_infos.push(ItemDrawingInfo::Divider(DividerDrawingInfo {
-                    item_list_idx: vidx,
+                    vidx,
                     top: label.rect.top(),
                     bottom: label.rect.bottom(),
                 }));
             }
             DisplayedItem::Marker(cursor) => {
                 drawing_infos.push(ItemDrawingInfo::Marker(MarkerDrawingInfo {
-                    item_list_idx: vidx,
+                    vidx,
                     top: label.rect.top(),
                     bottom: label.rect.bottom(),
                     idx: cursor.idx,
@@ -1234,7 +1245,7 @@ impl SystemState {
             }
             DisplayedItem::TimeLine(_) => {
                 drawing_infos.push(ItemDrawingInfo::TimeLine(TimeLineDrawingInfo {
-                    item_list_idx: vidx,
+                    vidx,
                     top: label.rect.top(),
                     bottom: label.rect.bottom(),
                 }));
@@ -1242,20 +1253,30 @@ impl SystemState {
             DisplayedItem::Stream(stream) => {
                 drawing_infos.push(ItemDrawingInfo::Stream(StreamDrawingInfo {
                     transaction_stream_ref: stream.transaction_stream_ref.clone(),
-                    item_list_idx: vidx,
+                    vidx,
                     top: label.rect.top(),
                     bottom: label.rect.bottom(),
                 }));
             }
             DisplayedItem::Group(_) => {
                 drawing_infos.push(ItemDrawingInfo::Group(GroupDrawingInfo {
-                    item_list_idx: vidx,
+                    vidx,
                     top: label.rect.top(),
                     bottom: label.rect.bottom(),
                 }));
             }
-            &DisplayedItem::Variable(_) => {}
-            &DisplayedItem::Placeholder(_) => {}
+            &DisplayedItem::Placeholder(_) => {
+                drawing_infos.push(ItemDrawingInfo::Placeholder(PlaceholderDrawingInfo {
+                    vidx,
+                    top: label.rect.top(),
+                    bottom: label.rect.bottom(),
+                }))
+            }
+            &DisplayedItem::Variable(_) => {
+                panic!(
+                    "draw_plain_item must not be called with a Variable - use draw_variable instead"
+                )
+            }
         }
         label.rect
     }
@@ -1332,13 +1353,13 @@ impl SystemState {
         ui.scope_builder(builder, |ui| {
             let text_style = TextStyle::Monospace;
             ui.style_mut().override_text_style = Some(text_style);
-            for (vidx, drawing_info) in waves
+            for (item_count, drawing_info) in waves
                 .drawing_infos
                 .iter()
                 .sorted_by_key(|o| o.top() as i32)
                 .enumerate()
             {
-                let vidx = VisibleItemIndex(vidx);
+                let vidx = drawing_info.vidx();
                 let next_y = ui.cursor().top();
                 // In order to align the text in this view with the variable tree,
                 // we need to keep track of how far away from the expected offset we are,
@@ -1347,7 +1368,8 @@ impl SystemState {
                     ui.add_space(drawing_info.top() - next_y);
                 }
 
-                let backgroundcolor = &self.get_background_color(waves, drawing_info, vidx);
+                let backgroundcolor =
+                    &self.get_background_color(waves, drawing_info, vidx, item_count);
                 self.draw_background(
                     drawing_info,
                     y_zero,
@@ -1417,7 +1439,8 @@ impl SystemState {
                     ItemDrawingInfo::Divider(_)
                     | ItemDrawingInfo::TimeLine(_)
                     | ItemDrawingInfo::Stream(_)
-                    | ItemDrawingInfo::Group(_) => {
+                    | ItemDrawingInfo::Group(_)
+                    | ItemDrawingInfo::Placeholder(_) => {
                         ui.label("");
                     }
                 }
@@ -1522,6 +1545,7 @@ impl SystemState {
         waves: &WaveData,
         drawing_info: &ItemDrawingInfo,
         vidx: VisibleItemIndex,
+        item_count: usize,
     ) -> Color32 {
         if let Some(focused) = waves.focused_item
             && self.highlight_focused()
@@ -1534,19 +1558,19 @@ impl SystemState {
             .get(
                 &waves
                     .items_tree
-                    .get_visible(drawing_info.item_list_idx())
+                    .get_visible(drawing_info.vidx())
                     .unwrap()
                     .item_ref,
             )
             .and_then(super::displayed_item::DisplayedItem::background_color)
             .and_then(|color| self.user.config.theme.get_color(color))
-            .unwrap_or_else(|| self.get_default_alternating_background_color(vidx))
+            .unwrap_or_else(|| self.get_default_alternating_background_color(item_count))
     }
 
-    fn get_default_alternating_background_color(&self, vidx: VisibleItemIndex) -> &Color32 {
+    fn get_default_alternating_background_color(&self, item_count: usize) -> &Color32 {
         // Set background color
         if self.user.config.theme.alt_frequency != 0
-            && (vidx.0 / self.user.config.theme.alt_frequency) % 2 == 1
+            && (item_count / self.user.config.theme.alt_frequency) % 2 == 1
         {
             &self.user.config.theme.canvas_colors.alt_background
         } else {
