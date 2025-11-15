@@ -114,6 +114,8 @@ pub struct SurferConfig {
     pub wcp: WcpConfig,
     /// HTTP Server Configuration
     pub server: ServerConfig,
+    /// Maximum URL length for remote connections
+    pub max_url_length: u16,
 }
 
 impl SurferConfig {
