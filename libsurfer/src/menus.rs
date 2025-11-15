@@ -537,17 +537,23 @@ impl SystemState {
 
             if let DisplayedItem::Variable(variable) = displayed_item {
                 ui.menu_button("Analog", |ui| {
-                    use crate::displayed_item::AnalogMode;
-                    let current_mode = &variable.analog_mode;
+                    use crate::displayed_item::AnalogSettings;
+                    let current = &variable.analog_settings;
 
-                    for mode in [AnalogMode::Off, AnalogMode::Step, AnalogMode::Interpolated] {
-                        ui.radio(*current_mode == mode, mode.to_string())
-                            .clicked()
-                            .then(|| {
-                                if *current_mode != mode {
-                                    msgs.push(Message::SetAnalogMode(affected_vidxs.into(), mode));
-                                }
-                            });
+                    let options = [
+                        ("Off", AnalogSettings::off()),
+                        ("Step (Viewport)", AnalogSettings::step_viewport()),
+                        ("Step (Global)", AnalogSettings::step_global()),
+                        ("Interpolated (Viewport)", AnalogSettings::interpolated_viewport()),
+                        ("Interpolated (Global)", AnalogSettings::interpolated_global()),
+                    ];
+
+                    for (label, settings) in options {
+                        if ui.radio(*current == settings, label).clicked() {
+                            if *current != settings {
+                                msgs.push(Message::SetAnalogSettings(affected_vidxs.into(), settings));
+                            }
+                        }
                     }
                 });
             }

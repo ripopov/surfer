@@ -2,6 +2,7 @@ use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
 use directories::ProjectDirs;
@@ -57,11 +58,12 @@ fn translate_with_basic(
     })
 }
 
+#[derive(Clone)]
 pub enum AnyTranslator {
-    Full(Box<DynTranslator>),
-    Basic(Box<DynBasicTranslator>),
+    Full(Arc<DynTranslator>),
+    Basic(Arc<DynBasicTranslator>),
     #[cfg(feature = "python")]
-    Python(python_translators::PythonTranslator),
+    Python(Arc<python_translators::PythonTranslator>),
 }
 
 impl AnyTranslator {
@@ -98,7 +100,7 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
             AnyTranslator::Full(t) => t.translate(variable, value),
             AnyTranslator::Basic(t) => translate_with_basic(&**t, variable, value),
             #[cfg(feature = "python")]
-            AnyTranslator::Python(t) => translate_with_basic(t, variable, value),
+            AnyTranslator::Python(t) => translate_with_basic(&**t, variable, value),
         }
     }
 
@@ -148,8 +150,8 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
 /// Inside, multiple toml files can be added which will all be used for decoding 'x'
 /// This is useful e.g., for layering RISC-V extensions
 #[cfg(not(target_arch = "wasm32"))]
-fn find_user_decoders() -> Vec<Box<DynBasicTranslator>> {
-    let mut decoders: Vec<Box<DynBasicTranslator>> = vec![];
+fn find_user_decoders() -> Vec<Arc<DynBasicTranslator>> {
+    let mut decoders: Vec<Arc<DynBasicTranslator>> = vec![];
     if let Some(proj_dirs) = ProjectDirs::from("org", "surfer-project", "surfer") {
         let mut config_decoders = find_user_decoders_at_path(proj_dirs.config_dir());
         decoders.append(&mut config_decoders);
@@ -163,10 +165,10 @@ fn find_user_decoders() -> Vec<Box<DynBasicTranslator>> {
 
 /// Look for user defined decoders in path.
 #[cfg(not(target_arch = "wasm32"))]
-fn find_user_decoders_at_path(path: &Path) -> Vec<Box<DynBasicTranslator>> {
+fn find_user_decoders_at_path(path: &Path) -> Vec<Arc<DynBasicTranslator>> {
     use tracing::error;
 
-    let mut decoders: Vec<Box<DynBasicTranslator>> = vec![];
+    let mut decoders: Vec<Arc<DynBasicTranslator>> = vec![];
     let Ok(decoder_dirs) = std::fs::read_dir(path.join("decoders")) else {
         return decoders;
     };
@@ -230,7 +232,7 @@ fn find_user_decoders_at_path(path: &Path) -> Vec<Box<DynBasicTranslator>> {
 
             if let Some(width) = width.and_then(|width| width.as_integer()) {
                 match Decoder::new_from_table(tomls) {
-                    Ok(decoder) => decoders.push(Box::new(InstructionTranslator {
+                    Ok(decoder) => decoders.push(Arc::new(InstructionTranslator {
                         name,
                         decoder,
                         num_bits: width.unsigned_abs(),
@@ -253,39 +255,39 @@ fn find_user_decoders_at_path(path: &Path) -> Vec<Box<DynBasicTranslator>> {
 pub fn all_translators() -> TranslatorList {
     // WASM does not need mut, non-wasm does so we'll allow it
     #[allow(unused_mut)]
-    let mut basic_translators: Vec<Box<DynBasicTranslator>> = vec![
-        Box::new(BitTranslator {}),
-        Box::new(HexTranslator {}),
-        Box::new(OctalTranslator {}),
-        Box::new(GroupingBinaryTranslator {}),
-        Box::new(BinaryTranslator {}),
-        Box::new(ASCIITranslator {}),
-        Box::new(new_rv32_translator()),
-        Box::new(new_rv64_translator()),
-        Box::new(new_mips_translator()),
-        Box::new(new_la64_translator()),
-        Box::new(LebTranslator {}),
-        Box::new(UnsignedTranslator {}),
-        Box::new(SignedTranslator {}),
-        Box::new(SinglePrecisionTranslator {}),
-        Box::new(DoublePrecisionTranslator {}),
-        Box::new(HalfPrecisionTranslator {}),
-        Box::new(BFloat16Translator {}),
-        Box::new(Posit32Translator {}),
-        Box::new(Posit16Translator {}),
-        Box::new(Posit8Translator {}),
-        Box::new(PositQuire8Translator {}),
-        Box::new(PositQuire16Translator {}),
-        Box::new(E5M2Translator {}),
-        Box::new(E4M3Translator {}),
-        Box::new(NumberOfOnesTranslator {}),
-        Box::new(LeadingOnesTranslator {}),
-        Box::new(TrailingOnesTranslator {}),
-        Box::new(LeadingZerosTranslator {}),
-        Box::new(TrailingZerosTranslator {}),
-        Box::new(IdenticalMSBsTranslator {}),
+    let mut basic_translators: Vec<Arc<DynBasicTranslator>> = vec![
+        Arc::new(BitTranslator {}),
+        Arc::new(HexTranslator {}),
+        Arc::new(OctalTranslator {}),
+        Arc::new(GroupingBinaryTranslator {}),
+        Arc::new(BinaryTranslator {}),
+        Arc::new(ASCIITranslator {}),
+        Arc::new(new_rv32_translator()),
+        Arc::new(new_rv64_translator()),
+        Arc::new(new_mips_translator()),
+        Arc::new(new_la64_translator()),
+        Arc::new(LebTranslator {}),
+        Arc::new(UnsignedTranslator {}),
+        Arc::new(SignedTranslator {}),
+        Arc::new(SinglePrecisionTranslator {}),
+        Arc::new(DoublePrecisionTranslator {}),
+        Arc::new(HalfPrecisionTranslator {}),
+        Arc::new(BFloat16Translator {}),
+        Arc::new(Posit32Translator {}),
+        Arc::new(Posit16Translator {}),
+        Arc::new(Posit8Translator {}),
+        Arc::new(PositQuire8Translator {}),
+        Arc::new(PositQuire16Translator {}),
+        Arc::new(E5M2Translator {}),
+        Arc::new(E4M3Translator {}),
+        Arc::new(NumberOfOnesTranslator {}),
+        Arc::new(LeadingOnesTranslator {}),
+        Arc::new(TrailingOnesTranslator {}),
+        Arc::new(LeadingZerosTranslator {}),
+        Arc::new(TrailingZerosTranslator {}),
+        Arc::new(IdenticalMSBsTranslator {}),
         #[cfg(feature = "f128")]
-        Box::new(QuadPrecisionTranslator {}),
+        Arc::new(QuadPrecisionTranslator {}),
     ];
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -294,11 +296,11 @@ pub fn all_translators() -> TranslatorList {
     TranslatorList::new(
         basic_translators,
         vec![
-            Box::new(ClockTranslator::new()),
-            Box::new(StringTranslator {}),
-            Box::new(EnumTranslator {}),
-            Box::new(UnsignedFixedPointTranslator),
-            Box::new(SignedFixedPointTranslator),
+            Arc::new(ClockTranslator::new()),
+            Arc::new(StringTranslator {}),
+            Arc::new(EnumTranslator {}),
+            Arc::new(UnsignedFixedPointTranslator),
+            Arc::new(SignedFixedPointTranslator),
         ],
     )
 }
@@ -312,7 +314,7 @@ pub struct TranslatorList {
 }
 
 impl TranslatorList {
-    pub fn new(basic: Vec<Box<DynBasicTranslator>>, translators: Vec<Box<DynTranslator>>) -> Self {
+    pub fn new(basic: Vec<Arc<DynBasicTranslator>>, translators: Vec<Arc<DynTranslator>>) -> Self {
         Self {
             default: "Hexadecimal".to_string(),
             inner: basic
@@ -375,6 +377,11 @@ impl TranslatorList {
             .unwrap_or_else(|| panic!("No translator called {name}"))
     }
 
+    /// Clone a single translator for use in worker threads (cheap Arc refcount increment)
+    pub fn clone_translator(&self, name: &str) -> AnyTranslator {
+        self.get_translator(name).clone()
+    }
+
     pub fn add_or_replace(&mut self, t: AnyTranslator) {
         self.inner.insert(t.name(), t);
     }
@@ -398,7 +405,7 @@ impl TranslatorList {
         self.python_translator = Some((
             filename,
             translator.name(),
-            AnyTranslator::Python(translator),
+            AnyTranslator::Python(Arc::new(translator)),
         ));
         Ok(())
     }

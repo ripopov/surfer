@@ -68,19 +68,93 @@ pub struct FieldFormat {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum AnalogMode {
+pub enum AnalogRenderStyle {
     #[default]
-    Off,
     Step,
     Interpolated,
 }
 
-impl std::fmt::Display for AnalogMode {
+impl std::fmt::Display for AnalogRenderStyle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AnalogMode::Off => write!(f, "Off"),
-            AnalogMode::Step => write!(f, "Step"),
-            AnalogMode::Interpolated => write!(f, "Interpolated"),
+            AnalogRenderStyle::Step => write!(f, "Step"),
+            AnalogRenderStyle::Interpolated => write!(f, "Interpolated"),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum AnalogYAxisScale {
+    #[default]
+    Viewport,
+    Global,
+}
+
+impl std::fmt::Display for AnalogYAxisScale {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AnalogYAxisScale::Viewport => write!(f, "Viewport"),
+            AnalogYAxisScale::Global => write!(f, "Global"),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct AnalogSettings {
+    pub enabled: bool,
+    #[serde(default)]
+    pub render_style: AnalogRenderStyle,
+    #[serde(default)]
+    pub y_axis_scale: AnalogYAxisScale,
+}
+
+impl AnalogSettings {
+    pub fn off() -> Self {
+        Self {
+            enabled: false,
+            ..Default::default()
+        }
+    }
+
+    pub fn step_viewport() -> Self {
+        Self {
+            enabled: true,
+            render_style: AnalogRenderStyle::Step,
+            y_axis_scale: AnalogYAxisScale::Viewport,
+        }
+    }
+
+    pub fn step_global() -> Self {
+        Self {
+            enabled: true,
+            render_style: AnalogRenderStyle::Step,
+            y_axis_scale: AnalogYAxisScale::Global,
+        }
+    }
+
+    pub fn interpolated_viewport() -> Self {
+        Self {
+            enabled: true,
+            render_style: AnalogRenderStyle::Interpolated,
+            y_axis_scale: AnalogYAxisScale::Viewport,
+        }
+    }
+
+    pub fn interpolated_global() -> Self {
+        Self {
+            enabled: true,
+            render_style: AnalogRenderStyle::Interpolated,
+            y_axis_scale: AnalogYAxisScale::Global,
+        }
+    }
+}
+
+impl std::fmt::Display for AnalogSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if !self.enabled {
+            write!(f, "Off")
+        } else {
+            write!(f, "{} ({})", self.render_style, self.y_axis_scale)
         }
     }
 }
@@ -98,7 +172,7 @@ pub struct DisplayedVariable {
     pub format: Option<String>,
     pub field_formats: Vec<FieldFormat>,
     pub height_scaling_factor: Option<f32>,
-    pub analog_mode: AnalogMode,
+    pub analog_settings: AnalogSettings,
 }
 
 impl DisplayedVariable {
@@ -145,7 +219,7 @@ impl DisplayedVariable {
             format: self.format,
             field_formats: self.field_formats,
             height_scaling_factor: self.height_scaling_factor,
-            analog_mode: self.analog_mode,
+            analog_settings: self.analog_settings,
         }
     }
 }
@@ -209,7 +283,7 @@ pub struct DisplayedPlaceholder {
     pub format: Option<String>,
     pub field_formats: Vec<FieldFormat>,
     pub height_scaling_factor: Option<f32>,
-    pub analog_mode: AnalogMode,
+    pub analog_settings: AnalogSettings,
 }
 
 impl DisplayedPlaceholder {
@@ -229,7 +303,7 @@ impl DisplayedPlaceholder {
             format: self.format,
             field_formats: self.field_formats,
             height_scaling_factor: self.height_scaling_factor,
-            analog_mode: self.analog_mode,
+            analog_settings: self.analog_settings,
         }
     }
 

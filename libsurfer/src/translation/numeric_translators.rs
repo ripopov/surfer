@@ -110,6 +110,11 @@ impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
 
 /// Computes the signed value string for a given BigUint and bit width.
 fn compute_signed_value(v: &BigUint, num_bits: u64) -> String {
+    // Handle edge case where num_bits is 0
+    if num_bits == 0 {
+        return format!("{v}");
+    }
+
     let signweight = BigUint::from(1u8) << (num_bits - 1);
     if v < &signweight {
         format!("{v}")
@@ -560,6 +565,23 @@ mod test {
         assert_eq!(
             SignedTranslator {}
                 .basic_translate(2, &VariableValue::BigUint(BigUint::from(0u32)))
+                .0,
+            "0"
+        );
+    }
+
+    #[test]
+    fn signed_translation_with_zero_bits() {
+        // Test edge case where num_bits is 0 (e.g., for analog/real signals)
+        assert_eq!(
+            SignedTranslator {}
+                .basic_translate(0, &VariableValue::BigUint(BigUint::from(42u32)))
+                .0,
+            "42"
+        );
+        assert_eq!(
+            SignedTranslator {}
+                .basic_translate(0, &VariableValue::BigUint(BigUint::from(0u32)))
                 .0,
             "0"
         );

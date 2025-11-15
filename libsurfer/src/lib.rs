@@ -1,6 +1,7 @@
 #![deny(unused_crate_dependencies)]
 
 pub mod analog_renderer;
+pub mod analog_signal_cache;
 pub mod async_util;
 pub mod batch_commands;
 #[cfg(feature = "performance_plot")]
@@ -31,6 +32,7 @@ pub mod message;
 pub mod mousegestures;
 pub mod overview;
 pub mod remote;
+pub mod signal_rmq;
 pub mod state;
 pub mod state_file_io;
 pub mod state_util;
@@ -725,13 +727,16 @@ impl SystemState {
                     .map(|node| node.item_ref);
 
                 let mut redraw = false;
+                let mut changed_items = Vec::new();
 
                 match displayed_field_ref {
                     MessageTarget::Explicit(field_ref) => {
                         if let Some(DisplayedItem::Variable(displayed_variable)) =
                             waves.displayed_items.get_mut(&field_ref.item)
                         {
+                            let item_ref = field_ref.item;
                             update_format(displayed_variable, field_ref);
+                            changed_items.push(item_ref);
                             redraw = true;
                         }
                     }
@@ -742,6 +747,7 @@ impl SystemState {
                                 waves.displayed_items.get_mut(&focused)
                             {
                                 update_format(displayed_variable, DisplayedFieldRef::from(focused));
+                                changed_items.push(focused);
                                 redraw = true;
                             }
                         }
@@ -756,6 +762,7 @@ impl SystemState {
                                 waves.displayed_items.get_mut(&item)
                             {
                                 update_format(variable, field_ref);
+                                changed_items.push(item);
                             }
                             redraw = true;
                         }
@@ -863,10 +870,12 @@ impl SystemState {
                     .entry(node.item_ref)
                     .and_modify(|item| item.set_height_scaling_factor(scale));
             }
-            Message::SetAnalogMode(vidx, new_mode) => {
-                self.save_current_canvas("Set analog mode".into());
+            Message::SetAnalogSettings(vidx, new_settings) => {
+                self.save_current_canvas("Set analog settings".into());
                 self.invalidate_draw_commands();
                 let waves = self.user.waves.as_mut()?;
+
+                let mut changed_items = Vec::new();
 
                 match vidx {
                     MessageTarget::Explicit(vidx) => {
@@ -876,7 +885,11 @@ impl SystemState {
                             .entry(node.item_ref)
                             .and_modify(|item| {
                                 if let DisplayedItem::Variable(var) = item {
-                                    var.analog_mode = new_mode;
+                                    let old_enabled = var.analog_settings.enabled;
+                                    var.analog_settings = new_settings;
+                                    if new_settings.enabled && !old_enabled {
+                                        changed_items.push(node.item_ref);
+                                    }
                                 }
                             });
                     }
@@ -888,7 +901,11 @@ impl SystemState {
                                 .entry(node.item_ref)
                                 .and_modify(|item| {
                                     if let DisplayedItem::Variable(var) = item {
-                                        var.analog_mode = new_mode;
+                                        let old_enabled = var.analog_settings.enabled;
+                                        var.analog_settings = new_settings;
+                                        if new_settings.enabled && !old_enabled {
+                                            changed_items.push(node.item_ref);
+                                        }
                                     }
                                 });
                         }
@@ -901,9 +918,40 @@ impl SystemState {
                         for item_ref in selected_items {
                             waves.displayed_items.entry(item_ref).and_modify(|item| {
                                 if let DisplayedItem::Variable(var) = item {
-                                    var.analog_mode = new_mode;
+                                    let old_enabled = var.analog_settings.enabled;
+                                    var.analog_settings = new_settings;
+                                    if new_settings.enabled && !old_enabled {
+                                        changed_items.push(item_ref);
+                                    }
                                 }
                             });
+                        }
+                    }
+                }
+
+                // Proactively build caches when enabling analog mode
+                // (Disabled caches will be swept automatically by mark-and-sweep)
+                for item_ref in changed_items {
+                    // Get the displayed variable and extract info for cache build
+                    if let Some(DisplayedItem::Variable(displayed_var)) =
+                        waves.displayed_items.get(&item_ref)
+                    {
+                        let variable_ref = displayed_var.variable_ref.clone();
+                        if let Some(wave_container) = waves.inner.as_waves() {
+                            if let Ok(signal_ref) = wave_container.get_signal_ref(&variable_ref) {
+                                let displayed_field_ref: DisplayedFieldRef = item_ref.into();
+                                let translator_name = waves
+                                    .variable_translator(&displayed_field_ref, &self.translators)
+                                    .name();
+                                self.channels
+                                    .msg_sender
+                                    .send(Message::BuildAnalogCache {
+                                        signal_ref,
+                                        translator_name,
+                                        variable_ref,
+                                    })
+                                    .ok();
+                            }
                         }
                     }
                 }
@@ -1012,8 +1060,10 @@ impl SystemState {
                             .field_formats
                             .retain(|ff| ff.field != displayed_field_ref.field);
                     }
-                    self.invalidate_draw_commands();
                 }
+                // Analog cache invalidation handled by mark-and-sweep
+                // (validation will fail on translator_name mismatch)
+                self.invalidate_draw_commands();
             }
             Message::CursorSet(time) => {
                 let waves = self.user.waves.as_mut()?;
@@ -1046,7 +1096,7 @@ impl SystemState {
                 let sender = self.channels.msg_sender.clone();
                 perform_work(
                     move || match PluginTranslator::new(path.into_std_path_buf()) {
-                        Ok(t) => sender.send(Message::TranslatorLoaded(Box::new(t))).unwrap(),
+                        Ok(t) => sender.send(Message::TranslatorLoaded(Arc::new(t))).unwrap(),
                         Err(e) => {
                             error!("Failed to load wasm translator {e:#}")
                         }
@@ -1186,15 +1236,22 @@ impl SystemState {
             Message::SignalsLoaded(start, res) => {
                 info!("Loaded {} variables in {:?}", res.len(), start.elapsed());
                 self.progress_tracker = None;
-                let waves = self
-                    .user
-                    .waves
-                    .as_mut()
-                    .expect("Waves should be loaded at this point!");
-                match waves.inner.as_waves_mut().unwrap().on_signals_loaded(res) {
-                    Err(err) => error!("{err:?}"),
-                    Ok(Some(cmd)) => self.load_variables(cmd),
-                    _ => {}
+                let maybe_cmd = {
+                    let waves = self
+                        .user
+                        .waves
+                        .as_mut()
+                        .expect("Waves should be loaded at this point!");
+                    match waves.inner.as_waves_mut().unwrap().on_signals_loaded(res) {
+                        Err(err) => {
+                            error!("{err:?}");
+                            None
+                        }
+                        Ok(cmd) => cmd,
+                    }
+                };
+                if let Some(cmd) = maybe_cmd {
+                    self.load_variables(cmd);
                 }
                 // make sure we redraw since now more variable data is available
                 self.invalidate_draw_commands();
@@ -1952,6 +2009,65 @@ impl SystemState {
                     }
                     self.channels.wcp_s2c_sender = Some(WCP_SC_HANDLER.tx.clone());
                 }
+            }
+            Message::BuildAnalogCache {
+                signal_ref,
+                translator_name,
+                variable_ref,
+            } => {
+                let waves = self.user.waves.as_mut()?;
+                let cache_key = (signal_ref, translator_name.clone());
+
+                // Check if already building
+                if waves.cache_build_in_progress.contains(&cache_key) {
+                    return None; // Ignore duplicate request
+                }
+
+                // Mark in-progress
+                waves.cache_build_in_progress.insert(cache_key.clone());
+
+                // Clone translator (cheap Arc refcount increment)
+                let translator = self.translators.clone_translator(&translator_name);
+
+                // Trigger async build
+                waves.build_analog_cache_async(
+                    cache_key,
+                    &variable_ref,
+                    translator,
+                    &self.channels.msg_sender,
+                );
+            }
+            Message::AnalogCacheBuilt {
+                cache_key,
+                cache,
+                error,
+            } => {
+                // Decrement outstanding transactions counter
+                OUTSTANDING_TRANSACTIONS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+
+                let waves = self.user.waves.as_mut()?;
+
+                // Remove from in-progress
+                waves.cache_build_in_progress.remove(&cache_key);
+
+                // Install cache (if successful)
+                if let Some(cache) = cache {
+                    waves.analog_signal_caches.insert(cache_key.clone(), cache);
+                }
+
+                // Log error if present
+                if let Some(err) = error {
+                    warn!("Failed to build analog cache for {cache_key:?}: {err}");
+                }
+
+                // Invalidate draw commands to trigger re-render
+                self.invalidate_draw_commands();
+            }
+            Message::SweepUnusedAnalogCaches { used_keys } => {
+                let waves = self.user.waves.as_mut()?;
+                waves
+                    .analog_signal_caches
+                    .retain(|key, _| used_keys.contains(key));
             }
             Message::Exit | Message::ToggleFullscreen => {} // Handled in eframe::update
             Message::AddViewport => {

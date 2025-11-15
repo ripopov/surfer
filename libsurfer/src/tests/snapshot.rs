@@ -1785,12 +1785,29 @@ snapshot_ui!(signals_can_be_added_after_file_switch, || {
 #[inline]
 pub fn wait_for_waves_fully_loaded(state: &mut SystemState, timeout_s: u64) {
     let load_start = std::time::Instant::now();
+
+    // First wait for waves and batch commands to complete
     while !(state.waves_fully_loaded() && state.batch_commands_completed()) {
         state.handle_async_messages();
         state.handle_batch_commands();
         if load_start.elapsed().as_secs() > timeout_s {
-            panic!("Timeout after {timeout_s}s!");
+            panic!("Timeout waiting for waves/batch commands after {timeout_s}s!");
         }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    // Process any messages that were queued by batch commands
+    state.handle_async_messages();
+    state.handle_batch_commands();
+
+    // Then wait for any analog caches that were triggered
+    while !state.analog_caches_ready() {
+        state.handle_async_messages();
+        state.handle_batch_commands();
+        if load_start.elapsed().as_secs() > timeout_s {
+            panic!("Timeout waiting for analog caches after {timeout_s}s!");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 
@@ -2582,17 +2599,17 @@ snapshot_ui_with_file_and_msgs! {analog_waveform_with_state, "examples/analog.vc
     ),
 
     // Configure analog modes
-    Message::SetAnalogMode(
+    Message::SetAnalogSettings(
         MessageTarget::Explicit(VisibleItemIndex(0)),
-        crate::displayed_item::AnalogMode::Interpolated,
+        crate::displayed_item::AnalogSettings::interpolated_viewport(),
     ),
-    Message::SetAnalogMode(
+    Message::SetAnalogSettings(
         MessageTarget::Explicit(VisibleItemIndex(1)),
-        crate::displayed_item::AnalogMode::Step,
+        crate::displayed_item::AnalogSettings::step_viewport(),
     ),
-    Message::SetAnalogMode(
+    Message::SetAnalogSettings(
         MessageTarget::Explicit(VisibleItemIndex(3)),
-        crate::displayed_item::AnalogMode::Step,
+        crate::displayed_item::AnalogSettings::step_viewport(),
     ),
     Message::ItemHeightScalingFactorChange(
         MessageTarget::Explicit(VisibleItemIndex(0)),
@@ -2606,4 +2623,329 @@ snapshot_ui_with_file_and_msgs! {analog_waveform_with_state, "examples/analog.vc
         MessageTarget::Explicit(VisibleItemIndex(3)),
         2.0,
     ),
+]}
+
+snapshot_ui_with_file_and_msgs! {analog_waveform_4state_zoom, "examples/analog.vcd", [
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.sine_4state"),
+        VariableRef::from_hierarchy_string("top.sine_4state"),
+    ]),
+
+    // Configure analog modes
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        crate::displayed_item::AnalogSettings::step_viewport(),
+    ),
+
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        8.0,
+    ),
+
+]}
+
+snapshot_ui_with_file_and_msgs! {analog_waveform_4state_zoom_interpolate, "examples/analog.vcd", [
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.sine_4state"),
+    ]),
+
+    // Configure analog modes
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        crate::displayed_item::AnalogSettings::interpolated_viewport(),
+    ),
+
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        8.0,
+    ),
+
+    Message::ZoomToRange {
+        start: BigInt::from(27900),
+        end: BigInt::from(28800),
+        viewport_idx: 0
+    },
+]}
+
+// Test interpolation with valid values on both edges (no NaN)
+// Viewport 7500-8500 has:
+// - Sample BEFORE: time 7000, value 53
+// - Sample INSIDE: time 8000, value 127
+// - Sample AFTER: time 9000, value 202
+snapshot_ui_with_file_and_msgs! {analog_waveform_interpolate_full, "examples/analog.vcd", [
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.sine_4state"),
+    ]),
+
+    // Configure analog interpolated mode
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        crate::displayed_item::AnalogSettings::interpolated_viewport(),
+    ),
+
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        8.0,
+    ),
+
+    Message::ZoomToRange {
+        start: BigInt::from(7500),
+        end: BigInt::from(8500),
+        viewport_idx: 0
+    },
+]}
+
+snapshot_ui_with_file_and_msgs! {analog_waveform_interpolate_local_artifacts, "examples/analog.vcd", [
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.sine_4state"),
+    ]),
+
+    // Configure analog interpolated mode
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        crate::displayed_item::AnalogSettings::interpolated_viewport(),
+    ),
+
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        8.0,
+    ),
+
+    Message::ZoomToRange {
+        start: BigInt::from(16300),
+        end: BigInt::from(36700),
+        viewport_idx: 0
+    },
+]}
+
+// Test analog rendering when X/NaN region is at the START of the viewport
+// The X value is at time 68000, so we zoom to start just before it
+snapshot_ui_with_file_and_msgs! {analog_waveform_interpolate_nan_at_start, "examples/analog.vcd", [
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.sine_4state"),
+    ]),
+
+    // Configure analog interpolated mode
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        crate::displayed_item::AnalogSettings::interpolated_viewport(),
+    ),
+
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        8.0,
+    ),
+
+    // Zoom to viewport where X region (at 68000) is near the start
+    Message::ZoomToRange {
+        start: BigInt::from(77000),
+        end: BigInt::from(87000),
+        viewport_idx: 0
+    },
+]}
+
+snapshot_ui_with_file_and_msgs! {analog_waveform_interpolate_at_start_range, "examples/analog.vcd", [
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.sine_4state"),
+        VariableRef::from_hierarchy_string("top.sine_4state"),
+    ]),
+
+    // Configure analog interpolated mode
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        crate::displayed_item::AnalogSettings::interpolated_viewport(),
+    ),
+
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        8.0,
+    ),
+
+    // Zoom to viewport where X region (at 68000) is near the start
+    Message::ZoomToRange {
+        start: BigInt::from(0),
+        end: BigInt::from(1400),
+        viewport_idx: 0
+    },
+]}
+
+// Render pulses.vcd as analog in Step mode
+snapshot_ui_with_file_and_msgs! {analog_pulses_step, "examples/pulses.vcd", [
+    // Add the single integer signal from the VCD
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.clk_cnt"),
+    ]),
+
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.clk_cnt"),
+    ]),
+
+    // Display it as unsigned for readability
+    Message::VariableFormatChange(
+        MessageTarget::Explicit(DisplayedFieldRef {
+            item: DisplayedItemRef(0),
+            field: vec![],
+        }),
+        String::from("Unsigned"),
+    ),
+
+    // Ensure analog rendering is enabled and set to Step mode
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        crate::displayed_item::AnalogSettings::step_viewport(),
+    ),
+
+    // Make it a bit taller so the analog shape is clear in the snapshot
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        16.0,
+    ),
+]}
+
+// Render pulses.vcd as analog in Step mode, zoomed into 1500000-2500000 ps region
+snapshot_ui_with_file_and_msgs! {analog_pulses_step_zoom, "examples/pulses.vcd", [
+    // Add the single integer signal from the VCD
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.clk_cnt"),
+    ]),
+
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.clk_cnt"),
+    ]),
+
+    // Display it as unsigned for readability
+    Message::VariableFormatChange(
+        MessageTarget::Explicit(DisplayedFieldRef {
+            item: DisplayedItemRef(0),
+            field: vec![],
+        }),
+        String::from("Unsigned"),
+    ),
+
+    // Ensure analog rendering is enabled and set to Step mode
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        crate::displayed_item::AnalogSettings::step_viewport(),
+    ),
+
+    // Make it a bit taller so the analog shape is clear in the snapshot
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        16.0,
+    ),
+
+    // Zoom into the 1500000 ps - 2500000 ps region
+    Message::ZoomToRange {
+        start: BigInt::from(1500000),
+        end: BigInt::from(2500000),
+        viewport_idx: 0
+    },
+]}
+
+// Render pulses.vcd as analog in Step mode, zoomed into 800000-1500000 ps region
+snapshot_ui_with_file_and_msgs! {analog_pulses_step_zoom2, "examples/pulses.vcd", [
+    // Add the single integer signal from the VCD
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.clk_cnt"),
+    ]),
+
+
+
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.clk_cnt"),
+    ]),
+
+    // Display it as unsigned for readability
+    Message::VariableFormatChange(
+        MessageTarget::Explicit(DisplayedFieldRef {
+            item: DisplayedItemRef(0),
+            field: vec![],
+        }),
+        String::from("Unsigned"),
+    ),
+
+    // Ensure analog rendering is enabled and set to Step mode
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        crate::displayed_item::AnalogSettings::step_viewport(),
+    ),
+
+    // Make it a bit taller so the analog shape is clear in the snapshot
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        16.0,
+    ),
+
+    Message::ZoomToRange {
+        start: BigInt::from(800000),
+        end: BigInt::from(1500000),
+        viewport_idx: 0
+    },
+]}
+
+snapshot_ui_with_file_and_msgs! {analog_waveform_4state, "examples/analog.vcd", [
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.sine_4state"),
+        VariableRef::from_hierarchy_string("top.sine_4state")
+    ]),
+
+    // Configure analog modes
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        crate::displayed_item::AnalogSettings::step_viewport(),
+    ),
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        4.0,
+    ),
+    Message::ZoomToRange {
+        start: BigInt::from(0),
+        end: BigInt::from(25000),
+        viewport_idx: 0
+    },
+]}
+
+snapshot_ui_with_file_and_msgs! {analog_waveform_translators, "examples/analog_negative.vcd", [
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.sine_int_neg"),
+        VariableRef::from_hierarchy_string("top.sine_int_neg")
+    ]),
+
+    // Configure analog modes
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        crate::displayed_item::AnalogSettings::step_viewport(),
+    ),
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        4.0,
+    ),
+    // Message::ZoomToRange {
+    //     start: BigInt::from(0),
+    //     end: BigInt::from(25000),
+    //     viewport_idx: 0
+    // },
+]}
+
+
+snapshot_ui_with_file_and_msgs! {analog_waveform_short, "examples/analog_signals_short.vcd", [
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.pulse_5khz")
+    ]),
+
+    // Configure analog modes
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        crate::displayed_item::AnalogSettings::step_viewport(),
+    ),
+
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        4.0,
+    ),
+    // Message::ZoomToRange {
+    //     start: BigInt::from(0),
+    //     end: BigInt::from(25000),
+    //     viewport_idx: 0
+    // },
 ]}

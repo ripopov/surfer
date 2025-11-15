@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
+use std::sync::Arc;
 
 use derive_more::Debug;
 use eyre::{anyhow, bail, Result};
@@ -27,15 +28,15 @@ static UNIQUE_ID_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 #[derive(Debug)]
 pub struct WellenContainer {
     #[debug(skip)]
-    hierarchy: std::sync::Arc<Hierarchy>,
+    hierarchy: Arc<Hierarchy>,
     /// the url of a remote server, None if waveforms are loaded locally
     server: Option<String>,
     scopes: Vec<String>,
     vars: Vec<String>,
-    signals: HashMap<SignalRef, Signal>,
+    signals: HashMap<SignalRef, Arc<Signal>>,
     /// keeps track of signals that need to be loaded once the body of the waveform file has been loaded
     signals_to_be_loaded: HashSet<SignalRef>,
-    time_table: TimeTable,
+    time_table: Arc<TimeTable>,
     #[debug(skip)]
     source: Option<SignalSource>,
     unique_id: u64,
@@ -56,7 +57,7 @@ pub enum HeaderResult {
     /// Result of locally parsing the header of a waveform file with wellen from bytes.
     LocalBytes(Box<wellen::viewers::HeaderResult<std::io::Cursor<Vec<u8>>>>),
     /// Result of querying a remote surfer server (which has used wellen).
-    Remote(std::sync::Arc<Hierarchy>, FileFormat, String),
+    Remote(Arc<Hierarchy>, FileFormat, String),
 }
 
 pub enum BodyResult {
@@ -67,7 +68,7 @@ pub enum BodyResult {
 }
 
 pub enum LoadSignalPayload {
-    Local(SignalSource, std::sync::Arc<Hierarchy>),
+    Local(SignalSource, Arc<Hierarchy>),
     Remote(String),
 }
 
@@ -126,7 +127,7 @@ pub fn convert_format(format: FileFormat) -> crate::WaveFormat {
 }
 
 impl WellenContainer {
-    pub fn new(hierarchy: std::sync::Arc<Hierarchy>, server: Option<String>) -> Self {
+    pub fn new(hierarchy: Arc<Hierarchy>, server: Option<String>) -> Self {
         // generate a list of names for all variables and scopes since they will be requested by the parser
         let h = &hierarchy;
         let scopes = h.iter_scopes().map(|r| r.full_name(h)).collect::<Vec<_>>();
@@ -141,7 +142,7 @@ impl WellenContainer {
             vars,
             signals: HashMap::new(),
             signals_to_be_loaded: HashSet::new(),
-            time_table: vec![],
+            time_table: Arc::new(vec![]),
             source: None,
             unique_id,
             body_loaded: false,
@@ -161,7 +162,7 @@ impl WellenContainer {
                 if self.server.is_some() {
                     bail!("We are connected to a server, but also received the result of parsing a file locally. Something is going wrong here!");
                 }
-                self.time_table = body.time_table;
+                self.time_table = Arc::new(body.time_table);
                 self.source = Some(body.source);
             }
             BodyResult::Remote(time_table, server) => {
@@ -172,7 +173,7 @@ impl WellenContainer {
                 } else {
                     bail!("Missing server URL!");
                 }
-                self.time_table = time_table;
+                self.time_table = Arc::new(time_table);
             }
         }
         self.body_loaded = true;
@@ -414,7 +415,7 @@ impl WellenContainer {
             debug_assert!(self.server.is_some() || self.source.is_some());
             // install signals
             for (id, signal) in res.signals {
-                self.signals.insert(id, signal);
+                self.signals.insert(id, Arc::new(signal));
             }
         }
 
@@ -467,19 +468,6 @@ impl WellenContainer {
         }
     }
 
-    fn time_to_time_table_idx(&self, time: &BigUint) -> Option<TimeTableIdx> {
-        let time: Time = time.to_u64().expect("unsupported time!");
-        let table = &self.time_table;
-        if table.is_empty() || table[0] > time {
-            None
-        } else {
-            // binary search to find correct index
-            let idx = binary_search(table, time);
-            assert!(table[idx] <= time);
-            Some(idx as TimeTableIdx)
-        }
-    }
-
     pub fn query_variable(
         &self,
         variable: &VariableRef,
@@ -497,39 +485,13 @@ impl WellenContainer {
                 return Ok(None);
             }
         };
-        let time_table = &self.time_table;
 
-        // convert time to index
-        if let Some(idx) = self.time_to_time_table_idx(time) {
-            // get data offset
-            if let Some(offset) = sig.get_offset(idx) {
-                // which time did we actually get the value for?
-                let offset_time_idx = sig.get_time_idx_at(&offset);
-                let offset_time = time_table[offset_time_idx as usize];
-                // get the last value in a time step (since we ignore delta cycles for now)
-                let current_value = sig.get_value_at(&offset, offset.elements - 1);
-                // the next time the variable changes
-                let next_time = offset
-                    .next_index
-                    .and_then(|i| time_table.get(i.get() as usize));
-
-                let converted_value = convert_variable_value(current_value);
-                let result = QueryResult {
-                    current: Some((BigUint::from(offset_time), converted_value)),
-                    next: next_time.map(|t| BigUint::from(*t)),
-                };
-                return Ok(Some(result));
-            }
-        }
-
-        // if `get_offset` returns None, this means that there is no change at or before the requested time
-        let first_index = sig.get_first_time_idx();
-        let next_time = first_index.and_then(|i| time_table.get(i as usize));
-        let result = QueryResult {
-            current: None,
-            next: next_time.map(|t| BigUint::from(*t)),
-        };
-        Ok(Some(result))
+        // Use static method directly to avoid creating a SignalAccessor
+        Ok(Some(SignalAccessor::query_signal_at_time(
+            sig,
+            &self.time_table,
+            time,
+        )))
     }
 
     pub fn scope_names(&self) -> Vec<String> {
@@ -610,7 +572,117 @@ impl WellenContainer {
             encoding,
         })
     }
+
+    /// Get a SignalAccessor for a variable (cheap Arc clones)
+    pub fn get_signal_accessor(&self, variable: &VariableRef) -> Result<SignalAccessor> {
+        let h = &self.hierarchy;
+        let var_ref = self.get_var_ref(variable)?;
+        let signal_ref = h[var_ref].signal_ref();
+        let signal = self
+            .signals
+            .get(&signal_ref)
+            .cloned()
+            .ok_or_else(|| anyhow!("Signal not loaded"))?;
+        Ok(SignalAccessor::new(signal, Arc::clone(&self.time_table)))
+    }
+
+    /// Get the SignalRef for a variable (canonical signal identity for cache keys)
+    pub fn get_signal_ref(&self, variable: &VariableRef) -> Result<SignalRef> {
+        let var_ref = self.get_var_ref(variable)?;
+        Ok(self.hierarchy[var_ref].signal_ref())
+    }
 }
+
+/// Accessor for iterating through signal changes in a time range
+pub struct SignalAccessor {
+    signal: Arc<Signal>,
+    time_table: Arc<TimeTable>,
+}
+
+impl SignalAccessor {
+    /// Create a new SignalAccessor from Arc pointers
+    pub fn new(signal: Arc<Signal>, time_table: Arc<TimeTable>) -> Self {
+        Self { signal, time_table }
+    }
+
+    /// Get the underlying signal
+    pub fn signal(&self) -> &Signal {
+        &self.signal
+    }
+
+    /// Get the time table
+    pub fn time_table(&self) -> &TimeTable {
+        &self.time_table
+    }
+
+    /// Query the signal value at a specific time
+    /// Returns QueryResult with current value and next change time
+    pub fn query_at_time(&self, time: &BigUint) -> QueryResult {
+        Self::query_signal_at_time(&self.signal, &self.time_table, time)
+    }
+
+    /// Convert time to time table index using binary search (static version)
+    /// Returns None if time is before the first entry or table is empty
+    pub fn time_to_time_table_idx(time_table: &TimeTable, time: &BigUint) -> Option<TimeTableIdx> {
+        let time: Time = time.to_u64().expect("unsupported time!");
+        if time_table.is_empty() || time_table[0] > time {
+            None
+        } else {
+            let idx = binary_search(time_table, time);
+            assert!(time_table[idx] <= time);
+            Some(idx as TimeTableIdx)
+        }
+    }
+
+    /// Get the time of the first signal change (static version)
+    /// Returns None if the signal has no changes
+    pub fn first_change_time(signal: &Signal, time_table: &TimeTable) -> Option<BigUint> {
+        signal
+            .get_first_time_idx()
+            .and_then(|i| time_table.get(i as usize))
+            .map(|t| BigUint::from(*t))
+    }
+
+    /// Query the signal value at a specific time (static version)
+    /// Use this for one-off queries without creating a SignalAccessor
+    pub fn query_signal_at_time(
+        signal: &Signal,
+        time_table: &TimeTable,
+        time: &BigUint,
+    ) -> QueryResult {
+        // Convert time to index
+        if let Some(idx) = Self::time_to_time_table_idx(time_table, time) {
+            // Get data offset
+            if let Some(offset) = signal.get_offset(idx) {
+                // Which time did we actually get the value for?
+                let offset_time_idx = signal.get_time_idx_at(&offset);
+                let offset_time = time_table[offset_time_idx as usize];
+
+                // Get the last value in a time step (since we ignore delta cycles for now)
+                let current_value = signal.get_value_at(&offset, offset.elements - 1);
+
+                // The next time the variable changes
+                let next_time = offset
+                    .next_index
+                    .and_then(|i| time_table.get(i.get() as usize))
+                    .copied();
+
+                let converted_value = convert_variable_value(current_value);
+                return QueryResult {
+                    current: Some((BigUint::from(offset_time), converted_value)),
+                    next: next_time.map(BigUint::from),
+                };
+            }
+        }
+
+        // If `get_offset` returns None, this means that there is no change at or before the requested time
+        QueryResult {
+            current: None,
+            next: Self::first_change_time(signal, time_table),
+        }
+    }
+}
+
 
 fn scope_type_to_string(tpe: ScopeType) -> &'static str {
     match tpe {
@@ -643,7 +715,7 @@ fn scope_type_to_string(tpe: ScopeType) -> &'static str {
     }
 }
 
-fn convert_variable_value(value: wellen::SignalValue) -> VariableValue {
+pub(crate) fn convert_variable_value(value: wellen::SignalValue) -> VariableValue {
     match value {
         wellen::SignalValue::Binary(data, _bits) => {
             VariableValue::BigUint(BigUint::from_bytes_be(data))

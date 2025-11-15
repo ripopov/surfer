@@ -90,7 +90,7 @@ impl SubFieldTranslationResult {
     }
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct TranslatedValue {
     pub value: String,
     pub kind: ValueKind,

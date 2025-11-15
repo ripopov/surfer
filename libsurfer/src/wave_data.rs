@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use eyre::{Result, WrapErr};
 use num::bigint::ToBigInt as _;
-use num::{BigInt, BigUint, Zero};
+use num::{BigInt, BigUint, ToPrimitive, Zero};
 use serde::{Deserialize, Serialize};
 use surfer_translation_types::{TranslationPreference, Translator, VariableValue};
 use tracing::{error, info, warn};
@@ -76,6 +76,15 @@ pub struct WaveData {
     /// used by the `update_viewports` method after loading a new file
     #[serde(skip)]
     pub old_num_timestamps: Option<BigInt>,
+    /// Analog signal caches using SignalRMQ
+    /// Key: (SignalRef, translator_name) - uniquely identifies signal data + interpretation
+    /// Only populated for signals in analog mode
+    #[serde(skip)]
+    pub analog_signal_caches:
+        HashMap<(wellen::SignalRef, String), crate::analog_signal_cache::AnalogSignalCache>,
+    /// Tracks analog cache builds in progress (keyed by signal_ref + translator_name)
+    #[serde(skip)]
+    pub cache_build_in_progress: HashSet<(wellen::SignalRef, String)>,
 }
 
 fn select_preferred_translator(var: &VariableMeta, translators: &TranslatorList) -> String {
@@ -194,6 +203,8 @@ impl WaveData {
             graphics: HashMap::new(),
             total_height: 0.,
             old_num_timestamps,
+            analog_signal_caches: HashMap::new(),
+            cache_build_in_progress: HashSet::new(),
         };
 
         new_wavedata.update_metadata(translators);
@@ -436,7 +447,7 @@ impl WaveData {
                 format: None,
                 field_formats: vec![],
                 height_scaling_factor: None,
-                analog_mode: crate::displayed_item::AnalogMode::Off,
+                analog_settings: crate::displayed_item::AnalogSettings::default(),
             });
 
             indices.push(self.insert_item(new_variable, Some(target_position), true));
@@ -945,6 +956,70 @@ impl WaveData {
                     None
                 }
             })
+    }
+
+    /// Build analog cache asynchronously off the UI thread
+    /// Takes cache_key (SignalRef, translator_name) to enable cache sharing across aliased variables
+    pub fn build_analog_cache_async(
+        &mut self,
+        cache_key: (wellen::SignalRef, String),
+        variable_ref: &VariableRef,
+        translator: crate::translation::AnyTranslator,
+        sender: &std::sync::mpsc::Sender<crate::message::Message>,
+    ) -> Option<()> {
+        let wave_container = self.inner.as_waves()?;
+        let meta = wave_container
+            .variable_meta(variable_ref)
+            .ok()?
+            .clone();
+
+        let num_timestamps = self.num_timestamps()?.to_u64()?;
+
+        // Create SignalAccessor (cheap Arc clones!)
+        let accessor = wave_container
+            .get_signal_accessor(variable_ref)
+            .ok()?;
+
+        // Move all needed data into worker
+        let sender_clone = sender.clone();
+        crate::async_util::perform_work(move || {
+            let result = crate::analog_signal_cache::AnalogSignalCache::build(
+                accessor,
+                &translator, // AnyTranslator auto-derefs to &DynTranslator
+                &meta,
+                num_timestamps,
+                None, // Use default block size (64)
+            );
+
+            let msg = match result {
+                Some(cache) => crate::message::Message::AnalogCacheBuilt {
+                    cache_key,
+                    cache: Some(cache),
+                    error: None,
+                },
+                None => crate::message::Message::AnalogCacheBuilt {
+                    cache_key,
+                    cache: None,
+                    error: Some("Failed to build analog cache".into()),
+                },
+            };
+
+            // Increment transaction counter before sending to trigger continuous repaint
+            crate::OUTSTANDING_TRANSACTIONS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _ = sender_clone.send(msg);
+
+            // Request immediate repaint
+            if let Some(ctx) = crate::EGUI_CONTEXT.read().unwrap().as_ref() {
+                ctx.request_repaint();
+            }
+        });
+
+        Some(())
+    }
+
+    /// Clear all analog caches (e.g., when loading new waveform)
+    pub fn clear_analog_caches(&mut self) {
+        self.analog_signal_caches.clear();
     }
 }
 

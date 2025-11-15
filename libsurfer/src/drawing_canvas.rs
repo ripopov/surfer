@@ -9,13 +9,14 @@ use num::bigint::{ToBigInt, ToBigUint};
 use num::{BigInt, BigUint, ToPrimitive};
 use rayon::prelude::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::f32::consts::PI;
 use surfer_translation_types::{
     SubFieldFlatTranslationResult, TranslatedValue, ValueKind, VariableInfo, VariableType,
 };
 use tracing::{error, warn};
 
+use crate::analog_renderer::AnalogDrawingCommand;
 use crate::clock_highlighting::draw_clock_edge_marks;
 use crate::config::SurferTheme;
 use crate::data_container::DataContainer;
@@ -34,6 +35,7 @@ use crate::{
     Message, SystemState,
 };
 
+#[derive(Debug)]
 pub struct DrawnRegion {
     pub inner: Option<TranslatedValue>,
     /// True if a transition should be drawn even if there is no change in the value
@@ -42,41 +44,62 @@ pub struct DrawnRegion {
     force_anti_alias: bool,
 }
 
-/// List of values to draw for a variable. It is an ordered list of values that should
-/// be drawn at the *start time* until the *start time* of the next value
-pub struct DrawingCommands {
+/// Drawing commands for a variable, either digital or analog
+#[derive(Debug)]
+pub enum DrawingCommands {
+    Digital(DigitalDrawingCommands),
+    Analog(AnalogDrawingCommands),
+}
+
+/// Drawing commands for digital (boolean/bus) signals
+#[derive(Debug)]
+pub struct DigitalDrawingCommands {
     pub is_bool: bool,
     pub is_clock: bool,
     pub values: Vec<(f32, DrawnRegion)>,
 }
 
+/// Drawing commands for analog signals with anti-aliasing
+#[derive(Debug)]
+pub struct AnalogDrawingCommands {
+    /// Viewport min/max for the visible signal range (used for Y-axis scaling)
+    pub viewport_min: f64,
+    pub viewport_max: f64,
+
+    /// Global min/max across entire signal (used for global Y-axis scaling)
+    pub global_min: f64,
+    pub global_max: f64,
+
+    /// Per-pixel drawing commands with flat spans and ranges
+    pub values: Vec<AnalogDrawingCommand>,
+
+    /// First pixel coordinate within valid waveform time bounds [0, num_timestamps]
+    pub min_valid_pixel: f32,
+
+    /// Last pixel coordinate within valid waveform time bounds [0, num_timestamps]
+    pub max_valid_pixel: f32,
+}
+
+
 impl DrawingCommands {
-    pub fn new_bool() -> Self {
-        Self {
+    pub fn new_digital(is_bool: bool, is_clock: bool) -> Self {
+        DrawingCommands::Digital(DigitalDrawingCommands {
             values: vec![],
-            is_bool: true,
-            is_clock: false,
-        }
+            is_bool,
+            is_clock,
+        })
     }
 
-    pub fn new_clock() -> Self {
-        Self {
+    pub fn new_analog() -> Self {
+        DrawingCommands::Analog(AnalogDrawingCommands {
+            viewport_min: f64::INFINITY,
+            viewport_max: f64::NEG_INFINITY,
+            global_min: f64::INFINITY,
+            global_max: f64::NEG_INFINITY,
             values: vec![],
-            is_bool: true,
-            is_clock: true,
-        }
-    }
-
-    pub fn new_wide() -> Self {
-        Self {
-            values: vec![],
-            is_bool: false,
-            is_clock: false,
-        }
-    }
-
-    pub fn push(&mut self, val: (f32, DrawnRegion)) {
-        self.values.push(val);
+            min_valid_pixel: 0.0,
+            max_valid_pixel: f32::INFINITY,
+        })
     }
 }
 
@@ -86,11 +109,14 @@ pub struct TxDrawingCommands {
     gen_ref: TransactionStreamRef, // makes it easier to later access the actual Transaction object
 }
 
-struct VariableDrawCommands {
-    clock_edges: Vec<f32>,
-    display_id: DisplayedItemRef,
-    local_commands: HashMap<Vec<String>, DrawingCommands>,
-    local_msgs: Vec<Message>,
+pub(crate) struct VariableDrawCommands {
+    pub(crate) clock_edges: Vec<f32>,
+    pub(crate) display_id: DisplayedItemRef,
+    pub(crate) local_commands: HashMap<Vec<String>, DrawingCommands>,
+    pub(crate) local_msgs: Vec<Message>,
+    /// Analog cache key used during rendering (for mark-and-sweep invalidation)
+    /// Key is (SignalRef, translator_name) for cache sharing across aliased variables
+    pub(crate) used_cache_key: Option<(wellen::SignalRef, String)>,
 }
 
 fn variable_draw_commands(
@@ -124,6 +150,22 @@ fn variable_draw_commands(
     // we need to get the variable info here to get the correct info for aliases
     let info = translator.variable_info(&meta).unwrap();
     let num_timestamps = waves.num_timestamps().unwrap_or(1.into());
+
+    // Check if we should use analog mode with anti-aliasing
+    let is_analog_mode = displayed_variable.analog_settings.enabled;
+    let is_bool = matches!(info, VariableInfo::Bool | VariableInfo::Clock);
+
+    // Route to analog command generation if applicable
+    if is_analog_mode && !is_bool {
+        return crate::analog_renderer::variable_analog_draw_commands(
+            displayed_variable,
+            display_id,
+            waves,
+            translators,
+            view_width,
+            viewport_idx,
+        );
+    }
 
     let mut local_commands: HashMap<Vec<_>, _> = HashMap::new();
 
@@ -204,11 +246,11 @@ fn variable_draw_commands(
 
         for SubFieldFlatTranslationResult { names, value } in fields {
             let entry = local_commands.entry(names.clone()).or_insert_with(|| {
-                match info.get_subinfo(&names) {
-                    VariableInfo::Bool => DrawingCommands::new_bool(),
-                    VariableInfo::Clock => DrawingCommands::new_clock(),
-                    _ => DrawingCommands::new_wide(),
-                }
+                let subinfo = info.get_subinfo(&names);
+                DrawingCommands::new_digital(
+                    matches!(subinfo, VariableInfo::Bool | VariableInfo::Clock),
+                    matches!(subinfo, VariableInfo::Clock),
+                )
             });
 
             let prev = prev_values.get(&names);
@@ -242,13 +284,15 @@ fn variable_draw_commands(
                     }
                 }
 
-                entry.push((
-                    *pixel,
-                    DrawnRegion {
-                        inner: value,
-                        force_anti_alias: anti_alias && !new_value,
-                    },
-                ));
+                if let DrawingCommands::Digital(d) = entry {
+                    d.values.push((
+                        *pixel,
+                        DrawnRegion {
+                            inner: value,
+                            force_anti_alias: anti_alias && !new_value,
+                        },
+                    ));
+                }
             }
         }
     }
@@ -257,6 +301,7 @@ fn variable_draw_commands(
         display_id,
         local_commands,
         local_msgs,
+        used_cache_key: None, // Not analog mode
     })
 }
 
@@ -355,13 +400,22 @@ impl SystemState {
             })
             .collect::<Vec<_>>();
 
+        // Collect used analog cache keys for mark-and-sweep invalidation
+        let mut used_analog_keys = HashSet::new();
+
         for VariableDrawCommands {
             clock_edges: mut new_clock_edges,
             display_id,
             local_commands,
             mut local_msgs,
+            used_cache_key,
         } in commands
         {
+            // Collect used analog cache keys
+            if let Some(key) = used_cache_key {
+                used_analog_keys.insert(key);
+            }
+
             msgs.append(&mut local_msgs);
             for (field, val) in local_commands {
                 draw_commands.insert(
@@ -374,6 +428,12 @@ impl SystemState {
             }
             clock_edges.append(&mut new_clock_edges);
         }
+
+        // Sweep unused analog caches
+        msgs.push(Message::SweepUnusedAnalogCaches {
+            used_keys: used_analog_keys,
+        });
+
         let ticks = waves.get_ticks(
             &waves.viewports[viewport_idx],
             &waves.inner.metadata().timescale,
@@ -914,52 +974,56 @@ impl SystemState {
                                 &self.user.config.theme.variable_default
                             }
                         });
-                        // Check analog mode for this variable
-                        let analog_mode =
+                        // Check analog settings for this variable
+                        let analog_settings =
                             if let Some(DisplayedItem::Variable(variable)) = displayed_item {
-                                &variable.analog_mode
+                                &variable.analog_settings
                             } else {
-                                &crate::displayed_item::AnalogMode::Off
+                                &crate::displayed_item::AnalogSettings::off()
                             };
 
-                        if *analog_mode != crate::displayed_item::AnalogMode::Off
-                            && !commands.is_bool
-                        {
-                            // Use analog rendering for non-boolean signals when analog mode is enabled
-                            crate::analog_renderer::draw_analog(
-                                commands,
-                                color,
-                                y_offset,
-                                height_scaling_factor,
-                                analog_mode,
-                                frame_width,
-                                ctx,
-                            );
-                        } else {
-                            for (old, new) in
-                                commands.values.iter().zip(commands.values.iter().skip(1))
-                            {
-                                if commands.is_bool {
-                                    self.draw_bool_transition(
-                                        (old, new),
-                                        new.1.force_anti_alias,
-                                        color,
-                                        y_offset,
-                                        height_scaling_factor,
-                                        commands.is_clock && draw_clock_rising_marker,
-                                        self.fill_high_values(),
-                                        ctx,
-                                    );
-                                } else {
-                                    self.draw_region(
-                                        (old, new),
-                                        color,
-                                        y_offset,
-                                        height_scaling_factor,
-                                        ctx,
-                                        *text_color,
-                                    );
+                        match commands {
+                            DrawingCommands::Digital(digital_commands) => {
+                                // Digital rendering logic
+                                for (old, new) in digital_commands
+                                    .values
+                                    .iter()
+                                    .zip(digital_commands.values.iter().skip(1))
+                                {
+                                    if digital_commands.is_bool {
+                                        self.draw_bool_transition(
+                                            (old, new),
+                                            new.1.force_anti_alias,
+                                            color,
+                                            y_offset,
+                                            height_scaling_factor,
+                                            digital_commands.is_clock && draw_clock_rising_marker,
+                                            self.fill_high_values(),
+                                            ctx,
+                                        );
+                                    } else {
+                                        self.draw_region(
+                                            (old, new),
+                                            color,
+                                            y_offset,
+                                            height_scaling_factor,
+                                            ctx,
+                                            *text_color,
+                                        );
+                                    }
                                 }
+                            }
+                            DrawingCommands::Analog(_analog_commands) => {
+                                // Analog rendering
+                                crate::analog_renderer::draw_analog(
+                                    commands,
+                                    color,
+                                    y_offset,
+                                    height_scaling_factor,
+                                    analog_settings,
+                                    frame_width,
+                                    ctx,
+                                );
                             }
                         }
                     }

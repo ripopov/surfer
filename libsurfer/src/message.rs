@@ -6,7 +6,9 @@ use emath::{Pos2, Vec2};
 use ftr_parser::types::Transaction;
 use num::BigInt;
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 use surver::Status;
 
 use crate::async_util::AsyncJob;
@@ -190,7 +192,7 @@ pub enum Message {
     #[serde(skip)]
     Error(eyre::Error),
     #[serde(skip)]
-    TranslatorLoaded(#[debug(skip)] Box<DynTranslator>),
+    TranslatorLoaded(#[debug(skip)] Arc<DynTranslator>),
     /// Take note that the specified translator errored on a `translates` call on the
     /// specified variable
     BlacklistTranslator(VariableRef, String),
@@ -361,11 +363,32 @@ pub enum Message {
         item: DisplayedItemRef,
         levels: usize,
     },
-    /// Set analog mode for a variable
-    SetAnalogMode(
+    /// Set analog settings for a variable
+    SetAnalogSettings(
         MessageTarget<VisibleItemIndex>,
-        crate::displayed_item::AnalogMode,
+        crate::displayed_item::AnalogSettings,
     ),
+    /// Build analog cache asynchronously
+    /// Keyed by (SignalRef, translator_name) for cache sharing across aliases
+    BuildAnalogCache {
+        signal_ref: wellen::SignalRef,
+        translator_name: String,
+        variable_ref: crate::wave_container::VariableRef,
+    },
+    #[serde(skip)]
+    /// Analog cache build completed
+    AnalogCacheBuilt {
+        cache_key: (wellen::SignalRef, String),
+        #[debug(skip)]
+        cache: Option<crate::analog_signal_cache::AnalogSignalCache>,
+        error: Option<String>,
+    },
+    #[serde(skip)]
+    /// Sweep unused analog caches after draw command generation
+    SweepUnusedAnalogCaches {
+        #[debug(skip)]
+        used_keys: HashSet<(wellen::SignalRef, String)>,
+    },
 
     SetViewportStrategy(ViewportStrategy),
     SetConfigFromString(String),

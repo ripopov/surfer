@@ -368,6 +368,27 @@ impl WaveContainer {
         }
     }
 
+    /// Get a SignalAccessor for a variable (cheap Arc clones)
+    pub fn get_signal_accessor(
+        &self,
+        variable: &VariableRef,
+    ) -> Result<crate::wellen::SignalAccessor> {
+        match self {
+            WaveContainer::Wellen(f) => f.get_signal_accessor(variable),
+            WaveContainer::Empty => bail!("No signal data"),
+            WaveContainer::Cxxrtl(_) => bail!("Not supported for Cxxrtl yet"),
+        }
+    }
+
+    /// Get the SignalRef for a variable (canonical signal identity for cache keys)
+    pub fn get_signal_ref(&self, variable: &VariableRef) -> Result<wellen::SignalRef> {
+        match self {
+            WaveContainer::Wellen(f) => f.get_signal_ref(variable),
+            WaveContainer::Empty => bail!("No signal data"),
+            WaveContainer::Cxxrtl(_) => bail!("Not supported for Cxxrtl yet"),
+        }
+    }
+
     /// Looks up the variable _by name_ and returns a new reference with an updated `id` if the variable is found.
     pub fn update_variable_ref(&self, variable: &VariableRef) -> Option<VariableRef> {
         match self {
