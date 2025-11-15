@@ -2,7 +2,7 @@ mod client;
 
 use serde::{Deserialize, Serialize};
 
-pub use client::{get_hierarchy, get_signals, get_status, get_time_table};
+pub use client::{get_hierarchy, get_signals, get_status, get_time_table, reload};
 
 #[derive(Serialize, Deserialize)]
 pub struct HierarchyResponse {

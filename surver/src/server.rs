@@ -8,7 +8,6 @@ use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use std::collections::HashMap;
-use std::io::{BufRead, Seek};
 use std::iter::repeat_with;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -40,6 +39,11 @@ struct ReadOnly {
 struct State {
     timetable: Vec<Time>,
     signals: HashMap<SignalRef, Signal>,
+}
+
+enum LoaderMessage {
+    SignalRequest(SignalRequest),
+    Reload,
 }
 
 type SignalRequest = Vec<SignalRef>;
@@ -127,7 +131,7 @@ fn get_status(shared: Arc<ReadOnly>) -> Result<Vec<u8>> {
 
 async fn get_signals(
     state: Arc<RwLock<State>>,
-    tx: Sender<SignalRequest>,
+    tx: Sender<LoaderMessage>,
     id_strings: &[&str],
 ) -> Result<Vec<u8>> {
     let mut ids = Vec::with_capacity(id_strings.len());
@@ -141,7 +145,7 @@ async fn get_signals(
     let num_ids = ids.len();
 
     // send request to background thread
-    tx.send(ids.clone())?;
+    tx.send(LoaderMessage::SignalRequest(ids.clone()))?;
 
     // poll to see when all our ids are returned
     let mut data = vec![];
@@ -190,7 +194,7 @@ impl DefaultHeader for hyper::http::response::Builder {
 async fn handle_cmd(
     state: Arc<RwLock<State>>,
     shared: Arc<ReadOnly>,
-    tx: Sender<SignalRequest>,
+    tx: Sender<LoaderMessage>,
     cmd: &str,
     args: &[&str],
 ) -> Result<Response<Full<Bytes>>> {
@@ -224,6 +228,16 @@ async fn handle_cmd(
                 .default_header()
                 .body(Full::from(body))
         }
+        ("reload", []) => {
+            info!("Reload requested");
+            tx.send(LoaderMessage::Reload)?;
+            let body = get_status(shared)?;
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, JSON_MIME)
+                .default_header()
+                .body(Full::from(body))
+        }
         _ => {
             // unknown command or unexpected number of arguments
             Response::builder()
@@ -237,7 +251,7 @@ async fn handle_cmd(
 async fn handle(
     state: Arc<RwLock<State>>,
     shared: Arc<ReadOnly>,
-    tx: Sender<SignalRequest>,
+    tx: Sender<LoaderMessage>,
     req: Request<hyper::body::Incoming>,
 ) -> Result<Response<Full<Bytes>>> {
     // check to see if the correct token was received
@@ -334,7 +348,7 @@ pub async fn server_main(
     // state can be written by the loading thread
     let state = Arc::new(RwLock::new(State::default()));
     // channel to communicate with loader
-    let (tx, rx) = std::sync::mpsc::channel::<SignalRequest>();
+    let (tx, rx) = std::sync::mpsc::channel::<LoaderMessage>();
     // start work thread
     let shared_2 = shared.clone();
     let state_2 = state.clone();
@@ -390,62 +404,83 @@ pub async fn server_main(
 }
 
 /// Thread that loads the body and signals.
-fn loader<R: BufRead + Seek + Sync + Send + 'static>(
+fn loader(
     shared: Arc<ReadOnly>,
-    body_cont: viewers::ReadBodyContinuation<R>,
+    mut body_cont: viewers::ReadBodyContinuation<std::io::BufReader<std::fs::File>>,
     state: Arc<RwLock<State>>,
-    rx: std::sync::mpsc::Receiver<SignalRequest>,
+    rx: std::sync::mpsc::Receiver<LoaderMessage>,
 ) -> Result<()> {
-    // load the body of the file
-    let start_load_body = web_time::Instant::now();
-    let body_result = viewers::read_body(
-        body_cont,
-        &shared.hierarchy,
-        Some(shared.body_progress.clone()),
-    )
-    .map_err(|e| anyhow!("{e:?}"))
-    .with_context(|| format!("Failed to parse body of wave file: {}", shared.filename))?;
-    info!("Loaded body in {:?}", start_load_body.elapsed());
-
-    // update state with body results
-    {
-        let mut state = state.write().unwrap();
-        state.timetable = body_result.time_table;
-    }
-    // source is private, only owned by us
-    let mut source = body_result.source;
-
-    // process requests for signals to be loaded
     loop {
-        let ids = rx.recv()?;
+        // load the body of the file
+        let start_load_body = web_time::Instant::now();
+        let body_result = viewers::read_body(
+            body_cont,
+            &shared.hierarchy,
+            Some(shared.body_progress.clone()),
+        )
+        .map_err(|e| anyhow!("{e:?}"))
+        .with_context(|| format!("Failed to parse body of wave file: {}", shared.filename))?;
+        info!("Loaded body in {:?}", start_load_body.elapsed());
 
-        // make sure that we do not load signals that have already been loaded
-        let mut filtered_ids = {
-            let state_lock = state.read().unwrap();
-            ids.iter()
-                .filter(|id| !state_lock.signals.contains_key(id))
-                .cloned()
-                .collect::<Vec<_>>()
-        };
-
-        // check if there is anything left to do
-        if filtered_ids.is_empty() {
-            continue;
-        }
-
-        // load signals without holding the lock
-        filtered_ids.sort();
-        filtered_ids.dedup();
-        let result = source.load_signals(&filtered_ids, &shared.hierarchy, true);
-
-        // store signals
+        // update state with body results
         {
             let mut state = state.write().unwrap();
-            for (id, signal) in result {
-                state.signals.insert(id, signal);
+            state.timetable = body_result.time_table;
+            state.signals.clear(); // Clear old signals on reload
+        }
+        // source is private, only owned by us
+        let mut source = body_result.source;
+
+        // process requests for signals to be loaded
+        loop {
+            let msg = rx.recv()?;
+
+            match msg {
+                LoaderMessage::SignalRequest(ids) => {
+                    // make sure that we do not load signals that have already been loaded
+                    let mut filtered_ids = {
+                        let state_lock = state.read().unwrap();
+                        ids.iter()
+                            .filter(|id| !state_lock.signals.contains_key(id))
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    };
+
+                    // check if there is anything left to do
+                    if filtered_ids.is_empty() {
+                        continue;
+                    }
+
+                    // load signals without holding the lock
+                    filtered_ids.sort();
+                    filtered_ids.dedup();
+                    let result = source.load_signals(&filtered_ids, &shared.hierarchy, true);
+
+                    // store signals
+                    {
+                        let mut state = state.write().unwrap();
+                        for (id, signal) in result {
+                            state.signals.insert(id, signal);
+                        }
+                    }
+                }
+                LoaderMessage::Reload => {
+                    info!("Reloading waveform file: {}", shared.filename);
+                    // Reset progress counter
+                    shared.body_progress.store(0, Ordering::SeqCst);
+
+                    // Re-read header to get new body continuation
+                    let header_result = wellen::viewers::read_header_from_file(
+                        shared.filename.clone(),
+                        &WELLEN_SURFER_DEFAULT_OPTIONS,
+                    )
+                    .map_err(|e| anyhow!("{e:?}"))
+                    .with_context(|| format!("Failed to reload wave file: {}", shared.filename))?;
+
+                    body_cont = header_result.body;
+                    break; // Break inner loop to reload the body
+                }
             }
         }
     }
-
-    // unreachable!("the user needs to terminate the server")
 }
