@@ -89,14 +89,13 @@ pub async fn get_time_table(server: String) -> Result<Vec<wellen::Time>> {
 pub async fn get_signals(
     server: String,
     signals: &[wellen::SignalRef],
+    max_url_length: u16,
 ) -> Result<Vec<(wellen::SignalRef, wellen::Signal)>> {
-    // Hyper supports URLs of 65534 bytes
-    const MAX_URL_LENGTH: usize = (u16::MAX - 1) as usize;
-
     if signals.is_empty() {
         return Ok(vec![]);
     }
 
+    let max_url_length = max_url_length as usize;
     let base_url = format!("{server}/get_signals");
     let base_len = base_url.len();
 
@@ -109,7 +108,7 @@ pub async fn get_signals(
         let signal_len = signal.index().checked_ilog10().unwrap_or(0) as usize + 2; // +1 for '/', +1 as ilog10 rounds down
 
         // Check if adding this signal would exceed the limit
-        if current_url_len + signal_len > MAX_URL_LENGTH && !current_batch.is_empty() {
+        if current_url_len + signal_len > max_url_length && !current_batch.is_empty() {
             // Fetch current batch
             let batch_results = get_signals_batch(&base_url, &current_batch).await?;
             all_results.extend(batch_results);
