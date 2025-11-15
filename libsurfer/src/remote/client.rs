@@ -86,6 +86,14 @@ pub async fn get_time_table(server: String) -> Result<Vec<wellen::Time>> {
     Ok(table)
 }
 
+// Helper to calculate URL length for a signal index
+// Much more efficient than string conversion
+// Extracted for testing
+#[inline]
+fn signal_url_len(index: usize) -> usize {
+    index.checked_ilog10().unwrap_or(0) as usize + 2 // +1 for '/', +1 as ilog10 rounds down
+}
+
 pub async fn get_signals(
     server: String,
     signals: &[wellen::SignalRef],
@@ -105,7 +113,7 @@ pub async fn get_signals(
 
     for signal in signals.iter() {
         // Each signal adds: "/" + digits
-        let signal_len = signal.index().checked_ilog10().unwrap_or(0) as usize + 2; // +1 for '/', +1 as ilog10 rounds down
+        let signal_len = signal_url_len(signal.index());
 
         // Check if adding this signal would exceed the limit
         if current_url_len + signal_len > max_url_length && !current_batch.is_empty() {
@@ -135,15 +143,23 @@ pub async fn get_signals(
     Ok(all_results)
 }
 
+// Helper to format signal URL
+// Extracted for testing
+#[inline]
+fn format_signal_url(base_url: &str, signals: &[wellen::SignalRef]) -> String {
+    let mut url = base_url.to_string();
+    for signal in signals.iter() {
+        url.push_str(&format!("/{}", signal.index()));
+    }
+    url
+}
+
 async fn get_signals_batch(
     base_url: &str,
     signals: &[wellen::SignalRef],
 ) -> Result<Vec<(wellen::SignalRef, wellen::Signal)>> {
     let client = get_client();
-    let mut url = base_url.to_string();
-    for signal in signals.iter() {
-        url.push_str(&format!("/{}", signal.index()));
-    }
+    let url = format_signal_url(base_url, signals);
 
     let response = client.get(url).send().await?;
     check_response(base_url, &response)?;
@@ -172,4 +188,77 @@ async fn get_signals_batch(
     let signal = compressed.uncompress();
     out.push((signal.signal_ref(), signal));
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_signal_url_length_calculation() {
+        // Test edge cases for digit calculation
+        assert_eq!(signal_url_len(0), 2); // "/0" -> 2 chars
+        assert_eq!(signal_url_len(1), 2); // "/1" -> 2 chars
+        assert_eq!(signal_url_len(9), 2); // "/9" -> 2 chars
+        assert_eq!(signal_url_len(10), 3); // "/10" -> 3 chars
+        assert_eq!(signal_url_len(99), 3); // "/99" -> 3 chars
+        assert_eq!(signal_url_len(100), 4); // "/100" -> 4 chars
+        assert_eq!(signal_url_len(999), 4); // "/999" -> 4 chars
+        assert_eq!(signal_url_len(1000), 5); // "/1000" -> 5 chars
+        assert_eq!(signal_url_len(65535), 6); // "/65535" -> 6 chars
+    }
+
+    #[test]
+    fn test_empty_signals_returns_empty() {
+        // Create a mock async runtime for testing
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let signals: Vec<wellen::SignalRef> = vec![];
+            let result = get_signals("http://localhost:8080".to_string(), &signals, 1000).await;
+
+            // Should return Ok with empty vec without making any network calls
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap().len(), 0);
+        });
+    }
+
+    #[test]
+    fn test_boundary_signal_indices() {
+        // Test that we handle boundary cases correctly
+        let boundary_indices = vec![0, 1, 9, 10, 99, 100, 999, 1000, 9999, 10000];
+
+        for idx in boundary_indices {
+            let sig_ref = wellen::SignalRef::from_index(idx);
+            let len = signal_url_len(sig_ref.unwrap().index());
+
+            // Verify the calculated length matches actual string length
+            let actual = format!("/{}", idx);
+            assert_eq!(
+                len,
+                actual.len(),
+                "URL length calculation mismatch for index {}: expected {}, got {}",
+                idx,
+                actual.len(),
+                len
+            );
+        }
+    }
+
+    #[test]
+    fn test_url_construction_format() {
+        // Verify URL format matches expected pattern
+        let base_url = "http://localhost:8080/get_signals";
+        let signals: Vec<wellen::SignalRef> = vec![
+            wellen::SignalRef::from_index(1),
+            wellen::SignalRef::from_index(42),
+            wellen::SignalRef::from_index(999),
+        ]
+        .into_iter()
+        .filter_map(|s| s)
+        .collect();
+
+        let url = format_signal_url(base_url, &signals);
+
+        assert_eq!(url, "http://localhost:8080/get_signals/1/42/999");
+    }
 }
