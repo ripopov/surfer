@@ -59,6 +59,7 @@ struct VariableFilterRegexCache {
     regex_pattern: Option<String>,
     regex_case_insensitive: bool,
     regex: Option<Regex>,
+    regex_error: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -94,6 +95,13 @@ impl VariableFilter {
 
     fn name_filter_fn(&self) -> Box<dyn FnMut(&str) -> bool> {
         if self.name_filter_str.is_empty() {
+            if self.name_filter_type == VariableNameFilterType::Regex {
+                // Clear cached regex when filter string is empty
+                let mut cache = self.cache.borrow_mut();
+                cache.regex_pattern = None;
+                cache.regex = None;
+                cache.regex_error = None;
+            }
             return Box::new(|_var_name| true);
         }
 
@@ -127,10 +135,19 @@ impl VariableFilter {
             if rebuild {
                 cache.regex_pattern = Some(pat.clone());
                 cache.regex_case_insensitive = case_insensitive;
-                cache.regex = RegexBuilder::new(&pat)
+                match RegexBuilder::new(&pat)
                     .case_insensitive(case_insensitive)
                     .build()
-                    .ok();
+                {
+                    Ok(r) => {
+                        cache.regex = Some(r);
+                        cache.regex_error = None;
+                    }
+                    Err(e) => {
+                        cache.regex = None;
+                        cache.regex_error = Some(e.to_string());
+                    }
+                }
             }
 
             if let Some(r) = cache.regex.as_ref() {
@@ -202,7 +219,17 @@ impl VariableFilter {
             return false;
         }
         let cache = self.cache.borrow();
-        cache.regex.is_none()
+        cache.regex_error.is_some()
+    }
+
+    /// Returns the regex error message if the current filter type is Regex and
+    /// the regex compilation failed.
+    pub fn regex_error(&self) -> Option<String> {
+        if self.name_filter_type != VariableNameFilterType::Regex {
+            return None;
+        }
+        let cache = self.cache.borrow();
+        cache.regex_error.clone()
     }
 }
 
@@ -244,16 +271,35 @@ impl SystemState {
                         self.user.variable_filter.name_filter_str.clear();
                     }
 
-                    // Check if regex and if an incorrect regex, change background color
-                    if self.user.variable_filter.is_regex_and_invalid() {
+                    // Create text edit with isolated style for invalid regex
+                    let is_invalid = self.user.variable_filter.is_regex_and_invalid();
+                    let error_msg = self.user.variable_filter.regex_error();
+
+                    // Save original style to restore after
+                    let original_bg = ui.style().visuals.extreme_bg_color;
+
+                    if is_invalid {
                         ui.style_mut().visuals.extreme_bg_color =
                             self.user.config.theme.accent_error.background;
                     }
-                    // Create text edit
-                    let response = ui.add(
+
+                    let mut response = ui.add(
                         TextEdit::singleline(&mut self.user.variable_filter.name_filter_str)
                             .hint_text("Filter"),
                     );
+
+                    // Restore original style immediately after rendering
+                    ui.style_mut().visuals.extreme_bg_color = original_bg;
+
+                    // Add hover text with error message if regex is invalid
+                    if let Some(err) = error_msg {
+                        response = response.on_hover_ui(|ui| {
+                            ui.label(egui::RichText::new("Invalid regex:"));
+                            // Use monospace font for error details as it contains position information
+                            ui.label(egui::RichText::new(err).family(egui::FontFamily::Monospace));
+                        });
+                    }
+
                     // Handle focus
                     if response.gained_focus() {
                         msgs.push(Message::SetFilterFocused(true));
