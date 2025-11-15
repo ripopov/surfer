@@ -153,18 +153,13 @@ impl SystemState {
                 .map(|e| e.with_context(|| format!("Failed to download {url}")))
                 .await;
 
-            match bytes {
-                Ok(b) => {
-                    if let Err(e) = sender.send(Message::CommandFileDownloaded(url, b)) {
-                        error!("Failed to send message: {e}");
-                    }
-                }
-                Err(e) => {
-                    if let Err(e) = sender.send(Message::Error(e)) {
-                        error!("Failed to send error message: {e}");
-                    }
-                }
+            let msg = match bytes {
+                Ok(b) => Message::CommandFileDownloaded(url, b),
+                Err(e) => Message::Error(e),
             };
+            if let Err(e) = sender.send(msg) {
+                error!("Failed to send message: {e}");
+            }
         };
         spawn!(task);
 

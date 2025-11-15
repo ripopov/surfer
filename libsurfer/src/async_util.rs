@@ -12,6 +12,17 @@ pub enum AsyncJob {
     SaveState,
 }
 
+// Platform-dependent trait alias for futures that can be spawned
+#[cfg(target_arch = "wasm32")]
+pub trait SpawnableFuture: Future<Output = ()> + 'static {}
+#[cfg(target_arch = "wasm32")]
+impl<F> SpawnableFuture for F where F: Future<Output = ()> + 'static {}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub trait SpawnableFuture: Future<Output = ()> + Send + 'static {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<F> SpawnableFuture for F where F: Future<Output = ()> + Send + 'static {}
+
 // Wasm doesn't seem to support std::thread, so this spawns a thread where we can
 // but runs the work sequentially where we can not.
 pub fn perform_work<F>(f: F)
@@ -25,22 +36,13 @@ where
     info!("Returning from perform work")
 }
 
-// NOTE: wasm32 does not require a Send bound.
-#[cfg(target_arch = "wasm32")]
+// Spawn an async task on the appropriate runtime.
+// NOTE: wasm32 does not require a Send bound, but not-wasm32 does.
 pub fn perform_async_work<F>(f: F)
 where
-    F: Future<Output = ()> + 'static,
+    F: SpawnableFuture,
 {
-    wasm_bindgen_futures::spawn_local(f);
-}
-
-// NOTE: not wasm32 requires a Send bound too.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn perform_async_work<F>(f: F)
-where
-    F: Future<Output = ()> + Send + 'static,
-{
-    tokio::spawn(f);
+    spawn!(f);
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -255,23 +255,17 @@ impl SystemState {
             .map_err(|e| anyhow!("{e:?}"))
             .with_context(|| format!("Failed to parse wave file: {source}"));
 
-            match header_result {
-                Ok(header) => {
-                    let msg = Message::WaveHeaderLoaded(
-                        start,
-                        source,
-                        load_options,
-                        HeaderResult::LocalFile(Box::new(header)),
-                    );
-                    if let Err(e) = sender.send(msg) {
-                        error!("Failed to send message: {e}");
-                    }
-                }
-                Err(e) => {
-                    if let Err(err) = sender.send(Message::Error(e)) {
-                        error!("Failed to send error message: {err}");
-                    }
-                }
+            let msg = match header_result {
+                Ok(header) => Message::WaveHeaderLoaded(
+                    start,
+                    source,
+                    load_options,
+                    HeaderResult::LocalFile(Box::new(header)),
+                ),
+                Err(e) => Message::Error(e),
+            };
+            if let Err(e) = sender.send(msg) {
+                error!("Failed to send message: {e}");
             }
         });
 
@@ -389,20 +383,13 @@ impl SystemState {
                         .map(|e| e.with_context(|| format!("Failed to download {url}")))
                         .await;
 
-                    match bytes {
-                        Ok(b) => {
-                            if let Err(err) =
-                                sender.send(Message::FileDownloaded(url, b, load_options))
-                            {
-                                error!("Failed to send message: {err}");
-                            }
-                        }
-                        Err(e) => {
-                            if let Err(err) = sender.send(Message::Error(e)) {
-                                error!("Failed to send error message: {err}");
-                            }
-                        }
+                    let msg = match bytes {
+                        Ok(b) => Message::FileDownloaded(url, b, load_options),
+                        Err(e) => Message::Error(e),
                     };
+                    if let Err(e) = sender.send(msg) {
+                        error!("Failed to send message: {e}");
+                    }
                 };
                 spawn!(task);
 
@@ -426,20 +413,17 @@ impl SystemState {
 
         info!("Done with loading ftr file");
 
-        match result {
-            Ok(ftr) => sender
-                .send(Message::TransactionStreamsLoaded(
-                    source,
-                    format,
-                    TransactionContainer { inner: ftr },
-                    load_options,
-                ))
-                .unwrap(),
-            Err(e) => {
-                if let Err(e) = sender.send(Message::Error(Report::msg(e))) {
-                    error!("Failed to send error message: {e}");
-                }
-            }
+        let msg = match result {
+            Ok(ftr) => Message::TransactionStreamsLoaded(
+                source,
+                format,
+                TransactionContainer { inner: ftr },
+                load_options,
+            ),
+            Err(e) => Message::Error(Report::msg(e)),
+        };
+        if let Err(e) = sender.send(msg) {
+            error!("Failed to send error message: {e}");
         }
         Ok(())
     }
@@ -455,20 +439,17 @@ impl SystemState {
 
         info!("Done with loading ftr file");
 
-        match result {
-            Ok(ftr) => sender
-                .send(Message::TransactionStreamsLoaded(
-                    source,
-                    WaveFormat::Ftr,
-                    TransactionContainer { inner: ftr },
-                    load_options,
-                ))
-                .unwrap(),
-            Err(e) => {
-                if let Err(e) = sender.send(Message::Error(Report::msg(e))) {
-                    error!("Failed to send error message: {e}");
-                }
-            }
+        let msg = match result {
+            Ok(ftr) => Message::TransactionStreamsLoaded(
+                source,
+                WaveFormat::Ftr,
+                TransactionContainer { inner: ftr },
+                load_options,
+            ),
+            Err(e) => Message::Error(Report::msg(e)),
+        };
+        if let Err(e) = sender.send(msg) {
+            error!("Failed to send message: {e}");
         }
     }
     fn get_hierarchy_from_server(
@@ -487,19 +468,15 @@ impl SystemState {
                     format!("Failed to retrieve hierarchy from remote server {server}")
                 });
 
-            match res {
+            let msg = match res {
                 Ok(h) => {
                     let header = HeaderResult::Remote(Arc::new(h.hierarchy), h.file_format, server);
-                    let msg = Message::WaveHeaderLoaded(start, source, load_options, header);
-                    if let Err(e) = sender.send(msg) {
-                        error!("Failed to send message: {e}");
-                    }
+                    Message::WaveHeaderLoaded(start, source, load_options, header)
                 }
-                Err(e) => {
-                    if let Err(err) = sender.send(Message::Error(e)) {
-                        error!("Failed to send error message: {err}");
-                    }
-                }
+                Err(e) => Message::Error(e),
+            };
+            if let Err(e) = sender.send(msg) {
+                error!("Failed to send message: {e}");
             }
         };
         spawn!(task);
@@ -517,19 +494,14 @@ impl SystemState {
                     format!("Failed to retrieve time table from remote server {server}")
                 });
 
-            match res {
+            let msg = match res {
                 Ok(table) => {
-                    let msg =
-                        Message::WaveBodyLoaded(start, source, BodyResult::Remote(table, server));
-                    if let Err(e) = sender.send(msg) {
-                        error!("Failed to send message: {e}");
-                    }
+                    Message::WaveBodyLoaded(start, source, BodyResult::Remote(table, server))
                 }
-                Err(e) => {
-                    if let Err(err) = sender.send(Message::Error(e)) {
-                        error!("Failed to send error message: {err}");
-                    }
-                }
+                Err(e) => Message::Error(e),
+            };
+            if let Err(e) = sender.send(msg) {
+                error!("Failed to send message: {e}");
             }
         };
         spawn!(task);
@@ -544,18 +516,12 @@ impl SystemState {
                 .map_err(|e| anyhow!("{e:?}"))
                 .with_context(|| format!("Failed to retrieve status from remote server {server}"));
 
-            match res {
-                Ok(status) => {
-                    let msg = Message::SurferServerStatus(start, server, status);
-                    if let Err(e) = sender.send(msg) {
-                        error!("Failed to send message: {e}");
-                    }
-                }
-                Err(e) => {
-                    if let Err(err) = sender.send(Message::Error(e)) {
-                        error!("Failed to send error message: {err}");
-                    }
-                }
+            let msg = match res {
+                Ok(status) => Message::SurferServerStatus(start, server, status),
+                Err(e) => Message::Error(e),
+            };
+            if let Err(e) = sender.send(msg) {
+                error!("Failed to send message: {e}");
             }
         };
         spawn!(task);
@@ -610,25 +576,20 @@ impl SystemState {
                 CxxrtlKind::Mailbox => CxxrtlContainer::new_wasm_mailbox(sender.clone()).await,
             };
 
-            match container {
-                Ok(c) => {
-                    if let Err(err) = sender.send(Message::WavesLoaded(
-                        WaveSource::Cxxrtl(kind),
-                        WaveFormat::CxxRtl,
-                        Box::new(WaveContainer::Cxxrtl(Box::new(Mutex::new(c)))),
-                        LoadOptions {
-                            keep_variables,
-                            keep_unavailable: false,
-                        },
-                    )) {
-                        error!("Failed to send message: {err}");
-                    }
-                }
-                Err(e) => {
-                    if let Err(err) = sender.send(Message::Error(e)) {
-                        error!("Failed to send error message: {err}");
-                    }
-                }
+            let msg = match container {
+                Ok(c) => Message::WavesLoaded(
+                    WaveSource::Cxxrtl(kind),
+                    WaveFormat::CxxRtl,
+                    Box::new(WaveContainer::Cxxrtl(Box::new(Mutex::new(c)))),
+                    LoadOptions {
+                        keep_variables,
+                        keep_unavailable: false,
+                    },
+                ),
+                Err(e) => Message::Error(e),
+            };
+            if let Err(e) = sender.send(msg) {
+                error!("Failed to send message: {e}");
             }
         };
         #[cfg(not(target_arch = "wasm32"))]
@@ -652,23 +613,17 @@ impl SystemState {
                     .map_err(|e| anyhow!("{e:?}"))
                     .with_context(|| format!("Failed to parse wave file: {source}"));
 
-            match header_result {
-                Ok(header) => {
-                    let msg = Message::WaveHeaderLoaded(
-                        start,
-                        source,
-                        load_options,
-                        HeaderResult::LocalBytes(Box::new(header)),
-                    );
-                    if let Err(e) = sender.send(msg) {
-                        error!("Failed to send message: {e}");
-                    }
-                }
-                Err(e) => {
-                    if let Err(err) = sender.send(Message::Error(e)) {
-                        error!("Failed to send error message: {err}");
-                    }
-                }
+            let msg = match header_result {
+                Ok(header) => Message::WaveHeaderLoaded(
+                    start,
+                    source,
+                    load_options,
+                    HeaderResult::LocalBytes(Box::new(header)),
+                ),
+                Err(e) => Message::Error(e),
+            };
+            if let Err(e) = sender.send(msg) {
+                error!("Failed to send message: {e}");
             }
         });
 
@@ -711,18 +666,12 @@ impl SystemState {
                     .map_err(|e| anyhow!("{e:?}"))
                     .with_context(|| format!("Failed to parse body of wave file: {source}"));
 
-                match body_result {
-                    Ok(body) => {
-                        let msg = Message::WaveBodyLoaded(start, source, BodyResult::Local(body));
-                        if let Err(e) = sender.send(msg) {
-                            error!("Failed to send message: {e}");
-                        }
-                    }
-                    Err(e) => {
-                        if let Err(err) = sender.send(Message::Error(e)) {
-                            error!("Failed to send error message: {err}");
-                        }
-                    }
+                let msg = match body_result {
+                    Ok(body) => Message::WaveBodyLoaded(start, source, BodyResult::Local(body)),
+                    Err(e) => Message::Error(e),
+                };
+                if let Err(e) = sender.send(msg) {
+                    error!("Failed to send message: {e}");
                 }
             };
             if let Some(pool) = pool {
@@ -777,19 +726,15 @@ impl SystemState {
                             format!("Failed to retrieve signals from remote server {server}")
                         });
 
-                    match res {
+                    let msg = match res {
                         Ok(loaded) => {
                             let res = LoadSignalsResult::remote(server, loaded, from_unique_id);
-                            let msg = Message::SignalsLoaded(start, res);
-                            if let Err(e) = sender.send(msg) {
-                                error!("Failed to send message: {e}");
-                            }
+                            Message::SignalsLoaded(start, res)
                         }
-                        Err(e) => {
-                            if let Err(err) = sender.send(Message::Error(e)) {
-                                error!("Failed to send error message: {err}");
-                            }
-                        }
+                        Err(e) => Message::Error(e),
+                    };
+                    if let Err(e) = sender.send(msg) {
+                        error!("Failed to send message: {e}");
                     }
                 };
                 spawn!(task);
