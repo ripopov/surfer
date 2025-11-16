@@ -20,10 +20,7 @@ fn create_gesture_stroke(config: &SurferConfig, is_measure: bool) -> Stroke {
     } else {
         &config.theme.gesture
     };
-    Stroke {
-        color: line_style.color,
-        width: line_style.width,
-    }
+    Stroke::from(line_style)
 }
 
 /// The supported mouse gesture operations.
@@ -416,10 +413,7 @@ fn draw_gesture_help(
         RectTransform::from_to(container_rect, response.rect)
             .transform_pos(Pos2::new(x, y) + Vec2::new(0.5, 0.5))
     };
-    let stroke = Stroke {
-        color: config.theme.gesture.color,
-        width: config.theme.gesture.width,
-    };
+    let stroke = Stroke::from(&config.theme.gesture);
     let tan225deltax = TAN_22_5_DEGREES * deltax;
     let tan225deltay = TAN_22_5_DEGREES * deltay;
     let left = midx - deltax;

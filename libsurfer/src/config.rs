@@ -304,6 +304,15 @@ impl From<SurferLineStyle> for Stroke {
     }
 }
 
+impl From<&SurferLineStyle> for Stroke {
+    fn from(style: &SurferLineStyle) -> Self {
+        Stroke {
+            color: style.color,
+            width: style.width,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 /// Tick mark configuration
 pub struct SurferTicks {

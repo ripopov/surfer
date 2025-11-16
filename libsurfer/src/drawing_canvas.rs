@@ -849,10 +849,7 @@ impl SystemState {
             draw_clock_edges && self.user.config.theme.clock_rising_marker;
         let ticks = &draw_data.ticks;
         if !ticks.is_empty() && self.show_ticks() {
-            let stroke = Stroke {
-                color: self.user.config.theme.ticks.style.color,
-                width: self.user.config.theme.ticks.style.width,
-            };
+            let stroke = Stroke::from(&self.user.config.theme.ticks.style);
 
             for (_, x) in ticks {
                 waves.draw_tick_line(*x, ctx, &stroke);
@@ -1000,10 +997,7 @@ impl SystemState {
         );
 
         if !ticks.is_empty() && self.show_ticks() {
-            let stroke = Stroke {
-                color: self.user.config.theme.ticks.style.color,
-                width: self.user.config.theme.ticks.style.width,
-            };
+            let stroke = Stroke::from(&self.user.config.theme.ticks.style);
 
             for (_, x) in ticks {
                 waves.draw_tick_line(*x, ctx, &stroke);
