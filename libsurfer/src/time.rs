@@ -60,6 +60,9 @@ pub enum TimeUnit {
 pub const DEFAULT_TIMELINE_NAME: &str = "Time";
 const THIN_SPACE: &str = "\u{2009}";
 
+/// Candidate multipliers used to choose tick spacing.
+pub const TICK_STEPS: [f64; 8] = [1., 2., 2.5, 5., 10., 20., 25., 50.];
+
 impl From<wellen::TimescaleUnit> for TimeUnit {
     fn from(timescale: wellen::TimescaleUnit) -> Self {
         match timescale {
@@ -342,78 +345,6 @@ pub fn time_string(
 }
 
 impl WaveData {
-    /// Get suitable tick locations for the current view port.
-    /// The method is based on guessing the length of the time string and
-    /// is inspired by the corresponding code in Matplotlib.
-    #[allow(clippy::too_many_arguments)]
-    pub fn get_ticks(
-        &self,
-        viewport: &Viewport,
-        timescale: &TimeScale,
-        frame_width: f32,
-        text_size: f32,
-        wanted_timeunit: &TimeUnit,
-        time_format: &TimeFormat,
-        config: &SurferConfig,
-    ) -> Vec<(String, f32)> {
-        let num_timestamps = self.num_timestamps().unwrap_or(1.into());
-        let char_width = text_size * (20. / 31.);
-        let rightexp = viewport
-            .curr_right
-            .absolute(&num_timestamps)
-            .0
-            .abs()
-            .log10()
-            .round() as i16;
-        let leftexp = viewport
-            .curr_left
-            .absolute(&num_timestamps)
-            .0
-            .abs()
-            .log10()
-            .round() as i16;
-        let max_labelwidth = (rightexp.max(leftexp) + 3) as f32 * char_width;
-        let max_labels = ((frame_width * config.theme.ticks.density) / max_labelwidth).floor() + 2.;
-        let scale = 10.0f64.powf(
-            ((viewport.curr_right - viewport.curr_left)
-                .absolute(&num_timestamps)
-                .0
-                / max_labels as f64)
-                .log10()
-                .floor(),
-        );
-
-        let steps = &[1., 2., 2.5, 5., 10., 20., 25., 50.];
-        let mut ticks: Vec<(String, f32)> = [].to_vec();
-        for step in steps {
-            let scaled_step = scale * step;
-            let rounded_min_label_time =
-                (viewport.curr_left.absolute(&num_timestamps).0 / scaled_step).floor()
-                    * scaled_step;
-            let high = ((viewport.curr_right.absolute(&num_timestamps).0 - rounded_min_label_time)
-                / scaled_step)
-                .ceil() as f32
-                + 1.;
-            if high <= max_labels {
-                ticks = (0..high as i16)
-                    .map(|v| {
-                        BigInt::from(((v as f64) * scaled_step + rounded_min_label_time) as i128)
-                    })
-                    .unique()
-                    .map(|tick| {
-                        (
-                            // Time string
-                            time_string(&tick, timescale, wanted_timeunit, time_format),
-                            viewport.pixel_from_time(&tick, frame_width, &num_timestamps),
-                        )
-                    })
-                    .collect::<Vec<(String, f32)>>();
-                break;
-            }
-        }
-        ticks
-    }
-
     pub fn draw_tick_line(&self, x: f32, ctx: &mut DrawingContext, stroke: &Stroke) {
         let Pos2 {
             x: x_pos,
@@ -458,6 +389,74 @@ impl SystemState {
             None,
         )
     }
+}
+
+/// Get suitable tick locations for the current view port.
+/// The method is based on guessing the length of the time string and
+/// is inspired by the corresponding code in Matplotlib.
+#[allow(clippy::too_many_arguments)]
+pub fn get_ticks(
+    viewport: &Viewport,
+    timescale: &TimeScale,
+    frame_width: f32,
+    text_size: f32,
+    wanted_timeunit: &TimeUnit,
+    time_format: &TimeFormat,
+    config: &SurferConfig,
+    num_timestamps: &BigInt,
+) -> Vec<(String, f32)> {
+    let char_width = text_size * (20. / 31.);
+    let rightexp = viewport
+        .curr_right
+        .absolute(num_timestamps)
+        .inner()
+        .abs()
+        .log10()
+        .round() as i16;
+    let leftexp = viewport
+        .curr_left
+        .absolute(num_timestamps)
+        .inner()
+        .abs()
+        .log10()
+        .round() as i16;
+    let max_labelwidth = (rightexp.max(leftexp) + 3) as f32 * char_width;
+    let max_labels = ((frame_width * config.theme.ticks.density) / max_labelwidth).floor() + 2.;
+    let scale = 10.0f64.powf(
+        ((viewport.curr_right - viewport.curr_left)
+            .absolute(num_timestamps)
+            .inner()
+            / max_labels as f64)
+            .log10()
+            .floor(),
+    );
+
+    let mut ticks: Vec<(String, f32)> = [].to_vec();
+    for step in TICK_STEPS.iter() {
+        let scaled_step = scale * step;
+        let rounded_min_label_time =
+            (viewport.curr_left.absolute(num_timestamps).inner() / scaled_step).floor()
+                * scaled_step;
+        let high = ((viewport.curr_right.absolute(num_timestamps).inner() - rounded_min_label_time)
+            / scaled_step)
+            .ceil() as f32
+            + 1.;
+        if high <= max_labels {
+            ticks = (0..high as i16)
+                .map(|v| BigInt::from(((v as f64) * scaled_step + rounded_min_label_time) as i128))
+                .unique()
+                .map(|tick| {
+                    (
+                        // Time string
+                        time_string(&tick, timescale, wanted_timeunit, time_format),
+                        viewport.pixel_from_time(&tick, frame_width, num_timestamps),
+                    )
+                })
+                .collect::<Vec<(String, f32)>>();
+            break;
+        }
+    }
+    ticks
 }
 
 #[cfg(test)]
@@ -1084,5 +1083,135 @@ mod test {
             find_auto_scale(&BigInt::from(1), &ts),
             TimeUnit::FemtoSeconds
         );
+    }
+}
+
+#[cfg(test)]
+mod get_ticks_tests {
+    use super::*;
+    use itertools::Itertools;
+    use num::BigInt;
+
+    // Basic smoke test: ensure we get at least one tick and that returned
+    // pixel coordinates lie within the frame width.
+    #[test]
+    fn get_ticks_basic() {
+        let vp = crate::viewport::Viewport::default();
+        let timescale = TimeScale {
+            unit: TimeUnit::MicroSeconds,
+            multiplier: Some(1),
+        };
+        let frame_width = 800.0_f32;
+        let text_size = 12.0_f32;
+        let wanted = TimeUnit::MicroSeconds;
+        let time_format = TimeFormat::default();
+        let config = crate::config::SurferConfig::default();
+        let num_timestamps = BigInt::from(1_000_000i64);
+
+        let ticks = get_ticks(
+            &vp,
+            &timescale,
+            frame_width,
+            text_size,
+            &wanted,
+            &time_format,
+            &config,
+            &num_timestamps,
+        );
+
+        assert!(!ticks.is_empty(), "expected at least one tick");
+
+        // Check monotonic x positions and collect labels for uniqueness check
+        let mut last_x = -1.0_f32;
+        let mut labels: Vec<String> = Vec::with_capacity(ticks.len());
+        for (label, x) in &ticks {
+            assert!(
+                *x >= last_x,
+                "tick x not monotonic: {} < {} for label {}",
+                x,
+                last_x,
+                label
+            );
+            last_x = *x;
+            assert!(*x >= 0.0, "tick x < 0: {}", x);
+            assert!(
+                *x <= frame_width,
+                "tick x > frame_width: {} > {}",
+                x,
+                frame_width
+            );
+            labels.push(label.clone());
+        }
+        // Labels should be unique
+        let unique_labels = labels.iter().unique().count();
+        assert_eq!(labels.len(), unique_labels, "duplicate tick labels found");
+    }
+
+    // Ensure tick generation produces a reasonable number of ticks when
+    // viewport is zoomed and density is high.
+    #[test]
+    fn get_ticks_respects_frame_width_and_density() {
+        let mut vp = crate::viewport::Viewport::default();
+        // zoom to a narrower view
+        vp.curr_left = crate::viewport::Relative(0.0);
+        vp.curr_right = crate::viewport::Relative(0.1);
+
+        let timescale = TimeScale {
+            unit: TimeUnit::NanoSeconds,
+            multiplier: Some(1),
+        };
+        let frame_width = 200.0_f32;
+        let text_size = 10.0_f32;
+        let wanted = TimeUnit::Auto;
+        let time_format = TimeFormat {
+            format: TimeStringFormatting::SI,
+            show_space: true,
+            show_unit: true,
+        };
+
+        let mut config = crate::config::SurferConfig::default();
+        // make ticks dense
+        config.theme.ticks.density = 1.0;
+
+        let num_timestamps = BigInt::from(1_000_000i64);
+
+        let ticks = get_ticks(
+            &vp,
+            &timescale,
+            frame_width,
+            text_size,
+            &wanted,
+            &time_format,
+            &config,
+            &num_timestamps,
+        );
+
+        assert!(!ticks.is_empty(), "expected ticks even for narrow view");
+        // expect a sane upper bound (protects against accidental infinite loops)
+        assert!(ticks.len() < 200, "too many ticks: {}", ticks.len());
+
+        // monotonic x positions and unique labels
+        let mut last_x = -1.0_f32;
+        let mut labels: Vec<String> = Vec::with_capacity(ticks.len());
+        for (label, x) in &ticks {
+            assert!(
+                *x >= last_x,
+                "tick x not monotonic: {} < {} for label {}",
+                x,
+                last_x,
+                label
+            );
+            last_x = *x;
+            assert!(*x >= 0.0, "tick x < 0: {}", x);
+            assert!(
+                *x <= frame_width,
+                "tick x > frame_width: {} > {}",
+                x,
+                frame_width
+            );
+            labels.push(label.clone());
+        }
+        let unique_labels = labels.iter().unique().count();
+        assert_eq!(labels.len(), unique_labels, "duplicate tick labels found");
     }
 }

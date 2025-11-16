@@ -1,4 +1,5 @@
 use crate::message::Message;
+use crate::time::get_ticks;
 use crate::view::{DrawConfig, DrawingContext};
 use crate::{wave_data::WaveData, SystemState};
 use egui::{Context, Frame, PointerButton, Sense, TopBottomPanel, Ui};
@@ -73,7 +74,7 @@ impl SystemState {
             &viewport_all,
         );
 
-        let mut ticks = waves.get_ticks(
+        let mut ticks = get_ticks(
             &viewport_all,
             &waves.inner.metadata().timescale,
             frame_width,
@@ -81,6 +82,7 @@ impl SystemState {
             &self.user.wanted_timeunit,
             &self.get_time_format(),
             &self.user.config,
+            &waves.num_timestamps().unwrap_or(1.into()),
         );
 
         if ticks.len() >= 2 {
