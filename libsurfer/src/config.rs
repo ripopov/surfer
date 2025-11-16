@@ -7,7 +7,7 @@ use derive_more::{Display, FromStr};
 use directories::ProjectDirs;
 use ecolor::Color32;
 use enum_iterator::Sequence;
-use epaint::Stroke;
+use epaint::{PathStroke, Stroke};
 use eyre::Report;
 use eyre::{Context, Result};
 use lazy_static::lazy_static;
@@ -310,6 +310,12 @@ impl From<&SurferLineStyle> for Stroke {
             color: style.color,
             width: style.width,
         }
+    }
+}
+
+impl From<&SurferLineStyle> for PathStroke {
+    fn from(style: &SurferLineStyle) -> Self {
+        PathStroke::new(style.width, style.color)
     }
 }
 

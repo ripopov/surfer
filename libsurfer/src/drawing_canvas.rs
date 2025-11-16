@@ -1144,13 +1144,14 @@ impl SystemState {
 
         // Draws the relations of the focused transaction
         if let Some(focused_pos) = focused_transaction_start {
-            let arrow_color = self.user.config.theme.relation_arrow.style.color;
+            let path_stroke = PathStroke::from(&ctx.theme.relation_arrow.style);
+            let head_stroke = Stroke::from(&ctx.theme.relation_arrow.style);
             for start_pos in inc_relation_starts {
-                self.draw_arrow(start_pos, focused_pos, arrow_color, ctx);
+                self.draw_arrow(start_pos, focused_pos, ctx, &path_stroke, &head_stroke);
             }
 
             for end_pos in out_relation_starts {
-                self.draw_arrow(focused_pos, end_pos, arrow_color, ctx);
+                self.draw_arrow(focused_pos, end_pos, ctx, &path_stroke, &head_stroke);
             }
         }
     }
@@ -1308,29 +1309,34 @@ impl SystemState {
     }
 
     /// Draws a curvy arrow from `start` to `end`.
-    fn draw_arrow(&self, start: Pos2, end: Pos2, color: Color32, ctx: &DrawingContext) {
-        let mut anchor1 = Pos2::default();
-        let mut anchor2 = Pos2::default();
-
+    fn draw_arrow(
+        &self,
+        start: Pos2,
+        end: Pos2,
+        ctx: &DrawingContext,
+        path_stroke: &PathStroke,
+        head_stroke: &Stroke,
+    ) {
         let x_diff = (end.x - start.x).max(100.);
+        let scaled_x_diff = 0.4 * x_diff;
 
-        anchor1.x = start.x + (2. / 5.) * x_diff;
-        anchor1.y = start.y;
-
-        anchor2.x = end.x - (2. / 5.) * x_diff;
-        anchor2.y = end.y;
-
-        let stroke = PathStroke::new(ctx.theme.relation_arrow.style.width, color);
+        let anchor1 = Pos2 {
+            x: start.x + scaled_x_diff,
+            y: start.y,
+        };
+        let anchor2 = Pos2 {
+            x: end.x - scaled_x_diff,
+            y: end.y,
+        };
 
         ctx.painter.add(Shape::CubicBezier(CubicBezierShape {
             points: [start, anchor1, anchor2, end],
             closed: false,
             fill: Default::default(),
-            stroke,
+            stroke: path_stroke.clone(),
         }));
 
-        let stroke = Stroke::new(ctx.theme.relation_arrow.style.width, color);
-        self.draw_arrowheads(anchor2, end, ctx, stroke);
+        self.draw_arrowheads(anchor2, end, ctx, head_stroke);
     }
 
     /// Draws arrowheads for the vector going from `vec_start` to `vec_tip`.
@@ -1340,7 +1346,7 @@ impl SystemState {
         vec_start: Pos2,
         vec_tip: Pos2,
         ctx: &DrawingContext,
-        stroke: Stroke,
+        stroke: &Stroke,
     ) {
         let head_length = ctx.theme.relation_arrow.head_length;
 
@@ -1365,12 +1371,12 @@ impl SystemState {
 
         ctx.painter.add(Shape::line_segment(
             [vec_tip, Pos2::new(arrowhead_left_x, arrowhead_left_y)],
-            stroke,
+            *stroke,
         ));
 
         ctx.painter.add(Shape::line_segment(
             [vec_tip, Pos2::new(arrowhead_right_x, arrowhead_right_y)],
-            stroke,
+            *stroke,
         ));
     }
 
