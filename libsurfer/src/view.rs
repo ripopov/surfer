@@ -516,7 +516,7 @@ impl SystemState {
                                 y: max_height * 0.5,
                             },
                             layout,
-                            |ui| self.help_message(ui),
+                            |ui| self.help_message(ui, &mut msgs),
                         );
                     });
                 });
