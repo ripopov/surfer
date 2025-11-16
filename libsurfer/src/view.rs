@@ -457,10 +457,8 @@ impl SystemState {
                     });
                 let std_stroke = ctx.style().visuals.widgets.noninteractive.bg_stroke;
                 ctx.style_mut(|style| {
-                    style.visuals.widgets.noninteractive.bg_stroke = Stroke {
-                        width: self.user.config.theme.viewport_separator.width,
-                        color: self.user.config.theme.viewport_separator.color,
-                    };
+                    style.visuals.widgets.noninteractive.bg_stroke =
+                        Stroke::from(&self.user.config.theme.viewport_separator);
                 });
                 let number_of_viewports = self.user.waves.as_ref().unwrap().viewports.len();
                 if number_of_viewports > 1 {

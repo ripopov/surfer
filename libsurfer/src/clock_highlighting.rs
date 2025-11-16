@@ -28,10 +28,7 @@ pub fn draw_clock_edge_marks(
 ) {
     match clock_highlight_type {
         ClockHighlightType::Line => {
-            let stroke = Stroke {
-                color: config.theme.clock_highlight_line.color,
-                width: config.theme.clock_highlight_line.width,
-            };
+            let stroke = Stroke::from(&config.theme.clock_highlight_line);
 
             for x in clock_edges {
                 let Pos2 {
