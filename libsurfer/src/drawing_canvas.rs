@@ -1015,6 +1015,7 @@ impl SystemState {
             let color = displayed_item
                 .and_then(super::displayed_item::DisplayedItem::color)
                 .and_then(|color| self.user.config.theme.get_color(color));
+            let tx_color = color.unwrap_or(&self.user.config.theme.transaction_default);
             // Draws the surrounding border of the stream
             let border_stroke = Stroke::new(
                 self.user.config.theme.linewidth,
@@ -1073,12 +1074,14 @@ impl SystemState {
                                     }
 
                                     let tx_fill_color = if is_transaction_focused {
-                                        let c = color
-                                            .unwrap_or(&self.user.config.theme.transaction_default);
-                                        Color32::from_rgb(255 - c.r(), 255 - c.g(), 255 - c.b())
+                                        // Complementary color for focused transaction
+                                        Color32::from_rgb(
+                                            255 - tx_color.r(),
+                                            255 - tx_color.g(),
+                                            255 - tx_color.b(),
+                                        )
                                     } else {
-                                        *color
-                                            .unwrap_or(&self.user.config.theme.transaction_default)
+                                        *tx_color
                                     };
 
                                     let stroke =
@@ -1091,9 +1094,7 @@ impl SystemState {
                                         egui::StrokeKind::Middle,
                                     );
                                 } else {
-                                    let tx_fill_color = color
-                                        .unwrap_or(&self.user.config.theme.transaction_default)
-                                        .gamma_multiply(1.2);
+                                    let tx_fill_color = tx_color.gamma_multiply(1.2);
 
                                     let stroke = Stroke::new(1.5, tx_fill_color);
                                     ctx.painter.rect(
