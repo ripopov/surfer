@@ -31,6 +31,10 @@ impl Relative {
         )
     }
 
+    pub fn inner(&self) -> f64 {
+        self.0
+    }
+
     pub fn min(&self, other: &Relative) -> Self {
         Self(self.0.min(other.0))
     }
@@ -61,6 +65,10 @@ impl Absolute {
                     .to_f64()
                     .expect("Failed to convert timestamp to f64"),
         )
+    }
+
+    pub fn inner(&self) -> f64 {
+        self.0
     }
 }
 
