@@ -494,10 +494,15 @@ impl SystemState {
         b: &VariableRef,
         wave_container: Option<&WaveContainer>,
     ) -> Ordering {
+        // Fast path: if not grouping by direction, just compare names
+        if !self.user.variable_filter.group_by_direction {
+            return numeric_sort::cmp(&a.name, &b.name);
+        }
+
         let a_direction = get_variable_direction(a, wave_container);
         let b_direction = get_variable_direction(b, wave_container);
 
-        if !self.user.variable_filter.group_by_direction || a_direction == b_direction {
+        if a_direction == b_direction {
             numeric_sort::cmp(&a.name, &b.name)
         } else if a_direction < b_direction {
             Ordering::Less
