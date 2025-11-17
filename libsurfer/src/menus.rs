@@ -496,6 +496,9 @@ impl SystemState {
                 }
             });
 
+            #[cfg(feature = "analysis")]
+            crate::analysis::analysis_menu(msgs, ui, vidx);
+
             if self.wcp_greeted_signal.load(Ordering::Relaxed) {
                 if self.wcp_client_capabilities.goto_declaration
                     && ui.button("Go to declaration").clicked()

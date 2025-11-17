@@ -14,6 +14,7 @@ use ecolor::Color32;
 use extism_convert::{FromBytes, Json, ToBytes};
 use num::BigUint;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 pub use crate::field_ref::FieldRef;
@@ -75,7 +76,7 @@ pub fn extend_string(val: &str, num_bits: u64) -> String {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Display, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Display, Serialize, Deserialize, Eq, Hash)]
 pub enum VariableValue {
     #[display("{_0}")]
     BigUint(BigUint),
@@ -83,6 +84,22 @@ pub enum VariableValue {
     String(String),
 }
 
+impl PartialOrd for VariableValue {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for VariableValue {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (VariableValue::BigUint(a), VariableValue::BigUint(b)) => a.cmp(b),
+            (VariableValue::String(a), VariableValue::String(b)) => a.cmp(b),
+            (VariableValue::BigUint(_), VariableValue::String(_)) => Ordering::Less,
+            (VariableValue::String(_), VariableValue::BigUint(_)) => Ordering::Greater,
+        }
+    }
+}
 impl VariableValue {
     /// Utility function for handling the happy case of the variable value being only 0 and 1,
     /// with default handling of other values.

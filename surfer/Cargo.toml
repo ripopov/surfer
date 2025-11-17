@@ -28,9 +28,10 @@ vergen-gitcl = { workspace = true, features = ["build"] }
 wasm-bindgen-futures.workspace = true
 
 [features]
-default = ["performance_plot", "wasm_plugins"]
+default = ["analysis", "performance_plot", "wasm_plugins"]
 accesskit = ["libsurfer/accesskit"]
 f128 = ["libsurfer/f128"]
+analysis = ["libsurfer/analysis"]
 performance_plot = ["libsurfer/performance_plot"]
 python = ["libsurfer/python"]
 wasm_plugins = ["libsurfer/wasm_plugins"]

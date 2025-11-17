@@ -438,7 +438,7 @@ pages_build:
           # generate relative urls which we want for external pipelines to be able
           # to download our artefacts and put them wherever on their webserver. To fix this,
           # we'll build with a dummy public URL, then replace it with ./
-        - RUSTFLAGS="--cfg=web_sys_unstable_apis" ./trunk build --config=surfer/Trunk.toml index.html --release --public-url /dist --features accesskit
+        - RUSTFLAGS='--cfg=web_sys_unstable_apis --cfg get_random_backend="wasm_js"' ./trunk build --config=surfer/Trunk.toml index.html --release --public-url /dist --features accesskit
         - cp -r surfer/dist pages_build
         - cp -r surfer/dist surfer_wasm
         - cp examples/*.vcd pages_build/
