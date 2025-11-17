@@ -21,6 +21,7 @@ use crate::config::SurferTheme;
 use crate::data_container::DataContainer;
 use crate::displayed_item::{DisplayedFieldRef, DisplayedItemRef, DisplayedVariable};
 use crate::displayed_item_tree::VisibleItemIndex;
+use crate::time::get_ticks;
 use crate::tooltips::handle_transaction_tooltip;
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
 use crate::translation::{TranslationResultExt, TranslatorList, ValueKindExt, VariableInfoExt};
@@ -374,7 +375,7 @@ impl SystemState {
             }
             clock_edges.append(&mut new_clock_edges);
         }
-        let ticks = waves.get_ticks(
+        let ticks = get_ticks(
             &waves.viewports[viewport_idx],
             &waves.inner.metadata().timescale,
             frame_width,
@@ -382,6 +383,7 @@ impl SystemState {
             &self.user.wanted_timeunit,
             &self.get_time_format(),
             &self.user.config,
+            &waves.num_timestamps().unwrap_or(1.into()),
         );
 
         Some(CachedDrawData::WaveDrawData(CachedWaveDrawData {
@@ -986,7 +988,7 @@ impl SystemState {
         let mut out_relation_starts = vec![];
         let mut focused_transaction_start: Option<Pos2> = None;
 
-        let ticks = &waves.get_ticks(
+        let ticks = &get_ticks(
             &waves.viewports[viewport_idx],
             &waves.inner.metadata().timescale,
             frame_width,
@@ -994,6 +996,7 @@ impl SystemState {
             &self.user.wanted_timeunit,
             &self.get_time_format(),
             &self.user.config,
+            &waves.num_timestamps().unwrap_or(1.into()),
         );
 
         if !ticks.is_empty() && self.show_ticks() {

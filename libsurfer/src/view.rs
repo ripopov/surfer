@@ -1,4 +1,4 @@
-use crate::{fzcmd::expand_command, tooltips::variable_tooltip_text};
+use crate::{fzcmd::expand_command, time::get_ticks, tooltips::variable_tooltip_text};
 use ecolor::Color32;
 #[cfg(not(target_arch = "wasm32"))]
 use egui::ViewportCommand;
@@ -1577,7 +1577,7 @@ impl SystemState {
         frame_width: f32,
         cfg: &DrawConfig,
     ) {
-        let ticks = waves.get_ticks(
+        let ticks = get_ticks(
             &waves.viewports[viewport_idx],
             &waves.inner.metadata().timescale,
             frame_width,
@@ -1585,6 +1585,7 @@ impl SystemState {
             &self.user.wanted_timeunit,
             &self.get_time_format(),
             &self.user.config,
+            &waves.num_timestamps().unwrap_or(1.into()),
         );
 
         waves.draw_ticks(
