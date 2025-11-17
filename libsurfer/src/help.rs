@@ -7,7 +7,7 @@ use crate::wave_source::LoadOptions;
 use crate::{message::Message, SystemState};
 
 impl SystemState {
-    pub fn help_message(&self, ui: &mut Ui) {
+    pub fn help_message(&self, ui: &mut Ui, msgs: &mut Vec<Message>) {
         if self.user.waves.is_none() {
             ui.label(RichText::new(
                 "Drag and drop a VCD, FST, or GHW file here to open it",
@@ -40,6 +40,13 @@ impl SystemState {
                 }
                 ui.label("to open an example waveform");
             });
+            #[cfg(all(not(target_arch = "wasm32"), not(test)))]
+            {
+                ui.add_space(10.0);
+                ui.label(RichText::new("Recent files"));
+                ui.separator();
+                self.file_history.menu(ui, msgs, false);
+            }
 
             ui.add_space(20.0);
             ui.separator();

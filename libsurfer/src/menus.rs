@@ -106,6 +106,12 @@ impl SystemState {
             .shortcut("r")
             .enabled(self.user.waves.is_some())
             .add_closing_menu(msgs, ui);
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                ui.menu_button("Recent files", |ui| {
+                    self.file_history.menu(ui, msgs, true);
+                });
+            }
 
             b("Load state...", Message::LoadStateFile(None)).add_closing_menu(msgs, ui);
             #[cfg(not(target_arch = "wasm32"))]
