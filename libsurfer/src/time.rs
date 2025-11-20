@@ -95,6 +95,22 @@ impl From<ftr_parser::types::Timescale> for TimeUnit {
 }
 
 impl TimeUnit {
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "zs" => Some(TimeUnit::ZeptoSeconds),
+            "as" => Some(TimeUnit::AttoSeconds),
+            "fs" => Some(TimeUnit::FemtoSeconds),
+            "ps" => Some(TimeUnit::PicoSeconds),
+            "ns" => Some(TimeUnit::NanoSeconds),
+            "us" | "μs" => Some(TimeUnit::MicroSeconds),
+            "ms" => Some(TimeUnit::MilliSeconds),
+            "s" => Some(TimeUnit::Seconds),
+            _ => None,
+        }
+    }
+}
+
+impl TimeUnit {
     /// Get the power-of-ten exponent for a time unit.
     fn exponent(&self) -> i8 {
         match self {
@@ -1214,4 +1230,37 @@ mod get_ticks_tests {
         let unique_labels = labels.iter().unique().count();
         assert_eq!(labels.len(), unique_labels, "duplicate tick labels found");
     }
+}
+
+// Helper function to create a TextEdit for numbers only (int or f64)
+pub fn numeric_text_edit<'a>(ui: &mut Ui, value: &'a mut String) -> egui::Response {
+    // Filter out non-numeric characters (including allowing one decimal point and minus sign)
+    let mut filtered = String::new();
+    let mut chars = value.chars().peekable();
+    let mut seen_dot = false;
+    let mut seen_minus = false;
+
+    while let Some(c) = chars.next() {
+        match c {
+            '-' if filtered.is_empty() && !seen_minus => {
+                filtered.push(c);
+                seen_minus = true;
+            }
+            '.' if !seen_dot => {
+                filtered.push(c);
+                seen_dot = true;
+            }
+            d if d.is_ascii_digit() => filtered.push(d),
+            _ => {}
+        }
+    }
+
+    if filtered != *value {
+        *value = filtered;
+    }
+
+    ui.add(
+        egui::TextEdit::singleline(value)
+    )
+
 }
