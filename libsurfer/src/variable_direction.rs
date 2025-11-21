@@ -1,5 +1,6 @@
+use crate::wave_container::VariableMeta;
 use egui_remixicon::icons;
-use surfer_translation_types::VariableDirection;
+use surfer_translation_types::{VariableDirection, VariableNameInfo, VariableType};
 
 #[local_impl::local_impl]
 impl VariableDirectionExt for VariableDirection {
@@ -26,4 +27,35 @@ impl VariableDirectionExt for VariableDirection {
             VariableDirection::Linkage => Some(icons::LINK),
         }
     }
+}
+
+pub fn get_direction_string(
+    meta: &Option<VariableMeta>,
+    name_info: &Option<VariableNameInfo>,
+) -> Option<String> {
+    meta.as_ref()
+        .and_then(|meta| meta.direction)
+        .map(|direction| {
+            format!(
+                "{} ",
+                // Icon based on direction
+                direction.get_icon().unwrap_or_else(|| {
+                    if meta
+                        .as_ref()
+                        .is_some_and(|meta| meta.variable_type == Some(VariableType::VCDParameter))
+                    {
+                        // If parameter
+                        icons::MAP_PIN_2_LINE
+                    } else {
+                        // Align other items (can be improved)
+                        // The padding depends on if we will render monospace or not
+                        if name_info.is_some() {
+                            "  "
+                        } else {
+                            "    "
+                        }
+                    }
+                })
+            )
+        })
 }
