@@ -788,6 +788,16 @@ impl SystemState {
         });
 
         self.user.waves.as_mut().unwrap().drawing_infos = item_offsets;
+
+        let response = ui.allocate_response(ui.available_size(), Sense::click());
+        response.context_menu(|ui| {
+            if ui.button("Add divider").clicked() {
+                msgs.push(Message::AddDivider(None, None));
+            }
+            if ui.button("Add timeline").clicked() {
+                msgs.push(Message::AddTimeLine(None));
+            }
+        });
     }
 
     fn get_name_alignment(&self) -> Align {
@@ -1308,6 +1318,15 @@ impl SystemState {
             return;
         };
         let response = ui.allocate_response(ui.available_size(), Sense::click());
+        response.context_menu(|ui| {
+            if ui.button("Add divider").clicked() {
+                msgs.push(Message::AddDivider(None, None));
+            }
+            if ui.button("Add timeline").clicked() {
+                msgs.push(Message::AddTimeLine(None));
+            }
+        });
+
         let mut painter = ui.painter().clone();
         let rect = response.rect;
         let container_rect = Rect::from_min_size(Pos2::ZERO, rect.size());
