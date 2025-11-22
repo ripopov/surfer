@@ -15,6 +15,7 @@ use crate::displayed_item::{
 use crate::displayed_item_tree::{DisplayedItemTree, ItemIndex, TargetPosition, VisibleItemIndex};
 use crate::graphics::{Graphic, GraphicId};
 use crate::transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef};
+use crate::transactions::calculate_rows_of_stream;
 use crate::translation::{DynTranslator, TranslatorList, VariableInfoExt};
 use crate::variable_name_type::VariableNameType;
 use crate::view::ItemDrawingInfo;
@@ -542,21 +543,18 @@ impl WaveData {
 
     pub fn add_generator(&mut self, gen_ref: TransactionStreamRef) {
         let Some(gen_id) = gen_ref.gen_id else { return };
-
-        if self
-            .inner
-            .as_transactions()
-            .unwrap()
-            .get_generator(gen_id)
-            .unwrap()
-            .transactions
-            .is_empty()
-        {
-            info!("(Generator {gen_id})Loading transactions into memory!");
-            match self
-                .inner
-                .as_transactions_mut()
-                .unwrap()
+        let Some(transactions) = self.inner.as_transactions_mut() else {
+            return;
+        };
+        let is_empty = {
+            let Some(gen) = transactions.get_generator(gen_id) else {
+                return;
+            };
+            gen.transactions.is_empty()
+        };
+        if is_empty {
+            info!("(Generator {gen_id}) Loading transactions into memory!");
+            match transactions
                 .inner
                 .load_stream_into_memory(gen_ref.stream_id)
             {
@@ -565,13 +563,10 @@ impl WaveData {
             }
         }
 
-        let gen = self
-            .inner
-            .as_transactions()
-            .unwrap()
-            .get_generator(gen_id)
-            .unwrap();
         let mut last_times_on_row = vec![(BigUint::ZERO, BigUint::ZERO)];
+        let Some(gen) = transactions.get_generator(gen_id) else {
+            return;
+        };
         calculate_rows_of_stream(&gen.transactions, &mut last_times_on_row);
 
         let new_gen = DisplayedItem::Stream(DisplayedStream {
@@ -596,7 +591,7 @@ impl WaveData {
             .transactions_loaded
             .not()
         {
-            info!("(Stream)Loading transactions into memory!");
+            info!("(Stream) Loading transactions into memory!");
             match self
                 .inner
                 .as_transactions_mut()
@@ -944,26 +939,5 @@ impl WaveData {
                     None
                 }
             })
-    }
-}
-
-fn calculate_rows_of_stream(
-    transactions: &Vec<Transaction>,
-    last_times_on_row: &mut Vec<(BigUint, BigUint)>,
-) {
-    for transaction in transactions {
-        let mut curr_row = 0;
-        let start_time = transaction.get_start_time();
-        let end_time = transaction.get_end_time();
-
-        while start_time > last_times_on_row[curr_row].0
-            && start_time < last_times_on_row[curr_row].1
-        {
-            curr_row += 1;
-            if last_times_on_row.len() <= curr_row {
-                last_times_on_row.push((BigUint::ZERO, BigUint::ZERO));
-            }
-        }
-        last_times_on_row[curr_row] = (start_time, end_time);
     }
 }

@@ -1,8 +1,5 @@
 [book]
 authors = ["Surfer developers"]
 language = "en"
-multilingual = false
 src = "docs"
 title = "Surfer"
-
-[preprocessor.footnote]
