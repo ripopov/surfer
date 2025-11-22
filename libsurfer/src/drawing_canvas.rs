@@ -1094,7 +1094,7 @@ impl SystemState {
                                         CornerRadiusF32::same(5.0),
                                         tx_fill_color,
                                         stroke,
-                                        egui::StrokeKind::Middle,
+                                        epaint::StrokeKind::Middle,
                                     );
                                 } else {
                                     let tx_fill_color = tx_color.gamma_multiply(1.2);
@@ -1105,7 +1105,7 @@ impl SystemState {
                                         CornerRadiusF32::ZERO,
                                         tx_fill_color,
                                         stroke,
-                                        egui::StrokeKind::Middle,
+                                        epaint::StrokeKind::Middle,
                                     );
                                 }
                             }
@@ -1272,7 +1272,7 @@ impl SystemState {
                     CornerRadiusF32::ZERO,
                     old_bg,
                     Stroke::NONE,
-                    egui::StrokeKind::Middle,
+                    epaint::StrokeKind::Middle,
                 ));
             }
 

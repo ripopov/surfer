@@ -160,6 +160,7 @@ impl WaveData {
 
     /// Draw text with background box at the specified position
     /// Returns the text and its background rectangle info for reuse if needed
+    #[allow(clippy::too_many_arguments)]
     fn draw_text_with_background(
         ctx: &mut DrawingContext,
         x: f32,

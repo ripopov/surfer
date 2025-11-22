@@ -11,13 +11,15 @@ use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, WaveContainer};
 use crate::wave_data::{ScopeType, WaveData};
 use crate::SystemState;
 use derive_more::{Display, FromStr};
+use ecolor::Color32;
 use egui::text::LayoutJob;
-use egui::{
-    CentralPanel, Color32, Frame, Layout, Margin, ScrollArea, TextFormat, TextStyle, TextWrapMode,
-    TopBottomPanel, Ui,
-};
+use egui::{CentralPanel, Frame, Layout, ScrollArea, TextStyle, TopBottomPanel, Ui};
 use emath::Align;
 use enum_iterator::Sequence;
+use epaint::{
+    text::{TextFormat, TextWrapMode},
+    Margin,
+};
 use eyre::Context;
 use itertools::Itertools;
 use num::BigUint;
@@ -140,8 +142,8 @@ impl SystemState {
                     }
                     // Parameters not shown here or no parameters: use fast approach only drawing visible rows
                     let row_height = ui
-                        .text_style_height(&egui::TextStyle::Monospace)
-                        .max(ui.text_style_height(&egui::TextStyle::Body));
+                        .text_style_height(&TextStyle::Monospace)
+                        .max(ui.text_style_height(&TextStyle::Body));
                     ScrollArea::both()
                         .auto_shrink([false; 2])
                         .id_salt("variables")
@@ -226,8 +228,8 @@ impl SystemState {
                 DataContainer::Waves(wave_container) => {
                     let variables = self.filtered_variables(&wave_container.variables(false), true);
                     let row_height = ui
-                        .text_style_height(&egui::TextStyle::Monospace)
-                        .max(ui.text_style_height(&egui::TextStyle::Body));
+                        .text_style_height(&TextStyle::Monospace)
+                        .max(ui.text_style_height(&TextStyle::Body));
                     ScrollArea::both()
                         .auto_shrink([false; 2])
                         .id_salt("variables")
@@ -262,7 +264,7 @@ impl SystemState {
         msgs: &mut Vec<Message>,
         wave: &WaveData,
         draw_variables: bool,
-        ui: &mut egui::Ui,
+        ui: &mut Ui,
     ) {
         for scope in wave.inner.root_scopes() {
             match scope {
@@ -294,7 +296,7 @@ impl SystemState {
         msgs: &mut Vec<Message>,
         wave: &WaveData,
         scope: &ScopeRef,
-        ui: &mut egui::Ui,
+        ui: &mut Ui,
         scroll_to_label: bool,
     ) {
         let name = scope.name();
@@ -368,7 +370,7 @@ impl SystemState {
         wave: &WaveData,
         scope: &ScopeRef,
         draw_variables: bool,
-        ui: &mut egui::Ui,
+        ui: &mut Ui,
     ) {
         // Extract wave container once to avoid repeated as_waves().unwrap() calls
         let wave_container = match wave.inner.as_waves() {
@@ -468,7 +470,7 @@ impl SystemState {
         wave: &WaveData,
         root_scope: &ScopeRef,
         draw_variables: bool,
-        ui: &mut egui::Ui,
+        ui: &mut Ui,
     ) {
         // Extract wave container once to avoid unwrap
         let wave_container = match wave.inner.as_waves() {
@@ -499,7 +501,7 @@ impl SystemState {
         &self,
         msgs: &mut Vec<Message>,
         wave_container: &WaveContainer,
-        ui: &mut egui::Ui,
+        ui: &mut Ui,
         variables: &[VariableRef],
         row_range: Option<Range<usize>>,
     ) {
@@ -518,7 +520,7 @@ impl SystemState {
         &self,
         msgs: &mut Vec<Message>,
         wave_container: &WaveContainer,
-        ui: &mut egui::Ui,
+        ui: &mut Ui,
         variables: &[VariableRef],
         row_range: Option<Range<usize>>,
         display_full_path: bool,
