@@ -11,16 +11,15 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{sleep, timeout, Duration};
 
 use itertools::Itertools;
-use lazy_static::lazy_static;
 use std::future::Future;
 use std::sync::atomic::Ordering;
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 
 fn get_test_port() -> u16 {
-    lazy_static! {
-        static ref PORT_NUM: Arc<Mutex<u16>> = Arc::new(Mutex::new(54321));
-    }
-    let mut port = PORT_NUM.lock().unwrap();
+    static PORT_NUM: OnceLock<Arc<Mutex<u16>>> = OnceLock::new();
+    let port_lock = PORT_NUM.get_or_init(|| Arc::new(Mutex::new(54321)));
+    let mut port = port_lock.lock().unwrap();
     let free = free_local_ipv4_port_in_range(*port + 1..65535u16);
     *port = free.unwrap();
     *port

@@ -1,6 +1,6 @@
 //! External access to the Surver server.
-use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod server;
@@ -29,6 +29,20 @@ pub struct Status {
     pub file_format: wellen::FileFormat,
 }
 
-lazy_static! {
-    pub static ref BINCODE_OPTIONS: bincode::DefaultOptions = bincode::DefaultOptions::new();
+pub struct BincodeOptions(OnceLock<bincode::DefaultOptions>);
+
+impl BincodeOptions {
+    fn get(&self) -> &bincode::DefaultOptions {
+        self.0.get_or_init(|| bincode::DefaultOptions::new())
+    }
 }
+
+impl std::ops::Deref for BincodeOptions {
+    type Target = bincode::DefaultOptions;
+
+    fn deref(&self) -> &Self::Target {
+        self.get()
+    }
+}
+
+pub static BINCODE_OPTIONS: BincodeOptions = BincodeOptions(OnceLock::new());

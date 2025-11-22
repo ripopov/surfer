@@ -83,10 +83,10 @@ use eyre::Result;
 use ftr_parser::types::Transaction;
 use futures::executor::block_on;
 use itertools::Itertools;
-use lazy_static::lazy_static;
 use message::MessageTarget;
 use num::BigInt;
 use serde::Deserialize;
+use std::sync::OnceLock;
 use surfer_translation_types::Translator;
 pub use system_state::SystemState;
 #[cfg(target_arch = "wasm32")]
@@ -115,23 +115,92 @@ use crate::wave_data::{ScopeType, WaveData};
 use crate::wave_source::{LoadOptions, WaveFormat, WaveSource};
 use crate::wellen::{convert_format, HeaderResult};
 
-lazy_static! {
-    pub static ref EGUI_CONTEXT: RwLock<Option<Arc<egui::Context>>> = RwLock::new(None);
-    /// A number that is non-zero if there are asynchronously triggered operations that
-    /// have been triggered but not successfully completed yet. In practice, if this is
-    /// non-zero, we will re-run the egui update function in order to ensure that we deal
-    /// with the outstanding transactions eventually.
-    /// When incrementing this, it is important to make sure that it gets decremented
-    /// whenever the asynchronous transaction is completed, otherwise we will re-render
-    /// things until program exit
-    pub(crate) static ref OUTSTANDING_TRANSACTIONS: AtomicU32 = AtomicU32::new(0);
+pub struct LazyEgCtx(OnceLock<RwLock<Option<Arc<egui::Context>>>>);
+
+impl LazyEgCtx {
+    fn get(&self) -> &RwLock<Option<Arc<egui::Context>>> {
+        self.0.get_or_init(|| RwLock::new(None))
+    }
+}
+
+impl std::ops::Deref for LazyEgCtx {
+    type Target = RwLock<Option<Arc<egui::Context>>>;
+
+    fn deref(&self) -> &Self::Target {
+        self.get()
+    }
+}
+
+pub static EGUI_CONTEXT: LazyEgCtx = LazyEgCtx(OnceLock::new());
+
+/// A number that is non-zero if there are asynchronously triggered operations that
+/// have been triggered but not successfully completed yet. In practice, if this is
+/// non-zero, we will re-run the egui update function in order to ensure that we deal
+/// with the outstanding transactions eventually.
+/// When incrementing this, it is important to make sure that it gets decremented
+/// whenever the asynchronous transaction is completed, otherwise we will re-render
+/// things until program exit
+pub struct LazyAtomicU32(OnceLock<AtomicU32>);
+
+impl LazyAtomicU32 {
+    fn get(&self) -> &AtomicU32 {
+        self.0.get_or_init(|| AtomicU32::new(0))
+    }
+}
+
+impl std::ops::Deref for LazyAtomicU32 {
+    type Target = AtomicU32;
+
+    fn deref(&self) -> &Self::Target {
+        self.get()
+    }
+}
+
+pub(crate) static OUTSTANDING_TRANSACTIONS: LazyAtomicU32 = LazyAtomicU32(OnceLock::new());
+
+#[cfg(target_arch = "wasm32")]
+pub struct LazyIngressHandler(OnceLock<IngressHandler<WcpCSMessage>>);
+
+#[cfg(target_arch = "wasm32")]
+impl LazyIngressHandler {
+    fn get(&self) -> &IngressHandler<WcpCSMessage> {
+        self.0.get_or_init(|| IngressHandler::new())
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
-lazy_static! {
-    pub(crate) static ref WCP_CS_HANDLER: IngressHandler<WcpCSMessage> = IngressHandler::new();
-    pub(crate) static ref WCP_SC_HANDLER: GlobalChannelTx<WcpSCMessage> = GlobalChannelTx::new();
+impl std::ops::Deref for LazyIngressHandler {
+    type Target = IngressHandler<WcpCSMessage>;
+
+    fn deref(&self) -> &Self::Target {
+        self.get()
+    }
 }
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) static WCP_CS_HANDLER: LazyIngressHandler = LazyIngressHandler(OnceLock::new());
+
+#[cfg(target_arch = "wasm32")]
+pub struct LazyGlobalChannelTx(OnceLock<GlobalChannelTx<WcpSCMessage>>);
+
+#[cfg(target_arch = "wasm32")]
+impl LazyGlobalChannelTx {
+    fn get(&self) -> &GlobalChannelTx<WcpSCMessage> {
+        self.0.get_or_init(|| GlobalChannelTx::new())
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl std::ops::Deref for LazyGlobalChannelTx {
+    type Target = GlobalChannelTx<WcpSCMessage>;
+
+    fn deref(&self) -> &Self::Target {
+        self.get()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) static WCP_SC_HANDLER: LazyGlobalChannelTx = LazyGlobalChannelTx(OnceLock::new());
 
 #[derive(Default)]
 pub struct StartupParams {
