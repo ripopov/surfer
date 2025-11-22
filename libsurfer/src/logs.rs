@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, sync::Mutex};
 
 use ecolor::Color32;
-use egui::{self, RichText, TextWrapMode};
+use egui::{RichText, TextWrapMode};
 use egui_extras::{Column, TableBuilder, TableRow};
 use eyre::Result;
 use tracing::{

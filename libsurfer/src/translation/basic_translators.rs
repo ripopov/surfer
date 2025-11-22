@@ -30,7 +30,7 @@ pub fn group_n_chars(s: &str, n: usize) -> Vec<&str> {
 
 /// Number of digits for digit_size, simply ceil(num_bits/digit_size)
 pub fn no_of_digits(num_bits: u64, digit_size: u64) -> usize {
-    if (num_bits % digit_size) == 0 {
+    if num_bits.is_multiple_of(digit_size) {
         (num_bits / digit_size) as usize
     } else {
         (num_bits / digit_size + 1) as usize

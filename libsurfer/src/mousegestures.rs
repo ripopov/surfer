@@ -57,7 +57,7 @@ impl SystemState {
     #[allow(clippy::too_many_arguments)]
     pub fn draw_mouse_gesture_widget(
         &self,
-        egui_ctx: &egui::Context,
+        egui_ctx: &Context,
         waves: &WaveData,
         pointer_pos_canvas: Option<Pos2>,
         response: &Response,
@@ -357,7 +357,7 @@ impl SystemState {
     #[allow(clippy::too_many_arguments)]
     pub fn draw_measure_widget(
         &self,
-        egui_ctx: &egui::Context,
+        egui_ctx: &Context,
         waves: &WaveData,
         pointer_pos_canvas: Option<Pos2>,
         response: &Response,
@@ -560,7 +560,7 @@ fn draw_gesture_text(
         2.0,
         theme.primary_ui_color.background,
         Stroke::default(),
-        egui::StrokeKind::Inside,
+        epaint::StrokeKind::Inside,
     );
 
     ctx.painter

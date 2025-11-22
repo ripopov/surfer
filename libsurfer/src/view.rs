@@ -3,12 +3,12 @@ use ecolor::Color32;
 #[cfg(not(target_arch = "wasm32"))]
 use egui::ViewportCommand;
 use egui::{
-    FontId, FontSelection, Frame, Layout, Painter, RichText, ScrollArea, Sense, TextFormat,
-    TextStyle, UiBuilder, WidgetText,
+    FontSelection, Frame, Layout, Painter, RichText, ScrollArea, Sense, TextStyle, UiBuilder,
+    WidgetText,
 };
 use emath::{Align, GuiRounding, Pos2, Rect, RectTransform, Vec2};
 use epaint::{
-    text::{LayoutJob, TextWrapMode},
+    text::{FontId, LayoutJob, TextFormat, TextWrapMode},
     CornerRadiusF32, Margin, Stroke,
 };
 use itertools::Itertools;
@@ -1577,7 +1577,7 @@ impl SystemState {
             &ticks,
             ctx,
             0.0,
-            egui::Align2::CENTER_TOP,
+            emath::Align2::CENTER_TOP,
             &self.user.config,
         );
     }
