@@ -1,7 +1,6 @@
-use eframe::{
-    emath::{Align, Align2},
-    epaint::{Color32, CubicBezierShape, FontId, Shape, Stroke, Vec2},
-};
+use ecolor::Color32;
+use emath::{Align, Align2, Vec2};
+use epaint::{CubicBezierShape, FontId, Shape, Stroke};
 use num::BigInt;
 use serde::{Deserialize, Serialize};
 

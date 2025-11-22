@@ -151,7 +151,7 @@ test-oldest-supported:
 
 test-surver-oldest-supported:
     # This version should match rust-version in surver/Cargo.toml
-    image: rust:1.85
+    image: rust:1.88
     stage: test
     extends: .snapshots
     script:

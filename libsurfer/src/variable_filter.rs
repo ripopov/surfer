@@ -1,7 +1,7 @@
 //! Filtering of the variable list.
 use derive_more::Display;
 use egui::collapsing_header::CollapsingState;
-use egui::{Button, Layout, TextEdit, Ui};
+use egui::{Button, Layout, RichText, TextEdit, Ui};
 use egui_remixicon::icons;
 use emath::{Align, Vec2};
 use enum_iterator::Sequence;
@@ -294,9 +294,9 @@ impl SystemState {
                     // Add hover text with error message if regex is invalid
                     if let Some(err) = error_msg {
                         response = response.on_hover_ui(|ui| {
-                            ui.label(egui::RichText::new("Invalid regex:"));
+                            ui.label("Invalid regex:");
                             // Use monospace font for error details as it contains position information
-                            ui.label(egui::RichText::new(err).family(egui::FontFamily::Monospace));
+                            ui.label(RichText::new(err).family(epaint::FontFamily::Monospace));
                         });
                     }
 
