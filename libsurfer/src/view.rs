@@ -416,24 +416,8 @@ impl SystemState {
                         }
                     });
 
-                if self
-                    .user
-                    .waves
-                    .as_ref()
-                    .unwrap()
-                    .focused_transaction
-                    .1
-                    .is_some()
-                {
-                    egui::SidePanel::right("Transaction Details")
-                        .default_width(330.)
-                        .width_range(10.0..=max_width)
-                        .show(ctx, |ui| {
-                            ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-                            self.handle_pointer_in_ui(ui, &mut msgs);
-                            self.draw_focused_transaction_details(ui);
-                        });
-                }
+                // Will only draw if a transaction is focused
+                self.draw_transaction_detail_panel(ctx, max_width, &mut msgs);
 
                 egui::SidePanel::left("variable values")
                     .frame(
@@ -565,7 +549,7 @@ impl SystemState {
         }
     }
 
-    fn handle_pointer_in_ui(&self, ui: &mut egui::Ui, msgs: &mut Vec<Message>) {
+    pub fn handle_pointer_in_ui(&self, ui: &mut egui::Ui, msgs: &mut Vec<Message>) {
         if ui.ui_contains_pointer() {
             let scroll_delta = ui.input(|i| i.smooth_scroll_delta);
             if scroll_delta.y > 0.0 {
@@ -584,7 +568,7 @@ impl SystemState {
             Layout::top_down(alignment).with_cross_justify(false),
             |ui| {
                 if self.show_default_timeline() {
-                    ui.add_space(ui.text_style_height(&egui::TextStyle::Body) + 2.0);
+                    ui.add_space(ui.text_style_height(&TextStyle::Body) + 2.0);
                 }
                 for (vidx, _) in self
                     .user
