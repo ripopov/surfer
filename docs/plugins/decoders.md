@@ -11,7 +11,7 @@ To add additional decoders to Surfer, create a `decoders` directory in Surfer's 
 | macOS   | `/Users/<Name>/Library/Application Support/org.surfer-project.surfer/decoders/` |
 
 To add a new decoder, create a subdirectory inside `decoders` and add the required toml files.
-Each decoder can consist of multiple toml files which get combined.
+A decoder can consist of multiple toml files which will be merged.
 You can also add project-specific decoders by creating subdirectories in `.surfer/decoders`.
 
 The decoders show up as additional formats.
