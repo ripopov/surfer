@@ -5,8 +5,8 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use futures::executor::block_on;
-use lazy_static::lazy_static;
 use num::BigInt;
+use std::sync::OnceLock;
 use tokio::sync::Mutex;
 use tracing::{error, warn};
 #[cfg(target_arch = "wasm32")]
@@ -34,14 +34,81 @@ use crate::EGUI_CONTEXT;
 use crate::WCP_CS_HANDLER;
 use crate::WCP_SC_HANDLER;
 
-lazy_static! {
-    pub(crate) static ref MESSAGE_QUEUE: Mutex<Vec<Message>> = Mutex::new(vec![]);
-    static ref QUERY_QUEUE: tokio::sync::Mutex<VecDeque<Callback>> =
-        tokio::sync::Mutex::new(VecDeque::new());
-    // TODO: Let's make these take CXXRTL messages instead of strings
-    pub(crate) static ref CXXRTL_SC_HANDLER: IngressHandler<String> = IngressHandler::new();
-    pub(crate) static ref CXXRTL_CS_HANDLER: GlobalChannelTx<String> = GlobalChannelTx::new();
+pub struct LazyMessageQueue(OnceLock<Mutex<Vec<Message>>>);
+
+impl LazyMessageQueue {
+    fn get(&self) -> &Mutex<Vec<Message>> {
+        self.0.get_or_init(|| Mutex::new(vec![]))
+    }
 }
+
+impl std::ops::Deref for LazyMessageQueue {
+    type Target = Mutex<Vec<Message>>;
+
+    fn deref(&self) -> &Self::Target {
+        self.get()
+    }
+}
+
+pub(crate) static MESSAGE_QUEUE: LazyMessageQueue = LazyMessageQueue(OnceLock::new());
+
+pub struct LazyQueryQueue(OnceLock<tokio::sync::Mutex<VecDeque<Callback>>>);
+
+impl LazyQueryQueue {
+    fn get(&self) -> &tokio::sync::Mutex<VecDeque<Callback>> {
+        self.0
+            .get_or_init(|| tokio::sync::Mutex::new(VecDeque::new()))
+    }
+}
+
+impl std::ops::Deref for LazyQueryQueue {
+    type Target = tokio::sync::Mutex<VecDeque<Callback>>;
+
+    fn deref(&self) -> &Self::Target {
+        self.get()
+    }
+}
+
+static QUERY_QUEUE: LazyQueryQueue = LazyQueryQueue(OnceLock::new());
+
+// TODO: Let's make these take CXXRTL messages instead of strings
+pub struct LazyIngressHandlerString(OnceLock<IngressHandler<String>>);
+
+impl LazyIngressHandlerString {
+    fn get(&self) -> &IngressHandler<String> {
+        self.0.get_or_init(|| IngressHandler::new())
+    }
+}
+
+impl std::ops::Deref for LazyIngressHandlerString {
+    type Target = IngressHandler<String>;
+
+    fn deref(&self) -> &Self::Target {
+        self.get()
+    }
+}
+
+pub(crate) static CXXRTL_SC_HANDLER: LazyIngressHandlerString =
+    LazyIngressHandlerString(OnceLock::new());
+
+pub struct LazyGlobalChannelTxString(OnceLock<GlobalChannelTx<String>>);
+
+impl LazyGlobalChannelTxString {
+    fn get(&self) -> &GlobalChannelTx<String> {
+        self.0.get_or_init(|| GlobalChannelTx::new())
+    }
+}
+
+impl std::ops::Deref for LazyGlobalChannelTxString {
+    type Target = GlobalChannelTx<String>;
+
+    fn deref(&self) -> &Self::Target {
+        self.get()
+    }
+}
+
+pub(crate) static CXXRTL_CS_HANDLER: LazyGlobalChannelTxString =
+    LazyGlobalChannelTxString(OnceLock::new());
 
 struct Callback {
     function: Box<dyn FnOnce(&SystemState) + Send + Sync>,

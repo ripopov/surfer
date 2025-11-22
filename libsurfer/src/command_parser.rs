@@ -5,7 +5,6 @@ use crate::config::ArrowKeyBindings;
 use crate::displayed_item_tree::{Node, VisibleItemIndex};
 use crate::fzcmd::{Command, ParamGreed};
 use crate::hierarchy::HierarchyStyle;
-use crate::lazy_static;
 use crate::message::MessageTarget;
 use crate::transaction_container::StreamScopeRef;
 use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, VariableRefExt};
@@ -20,6 +19,7 @@ use crate::{
     SystemState,
 };
 use itertools::Itertools;
+use std::sync::OnceLock;
 use tracing::warn;
 
 type RestCommand = Box<dyn Fn(&str) -> Option<Command<Message>>>;
@@ -39,12 +39,9 @@ fn is_command_file_extension(ext: &str) -> bool {
 /// fzcmd splits at regex "words" which does not include special characters
 /// like '#'. This function can be used instead via `ParamGreed::Custom(&separate_at_space)`
 fn separate_at_space(query: &str) -> (String, String, String, String) {
-    use regex::Regex;
-    lazy_static! {
-        static ref RE: Regex = Regex::new(r#"(\s*)(\S*)(\s?)(.*)"#).unwrap();
-    }
-
-    let captures = RE.captures_iter(query).next().unwrap();
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r#"(\s*)(\S*)(\s?)(.*)"#).unwrap());
+    let captures = re.captures_iter(query).next().unwrap();
 
     (
         captures[1].into(),

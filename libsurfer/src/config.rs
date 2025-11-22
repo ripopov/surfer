@@ -10,21 +10,22 @@ use enum_iterator::Sequence;
 use epaint::{PathStroke, Stroke};
 use eyre::Report;
 use eyre::{Context, Result};
-use lazy_static::lazy_static;
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation};
 use crate::mousegestures::GestureZones;
 use crate::time::TimeFormat;
 use crate::{clock_highlighting::ClockHighlightType, variable_name_type::VariableNameType};
 
-lazy_static! {
-    /// Built-in theme names and their corresponding embedded content
-    static ref BUILTIN_THEMES: HashMap<&'static str, &'static str> = {
+static BUILTIN_THEMES: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+
+fn builtin_themes() -> &'static HashMap<&'static str, &'static str> {
+    BUILTIN_THEMES.get_or_init(|| {
         HashMap::from([
             ("dark+", include_str!("../../themes/dark+.toml")),
             (
@@ -48,7 +49,7 @@ lazy_static! {
             ),
             ("solarized", include_str!("../../themes/solarized.toml")),
         ])
-    };
+    })
 }
 
 /// Select the function of the arrow keys
@@ -504,7 +505,7 @@ impl SurferTheme {
 
         let override_theme = theme_name
             .as_ref()
-            .and_then(|name| BUILTIN_THEMES.get(name.as_str()).copied())
+            .and_then(|name| builtin_themes().get(name.as_str()).copied())
             .unwrap_or("");
 
         theme = theme.add_source(config::File::from_str(
@@ -739,7 +740,7 @@ fn hex_string_to_color32(mut str: String) -> Result<Color32> {
 }
 
 fn all_theme_names() -> Vec<String> {
-    BUILTIN_THEMES.keys().map(|s| s.to_string()).collect()
+    builtin_themes().keys().map(|s| s.to_string()).collect()
 }
 
 fn deserialize_hex_color<'de, D>(deserializer: D) -> Result<Color32, D::Error>
