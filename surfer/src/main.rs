@@ -4,7 +4,7 @@
 mod main_impl {
     use camino::Utf8PathBuf;
     use clap::Parser;
-    use egui::Vec2;
+    use emath::Vec2;
     use eyre::Context;
     use eyre::Result;
     use libsurfer::{
