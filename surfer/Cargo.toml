@@ -14,6 +14,7 @@ camino.workspace = true
 eyre.workspace = true
 eframe.workspace = true
 egui.workspace = true
+emath.workspace = true
 libsurfer = { path = "../libsurfer", default-features = false }
 log.workspace = true
 tokio = { workspace = true, features = ["rt", "time", "macros"] }

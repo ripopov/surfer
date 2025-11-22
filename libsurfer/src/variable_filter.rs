@@ -296,7 +296,9 @@ impl SystemState {
                         response = response.on_hover_ui(|ui| {
                             ui.label(egui::RichText::new("Invalid regex:"));
                             // Use monospace font for error details as it contains position information
-                            ui.label(egui::RichText::new(err).family(egui::FontFamily::Monospace));
+                            ui.label(
+                                egui::RichText::new(err).family(epaint::FontFamily::Monospace),
+                            );
                         });
                     }
 
