@@ -84,6 +84,7 @@ softposit = "0.4.0"
 surfer = { path = "surfer", default-features = false }
 surver = { path = "surver", default-features = false }
 sys-locale = "0.3.2"
+thiserror = "2.0.17"
 tokio = { version = "1.43", features = ["rt", "time", "macros"] }
 toml = { version = "0.9.8", default-features = false, features = ["parse"] }
 tracing = "0.1.41"
