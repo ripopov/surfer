@@ -3,13 +3,13 @@ use ecolor::Color32;
 #[cfg(not(target_arch = "wasm32"))]
 use egui::ViewportCommand;
 use egui::{
-    FontId, FontSelection, Frame, Layout, Painter, RichText, ScrollArea, Sense, TextFormat,
-    TextStyle, UiBuilder, WidgetText,
+    CentralPanel, FontSelection, Frame, Layout, Painter, RichText, ScrollArea, Sense, SidePanel,
+    TextStyle, Ui, UiBuilder, WidgetText,
 };
 use emath::{Align, GuiRounding, Pos2, Rect, RectTransform, Vec2};
 use epaint::{
-    text::{LayoutJob, TextWrapMode},
-    CornerRadiusF32, Margin, Stroke,
+    text::{FontId, LayoutJob, TextFormat, TextWrapMode},
+    CornerRadiusF32, Margin, Shape, Stroke,
 };
 use itertools::Itertools;
 use tracing::info;
@@ -338,7 +338,7 @@ impl SystemState {
         }
 
         if self.show_hierarchy() {
-            egui::SidePanel::left("variable select left panel")
+            SidePanel::left("variable select left panel")
                 .default_width(300.)
                 .width_range(100.0..=max_width)
                 .frame(Frame {
@@ -371,7 +371,7 @@ impl SystemState {
                         .expanded
                         .starts_with("item_focus");
                 if draw_focus_ids {
-                    egui::SidePanel::left("focus id list")
+                    SidePanel::left("focus id list")
                         .default_width(40.)
                         .width_range(40.0..=max_width)
                         .show(ctx, |ui| {
@@ -391,7 +391,7 @@ impl SystemState {
                         });
                 }
 
-                egui::SidePanel::left("variable list")
+                SidePanel::left("variable list")
                     .default_width(100.)
                     .width_range(100.0..=max_width)
                     .show(ctx, |ui| {
@@ -419,7 +419,7 @@ impl SystemState {
                 // Will only draw if a transaction is focused
                 self.draw_transaction_detail_panel(ctx, max_width, &mut msgs);
 
-                egui::SidePanel::left("variable values")
+                SidePanel::left("variable values")
                     .frame(
                         egui::Frame::default()
                             .inner_margin(0)
@@ -450,7 +450,7 @@ impl SystemState {
                     let max_width = ctx.available_rect().width();
                     let default_width = max_width / (number_of_viewports as f32);
                     for viewport_idx in 1..number_of_viewports {
-                        egui::SidePanel::right(format! {"view port {viewport_idx}"})
+                        SidePanel::right(format! {"view port {viewport_idx}"})
                             .default_width(default_width)
                             .width_range(30.0..=max_width)
                             .frame(Frame {
@@ -462,7 +462,7 @@ impl SystemState {
                     }
                 }
 
-                egui::CentralPanel::default()
+                CentralPanel::default()
                     .frame(Frame {
                         inner_margin: Margin::ZERO,
                         outer_margin: Margin::ZERO,
@@ -484,7 +484,7 @@ impl SystemState {
                 .as_ref()
                 .is_some_and(|waves| !waves.any_displayed())
         {
-            egui::CentralPanel::default()
+            CentralPanel::default()
                 .frame(Frame::NONE.fill(self.user.config.theme.canvas_colors.background))
                 .show(ctx, |ui| {
                     ui.add_space(max_height * 0.1);
@@ -549,7 +549,7 @@ impl SystemState {
         }
     }
 
-    pub fn handle_pointer_in_ui(&self, ui: &mut egui::Ui, msgs: &mut Vec<Message>) {
+    pub fn handle_pointer_in_ui(&self, ui: &mut Ui, msgs: &mut Vec<Message>) {
         if ui.ui_contains_pointer() {
             let scroll_delta = ui.input(|i| i.smooth_scroll_delta);
             if scroll_delta.y > 0.0 {
@@ -562,7 +562,7 @@ impl SystemState {
         }
     }
 
-    fn draw_item_focus_list(&self, ui: &mut egui::Ui) {
+    fn draw_item_focus_list(&self, ui: &mut Ui) {
         let alignment = self.get_name_alignment();
         ui.with_layout(
             Layout::top_down(alignment).with_cross_justify(false),
@@ -594,7 +594,7 @@ impl SystemState {
 
     fn hierarchy_icon(
         &self,
-        ui: &mut egui::Ui,
+        ui: &mut Ui,
         has_children: bool,
         unfolded: bool,
         alignment: Align,
@@ -630,15 +630,15 @@ impl SystemState {
         }
 
         let style = ui.style().interact(&response);
-        ui.painter().add(egui::Shape::convex_polygon(
+        ui.painter().add(Shape::convex_polygon(
             points,
             style.fg_stroke.color,
-            egui::Stroke::NONE,
+            Stroke::NONE,
         ));
         response
     }
 
-    fn draw_item_list(&mut self, msgs: &mut Vec<Message>, ui: &mut egui::Ui, ctx: &egui::Context) {
+    fn draw_item_list(&mut self, msgs: &mut Vec<Message>, ui: &mut Ui, ctx: &egui::Context) {
         let mut item_offsets = Vec::new();
 
         let any_groups = self
@@ -827,7 +827,7 @@ impl SystemState {
         displayed_id: DisplayedItemRef,
         field: FieldRef,
         msgs: &mut Vec<Message>,
-        ui: &mut egui::Ui,
+        ui: &mut Ui,
         ctx: &egui::Context,
     ) -> egui::Response {
         let mut variable_label = self.draw_item_label(
@@ -871,7 +871,7 @@ impl SystemState {
         field: FieldRef,
         drawing_infos: &mut Vec<ItemDrawingInfo>,
         info: &VariableInfo,
-        ui: &mut egui::Ui,
+        ui: &mut Ui,
         ctx: &egui::Context,
         levels_to_force_expand: Option<usize>,
         alignment: Align,
@@ -984,7 +984,7 @@ impl SystemState {
         vidx: VisibleItemIndex,
         expanded_rect: Rect,
         available_rect: Rect,
-        ui: &mut egui::Ui,
+        ui: &mut Ui,
         last: bool,
     ) {
         if !self.user.drag_started || self.user.drag_source_idx.is_none() {
@@ -1077,7 +1077,7 @@ impl SystemState {
         displayed_item: &DisplayedItem,
         field: Option<&FieldRef>,
         msgs: &mut Vec<Message>,
-        ui: &mut egui::Ui,
+        ui: &mut Ui,
         ctx: &egui::Context,
     ) -> egui::Response {
         let text_color = {
@@ -1206,7 +1206,7 @@ impl SystemState {
         displayed_id: DisplayedItemRef,
         displayed_item: &DisplayedItem,
         drawing_infos: &mut Vec<ItemDrawingInfo>,
-        ui: &mut egui::Ui,
+        ui: &mut Ui,
         ctx: &egui::Context,
     ) -> Rect {
         let label = self.draw_item_label(vidx, displayed_id, displayed_item, None, msgs, ui, ctx);
@@ -1287,7 +1287,7 @@ impl SystemState {
         }
     }
 
-    fn draw_var_values(&self, ui: &mut egui::Ui, msgs: &mut Vec<Message>) {
+    fn draw_var_values(&self, ui: &mut Ui, msgs: &mut Vec<Message>) {
         let Some(waves) = &self.user.waves else {
             return;
         };
@@ -1577,7 +1577,7 @@ impl SystemState {
             &ticks,
             ctx,
             0.0,
-            egui::Align2::CENTER_TOP,
+            emath::Align2::CENTER_TOP,
             &self.user.config,
         );
     }
