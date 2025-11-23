@@ -1,5 +1,6 @@
 //! External access to the Surver server.
-use lazy_static::lazy_static;
+use std::sync::LazyLock;
+
 use serde::{Deserialize, Serialize};
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -29,6 +30,5 @@ pub struct Status {
     pub file_format: wellen::FileFormat,
 }
 
-lazy_static! {
-    pub static ref BINCODE_OPTIONS: bincode::DefaultOptions = bincode::DefaultOptions::new();
-}
+pub static BINCODE_OPTIONS: LazyLock<bincode::DefaultOptions> =
+    LazyLock::new(bincode::DefaultOptions::new);

@@ -16,7 +16,7 @@ mod main_impl {
         wave_source::{string_to_wavesource, WaveSource},
         StartupParams, SystemState,
     };
-    use log::error;
+    use tracing::error;
 
     #[derive(clap::Subcommand)]
     enum Commands {
