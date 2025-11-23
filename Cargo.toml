@@ -64,7 +64,6 @@ itertools = "0.14.0"
 lazy_static = "1.5.0"
 leb128 = "0.2.5"
 local-impl = "0.1.2"
-log = "0.4.26"
 lz4_flex = "0.12"
 num = { version = "0.4", features = ["serde"] }
 numeric-sort = "0.1.4"

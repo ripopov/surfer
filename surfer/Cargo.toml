@@ -16,11 +16,11 @@ eframe.workspace = true
 egui.workspace = true
 emath.workspace = true
 libsurfer = { path = "../libsurfer", default-features = false }
-log.workspace = true
 tokio = { workspace = true, features = ["rt", "time", "macros"] }
 ron.workspace = true
 simple-eyre.workspace = true
 surver.workspace = true
+tracing.workspace = true
 
 [build-dependencies]
 vergen-gitcl = { workspace = true, features = ["build"] }
