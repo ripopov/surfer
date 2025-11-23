@@ -171,6 +171,9 @@ pub fn run_egui(cc: &CreationContext, mut state: SystemState) -> Result<Box<dyn 
         .set_visuals_of(egui::Theme::Dark, state.get_visuals());
     cc.egui_ctx
         .set_visuals_of(egui::Theme::Light, state.get_visuals());
+    cc.egui_ctx.all_styles_mut(|style| {
+        style.animation_time = state.user.config.animation_time;
+    });
     #[cfg(not(target_arch = "wasm32"))]
     if state.user.config.wcp.autostart {
         state.start_wcp_server(Some(state.user.config.wcp.address.clone()), false);

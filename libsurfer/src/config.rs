@@ -114,6 +114,8 @@ pub struct SurferConfig {
     pub wcp: WcpConfig,
     /// HTTP Server Configuration
     pub server: ServerConfig,
+    /// Animation time for UI elements in seconds
+    pub animation_time: f32,
 }
 
 impl SurferConfig {
