@@ -373,6 +373,14 @@ impl SystemState {
                 .then(|| {
                     msgs.push(Message::SetFillHighValues(!self.fill_high_values()));
                 });
+            ui.menu_button("UI animations", |ui| {
+                if ui.label("Enable").clicked() {
+                    msgs.push(Message::EnableAnimations(true));
+                }
+                if ui.label("Disable").clicked() {
+                    msgs.push(Message::EnableAnimations(false));
+                }
+            });
         });
         ui.menu_button("Help", |ui| {
             b("Quick start", Message::SetQuickStartVisible(true)).add_closing_menu(msgs, ui);
