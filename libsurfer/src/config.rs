@@ -10,46 +10,44 @@ use enum_iterator::Sequence;
 use epaint::{PathStroke, Stroke};
 use eyre::Report;
 use eyre::{Context, Result};
-use lazy_static::lazy_static;
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation};
 use crate::mousegestures::GestureZones;
 use crate::time::TimeFormat;
 use crate::{clock_highlighting::ClockHighlightType, variable_name_type::VariableNameType};
 
-lazy_static! {
-    /// Built-in theme names and their corresponding embedded content
-    static ref BUILTIN_THEMES: HashMap<&'static str, &'static str> = {
-        HashMap::from([
-            ("dark+", include_str!("../../themes/dark+.toml")),
-            (
-                "dark-high-contrast",
-                include_str!("../../themes/dark-high-contrast.toml"),
-            ),
-            ("ibm", include_str!("../../themes/ibm.toml")),
-            ("light+", include_str!("../../themes/light+.toml")),
-            (
-                "light-high-contrast",
-                include_str!("../../themes/light-high-contrast.toml"),
-            ),
-            ("okabe/ito", include_str!("../../themes/okabe-ito.toml")),
-            (
-                "petroff-dark",
-                include_str!("../../themes/petroff-dark.toml"),
-            ),
-            (
-                "petroff-light",
-                include_str!("../../themes/petroff-light.toml"),
-            ),
-            ("solarized", include_str!("../../themes/solarized.toml")),
-        ])
-    };
-}
+/// Built-in theme names and their corresponding embedded content
+static BUILTIN_THEMES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+    HashMap::from([
+        ("dark+", include_str!("../../themes/dark+.toml")),
+        (
+            "dark-high-contrast",
+            include_str!("../../themes/dark-high-contrast.toml"),
+        ),
+        ("ibm", include_str!("../../themes/ibm.toml")),
+        ("light+", include_str!("../../themes/light+.toml")),
+        (
+            "light-high-contrast",
+            include_str!("../../themes/light-high-contrast.toml"),
+        ),
+        ("okabe/ito", include_str!("../../themes/okabe-ito.toml")),
+        (
+            "petroff-dark",
+            include_str!("../../themes/petroff-dark.toml"),
+        ),
+        (
+            "petroff-light",
+            include_str!("../../themes/petroff-light.toml"),
+        ),
+        ("solarized", include_str!("../../themes/solarized.toml")),
+    ])
+});
 
 /// Select the function of the arrow keys
 #[derive(Clone, Copy, Debug, Deserialize, Display, FromStr, PartialEq, Eq, Sequence, Serialize)]

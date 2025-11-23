@@ -1,11 +1,12 @@
 //! Command prompt handling.
+use regex::Regex;
+use std::sync::LazyLock;
 use std::{fs, str::FromStr};
 
 use crate::config::ArrowKeyBindings;
 use crate::displayed_item_tree::{Node, VisibleItemIndex};
 use crate::fzcmd::{Command, ParamGreed};
 use crate::hierarchy::HierarchyStyle;
-use crate::lazy_static;
 use crate::message::MessageTarget;
 use crate::transaction_container::StreamScopeRef;
 use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, VariableRefExt};
@@ -39,10 +40,7 @@ fn is_command_file_extension(ext: &str) -> bool {
 /// fzcmd splits at regex "words" which does not include special characters
 /// like '#'. This function can be used instead via `ParamGreed::Custom(&separate_at_space)`
 fn separate_at_space(query: &str) -> (String, String, String, String) {
-    use regex::Regex;
-    lazy_static! {
-        static ref RE: Regex = Regex::new(r#"(\s*)(\S*)(\s?)(.*)"#).unwrap();
-    }
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(\s*)(\S*)(\s?)(.*)"#).unwrap());
 
     let captures = RE.captures_iter(query).next().unwrap();
 
