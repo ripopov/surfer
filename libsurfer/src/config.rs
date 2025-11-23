@@ -119,6 +119,10 @@ pub struct SurferConfig {
     pub wcp: WcpConfig,
     /// HTTP Server Configuration
     pub server: ServerConfig,
+    /// Animation time for UI elements in seconds
+    pub animation_time: f32,
+    /// UI animation enabled
+    pub animation_enabled: bool,
 }
 
 impl SurferConfig {
@@ -132,6 +136,10 @@ impl SurferConfig {
 
     pub fn autoreload_files(&self) -> AutoLoad {
         self.autoreload_files
+    }
+
+    pub fn animation_enabled(&self) -> bool {
+        self.animation_enabled
     }
 }
 

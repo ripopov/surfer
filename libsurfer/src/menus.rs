@@ -373,6 +373,11 @@ impl SystemState {
                 .then(|| {
                     msgs.push(Message::SetFillHighValues(!self.fill_high_values()));
                 });
+            ui.radio(self.animation_enabled(), "UI animations")
+                .clicked()
+                .then(|| {
+                    msgs.push(Message::EnableAnimations(!self.animation_enabled()));
+                });
         });
         ui.menu_button("Help", |ui| {
             b("Quick start", Message::SetQuickStartVisible(true)).add_closing_menu(msgs, ui);

@@ -107,6 +107,8 @@ pub struct UserState {
     pub(crate) sidepanel_width: Option<f32>,
     /// UI zoom factor if set by the user
     pub(crate) ui_zoom_factor: Option<f32>,
+    #[serde(default)]
+    pub(crate) animation_enabled: Option<bool>,
 
     // Path of last saved-to state file
     // Do not serialize as this causes a few issues and doesn't help:
