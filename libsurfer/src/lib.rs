@@ -65,7 +65,7 @@ use crate::config::AutoLoad;
 use crate::displayed_item_tree::ItemIndex;
 use crate::displayed_item_tree::TargetPosition;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, RwLock};
 
@@ -115,16 +115,17 @@ use crate::wave_data::{ScopeType, WaveData};
 use crate::wave_source::{LoadOptions, WaveFormat, WaveSource};
 use crate::wellen::{convert_format, HeaderResult};
 
+/// A number that is non-zero if there are asynchronously triggered operations that
+/// have been triggered but not successfully completed yet. In practice, if this is
+/// non-zero, we will re-run the egui update function in order to ensure that we deal
+/// with the outstanding transactions eventually.
+/// When incrementing this, it is important to make sure that it gets decremented
+/// whenever the asynchronous transaction is completed, otherwise we will re-render
+/// things until program exit
+pub(crate) static OUTSTANDING_TRANSACTIONS: AtomicUsize = AtomicUsize::new(0);
+
 lazy_static! {
     pub static ref EGUI_CONTEXT: RwLock<Option<Arc<egui::Context>>> = RwLock::new(None);
-    /// A number that is non-zero if there are asynchronously triggered operations that
-    /// have been triggered but not successfully completed yet. In practice, if this is
-    /// non-zero, we will re-run the egui update function in order to ensure that we deal
-    /// with the outstanding transactions eventually.
-    /// When incrementing this, it is important to make sure that it gets decremented
-    /// whenever the asynchronous transaction is completed, otherwise we will re-render
-    /// things until program exit
-    pub(crate) static ref OUTSTANDING_TRANSACTIONS: AtomicU32 = AtomicU32::new(0);
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -1,7 +1,7 @@
+use std::sync::LazyLock;
+
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use regex::Regex;
-
-use lazy_static::lazy_static;
 
 #[derive(PartialEq, Debug)]
 pub enum RestQuery {
@@ -58,10 +58,7 @@ pub enum ParseError {
 }
 
 fn separate_first_word(query: &str) -> (String, String, String, String) {
-    lazy_static! {
-        static ref RE: Regex = Regex::new(r#"(\W*)(\w*)(\W?)(.*)"#).unwrap();
-    }
-
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(\W*)(\w*)(\W?)(.*)"#).unwrap());
     let captures = RE.captures_iter(query).next().unwrap();
 
     (
@@ -86,9 +83,7 @@ fn separate_optional_word(query: &str) -> (String, String, String, String) {
 }
 
 fn separate_until_comma(query: &str) -> (String, String, String, String) {
-    lazy_static! {
-        static ref RE: Regex = Regex::new(r#"(\W*)([^,]*)(,?)(.*)"#).unwrap();
-    }
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(\W*)([^,]*)(,?)(.*)"#).unwrap());
 
     RE.captures_iter(query)
         .next()
@@ -287,10 +282,7 @@ fn fuzzy_match(alternatives: &[String], query: &str) -> Vec<(String, Vec<bool>)>
 }
 
 fn fuzzy_score(line: &str, query: &str) -> (i64, Vec<bool>) {
-    lazy_static! {
-        static ref MATCHER: SkimMatcherV2 = SkimMatcherV2::default();
-    }
-
+    static MATCHER: LazyLock<SkimMatcherV2> = LazyLock::new(SkimMatcherV2::default);
     let (score, indices) = MATCHER.fuzzy_indices(line, query).unwrap_or_default();
 
     let mut matches = vec![false; line.len()];
