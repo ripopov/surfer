@@ -771,3 +771,14 @@ impl SystemState {
         });
     }
 }
+
+pub fn generic_context_menu(msgs: &mut Vec<Message>, response: &egui::Response) {
+    response.context_menu(|ui| {
+        if ui.button("Add divider").clicked() {
+            msgs.push(Message::AddDivider(None, None));
+        }
+        if ui.button("Add timeline").clicked() {
+            msgs.push(Message::AddTimeLine(None));
+        }
+    });
+}
