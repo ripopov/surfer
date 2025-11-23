@@ -38,7 +38,7 @@ pub fn no_of_digits(num_bits: u64, digit_size: u64) -> usize {
 }
 
 /// Return kind for a binary representation
-fn color_for_binary_representation(s: &str) -> ValueKind {
+pub fn kind_for_binary_representation(s: &str) -> ValueKind {
     if s.contains('x') {
         ValueKind::Undef
     } else if s.contains('z') {
@@ -83,7 +83,7 @@ fn map_to_radix(s: &str, radix: usize, num_bits: u64) -> (String, ValueKind) {
     let kind = if had_invalid_digit {
         ValueKind::Error
     } else {
-        color_for_binary_representation(&formatted)
+        kind_for_binary_representation(&formatted)
     };
     (formatted, kind)
 }
@@ -140,7 +140,7 @@ impl BasicTranslator<VarId, ScopeId> for BitTranslator {
                 },
                 ValueKind::Normal,
             ),
-            VariableValue::String(s) => (s.to_string(), color_for_binary_representation(s)),
+            VariableValue::String(s) => (s.to_string(), kind_for_binary_representation(s)),
         }
     }
 
@@ -194,7 +194,7 @@ impl BasicTranslator<VarId, ScopeId> for GroupingBinaryTranslator {
             ),
             VariableValue::String(s) => (
                 format!("{extra_bits}{s}", extra_bits = extend_string(s, num_bits)),
-                color_for_binary_representation(s),
+                kind_for_binary_representation(s),
             ),
         };
 
@@ -217,7 +217,7 @@ impl BasicTranslator<VarId, ScopeId> for BinaryTranslator {
             ),
             VariableValue::String(s) => (
                 format!("{extra_bits}{s}", extra_bits = extend_string(s, num_bits)),
-                color_for_binary_representation(s),
+                kind_for_binary_representation(s),
             ),
         }
     }
@@ -328,7 +328,7 @@ impl BasicTranslator<VarId, ScopeId> for NumberOfOnesTranslator {
             }
             VariableValue::String(s) => (
                 format!("{ones}", ones = s.bytes().filter(|b| *b == b'1').count()),
-                color_for_binary_representation(s),
+                kind_for_binary_representation(s),
             ),
         }
     }
@@ -352,7 +352,7 @@ impl BasicTranslator<VarId, ScopeId> for TrailingOnesTranslator {
                     "{ones}",
                     ones = s.bytes().rev().take_while(|b| *b == b'1').count()
                 ),
-                color_for_binary_representation(s),
+                kind_for_binary_representation(s),
             ),
         }
     }
@@ -380,7 +380,7 @@ impl BasicTranslator<VarId, ScopeId> for TrailingZerosTranslator {
                         .take_while(|b| *b == b'0')
                         .count()
                 ),
-                color_for_binary_representation(s),
+                kind_for_binary_representation(s),
             ),
         }
     }
@@ -408,7 +408,7 @@ impl BasicTranslator<VarId, ScopeId> for LeadingOnesTranslator {
                 } else {
                     "0".to_string()
                 },
-                color_for_binary_representation(s),
+                kind_for_binary_representation(s),
             ),
         }
     }
@@ -435,7 +435,7 @@ impl BasicTranslator<VarId, ScopeId> for LeadingZerosTranslator {
                         .take_while(|b| *b == b'0')
                         .count()
                 ),
-                color_for_binary_representation(s),
+                kind_for_binary_representation(s),
             ),
         }
     }
@@ -459,7 +459,7 @@ impl BasicTranslator<VarId, ScopeId> for IdenticalMSBsTranslator {
                 let zeros = extended_string.bytes().take_while(|b| *b == b'0').count();
                 let ones = extended_string.bytes().take_while(|b| *b == b'1').count();
                 let count = ones.max(zeros);
-                (count.to_string(), color_for_binary_representation(s))
+                (count.to_string(), kind_for_binary_representation(s))
             }
         }
     }
