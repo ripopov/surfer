@@ -5,6 +5,7 @@ theme = ""
 undo_stack_size = 50
 autoreload_files = "Ask"
 autoload_sibling_state_files = "Ask"
+animation_time = 0.1
 
 [default_time_format]
 format = "No"

@@ -372,6 +372,8 @@ pub enum Message {
     RemoveViewport,
     /// Select Theme
     SelectTheme(Option<String>),
+    /// Enable animations
+    EnableAnimations(bool),
     /// Undo the last n changes
     Undo(usize),
     /// Redo the last n changes
