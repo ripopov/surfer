@@ -365,9 +365,16 @@ impl SystemState {
                     // check to see if the response came from a Surfer running in server mode
                     if let Some(value) = response.headers().get(HTTP_SERVER_KEY) {
                         if matches!(value.to_str(), Ok(HTTP_SERVER_VALUE_SURFER)) {
-                            info!("Connecting to a surfer server at: {url}");
-                            // request status and hierarchy
-                            Self::get_server_status(sender.clone(), url.clone(), 0);
+                            if load_options.keep_variables {
+                                // Request a reload (will also get status)
+                                info!("Reloading from surfer server at: {url}");
+                                Self::server_reload(sender.clone(), url.clone(), 0);
+                            } else {
+                                info!("Connecting to a surfer server at: {url}");
+                                // Request status
+                                Self::get_server_status(sender.clone(), url.clone(), 0);
+                            }
+                            // Request hierarchy
                             Self::get_hierarchy_from_server(
                                 sender.clone(),
                                 url.clone(),
@@ -515,6 +522,26 @@ impl SystemState {
                 .await
                 .map_err(|e| anyhow!("{e:?}"))
                 .with_context(|| format!("Failed to retrieve status from remote server {server}"));
+
+            let msg = match res {
+                Ok(status) => Message::SurferServerStatus(start, server, status),
+                Err(e) => Message::Error(e),
+            };
+            if let Err(e) = sender.send(msg) {
+                error!("Failed to send message: {e}");
+            }
+        };
+        spawn!(task);
+    }
+
+    fn server_reload(sender: Sender<Message>, server: String, delay_ms: u64) {
+        let start = web_time::Instant::now();
+        let task = async move {
+            sleep_ms(delay_ms).await;
+            let res = crate::remote::reload(server.clone())
+                .await
+                .map_err(|e| anyhow!("{e:?}"))
+                .with_context(|| format!("Failed to request reload from remote server {server}"));
 
             let msg = match res {
                 Ok(status) => Message::SurferServerStatus(start, server, status),
