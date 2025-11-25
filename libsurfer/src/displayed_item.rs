@@ -67,6 +67,24 @@ pub struct FieldFormat {
     pub format: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum AnalogMode {
+    #[default]
+    Off,
+    Step,
+    Interpolated,
+}
+
+impl std::fmt::Display for AnalogMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AnalogMode::Off => write!(f, "Off"),
+            AnalogMode::Step => write!(f, "Step"),
+            AnalogMode::Interpolated => write!(f, "Interpolated"),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct DisplayedVariable {
     pub variable_ref: VariableRef,
@@ -80,6 +98,7 @@ pub struct DisplayedVariable {
     pub format: Option<String>,
     pub field_formats: Vec<FieldFormat>,
     pub height_scaling_factor: Option<f32>,
+    pub analog_mode: AnalogMode,
 }
 
 impl DisplayedVariable {
@@ -126,6 +145,7 @@ impl DisplayedVariable {
             format: self.format,
             field_formats: self.field_formats,
             height_scaling_factor: self.height_scaling_factor,
+            analog_mode: self.analog_mode,
         }
     }
 }
@@ -189,6 +209,7 @@ pub struct DisplayedPlaceholder {
     pub format: Option<String>,
     pub field_formats: Vec<FieldFormat>,
     pub height_scaling_factor: Option<f32>,
+    pub analog_mode: AnalogMode,
 }
 
 impl DisplayedPlaceholder {
@@ -208,6 +229,7 @@ impl DisplayedPlaceholder {
             format: self.format,
             field_formats: self.field_formats,
             height_scaling_factor: self.height_scaling_factor,
+            analog_mode: self.analog_mode,
         }
     }
 

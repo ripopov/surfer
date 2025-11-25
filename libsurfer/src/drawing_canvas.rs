@@ -36,7 +36,7 @@ use crate::{
 };
 
 pub struct DrawnRegion {
-    inner: Option<TranslatedValue>,
+    pub inner: Option<TranslatedValue>,
     /// True if a transition should be drawn even if there is no change in the value
     /// between the previous and next pixels. Only used by the bool drawing logic to
     /// draw draw a vertical line and prevent apparent aliasing
@@ -46,9 +46,9 @@ pub struct DrawnRegion {
 /// List of values to draw for a variable. It is an ordered list of values that should
 /// be drawn at the *start time* until the *start time* of the next value
 pub struct DrawingCommands {
-    is_bool: bool,
-    is_clock: bool,
-    values: Vec<(f32, DrawnRegion)>,
+    pub is_bool: bool,
+    pub is_clock: bool,
+    pub values: Vec<(f32, DrawnRegion)>,
 }
 
 impl DrawingCommands {
@@ -750,7 +750,7 @@ impl SystemState {
 
         match &self.draw_data.borrow()[viewport_idx] {
             Some(CachedDrawData::WaveDrawData(draw_data)) => {
-                self.draw_wave_data(waves, draw_data, &mut ctx);
+                self.draw_wave_data(waves, draw_data, frame_width, &mut ctx);
             }
             Some(CachedDrawData::TransactionDrawData(draw_data)) => {
                 self.draw_transaction_data(
@@ -838,6 +838,7 @@ impl SystemState {
         &self,
         waves: &WaveData,
         draw_data: &CachedWaveDrawData,
+        frame_width: f32,
         ctx: &mut DrawingContext,
     ) {
         let clock_edges = &draw_data.clock_edges;
@@ -912,28 +913,52 @@ impl SystemState {
                                 &self.user.config.theme.variable_default
                             }
                         });
-                        for (old, new) in commands.values.iter().zip(commands.values.iter().skip(1))
-                        {
-                            if commands.is_bool {
-                                self.draw_bool_transition(
-                                    (old, new),
-                                    new.1.force_anti_alias,
-                                    color,
-                                    y_offset,
-                                    height_scaling_factor,
-                                    commands.is_clock && draw_clock_rising_marker,
-                                    self.fill_high_values(),
-                                    ctx,
-                                );
+                        // Check analog mode for this variable
+                        let analog_mode =
+                            if let Some(DisplayedItem::Variable(variable)) = displayed_item {
+                                &variable.analog_mode
                             } else {
-                                self.draw_region(
-                                    (old, new),
-                                    color,
-                                    y_offset,
-                                    height_scaling_factor,
-                                    ctx,
-                                    *text_color,
-                                );
+                                &crate::displayed_item::AnalogMode::Off
+                            };
+
+                        if *analog_mode != crate::displayed_item::AnalogMode::Off
+                            && !commands.is_bool
+                        {
+                            // Use analog rendering for non-boolean signals when analog mode is enabled
+                            crate::analog_renderer::draw_analog(
+                                commands,
+                                color,
+                                y_offset,
+                                height_scaling_factor,
+                                analog_mode,
+                                frame_width,
+                                ctx,
+                            );
+                        } else {
+                            for (old, new) in
+                                commands.values.iter().zip(commands.values.iter().skip(1))
+                            {
+                                if commands.is_bool {
+                                    self.draw_bool_transition(
+                                        (old, new),
+                                        new.1.force_anti_alias,
+                                        color,
+                                        y_offset,
+                                        height_scaling_factor,
+                                        commands.is_clock && draw_clock_rising_marker,
+                                        self.fill_high_values(),
+                                        ctx,
+                                    );
+                                } else {
+                                    self.draw_region(
+                                        (old, new),
+                                        color,
+                                        y_offset,
+                                        height_scaling_factor,
+                                        ctx,
+                                        *text_color,
+                                    );
+                                }
                             }
                         }
                     }

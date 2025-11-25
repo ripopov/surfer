@@ -361,6 +361,11 @@ pub enum Message {
         item: DisplayedItemRef,
         levels: usize,
     },
+    /// Set analog mode for a variable
+    SetAnalogMode(
+        MessageTarget<VisibleItemIndex>,
+        crate::displayed_item::AnalogMode,
+    ),
 
     SetViewportStrategy(ViewportStrategy),
     SetConfigFromString(String),

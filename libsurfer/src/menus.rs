@@ -539,6 +539,23 @@ impl SystemState {
                 msgs.push(Message::SetActiveScope(scope_type));
                 msgs.push(Message::ExpandScope(scope_path));
             }
+
+            if let DisplayedItem::Variable(variable) = displayed_item {
+                ui.menu_button("Analog", |ui| {
+                    use crate::displayed_item::AnalogMode;
+                    let current_mode = &variable.analog_mode;
+
+                    for mode in [AnalogMode::Off, AnalogMode::Step, AnalogMode::Interpolated] {
+                        ui.radio(*current_mode == mode, mode.to_string())
+                            .clicked()
+                            .then(|| {
+                                if *current_mode != mode {
+                                    msgs.push(Message::SetAnalogMode(affected_vidxs.into(), mode));
+                                }
+                            });
+                    }
+                });
+            }
         }
 
         if ui.button("Rename").clicked() {
