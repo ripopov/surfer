@@ -1,6 +1,7 @@
 use derive_more::{Display, FromStr};
 use enum_iterator::Sequence;
 use itertools::Itertools;
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +21,8 @@ pub enum VariableNameType {
     Global,
 }
 
+const ELLIPSIS: &str = "…";
+
 impl WaveData {
     pub fn compute_variable_display_names(&mut self) {
         // First pass: collect all unique variable refs
@@ -36,8 +39,10 @@ impl WaveData {
             })
             .unique()
             .collect();
+        // Compute minimal unique display names for collision groups.
+        let minimal_map = compute_minimal_display_map(&full_names);
 
-        // Single pass: update display names for all items
+        // Single pass: update display names for all items using the precomputed map
         for Node { item_ref, .. } in self.items_tree.iter() {
             self.displayed_items
                 .entry(*item_ref)
@@ -47,9 +52,10 @@ impl WaveData {
                         variable.display_name = match variable.display_name_type {
                             VariableNameType::Local => local_name,
                             VariableNameType::Global => variable.variable_ref.full_path_string(),
-                            VariableNameType::Unique => {
-                                compute_unique_variable_name(&variable.variable_ref, &full_names)
-                            }
+                            VariableNameType::Unique => minimal_map
+                                .get(&variable.variable_ref.full_path_string())
+                                .cloned()
+                                .unwrap_or_else(|| variable.variable_ref.name.clone()),
                         };
                         if self.display_variable_indices {
                             let index = self
@@ -88,44 +94,141 @@ impl WaveData {
     }
 }
 
-/// Compute a minimal unique variable name by adding scope components until
-/// the name becomes unique among the given set of variables.
-fn compute_unique_variable_name(variable: &VariableRef, all_variables: &[VariableRef]) -> String {
-    let other_variables: Vec<_> = all_variables
-        .iter()
-        .filter(|&v| v.full_path_string() != variable.full_path_string())
-        .collect();
+/// Compute minimal unique display names for a set of variables.
+/// Returns a map from `full_path_string()` -> minimal display name.
+fn compute_minimal_display_map(all_variables: &[VariableRef]) -> HashMap<String, String> {
+    // Group variables by their local name: only collisions within the same
+    // local name need disambiguation.
+    let mut groups: HashMap<String, Vec<&VariableRef>> = HashMap::new();
+    for v in all_variables {
+        groups.entry(v.name.clone()).or_default().push(v);
+    }
 
-    let mut scope_depth = 0;
-    loop {
-        let current_name = format_variable_name(variable, scope_depth);
+    let mut result: HashMap<String, String> = HashMap::with_capacity(all_variables.len());
 
-        // Check if this name is unique
-        if !other_variables
-            .iter()
-            .any(|v| format_variable_name(v, scope_depth) == current_name)
-        {
-            return current_name;
+    for (_local, vars) in groups {
+        if vars.len() == 1 {
+            let v = vars[0];
+            result.insert(v.full_path_string(), v.name.clone());
+            continue;
         }
 
-        scope_depth += 1;
+        // Build reversed scope component vectors for sorting and comparison.
+        let mut entries: Vec<(Vec<String>, &VariableRef)> = vars
+            .iter()
+            .map(|v| {
+                let rev: Vec<String> = v.path.strs().iter().rev().cloned().collect();
+                (rev, *v)
+            })
+            .collect();
+
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Helper to compute common prefix length of two reversed component vectors.
+        fn common_prefix_len(a: &[String], b: &[String]) -> usize {
+            let mut i = 0usize;
+            while i < a.len() && i < b.len() && a[i] == b[i] {
+                i += 1;
+            }
+            i
+        }
+
+        for i in 0..entries.len() {
+            let (ref path_i, var_i) = &entries[i];
+            let mut need = 0usize;
+            if i > 0 {
+                let common = common_prefix_len(path_i, &entries[i - 1].0);
+                need = need.max(common + 1);
+            }
+            if i + 1 < entries.len() {
+                let common = common_prefix_len(path_i, &entries[i + 1].0);
+                need = need.max(common + 1);
+            }
+
+            // If need is zero, fallback to local name.
+            if need == 0 || path_i.is_empty() {
+                result.insert(var_i.full_path_string(), var_i.name.clone());
+                continue;
+            }
+
+            // Take up to `need` reversed components, then reverse them back for display.
+            let take = need.min(path_i.len());
+            let scope_parts_rev: Vec<String> = path_i.iter().take(take).cloned().collect();
+            let scope = scope_parts_rev
+                .iter()
+                .rev()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(".");
+            let prefix = if take < path_i.len() { ELLIPSIS } else { "" };
+
+            let display = if scope.is_empty() {
+                var_i.name.clone()
+            } else {
+                format!("{}{}.{}", prefix, scope, var_i.name)
+            };
+            result.insert(var_i.full_path_string(), display);
+        }
     }
+
+    result
 }
 
-/// Format a variable name with the given scope depth.
-/// scope_depth=0 returns just the local name.
-/// Higher values add scope components from the end of the path.
-fn format_variable_name(variable: &VariableRef, scope_depth: usize) -> String {
-    if scope_depth == 0 {
-        variable.name.clone()
-    } else {
-        let path_parts = variable.path.strs();
-        let ellipsis = if scope_depth < path_parts.len() {
-            "…"
-        } else {
-            ""
-        };
-        let scope = path_parts.iter().rev().take(scope_depth).rev().join(".");
-        format!("{}{}.{}", ellipsis, scope, variable.name)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn minimal_display_map_unique_locals() {
+        let v1 = VariableRef::from_hierarchy_string("top.a");
+        let v2 = VariableRef::from_hierarchy_string("top.b");
+        let vars = vec![v1.clone(), v2.clone()];
+        let map = compute_minimal_display_map(&vars);
+        assert_eq!(
+            map.get(&v1.full_path_string()).map(|s| s.as_str()),
+            Some("a")
+        );
+        assert_eq!(
+            map.get(&v2.full_path_string()).map(|s| s.as_str()),
+            Some("b")
+        );
+    }
+
+    #[test]
+    fn minimal_display_map_collisions() {
+        let v1 = VariableRef::from_hierarchy_string("top.dut.x");
+        let v2 = VariableRef::from_hierarchy_string("other.dut.x");
+        let v3 = VariableRef::from_hierarchy_string("top.sub.x");
+        let vars = vec![v1.clone(), v2.clone(), v3.clone()];
+        let map = compute_minimal_display_map(&vars);
+
+        assert_eq!(
+            map.get(&v1.full_path_string()).map(|s| s.as_str()),
+            Some("top.dut.x")
+        );
+        assert_eq!(
+            map.get(&v2.full_path_string()).map(|s| s.as_str()),
+            Some("other.dut.x")
+        );
+        assert_eq!(
+            map.get(&v3.full_path_string()).map(|s| s.as_str()),
+            Some(ELLIPSIS.to_owned() + "sub.x").as_deref()
+        );
+    }
+
+    #[test]
+    fn minimal_display_map_root_and_scoped() {
+        let v1 = VariableRef::from_hierarchy_string("x");
+        let v2 = VariableRef::from_hierarchy_string("a.x");
+        let vars = vec![v1.clone(), v2.clone()];
+        let map = compute_minimal_display_map(&vars);
+        assert_eq!(
+            map.get(&v1.full_path_string()).map(|s| s.as_str()),
+            Some("x")
+        );
+        assert_eq!(
+            map.get(&v2.full_path_string()).map(|s| s.as_str()),
+            Some("a.x")
+        );
     }
 }
