@@ -22,32 +22,39 @@ use crate::mousegestures::GestureZones;
 use crate::time::TimeFormat;
 use crate::{clock_highlighting::ClockHighlightType, variable_name_type::VariableNameType};
 
+macro_rules! theme {
+    ($name:expr) => {
+        (
+            $name,
+            include_str!(concat!("../../themes/", $name, ".toml")),
+        )
+    };
+}
+
 /// Built-in theme names and their corresponding embedded content
 static BUILTIN_THEMES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     HashMap::from([
-        ("dark+", include_str!("../../themes/dark+.toml")),
-        (
-            "dark-high-contrast",
-            include_str!("../../themes/dark-high-contrast.toml"),
-        ),
-        ("ibm", include_str!("../../themes/ibm.toml")),
-        ("light+", include_str!("../../themes/light+.toml")),
-        (
-            "light-high-contrast",
-            include_str!("../../themes/light-high-contrast.toml"),
-        ),
+        theme!("dark+"),
+        theme!("dark-high-contrast"),
+        theme!("ibm"),
+        theme!("light+"),
+        theme!("light-high-contrast"),
         ("okabe/ito", include_str!("../../themes/okabe-ito.toml")),
-        (
-            "petroff-dark",
-            include_str!("../../themes/petroff-dark.toml"),
-        ),
-        (
-            "petroff-light",
-            include_str!("../../themes/petroff-light.toml"),
-        ),
-        ("solarized", include_str!("../../themes/solarized.toml")),
+        theme!("petroff-dark"),
+        theme!("petroff-light"),
+        theme!("solarized"),
     ])
 });
+
+#[cfg(not(target_arch = "wasm32"))]
+pub static PROJECT_DIR: LazyLock<Option<ProjectDirs>> =
+    LazyLock::new(|| ProjectDirs::from("org", "surfer-project", "surfer"));
+#[cfg(not(target_arch = "wasm32"))]
+const OLD_CONFIG_FILE: &str = "surfer.toml";
+#[cfg(not(target_arch = "wasm32"))]
+const CONFIG_FILE: &str = "config.toml";
+#[cfg(not(target_arch = "wasm32"))]
+const THEMES_DIR: &str = "themes";
 
 /// Select the function of the arrow keys
 #[derive(Clone, Copy, Debug, Deserialize, Display, FromStr, PartialEq, Eq, Sequence, Serialize)]
@@ -548,8 +555,8 @@ impl SurferTheme {
         };
 
         // read themes from config directory
-        if let Some(proj_dirs) = ProjectDirs::from("org", "surfer-project", "surfer") {
-            let config_themes_dir = proj_dirs.config_dir().join("themes");
+        if let Some(proj_dirs) = &*PROJECT_DIR {
+            let config_themes_dir = proj_dirs.config_dir().join(THEMES_DIR);
             if let Ok(config_themes_dir) = std::fs::read_dir(config_themes_dir) {
                 add_themes_from_dir(config_themes_dir);
             }
@@ -562,12 +569,12 @@ impl SurferTheme {
         // higher-level theme settings with a local `.surfer` directory.
         local_config_dirs
             .iter()
-            .filter_map(|p| std::fs::read_dir(p.join("themes")).ok())
+            .filter_map(|p| std::fs::read_dir(p.join(THEMES_DIR)).ok())
             .for_each(add_themes_from_dir);
 
         if matches!(theme_name, Some(ref name) if !name.is_empty()) {
             let theme_path =
-                Path::new("themes").join(theme_name.as_ref().unwrap().to_owned() + ".toml");
+                Path::new(THEMES_DIR).join(theme_name.as_ref().unwrap().to_owned() + ".toml");
 
             // First filter out all the existing local themes and add them in the aforementioned
             // order.
@@ -582,7 +589,7 @@ impl SurferTheme {
                     .fold(theme, |t, p| t.add_source(File::from(p).required(false)));
             } else {
                 // If no local themes exist, search in the config directory.
-                if let Some(proj_dirs) = ProjectDirs::from("org", "surfer-project", "surfer") {
+                if let Some(proj_dirs) = &*PROJECT_DIR {
                     let config_theme_path = proj_dirs.config_dir().join(theme_path);
                     if config_theme_path.exists() {
                         theme = theme.add_source(File::from(config_theme_path).required(false));
@@ -673,24 +680,25 @@ impl SurferConfig {
         ));
 
         let config = if !force_default_config {
-            if let Some(proj_dirs) = ProjectDirs::from("org", "surfer-project", "surfer") {
-                let config_file = proj_dirs.config_dir().join("config.toml");
+            if let Some(proj_dirs) = &*PROJECT_DIR {
+                let config_file = proj_dirs.config_dir().join(CONFIG_FILE);
                 config = config.add_source(File::from(config_file).required(false));
             }
 
-            if Path::new("surfer.toml").exists() {
+            let old_config_path = Path::new(OLD_CONFIG_FILE);
+            if old_config_path.exists() {
                 warn!("Configuration in 'surfer.toml' is deprecated. Please move your configuration to '.surfer/config.toml'.");
             }
 
             // `surfer.toml` will not be searched for upward, as it is deprecated.
-            config = config.add_source(File::from(Path::new("surfer.toml")).required(false));
+            config = config.add_source(File::from(old_config_path).required(false));
 
             // Add configs from most top-level to most local. This allows overwriting of
             // higher-level settings with a local `.surfer` directory.
             find_local_configs()
                 .into_iter()
                 .fold(config, |c, p| {
-                    c.add_source(File::from(p.join("config.toml")).required(false))
+                    c.add_source(File::from(p.join(CONFIG_FILE)).required(false))
                 })
                 .add_source(Environment::with_prefix("surfer")) // Add environment finally
         } else {
