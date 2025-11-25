@@ -3,8 +3,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::mpsc::Sender;
 
-#[cfg(not(target_arch = "wasm32"))]
-use directories::ProjectDirs;
 use ecolor::Color32;
 use eyre::Result;
 #[cfg(not(target_arch = "wasm32"))]
@@ -150,7 +148,7 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
 #[cfg(not(target_arch = "wasm32"))]
 fn find_user_decoders() -> Vec<Box<DynBasicTranslator>> {
     let mut decoders: Vec<Box<DynBasicTranslator>> = vec![];
-    if let Some(proj_dirs) = ProjectDirs::from("org", "surfer-project", "surfer") {
+    if let Some(proj_dirs) = &*crate::config::PROJECT_DIR {
         let mut config_decoders = find_user_decoders_at_path(proj_dirs.config_dir());
         decoders.append(&mut config_decoders);
     }
