@@ -3028,6 +3028,7 @@ dependencies = [
  "sys-locale",
  "tempfile",
  "test-log",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
  "toml 0.9.8",
