@@ -171,6 +171,7 @@ impl SystemState {
                 hierarchy_style: None,
                 autoload_sibling_state_files: None,
                 autoreload_files: None,
+                animation_enabled: None,
             },
             translators,
             channels,

@@ -126,6 +126,13 @@ impl SystemState {
     }
 
     #[inline]
+    pub fn animation_enabled(&self) -> bool {
+        self.user
+            .animation_enabled
+            .unwrap_or_else(|| self.user.config.animation_enabled())
+    }
+
+    #[inline]
     pub fn primary_button_drag_behavior(&self) -> PrimaryMouseDrag {
         self.user
             .primary_button_drag_behavior
