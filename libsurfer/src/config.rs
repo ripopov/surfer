@@ -22,30 +22,27 @@ use crate::mousegestures::GestureZones;
 use crate::time::TimeFormat;
 use crate::{clock_highlighting::ClockHighlightType, variable_name_type::VariableNameType};
 
+macro_rules! theme {
+    ($name:expr) => {
+        (
+            $name,
+            include_str!(concat!("../../themes/", $name, ".toml")),
+        )
+    };
+}
+
 /// Built-in theme names and their corresponding embedded content
 static BUILTIN_THEMES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     HashMap::from([
-        ("dark+", include_str!("../../themes/dark+.toml")),
-        (
-            "dark-high-contrast",
-            include_str!("../../themes/dark-high-contrast.toml"),
-        ),
-        ("ibm", include_str!("../../themes/ibm.toml")),
-        ("light+", include_str!("../../themes/light+.toml")),
-        (
-            "light-high-contrast",
-            include_str!("../../themes/light-high-contrast.toml"),
-        ),
+        theme!("dark+"),
+        theme!("dark-high-contrast"),
+        theme!("ibm"),
+        theme!("light+"),
+        theme!("light-high-contrast"),
         ("okabe/ito", include_str!("../../themes/okabe-ito.toml")),
-        (
-            "petroff-dark",
-            include_str!("../../themes/petroff-dark.toml"),
-        ),
-        (
-            "petroff-light",
-            include_str!("../../themes/petroff-light.toml"),
-        ),
-        ("solarized", include_str!("../../themes/solarized.toml")),
+        theme!("petroff-dark"),
+        theme!("petroff-light"),
+        theme!("solarized"),
     ])
 });
 
