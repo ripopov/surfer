@@ -1,4 +1,7 @@
-use crate::{fzcmd::expand_command, time::get_ticks, tooltips::variable_tooltip_text};
+use crate::{
+    fzcmd::expand_command, menus::generic_context_menu, time::get_ticks,
+    tooltips::variable_tooltip_text,
+};
 use ecolor::Color32;
 #[cfg(not(target_arch = "wasm32"))]
 use egui::ViewportCommand;
@@ -772,6 +775,10 @@ impl SystemState {
         });
 
         self.user.waves.as_mut().unwrap().drawing_infos = item_offsets;
+
+        // Context menu for the unused part
+        let response = ui.allocate_response(ui.available_size(), Sense::click());
+        generic_context_menu(msgs, &response);
     }
 
     fn get_name_alignment(&self) -> Align {
@@ -1292,6 +1299,8 @@ impl SystemState {
             return;
         };
         let response = ui.allocate_response(ui.available_size(), Sense::click());
+        generic_context_menu(msgs, &response);
+
         let mut painter = ui.painter().clone();
         let rect = response.rect;
         let container_rect = Rect::from_min_size(Pos2::ZERO, rect.size());
