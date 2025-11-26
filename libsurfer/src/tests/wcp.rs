@@ -61,9 +61,9 @@ where
 
         let setup_msgs = vec![
             // hide GUI elements
-            Message::ToggleMenu,
-            Message::ToggleToolbar,
-            Message::ToggleOverview,
+            Message::SetMenuVisible(false),
+            Message::SetToolbarVisible(false),
+            Message::SetOverviewVisible(false),
         ];
 
         for msg in setup_msgs {

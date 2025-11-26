@@ -469,8 +469,8 @@ impl SystemState {
                     .and_then(|item| waves.items_tree.get_mut(item))?;
                 node.selected = !node.selected;
             }
-            Message::ToggleDefaultTimeline => {
-                self.user.show_default_timeline = Some(!self.show_default_timeline());
+            Message::SetDefaultTimeline(v) => {
+                self.user.show_default_timeline = Some(v);
             }
             Message::UnfocusItem => {
                 let waves = self.user.waves.as_mut()?;
@@ -1204,27 +1204,24 @@ impl SystemState {
 
                 self.translators.add_or_replace(AnyTranslator::Full(t));
             }
-            Message::ToggleSidePanel => self.user.show_hierarchy = Some(!self.show_hierarchy()),
-            Message::ToggleMenu => self.user.show_menu = Some(!self.show_menu()),
-            Message::ToggleToolbar => self.user.show_toolbar = Some(!self.show_toolbar()),
-            Message::ToggleEmptyScopes => {
-                self.user.show_empty_scopes = Some(!self.show_empty_scopes())
+            Message::SetSidePanelVisible(v) => self.user.show_hierarchy = Some(v),
+            Message::SetMenuVisible(v) => self.user.show_menu = Some(v),
+            Message::ToggleMenu => {
+                self.user.show_menu = Some(!self.show_menu());
             }
+            Message::SetToolbarVisible(v) => self.user.show_toolbar = Some(v),
+            Message::SetShowEmptyScopes(v) => self.user.show_empty_scopes = Some(v),
             Message::SetParameterDisplayLocation(location) => {
                 self.user.parameter_display_location = Some(location);
             }
-            Message::ToggleStatusbar => self.user.show_statusbar = Some(!self.show_statusbar()),
-            Message::ToggleTickLines => self.user.show_ticks = Some(!self.show_ticks()),
-            Message::ToggleVariableTooltip => self.user.show_tooltip = Some(self.show_tooltip()),
-            Message::ToggleScopeTooltip => {
-                self.user.show_scope_tooltip = Some(!self.show_scope_tooltip())
-            }
-            Message::ToggleOverview => self.user.show_overview = Some(!self.show_overview()),
-            Message::ToggleDirection => {
-                self.user.show_variable_direction = Some(!self.show_variable_direction())
-            }
-            Message::ToggleIndices => {
-                let new = !self.show_variable_indices();
+            Message::SetStatusbarVisible(v) => self.user.show_statusbar = Some(v),
+            Message::SetTickLines(v) => self.user.show_ticks = Some(v),
+            Message::SetVariableTooltip(v) => self.user.show_tooltip = Some(v),
+            Message::SetScopeTooltip(v) => self.user.show_scope_tooltip = Some(v),
+            Message::SetOverviewVisible(v) => self.user.show_overview = Some(v),
+            Message::SetShowVariableDirection(v) => self.user.show_variable_direction = Some(v),
+            Message::SetShowIndices(v) => {
+                let new = v;
                 self.user.show_variable_indices = Some(new);
                 let waves = self.user.waves.as_mut()?;
                 waves.display_variable_indices = new;

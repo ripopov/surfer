@@ -240,10 +240,10 @@ macro_rules! snapshot_ui_with_file_and_msgs {
                     panic!("Timeout")
                 }
             }
-            state.add_batch_message(Message::ToggleMenu);
-            state.add_batch_message(Message::ToggleSidePanel);
-            state.add_batch_message(Message::ToggleToolbar);
-            state.add_batch_message(Message::ToggleOverview);
+            state.add_batch_message(Message::SetMenuVisible(false));
+            state.add_batch_message(Message::SetSidePanelVisible(false));
+            state.add_batch_message(Message::SetToolbarVisible(false));
+            state.add_batch_message(Message::SetOverviewVisible(false));
             state.add_batch_message(Message::CloseOpenSiblingStateFileDialog {
                 load_state: false,
                 do_not_show_again: true,
@@ -391,7 +391,7 @@ snapshot_ui!(menu_can_be_hidden, || {
     let mut state = SystemState::new_default_config()
         .unwrap()
         .with_params(StartupParams::default());
-    let msgs = [Message::ToggleMenu];
+    let msgs = [Message::SetMenuVisible(false)];
     for message in msgs {
         state.update(message);
     }
@@ -402,7 +402,7 @@ snapshot_ui!(side_panel_can_be_hidden, || {
     let mut state = SystemState::new_default_config()
         .unwrap()
         .with_params(StartupParams::default());
-    let msgs = [Message::ToggleSidePanel];
+    let msgs = [Message::SetSidePanelVisible(false)];
     for message in msgs {
         state.update(message);
     }
@@ -413,7 +413,7 @@ snapshot_ui!(toolbar_can_be_hidden, || {
     let mut state = SystemState::new_default_config()
         .unwrap()
         .with_params(StartupParams::default());
-    let msgs = [Message::ToggleToolbar];
+    let msgs = [Message::SetToolbarVisible(false)];
     for message in msgs {
         state.update(message);
     }
@@ -449,7 +449,7 @@ snapshot_ui!(overview_can_be_hidden, || {
         VariableRef::from_hierarchy_string("tb.dut.counter"),
     ]));
     state.update(Message::CursorSet(BigInt::from(10)));
-    state.update(Message::ToggleOverview);
+    state.update(Message::SetOverviewVisible(false));
     // make sure all the signals added by the proceeding messages are properly loaded
     wait_for_waves_fully_loaded(&mut state, 10);
     state
@@ -484,7 +484,7 @@ snapshot_ui!(statusbar_can_be_hidden, || {
         VariableRef::from_hierarchy_string("tb.dut.counter"),
     ]));
     state.update(Message::CursorSet(BigInt::from(10)));
-    state.update(Message::ToggleStatusbar);
+    state.update(Message::SetStatusbarVisible(false));
     // make sure all the signals added by the proceeding messages are properly loaded
     wait_for_waves_fully_loaded(&mut state, 10);
     state
@@ -504,10 +504,10 @@ snapshot_ui! {example_vcd_renders, || {
         }
     }
 
-    state.update(Message::ToggleMenu);
-    state.update(Message::ToggleSidePanel);
-    state.update(Message::ToggleToolbar);
-    state.update(Message::ToggleOverview);
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
     state.update(Message::CloseOpenSiblingStateFileDialog {load_state: false, do_not_show_again: true});
     state.update(Message::AddScope(ScopeRef::from_strs(&["tb"]), false));
     state.update(Message::AddScope(ScopeRef::from_strs(&["tb", "dut"]), false));
@@ -519,10 +519,10 @@ snapshot_ui! {example_vcd_renders, || {
 snapshot_empty_state_with_msgs! {
     dialogs_work,
     [
-        Message::ToggleMenu,
-        Message::ToggleSidePanel,
-        Message::ToggleToolbar,
-        Message::ToggleOverview,
+        Message::SetMenuVisible(false),
+        Message::SetSidePanelVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
         Message::CloseOpenSiblingStateFileDialog {load_state: false, do_not_show_again: true},
         Message::SetUrlEntryVisible(true, None),  // No need to provide callback
         Message::SetKeyHelpVisible(true),
@@ -542,7 +542,7 @@ snapshot_ui_with_file_and_msgs! {top_level_signals_have_no_aliasing, "examples/p
 ]}
 
 snapshot_ui_with_file_and_msgs! {expand_scope_works, "examples/counter.vcd", [
-    Message::ToggleSidePanel,
+    Message::SetSidePanelVisible(true),
     Message::AddScope(ScopeRef::from_strs(&["tb"]), true),
     Message::ExpandScope(ScopeRef::from_strs(&["tb", "dut"])),
 ]}
@@ -561,9 +561,9 @@ snapshot_ui! {resizing_the_canvas_redraws, || {
         }
     }
 
-    state.update(Message::ToggleMenu);
-    state.update(Message::ToggleToolbar);
-    state.update(Message::ToggleOverview);
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
     state.update(Message::AddScope(ScopeRef::from_strs(&["tb"]), false));
     state.update(Message::CloseOpenSiblingStateFileDialog {load_state: false, do_not_show_again: true});
     state.update(Message::CursorSet(BigInt::from(100)));
@@ -587,7 +587,7 @@ snapshot_ui! {resizing_the_canvas_redraws, || {
         None,
     );
 
-    state.update(Message::ToggleSidePanel);
+    state.update(Message::SetSidePanelVisible(false));
 
     state
 }}
@@ -686,7 +686,7 @@ snapshot_ui_with_file_and_msgs! {divider_works, "examples/counter.vcd", [
 ]}
 
 snapshot_ui_with_file_and_msgs! {markers_work, "examples/counter.vcd", [
-    Message::ToggleOverview,
+    Message::SetOverviewVisible(true),
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::CursorSet(BigInt::from(600)),
     Message::MoveMarkerToCursor(2),
@@ -698,7 +698,7 @@ snapshot_ui_with_file_and_msgs! {markers_work, "examples/counter.vcd", [
 ]}
 
 snapshot_ui_with_file_and_msgs! {markers_dialog_work, "examples/counter.vcd", [
-    Message::ToggleOverview,
+    Message::SetOverviewVisible(true),
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::CursorSet(BigInt::from(600)),
     Message::MoveMarkerToCursor(2),
@@ -789,7 +789,7 @@ snapshot_ui_with_file_and_msgs! {timeline_render, "examples/counter.vcd", [
 
 snapshot_ui_with_file_and_msgs! {toggle_tick_lines, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
-    Message::ToggleTickLines
+    Message::SetTickLines(false)
 ]}
 
 snapshot_ui_with_file_and_msgs! {command_prompt, "examples/counter.vcd", [
@@ -1038,9 +1038,9 @@ snapshot_ui!(regex_error_indication, || {
     }
 
     let msgs = [
-        Message::ToggleMenu,
-        Message::ToggleToolbar,
-        Message::ToggleOverview,
+        Message::SetMenuVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
         Message::CloseOpenSiblingStateFileDialog {
             load_state: false,
             do_not_show_again: true,
@@ -1059,8 +1059,8 @@ snapshot_ui!(regex_error_indication, || {
 });
 
 snapshot_ui_with_file_and_msgs! {signal_list_works, "examples/counter.vcd", [
-    Message::ToggleSidePanel,
-    Message::ToggleDirection,
+    Message::SetSidePanelVisible(true),
+    Message::SetShowVariableDirection(false),
     Message::SetActiveScope(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"]))),
     Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.clk")]),
 ]}
@@ -1087,10 +1087,10 @@ snapshot_ui!(fuzzy_signal_filter_works, || {
     }
 
     let msgs = [
-        Message::ToggleMenu,
-        Message::ToggleToolbar,
-        Message::ToggleOverview,
-        Message::ToggleDirection,
+        Message::SetMenuVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
+        Message::SetShowVariableDirection(false),
         Message::CloseOpenSiblingStateFileDialog {
             load_state: false,
             do_not_show_again: true,
@@ -1134,10 +1134,10 @@ snapshot_ui!(contain_signal_filter_works, || {
     }
 
     let msgs = [
-        Message::ToggleMenu,
-        Message::ToggleToolbar,
-        Message::ToggleOverview,
-        Message::ToggleDirection,
+        Message::SetMenuVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
+        Message::SetShowVariableDirection(false),
         Message::CloseOpenSiblingStateFileDialog {
             load_state: false,
             do_not_show_again: true,
@@ -1181,10 +1181,10 @@ snapshot_ui!(regex_signal_filter_works, || {
     }
 
     let msgs = [
-        Message::ToggleMenu,
-        Message::ToggleToolbar,
-        Message::ToggleOverview,
-        Message::ToggleDirection,
+        Message::SetMenuVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
+        Message::SetShowVariableDirection(false),
         Message::CloseOpenSiblingStateFileDialog {
             load_state: false,
             do_not_show_again: true,
@@ -1228,10 +1228,10 @@ snapshot_ui!(start_signal_filter_works, || {
     }
 
     let msgs = [
-        Message::ToggleMenu,
-        Message::ToggleToolbar,
-        Message::ToggleOverview,
-        Message::ToggleDirection,
+        Message::SetMenuVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
+        Message::SetShowVariableDirection(false),
         Message::CloseOpenSiblingStateFileDialog {
             load_state: false,
             do_not_show_again: true,
@@ -1275,10 +1275,10 @@ snapshot_ui!(case_sensitive_signal_filter_works, || {
     }
 
     let msgs = [
-        Message::ToggleMenu,
-        Message::ToggleToolbar,
-        Message::ToggleOverview,
-        Message::ToggleDirection,
+        Message::SetMenuVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
+        Message::SetShowVariableDirection(false),
         Message::CloseOpenSiblingStateFileDialog {
             load_state: false,
             do_not_show_again: true,
@@ -1323,10 +1323,10 @@ snapshot_ui!(signal_type_filter_works_1, || {
     }
 
     let msgs = [
-        Message::ToggleMenu,
-        Message::ToggleToolbar,
-        Message::ToggleOverview,
-        Message::ToggleDirection,
+        Message::SetMenuVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
+        Message::SetShowVariableDirection(false),
         Message::CloseOpenSiblingStateFileDialog {
             load_state: false,
             do_not_show_again: true,
@@ -1368,10 +1368,10 @@ snapshot_ui!(signal_type_filter_works_2, || {
     }
 
     let msgs = [
-        Message::ToggleMenu,
-        Message::ToggleToolbar,
-        Message::ToggleOverview,
-        Message::ToggleDirection,
+        Message::SetMenuVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
+        Message::SetShowVariableDirection(false),
         Message::CloseOpenSiblingStateFileDialog {
             load_state: false,
             do_not_show_again: true,
@@ -1414,10 +1414,10 @@ snapshot_ui!(signal_type_group_works, || {
     }
 
     let msgs = [
-        Message::ToggleMenu,
-        Message::ToggleToolbar,
-        Message::ToggleOverview,
-        Message::ToggleDirection,
+        Message::SetMenuVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
+        Message::SetShowVariableDirection(false),
         Message::CloseOpenSiblingStateFileDialog {
             load_state: false,
             do_not_show_again: true,
@@ -1454,10 +1454,10 @@ snapshot_ui!(load_keep_all_works, || {
     wait_for_waves_fully_loaded(&mut state, 10);
 
     let msgs = [
-        Message::ToggleMenu,
-        Message::ToggleToolbar,
-        Message::ToggleOverview,
-        Message::ToggleSidePanel,
+        Message::SetMenuVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
+        Message::SetSidePanelVisible(false),
         Message::CloseOpenSiblingStateFileDialog {
             load_state: false,
             do_not_show_again: true,
@@ -1519,10 +1519,10 @@ snapshot_ui!(load_keep_signal_remove_unavailable_works, || {
     wait_for_waves_fully_loaded(&mut state, 10);
 
     let msgs = [
-        Message::ToggleMenu,
-        Message::ToggleToolbar,
-        Message::ToggleOverview,
-        Message::ToggleSidePanel,
+        Message::SetMenuVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
+        Message::SetSidePanelVisible(false),
         Message::CloseOpenSiblingStateFileDialog {
             load_state: false,
             do_not_show_again: true,
@@ -1568,7 +1568,7 @@ snapshot_ui!(load_keep_signal_remove_unavailable_works, || {
 });
 
 snapshot_ui_with_file_and_msgs! {alignment_right_works, "examples/counter.vcd", [
-Message::ToggleOverview,
+Message::SetOverviewVisible(true),
 Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
 Message::SetNameAlignRight(true)
 ]}
@@ -1590,35 +1590,35 @@ snapshot_ui_with_file_and_msgs! {remove_viewport_works, "examples/counter.vcd", 
 ]}
 
 snapshot_ui_with_file_and_msgs! {hierarchy_tree, "examples/counter.vcd", [
-    Message::ToggleSidePanel,
+    Message::SetSidePanelVisible(true),
     Message::SetHierarchyStyle(HierarchyStyle::Tree),
 ]}
 
 snapshot_ui_with_file_and_msgs! {hierarchy_variables, "examples/counter.vcd", [
-    Message::ToggleSidePanel,
+    Message::SetSidePanelVisible(true),
     Message::SetHierarchyStyle(HierarchyStyle::Variables),
 ]}
 
 snapshot_ui_with_file_and_msgs! {transaction_hierarchy_separate, "examples/my_db.ftr", [
     Message::SetActiveScope(ScopeType::StreamScope(StreamScopeRef::Root)),
-    Message::ToggleSidePanel,
+    Message::SetSidePanelVisible(true),
     Message::SetHierarchyStyle(HierarchyStyle::Separate),
 ]}
 
 snapshot_ui_with_file_and_msgs! {transaction_hierarchy_tree, "examples/my_db.ftr", [
-    Message::ToggleSidePanel,
+    Message::SetSidePanelVisible(true),
     Message::SetHierarchyStyle(HierarchyStyle::Tree),
 ]}
 
 snapshot_ui_with_file_and_msgs! {transaction_hierarchy_variables, "examples/my_db.ftr", [
-    Message::ToggleSidePanel,
+    Message::SetSidePanelVisible(true),
     Message::SetHierarchyStyle(HierarchyStyle::Variables),
 ]}
 
 // makes sure that variables that are not part of a scope are properly displayed in the hierarchy tree view
 snapshot_ui_with_file_and_msgs! {hierarchy_tree_with_root_vars, "examples/atxmega256a3u-bmda-jtag_short.vcd", [
-    Message::ToggleSidePanel,
-    Message::ToggleDirection,
+    Message::SetSidePanelVisible(true),
+    Message::SetShowVariableDirection(false),
     Message::SetHierarchyStyle(HierarchyStyle::Tree),
     Message::AddVariables(vec![
         VariableRef::from_strs(&["tck"]),
@@ -1630,8 +1630,8 @@ snapshot_ui_with_file_and_msgs! {hierarchy_tree_with_root_vars, "examples/atxmeg
 
 // makes sure that variables that are not part of a scope are properly displayed in the separate hierarchy view
 snapshot_ui_with_file_and_msgs! {hierarchy_separate_with_root_vars, "examples/atxmega256a3u-bmda-jtag_short.vcd", [
-    Message::ToggleSidePanel,
-    Message::ToggleDirection,
+    Message::SetSidePanelVisible(true),
+    Message::SetShowVariableDirection(false),
     Message::AddVariables(vec![
         VariableRef::from_strs(&["tck"]),
         VariableRef::from_strs(&["tms"]),
@@ -1641,7 +1641,7 @@ snapshot_ui_with_file_and_msgs! {hierarchy_separate_with_root_vars, "examples/at
 ]}
 
 snapshot_ui_with_file_and_msgs! {hierarchy_separate, "examples/counter.vcd", [
-    Message::ToggleSidePanel,
+    Message::SetSidePanelVisible(true),
     Message::SetHierarchyStyle(HierarchyStyle::Separate),
 ]}
 
@@ -1719,11 +1719,11 @@ snapshot_ui_with_file_and_msgs! {previous_transition_skip_zero, "examples/counte
 
 snapshot_ui_with_file_and_msgs! {toggle_variable_indices, "examples/counter.vcd", [
     Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.dut.counter")]),
-    Message::ToggleIndices
+    Message::SetShowIndices(false),
 ]}
 
 snapshot_ui_with_file_and_msgs! {direction_works, "examples/tb_recv.ghw", [
-    Message::ToggleSidePanel,
+    Message::SetSidePanelVisible(true),
     Message::SetActiveScope(ScopeType::WaveScope(ScopeRef::from_strs(&["tb_recv", "dut"]))),
     Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb_recv.dut.en")]),
 ]}
@@ -1742,9 +1742,9 @@ snapshot_ui!(signals_can_be_added_after_file_switch, || {
         load_state: false,
         do_not_show_again: true,
     });
-    state.update(Message::ToggleToolbar);
-    state.update(Message::ToggleMenu);
-    state.update(Message::ToggleSidePanel);
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
     state.update(Message::AddVariables(vec![
         VariableRef::from_hierarchy_string("tb.dut.counter"),
     ]));
@@ -1842,10 +1842,10 @@ snapshot_ui!(rising_clock_markers, || {
         }
     }
     state.user.config.theme.clock_rising_marker = true;
-    state.update(Message::ToggleMenu);
-    state.update(Message::ToggleSidePanel);
-    state.update(Message::ToggleToolbar);
-    state.update(Message::ToggleOverview);
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
     state.update(Message::AddVariables(vec![
         VariableRef::from_hierarchy_string("tb.clk"),
     ]));
@@ -2275,7 +2275,7 @@ snapshot_ui_with_file_and_msgs! {tx_stream_multiple_viewport_works, "examples/my
 ]}
 
 snapshot_ui_with_file_and_msgs! {parameter_in_scopes, "examples/picorv32.vcd", [
-    Message::ToggleSidePanel,
+    Message::SetSidePanelVisible(true),
     Message::ExpandParameterSection,
     Message::SetActiveScope(ScopeType::WaveScope(ScopeRef::from_strs(&[
         "testbench",
@@ -2290,7 +2290,7 @@ snapshot_ui_with_file_and_msgs! {parameter_in_scopes, "examples/picorv32.vcd", [
 ]}
 
 snapshot_ui_with_file_and_msgs! {parameter_in_variables, "examples/picorv32.vcd", [
-    Message::ToggleSidePanel,
+    Message::SetSidePanelVisible(true),
     Message::SetParameterDisplayLocation(ParameterDisplayLocation::Variables),
     Message::SetActiveScope(ScopeType::WaveScope(ScopeRef::from_strs(&[
         "testbench",
@@ -2305,7 +2305,7 @@ snapshot_ui_with_file_and_msgs! {parameter_in_variables, "examples/picorv32.vcd"
 ]}
 
 snapshot_ui_with_file_and_msgs! {parameter_in_variables_expanded, "examples/picorv32.vcd", [
-    Message::ToggleSidePanel,
+    Message::SetSidePanelVisible(true),
     Message::SetParameterDisplayLocation(ParameterDisplayLocation::Variables),
     Message::ExpandParameterSection,
     Message::SetActiveScope(ScopeType::WaveScope(ScopeRef::from_strs(&[
@@ -2343,10 +2343,10 @@ snapshot_ui!(arrow_drawing, || {
     state.user.config.theme.clock_rising_marker = true;
     wait_for_waves_fully_loaded(&mut state, 10);
     state.update(Message::AddScope(ScopeRef::from_strs(&["tb"]), false));
-    state.update(Message::ToggleToolbar);
-    state.update(Message::ToggleMenu);
-    state.update(Message::ToggleSidePanel);
-    state.update(Message::ToggleOverview);
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetOverviewVisible(false));
     state.update(Message::ZoomToRange {
         start: 0u32.to_bigint().unwrap(),
         end: 100u32.to_bigint().unwrap(),
@@ -2501,7 +2501,7 @@ snapshot_ui!(arrow_drawing, || {
 
 snapshot_ui_with_file_and_msgs! {default_timeline_works, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
-    Message::ToggleDefaultTimeline,
+    Message::SetDefaultTimeline(false),
 ]}
 
 snapshot_ui!(command_file_loading_works, || {
@@ -2537,7 +2537,7 @@ snapshot_ui!(command_file_in_command_file_works, || {
 
 #[cfg(feature = "wasm_plugins")]
 snapshot_ui_with_file_and_msgs! {wasm_translator_works, "examples/picorv32.vcd", [
-    Message::ToggleSidePanel,
+    Message::SetSidePanelVisible(true),
     Message::LoadWasmTranslator(
         get_project_root()
             .unwrap()

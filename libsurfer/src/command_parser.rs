@@ -344,6 +344,9 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
     };
     let mut theme_names = state.user.config.theme.theme_names.clone();
     let state_file = state.user.state_file.clone();
+    let show_hierarchy = state.show_hierarchy();
+    let show_menu = state.show_menu();
+    let show_tick_lines = state.show_ticks();
     theme_names.insert(0, "default".to_string());
     Command::NonTerminal(
         ParamGreed::Word,
@@ -425,10 +428,14 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                     viewport_idx: 0,
                 })),
                 "zoom_fit" => Some(Command::Terminal(Message::ZoomToFit { viewport_idx: 0 })),
-                "toggle_menu" => Some(Command::Terminal(Message::ToggleMenu)),
-                "toggle_side_panel" => Some(Command::Terminal(Message::ToggleSidePanel)),
+                "toggle_menu" => Some(Command::Terminal(Message::SetMenuVisible(!show_menu))),
+                "toggle_side_panel" => Some(Command::Terminal(Message::SetSidePanelVisible(
+                    !show_hierarchy,
+                ))),
                 "toggle_fullscreen" => Some(Command::Terminal(Message::ToggleFullscreen)),
-                "toggle_tick_lines" => Some(Command::Terminal(Message::ToggleTickLines)),
+                "toggle_tick_lines" => {
+                    Some(Command::Terminal(Message::SetTickLines(!show_tick_lines)))
+                }
                 // scope commands
                 "scope_add" | "module_add" | "stream_add" | "scope_add_recursive" => {
                     let recursive = query == "scope_add_recursive";
