@@ -80,7 +80,9 @@ impl SystemState {
                             msgs.push(Message::ToggleItemSelected(None));
                         }
                     }
-                    (Key::B, true, false, false) => msgs.push(Message::ToggleSidePanel),
+                    (Key::B, true, false, false) => {
+                        msgs.push(Message::SetSidePanelVisible(!self.show_hierarchy()))
+                    }
                     (Key::E, true, false, false) => msgs.push(Message::GoToEnd { viewport_idx: 0 }),
                     (Key::F, true, false, false) => {
                         msgs.push(Message::ShowCommandPrompt("item_focus ".to_string(), None))
@@ -138,7 +140,7 @@ impl SystemState {
                     }),
                     (Key::M, true, false, false) => {
                         if modifiers.alt {
-                            msgs.push(Message::ToggleMenu)
+                            msgs.push(Message::SetMenuVisible(!self.show_menu()));
                         } else if let Some(waves) = self.user.waves.as_ref() {
                             if let Some(cursor) = waves.cursor.as_ref() {
                                 // Check if a marker already exists at the cursor position
@@ -188,7 +190,9 @@ impl SystemState {
                             msgs.push(Message::GoToStart { viewport_idx: 0 });
                         }
                     }
-                    (Key::T, true, false, false) => msgs.push(Message::ToggleToolbar),
+                    (Key::T, true, false, false) => {
+                        msgs.push(Message::SetToolbarVisible(!self.show_toolbar()))
+                    }
                     (Key::U, true, false, false) => {
                         if modifiers.shift {
                             msgs.push(Message::Redo(self.get_count()));

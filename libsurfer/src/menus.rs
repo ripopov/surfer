@@ -210,18 +210,36 @@ impl SystemState {
                 .add_closing_menu(msgs, ui);
             ui.separator();
 
-            b("Toggle side panel", Message::ToggleSidePanel)
-                .shortcut("b")
-                .add_closing_menu(msgs, ui);
-            b("Toggle menu", Message::ToggleMenu)
+            b(
+                "Toggle side panel",
+                Message::SetSidePanelVisible(!self.show_hierarchy()),
+            )
+            .shortcut("b")
+            .add_closing_menu(msgs, ui);
+            b("Toggle menu", Message::SetMenuVisible(!self.show_menu()))
                 .shortcut("Alt+m")
                 .add_closing_menu(msgs, ui);
-            b("Toggle toolbar", Message::ToggleToolbar)
-                .shortcut("t")
-                .add_closing_menu(msgs, ui);
-            b("Toggle overview", Message::ToggleOverview).add_closing_menu(msgs, ui);
-            b("Toggle statusbar", Message::ToggleStatusbar).add_closing_menu(msgs, ui);
-            b("Toggle timeline", Message::ToggleDefaultTimeline).add_closing_menu(msgs, ui);
+            b(
+                "Toggle toolbar",
+                Message::SetToolbarVisible(!self.show_toolbar()),
+            )
+            .shortcut("t")
+            .add_closing_menu(msgs, ui);
+            b(
+                "Toggle overview",
+                Message::SetOverviewVisible(!self.show_overview()),
+            )
+            .add_closing_menu(msgs, ui);
+            b(
+                "Toggle statusbar",
+                Message::SetStatusbarVisible(!self.show_statusbar()),
+            )
+            .add_closing_menu(msgs, ui);
+            b(
+                "Toggle timeline",
+                Message::SetDefaultTimeline(!self.show_default_timeline()),
+            )
+            .add_closing_menu(msgs, ui);
             #[cfg(not(target_arch = "wasm32"))]
             b("Toggle full screen", Message::ToggleFullscreen)
                 .shortcut("F11")
@@ -331,37 +349,39 @@ impl SystemState {
             ui.radio(self.show_ticks(), "Show tick lines")
                 .clicked()
                 .then(|| {
-                    msgs.push(Message::ToggleTickLines);
+                    msgs.push(Message::SetTickLines(!self.show_ticks()));
                 });
 
             ui.radio(self.show_tooltip(), "Show variable tooltip")
                 .clicked()
                 .then(|| {
-                    msgs.push(Message::ToggleVariableTooltip);
+                    msgs.push(Message::SetVariableTooltip(!self.show_tooltip()));
                 });
 
             ui.radio(self.show_scope_tooltip(), "Show scope tooltip")
                 .clicked()
                 .then(|| {
-                    msgs.push(Message::ToggleScopeTooltip);
+                    msgs.push(Message::SetScopeTooltip(!self.show_scope_tooltip()));
                 });
 
             ui.radio(self.show_variable_indices(), "Show variable indices")
                 .clicked()
                 .then(|| {
-                    msgs.push(Message::ToggleIndices);
+                    msgs.push(Message::SetShowIndices(!self.show_variable_indices()));
                 });
 
             ui.radio(self.show_variable_direction(), "Show variable direction")
                 .clicked()
                 .then(|| {
-                    msgs.push(Message::ToggleDirection);
+                    msgs.push(Message::SetShowVariableDirection(
+                        !self.show_variable_direction(),
+                    ));
                 });
 
             ui.radio(self.show_empty_scopes(), "Show empty scopes")
                 .clicked()
                 .then(|| {
-                    msgs.push(Message::ToggleEmptyScopes);
+                    msgs.push(Message::SetShowEmptyScopes(!self.show_empty_scopes()));
                 });
 
             ui.radio(self.highlight_focused(), "Highlight focused")

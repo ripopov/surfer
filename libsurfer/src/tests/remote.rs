@@ -58,10 +58,10 @@ fn run_with_server(
         // connect to server
         Message::LoadWaveformFileFromUrl(url, LoadOptions::clean()),
         // hide GUI elements
-        Message::ToggleMenu,
-        Message::ToggleSidePanel,
-        Message::ToggleToolbar,
-        Message::ToggleOverview,
+        Message::SetMenuVisible(false),
+        Message::SetSidePanelVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
     ];
 
     state.add_batch_messages(msgs);
