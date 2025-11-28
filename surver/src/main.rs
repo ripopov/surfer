@@ -1,7 +1,10 @@
 //! Code for the `surver` executable.
 use clap::Parser;
 use eyre::Result;
-use tracing_subscriber::Layer;
+use std::io::stdout;
+use tokio::runtime::Builder;
+use tracing::subscriber::set_global_default;
+use tracing_subscriber::{EnvFilter, Layer, Registry, fmt, layer::SubscriberExt};
 
 #[derive(clap::Parser, Default)]
 #[command(version = concat!(env!("CARGO_PKG_VERSION"), " (git: ", env!("VERGEN_GIT_DESCRIBE"), ")"), about)]
@@ -23,14 +26,8 @@ struct Args {
 }
 
 /// Starts the logging and error handling. Can be used by unittests to get more insights.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn start_logging() -> Result<()> {
-    use std::io::stdout;
-
-    use tracing_subscriber::{Registry, fmt, layer::SubscriberExt};
-
-    let filter =
-        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
     let subscriber = Registry::default().with(
         fmt::layer()
             .without_time()
@@ -38,7 +35,7 @@ pub fn start_logging() -> Result<()> {
             .with_filter(filter.clone()),
     );
 
-    tracing::subscriber::set_global_default(subscriber).expect("unable to set global subscriber");
+    set_global_default(subscriber).expect("unable to set global subscriber");
 
     Ok(())
 }
@@ -46,7 +43,7 @@ pub fn start_logging() -> Result<()> {
 fn main() -> Result<()> {
     start_logging()?;
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let runtime = Builder::new_current_thread()
         .worker_threads(1)
         .enable_all()
         .build()

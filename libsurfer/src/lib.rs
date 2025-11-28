@@ -64,6 +64,7 @@ pub mod wellen;
 use crate::config::AutoLoad;
 use crate::displayed_item_tree::ItemIndex;
 use crate::displayed_item_tree::TargetPosition;
+use crate::remote::get_time_table_from_server;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -1092,7 +1093,7 @@ impl SystemState {
                             load_options,
                         );
                         // body is already being parsed on the server, we need to request the time table though
-                        Self::get_time_table_from_server(self.channels.msg_sender.clone(), server);
+                        get_time_table_from_server(self.channels.msg_sender.clone(), server);
                     }
                 }
             }

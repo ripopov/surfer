@@ -4,11 +4,11 @@ use std::io::Cursor;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
-use std::sync::mpsc::Sender;
 
-use crate::async_util::{perform_async_work, perform_work, sleep_ms};
+use crate::async_util::{perform_async_work, perform_work};
 use crate::cxxrtl_container::CxxrtlContainer;
 use crate::file_dialog::OpenMode;
+use crate::remote::{get_hierarchy_from_server, get_server_status, server_reload};
 use crate::spawn;
 use crate::util::get_multi_extension;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -27,7 +27,9 @@ use crate::wellen::{
     BodyResult, HeaderResult, LoadSignalPayload, LoadSignalsCmd, LoadSignalsResult,
 };
 use crate::{SystemState, message::Message};
-use surver::{HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, Status, WELLEN_SURFER_DEFAULT_OPTIONS};
+use surver::{
+    HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, SurverStatus, WELLEN_SURFER_DEFAULT_OPTIONS,
+};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum CxxrtlKind {
@@ -366,20 +368,21 @@ impl SystemState {
                     };
 
                     // check to see if the response came from a Surfer running in server mode
+
                     if let Some(value) = response.headers().get(HTTP_SERVER_KEY)
                         && matches!(value.to_str(), Ok(HTTP_SERVER_VALUE_SURFER))
                     {
                         if load_options.keep_variables {
                             // Request a reload (will also get status)
                             info!("Reloading from surfer server at: {url}");
-                            Self::server_reload(sender.clone(), url.clone(), 0);
+                            server_reload(sender.clone(), url.clone(), 0);
                         } else {
                             info!("Connecting to a surfer server at: {url}");
                             // Request status
-                            Self::get_server_status(sender.clone(), url.clone(), 0);
+                            get_server_status(sender.clone(), url.clone(), 0);
                         }
                         // Request hierarchy
-                        Self::get_hierarchy_from_server(sender.clone(), url.clone(), load_options);
+                        get_hierarchy_from_server(sender.clone(), url.clone(), load_options);
                         return;
                     }
 
@@ -458,111 +461,9 @@ impl SystemState {
             error!("Failed to send message: {e}");
         }
     }
-    fn get_hierarchy_from_server(
-        sender: Sender<Message>,
-        server: String,
-        load_options: LoadOptions,
-    ) {
-        let start = web_time::Instant::now();
-        let source = WaveSource::Url(server.clone());
-
-        let task = async move {
-            let res = crate::remote::get_hierarchy(server.clone())
-                .await
-                .map_err(|e| anyhow!("{e:?}"))
-                .with_context(|| {
-                    format!("Failed to retrieve hierarchy from remote server {server}")
-                });
-
-            let msg = match res {
-                Ok(h) => {
-                    let header = HeaderResult::Remote(Arc::new(h.hierarchy), h.file_format, server);
-                    Message::WaveHeaderLoaded(start, source, load_options, header)
-                }
-                Err(e) => Message::Error(e),
-            };
-            if let Err(e) = sender.send(msg) {
-                error!("Failed to send message: {e}");
-            }
-        };
-        spawn!(task);
-    }
-
-    pub fn get_time_table_from_server(sender: Sender<Message>, server: String) {
-        let start = web_time::Instant::now();
-        let source = WaveSource::Url(server.clone());
-
-        let task = async move {
-            let res = crate::remote::get_time_table(server.clone())
-                .await
-                .map_err(|e| anyhow!("{e:?}"))
-                .with_context(|| {
-                    format!("Failed to retrieve time table from remote server {server}")
-                });
-
-            let msg = match res {
-                Ok(table) => {
-                    Message::WaveBodyLoaded(start, source, BodyResult::Remote(table, server))
-                }
-                Err(e) => Message::Error(e),
-            };
-            if let Err(e) = sender.send(msg) {
-                error!("Failed to send message: {e}");
-            }
-        };
-        spawn!(task);
-    }
-
-    fn get_server_status(sender: Sender<Message>, server: String, delay_ms: u64) {
-        let start = web_time::Instant::now();
-        let task = async move {
-            sleep_ms(delay_ms).await;
-            let res = crate::remote::get_status(server.clone())
-                .await
-                .map_err(|e| anyhow!("{e:?}"))
-                .with_context(|| format!("Failed to retrieve status from remote server {server}"));
-
-            let msg = match res {
-                Ok(status) => Message::SurferServerStatus(start, server, status),
-                Err(e) => Message::Error(e),
-            };
-            if let Err(e) = sender.send(msg) {
-                error!("Failed to send message: {e}");
-            }
-        };
-        spawn!(task);
-    }
-
-    fn server_reload(sender: Sender<Message>, server: String, delay_ms: u64) {
-        let start = web_time::Instant::now();
-        let task = async move {
-            sleep_ms(delay_ms).await;
-            let res = crate::remote::reload(server.clone()).await;
-
-            let msg = match res {
-                Ok(status) => Message::SurferServerStatus(start, server, status),
-                Err(crate::remote::ReloadError::TooFrequent) => {
-                    info!("Reload request was rate-limited by server");
-                    return; // Don't send error message for expected rate limiting
-                }
-                Err(crate::remote::ReloadError::FileUnchanged) => {
-                    info!("File unchanged, no reload needed");
-                    return; // Don't send error message for unchanged file
-                }
-                Err(e) => {
-                    let err = anyhow!("{e:?}");
-                    Message::Error(err)
-                }
-            };
-            if let Err(e) = sender.send(msg) {
-                error!("Failed to send message: {e}");
-            }
-        };
-        spawn!(task);
-    }
 
     /// uses the server status in order to display a loading bar
-    pub fn server_status_to_progress(&mut self, server: String, status: Status) {
+    pub fn server_status_to_progress(&mut self, server: String, status: SurverStatus) {
         // once the body is loaded, we are no longer interested in the status
         let body_loaded = self
             .user
@@ -579,7 +480,7 @@ impl SystemState {
                 Arc::new(AtomicU64::new(status.bytes_loaded)),
             )));
             // get another status update
-            Self::get_server_status(sender, server, 250);
+            get_server_status(sender, server, 250);
         }
     }
 

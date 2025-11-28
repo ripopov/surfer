@@ -7,7 +7,7 @@ use ftr_parser::types::Transaction;
 use num::BigInt;
 use serde::Deserialize;
 use std::path::PathBuf;
-use surver::Status;
+use surver::SurverStatus;
 
 use crate::async_util::AsyncJob;
 use crate::config::PrimaryMouseDrag;
@@ -140,7 +140,7 @@ pub enum Message {
     /// Set cursor at time.
     CursorSet(BigInt),
     #[serde(skip)]
-    SurferServerStatus(web_time::Instant, String, Status),
+    SurferServerStatus(web_time::Instant, String, SurverStatus),
     /// Load file from file path.
     LoadFile(Utf8PathBuf, LoadOptions),
     /// Load file from URL.

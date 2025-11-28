@@ -95,7 +95,7 @@ async fn server_end_to_end_basic() {
         "application/json"
     );
     let body = resp.text().await.unwrap();
-    let status = serde_json::from_str::<surver::Status>(&body).unwrap();
+    let status = serde_json::from_str::<surver::SurverStatus>(&body).unwrap();
     assert!(status.bytes >= status.bytes_loaded);
 
     // 4) Hierarchy endpoint (lz4-compressed bincode), just check non-empty

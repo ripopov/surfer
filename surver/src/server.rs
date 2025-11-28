@@ -24,7 +24,7 @@ use wellen::{
 };
 
 use crate::{
-    BINCODE_OPTIONS, HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, SURFER_VERSION, Status,
+    BINCODE_OPTIONS, HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, SURFER_VERSION, SurverStatus,
     WELLEN_SURFER_DEFAULT_OPTIONS, WELLEN_VERSION, X_SURFER_VERSION, X_WELLEN_VERSION,
 };
 
@@ -46,7 +46,7 @@ struct ReadOnly {
 }
 
 #[derive(Default)]
-struct State {
+struct SurverState {
     timetable: Vec<Time>,
     signals: HashMap<SignalRef, Signal>,
     reloading: bool,
@@ -57,7 +57,7 @@ struct State {
     notify: Arc<Notify>,
 }
 
-impl State {
+impl SurverState {
     pub fn modification_time_string(&self) -> String {
         if let Some(mtime) = self.last_file_mtime {
             let dur = mtime
@@ -88,7 +88,7 @@ enum LoaderMessage {
 
 type SignalRequest = Vec<SignalRef>;
 
-fn get_info_page(shared: Arc<ReadOnly>, state: Arc<RwLock<State>>) -> String {
+fn get_info_page(shared: Arc<ReadOnly>, state: Arc<RwLock<SurverState>>) -> String {
     let bytes_loaded = shared.body_progress.load(Ordering::SeqCst);
 
     let progress = if bytes_loaded == shared.body_len {
@@ -140,7 +140,7 @@ fn get_hierarchy(shared: Arc<ReadOnly>) -> Result<Vec<u8>> {
     Ok(compressed)
 }
 
-async fn get_timetable(state: Arc<RwLock<State>>) -> Result<Vec<u8>> {
+async fn get_timetable(state: Arc<RwLock<SurverState>>) -> Result<Vec<u8>> {
     // poll to see when the time table is available
     #[allow(unused_assignments)]
     let mut table = vec![];
@@ -164,9 +164,9 @@ async fn get_timetable(state: Arc<RwLock<State>>) -> Result<Vec<u8>> {
     Ok(compressed)
 }
 
-fn get_status(shared: Arc<ReadOnly>, state: Arc<RwLock<State>>) -> Result<Vec<u8>> {
+fn get_status(shared: Arc<ReadOnly>, state: Arc<RwLock<SurverState>>) -> Result<Vec<u8>> {
     let state = state.read().expect("State lock poisoned in get_status");
-    let status = Status {
+    let status = SurverStatus {
         bytes: shared.body_len + shared.header_len,
         bytes_loaded: shared.body_progress.load(Ordering::SeqCst) + shared.header_len,
         filename: shared.filename.clone(),
@@ -174,14 +174,14 @@ fn get_status(shared: Arc<ReadOnly>, state: Arc<RwLock<State>>) -> Result<Vec<u8
         surfer_version: SURFER_VERSION.to_string(),
         file_format: shared.file_format,
         reloading: state.reloading,
-        last_reload_ok: state.last_reload_ok,
-        last_reload_time: state.last_reload_time.map(|t| t.elapsed().as_secs()),
+        last_load_ok: state.last_reload_ok,
+        last_load_time: state.last_reload_time.map(|t| t.elapsed().as_secs()),
     };
     Ok(serde_json::to_vec(&status)?)
 }
 
 async fn get_signals(
-    state: Arc<RwLock<State>>,
+    state: Arc<RwLock<SurverState>>,
     tx: Sender<LoaderMessage>,
     id_strings: &[&str],
 ) -> Result<Vec<u8>> {
@@ -254,7 +254,7 @@ impl DefaultHeader for hyper::http::response::Builder {
 }
 
 async fn handle_cmd(
-    state: Arc<RwLock<State>>,
+    state: Arc<RwLock<SurverState>>,
     shared: Arc<ReadOnly>,
     tx: Sender<LoaderMessage>,
     cmd: &str,
@@ -318,9 +318,7 @@ async fn handle_cmd(
                         .body(Full::from(ERROR_FILE_NOT_FOUND.to_vec()))?);
                 }
             };
-            let mtime = meta
-                .modified()
-                .unwrap_or_else(|_| std::time::SystemTime::UNIX_EPOCH);
+            let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
             // Should probably look at file lengths as well for extra safety, but they are not updated correctly at the moment
             let unchanged =
                 state_guard.last_file_mtime == Some(mtime) && state_guard.last_reload_ok;
@@ -363,7 +361,7 @@ async fn handle_cmd(
 }
 
 async fn handle(
-    state: Arc<RwLock<State>>,
+    state: Arc<RwLock<SurverState>>,
     shared: Arc<ReadOnly>,
     tx: Sender<LoaderMessage>,
     req: Request<hyper::body::Incoming>,
@@ -467,7 +465,7 @@ pub async fn server_main(
         reload_guard: Duration::from_secs(reload_guard),
     });
     // state can be written by the loading thread
-    let state = Arc::new(RwLock::new(State::default()));
+    let state = Arc::new(RwLock::new(SurverState::default()));
     // channel to communicate with loader
     let (tx, rx) = std::sync::mpsc::channel::<LoaderMessage>();
     // start work thread
@@ -528,7 +526,7 @@ pub async fn server_main(
 fn loader(
     shared: Arc<ReadOnly>,
     mut body_cont: viewers::ReadBodyContinuation<std::io::BufReader<std::fs::File>>,
-    state: Arc<RwLock<State>>,
+    state: Arc<RwLock<SurverState>>,
     rx: std::sync::mpsc::Receiver<LoaderMessage>,
 ) -> Result<()> {
     loop {

@@ -1,17 +1,26 @@
-use super::HierarchyResponse;
+use std::sync::Arc;
+use std::sync::OnceLock;
+use std::sync::mpsc::Sender;
+
 use bincode::Options;
-use eyre::Result;
+use eyre::{Context, Result, anyhow};
 use eyre::{bail, eyre};
 use reqwest::StatusCode;
-use std::sync::OnceLock;
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use wellen::CompressedTimeTable;
 
 use surver::{
-    BINCODE_OPTIONS, HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, SURFER_VERSION, Status,
+    BINCODE_OPTIONS, HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, SURFER_VERSION, SurverStatus,
     WELLEN_VERSION, X_SURFER_VERSION, X_WELLEN_VERSION,
 };
+
+use super::HierarchyResponse;
+use crate::async_util::sleep_ms;
+use crate::message::Message;
+use crate::spawn;
+use crate::wave_source::{LoadOptions, WaveSource};
+use crate::wellen::{BodyResult, HeaderResult};
 
 /// Returns a shared reqwest client to reuse HTTP connections and reduce TLS overhead.
 fn get_client() -> &'static reqwest::Client {
@@ -68,17 +77,17 @@ fn check_response(server_url: &str, response: &reqwest::Response) -> Result<()> 
     Ok(())
 }
 
-pub async fn get_status(server: String) -> Result<Status> {
+async fn get_status(server: String) -> Result<SurverStatus> {
     let client = get_client();
     let response = client.get(format!("{server}/get_status")).send().await?;
     check_response(&server, &response)?;
     let body = response.text().await?;
-    let status = serde_json::from_str::<Status>(&body)?;
+    let status = serde_json::from_str::<SurverStatus>(&body)?;
     Ok(status)
 }
 
-pub async fn reload(server: String) -> std::result::Result<Status, ReloadError> {
-    let client = reqwest::Client::new();
+async fn reload(server: String) -> std::result::Result<SurverStatus, ReloadError> {
+    let client = get_client();
     let response = client.get(format!("{server}/reload")).send().await?;
     check_response(&server, &response)?;
     let status_code = response.status();
@@ -94,7 +103,7 @@ pub async fn reload(server: String) -> std::result::Result<Status, ReloadError> 
         }
         StatusCode::ACCEPTED => {
             info!("File reloaded at server");
-            let status = serde_json::from_str::<Status>(&body)?;
+            let status = serde_json::from_str::<SurverStatus>(&body)?;
             Ok(status)
         }
         code => {
@@ -104,7 +113,7 @@ pub async fn reload(server: String) -> std::result::Result<Status, ReloadError> 
     }
 }
 
-pub async fn get_hierarchy(server: String) -> Result<HierarchyResponse> {
+async fn get_hierarchy(server: String) -> Result<HierarchyResponse> {
     let client = get_client();
     let response = client.get(format!("{server}/get_hierarchy")).send().await?;
     check_response(&server, &response)?;
@@ -122,7 +131,7 @@ pub async fn get_hierarchy(server: String) -> Result<HierarchyResponse> {
     })
 }
 
-pub async fn get_time_table(server: String) -> Result<Vec<wellen::Time>> {
+async fn get_time_table(server: String) -> Result<Vec<wellen::Time>> {
     let client = get_client();
     let response = client
         .get(format!("{server}/get_time_table"))
@@ -239,10 +248,107 @@ async fn get_signals_batch(
     Ok(out)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub fn get_hierarchy_from_server(
+    sender: Sender<Message>,
+    server: String,
+    load_options: LoadOptions,
+) {
+    let start = web_time::Instant::now();
+    let source = WaveSource::Url(server.clone());
 
+    let task = async move {
+        let res = get_hierarchy(server.clone())
+            .await
+            .map_err(|e| anyhow!("{e:?}"))
+            .with_context(|| format!("Failed to retrieve hierarchy from remote server {server}"));
+
+        let msg = match res {
+            Ok(h) => {
+                let header = HeaderResult::Remote(Arc::new(h.hierarchy), h.file_format, server);
+                Message::WaveHeaderLoaded(start, source, load_options, header)
+            }
+            Err(e) => Message::Error(e),
+        };
+        if let Err(e) = sender.send(msg) {
+            error!("Failed to send message: {e}");
+        }
+    };
+    spawn!(task);
+}
+
+pub fn get_time_table_from_server(sender: Sender<Message>, server: String) {
+    let start = web_time::Instant::now();
+    let source = WaveSource::Url(server.clone());
+
+    let task = async move {
+        let res = get_time_table(server.clone())
+            .await
+            .map_err(|e| anyhow!("{e:?}"))
+            .with_context(|| format!("Failed to retrieve time table from remote server {server}"));
+
+        let msg = match res {
+            Ok(table) => Message::WaveBodyLoaded(start, source, BodyResult::Remote(table, server)),
+            Err(e) => Message::Error(e),
+        };
+        if let Err(e) = sender.send(msg) {
+            error!("Failed to send message: {e}");
+        }
+    };
+    spawn!(task);
+}
+
+pub fn get_server_status(sender: Sender<Message>, server: String, delay_ms: u64) {
+    let start = web_time::Instant::now();
+    let task = async move {
+        sleep_ms(delay_ms).await;
+        let res = get_status(server.clone())
+            .await
+            .map_err(|e| anyhow!("{e:?}"))
+            .with_context(|| format!("Failed to retrieve status from remote server {server}"));
+
+        let msg = match res {
+            Ok(status) => Message::SurferServerStatus(start, server, status),
+            Err(e) => Message::Error(e),
+        };
+        if let Err(e) = sender.send(msg) {
+            error!("Failed to send message: {e}");
+        }
+    };
+    spawn!(task);
+}
+
+pub fn server_reload(sender: Sender<Message>, server: String, delay_ms: u64) {
+    let start = web_time::Instant::now();
+    let task = async move {
+        sleep_ms(delay_ms).await;
+        let res = reload(server.clone()).await;
+
+        let msg = match res {
+            Ok(status) => Message::SurferServerStatus(start, server, status),
+            Err(crate::remote::ReloadError::TooFrequent) => {
+                info!("Reload request was rate-limited by server");
+                return; // Don't send error message for expected rate limiting
+            }
+            Err(crate::remote::ReloadError::FileUnchanged) => {
+                info!("File unchanged, no reload needed");
+                return; // Don't send error message for unchanged file
+            }
+            Err(e) => {
+                let err = anyhow!("{e:?}");
+                Message::Error(err)
+            }
+        };
+        if let Err(e) = sender.send(msg) {
+            error!("Failed to send message: {e}");
+        }
+    };
+    spawn!(task);
+}
+
+mod tests {
+    use crate::remote::get_signals;
+
+    use super::{format_signal_url, signal_url_len};
     #[test]
     fn test_signal_url_length_calculation() {
         // Test edge cases for digit calculation
