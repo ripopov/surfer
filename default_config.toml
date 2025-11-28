@@ -41,6 +41,7 @@ default_zoom_factor = 1.0
 highlight_focused = false
 move_focus_on_inserted_marker = true
 fill_high_values = true
+use_dinotrace_style = false
 
 [gesture]
 size = 300

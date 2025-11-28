@@ -202,6 +202,9 @@ pub struct SurferLayout {
     /// Fill high values in boolean waveforms
     #[serde(default = "default_true")]
     fill_high_values: bool,
+    /// Dinotrace drawing style (thick upper line for all-ones, no upper line for all-zeros)
+    #[serde(default)]
+    use_dinotrace_style: bool,
 }
 
 fn default_true() -> bool {
@@ -265,6 +268,9 @@ impl SurferLayout {
     }
     pub fn hierarchy_style(&self) -> HierarchyStyle {
         self.hierarchy_style
+    }
+    pub fn use_dinotrace_style(&self) -> bool {
+        self.use_dinotrace_style
     }
 }
 
@@ -435,6 +441,9 @@ pub struct SurferTheme {
 
     /// Variable line width
     pub linewidth: f32,
+
+    /// Variable line width for accented variables
+    pub thick_linewidth: f32,
 
     /// Vector transition max width
     pub vector_transition_width: f32,

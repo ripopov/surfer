@@ -109,6 +109,8 @@ pub struct UserState {
     pub(crate) ui_zoom_factor: Option<f32>,
     #[serde(default)]
     pub(crate) animation_enabled: Option<bool>,
+    #[serde(default)]
+    pub(crate) use_dinotrace_style: Option<bool>,
 
     // Path of last saved-to state file
     // Do not serialize as this causes a few issues and doesn't help:
