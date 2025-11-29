@@ -1,5 +1,6 @@
 use ecolor::Color32;
-use egui::{Context, Grid, RichText, WidgetText, Window};
+use egui::{Context, RichText, WidgetText, Window};
+use egui_extras::{Column, TableBuilder};
 use emath::{Align2, Pos2, Rect, Vec2};
 use epaint::{CornerRadius, FontId, Stroke};
 use itertools::Itertools;
@@ -289,40 +290,51 @@ impl SystemState {
             .open(&mut open)
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
-                    Grid::new("markers")
+                    // Table of markers: header row then rows of time differences.
+                    let row_height = ui.text_style_height(&egui::TextStyle::Body);
+                    TableBuilder::new(ui)
                         .striped(true)
-                        .num_columns(markers.len() + 1)
-                        .spacing([5., 5.])
-                        .show(ui, |ui| {
-                            ui.label("");
+                        .cell_layout(egui::Layout::right_to_left(emath::Align::TOP))
+                        .columns(Column::auto().resizable(true), markers.len() + 1)
+                        .auto_shrink(emath::Vec2b::new(false, true))
+                        .header(row_height, |mut header| {
+                            header.col(|ui| {
+                                ui.label("");
+                            });
                             for (marker_idx, _, widget_text) in &markers {
-                                if ui.selectable_label(false, widget_text.clone()).clicked() {
-                                    msgs.push(Self::marker_click_message(
-                                        *marker_idx,
-                                        &waves.cursor,
-                                    ));
-                                }
+                                header.col(|ui| {
+                                    if ui.label(widget_text.clone()).clicked() {
+                                        msgs.push(Self::marker_click_message(
+                                            *marker_idx,
+                                            &waves.cursor,
+                                        ));
+                                    }
+                                });
                             }
-                            ui.end_row();
+                        })
+                        .body(|mut body| {
                             for (marker_idx, row_marker_time, row_widget_text) in &markers {
-                                if ui
-                                    .selectable_label(false, row_widget_text.clone())
-                                    .clicked()
-                                {
-                                    msgs.push(Self::marker_click_message(
-                                        *marker_idx,
-                                        &waves.cursor,
-                                    ));
-                                }
-                                for (_, col_marker_time, _) in &markers {
-                                    ui.label(time_string(
-                                        &(*row_marker_time - *col_marker_time),
-                                        &waves.inner.metadata().timescale,
-                                        &self.user.wanted_timeunit,
-                                        &self.get_time_format(),
-                                    ));
-                                }
-                                ui.end_row();
+                                body.row(row_height, |mut row| {
+                                    row.col(|ui| {
+                                        if ui.label(row_widget_text.clone()).clicked() {
+                                            msgs.push(Self::marker_click_message(
+                                                *marker_idx,
+                                                &waves.cursor,
+                                            ));
+                                        }
+                                    });
+                                    for (_, col_marker_time, _) in &markers {
+                                        let diff = time_string(
+                                            &(*row_marker_time - *col_marker_time),
+                                            &waves.inner.metadata().timescale,
+                                            &self.user.wanted_timeunit,
+                                            &self.get_time_format(),
+                                        );
+                                        row.col(|ui| {
+                                            ui.label(diff);
+                                        });
+                                    }
+                                });
                             }
                         });
                     ui.add_space(15.);

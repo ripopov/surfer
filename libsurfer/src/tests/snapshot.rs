@@ -706,6 +706,12 @@ snapshot_ui_with_file_and_msgs! {markers_dialog_work, "examples/counter.vcd", [
     Message::CursorSet(BigInt::from(200)),
     Message::MoveMarkerToCursor(1),
     Message::ItemColorChange(MessageTarget::Explicit(VisibleItemIndex(5)), Some("Green".to_string())),
+    Message::CursorSet(BigInt::from(100)),
+    Message::MoveMarkerToCursor(3),
+    Message::ItemColorChange(MessageTarget::Explicit(VisibleItemIndex(6)), Some("Orange".to_string())),
+    Message::CursorSet(BigInt::from(350)),
+    Message::MoveMarkerToCursor(4),
+    Message::ItemColorChange(MessageTarget::Explicit(VisibleItemIndex(7)), Some("Yellow".to_string())),
     Message::CursorSet(BigInt::from(500)),
     Message::SetCursorWindowVisible(true)
 ]}

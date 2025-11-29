@@ -695,6 +695,12 @@ impl SystemState {
                 }
             }
         });
+        if let DisplayedItem::Marker(_) = displayed_item {
+            ui.separator();
+            if ui.button("View markers").clicked() {
+                msgs.push(Message::SetCursorWindowVisible(true))
+            }
+        }
     }
 
     fn add_format_menu(
