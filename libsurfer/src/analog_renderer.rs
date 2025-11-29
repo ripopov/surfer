@@ -559,7 +559,6 @@ pub struct StepStrategy {
     last_point: Option<Pos2>,
 }
 
-
 impl RenderStrategy for StepStrategy {
     fn reset_state(&mut self) {
         self.last_point = None;
@@ -621,7 +620,6 @@ pub struct InterpolatedStrategy {
     last: Option<(Pos2, f64)>,
     started: bool,
 }
-
 
 impl RenderStrategy for InterpolatedStrategy {
     fn reset_state(&mut self) {
@@ -685,8 +683,8 @@ impl RenderStrategy for InterpolatedStrategy {
         let p_max = render_ctx.to_screen(x, max_norm, ctx);
 
         let (first, second, second_val) = if let Some((prev, _)) = self.last {
-            let prev_norm =
-                1.0 - (prev.y - render_ctx.offset) / (render_ctx.line_height * render_ctx.height_scale);
+            let prev_norm = 1.0
+                - (prev.y - render_ctx.offset) / (render_ctx.line_height * render_ctx.height_scale);
 
             let go_max_first = prev_norm < min_norm
                 || (prev_norm <= max_norm
@@ -733,11 +731,7 @@ fn render_with_strategy<S: RenderStrategy>(
     }
 }
 
-fn draw_amplitude_labels(
-    render_ctx: &RenderContext,
-    frame_width: f32,
-    ctx: &mut DrawingContext,
-) {
+fn draw_amplitude_labels(render_ctx: &RenderContext, frame_width: f32, ctx: &mut DrawingContext) {
     const SPLIT_LABEL_HEIGHT_THRESHOLD: f32 = 2.0;
     const LABEL_ALPHA: f32 = 0.7;
     const BACKGROUND_ALPHA: u8 = 200;

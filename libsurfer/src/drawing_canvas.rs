@@ -190,6 +190,7 @@ fn variable_draw_commands(
 }
 
 /// Generate draw commands for digital waveform rendering.
+#[allow(clippy::too_many_arguments)]
 fn variable_digital_draw_commands(
     displayed_variable: &DisplayedVariable,
     display_id: DisplayedItemRef,
