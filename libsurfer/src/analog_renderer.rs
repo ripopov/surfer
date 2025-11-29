@@ -354,9 +354,8 @@ impl<'a> CommandBuilder<'a> {
     fn add_after_viewport_sample(&mut self, end_px: f32) {
         let query = self.query(self.time_at_pixel(end_px as f64));
 
-        let next_time = match query.next {
-            Some(t) => t,
-            None => return,
+        let Some(next_time) = query.next else {
+            return;
         };
 
         let after_px = self.pixel_at_time(next_time);
@@ -500,7 +499,7 @@ pub trait RenderStrategy {
 pub struct RenderContext {
     pub stroke: Stroke,
     pub min_val: f64,
-    pub value_range: f64,
+    pub max_val: f64,
     /// Used for interpolating with values outside the viewport.
     pub min_valid_pixel: f32,
     /// Used for interpolating with values outside the viewport.
@@ -522,8 +521,8 @@ impl RenderContext {
     ) -> Self {
         Self {
             stroke: Stroke::new(ctx.theme.linewidth, color),
-            value_range: max_val - min_val,
             min_val,
+            max_val,
             min_valid_pixel: analog_commands.min_valid_pixel,
             max_valid_pixel: analog_commands.max_valid_pixel,
             offset,
@@ -534,8 +533,9 @@ impl RenderContext {
 
     /// Normalize value to [0, 1].
     pub fn normalize(&self, value: f64) -> f32 {
-        if self.value_range.abs() > f64::EPSILON {
-            ((value - self.min_val) / self.value_range) as f32
+        let range = self.max_val - self.min_val;
+        if range.abs() > f64::EPSILON {
+            ((value - self.min_val) / range) as f32
         } else {
             0.5
         }
@@ -723,8 +723,7 @@ impl RenderStrategy for InterpolatedStrategy {
 
         let (first, second, second_val) = if let Some((prev, _)) = self.last {
             let prev_norm =
-                (prev.y - render_ctx.offset) / (render_ctx.line_height * render_ctx.height_scale);
-            let prev_norm = 1.0 - prev_norm;
+                1.0 - (prev.y - render_ctx.offset) / (render_ctx.line_height * render_ctx.height_scale);
 
             let go_max_first = prev_norm < min_norm
                 || (prev_norm <= max_norm
@@ -780,9 +779,6 @@ fn draw_amplitude_labels(
     const LABEL_ALPHA: f32 = 0.7;
     const BACKGROUND_ALPHA: u8 = 200;
 
-    let min_val = render_ctx.min_val;
-    let max_val = render_ctx.min_val + render_ctx.value_range;
-
     let text_size = ctx.cfg.text_size;
 
     let text_color = render_ctx.stroke.color.gamma_multiply(LABEL_ALPHA);
@@ -790,7 +786,7 @@ fn draw_amplitude_labels(
     let font = egui::FontId::monospace(text_size);
 
     if render_ctx.height_scale < SPLIT_LABEL_HEIGHT_THRESHOLD {
-        let combined_text = format!("[{min_val:.2}, {max_val:.2}]");
+        let combined_text = format!("[{:.2}, {:.2}]", render_ctx.min_val, render_ctx.max_val);
         let galley = ctx
             .painter
             .layout_no_wrap(combined_text.clone(), font.clone(), text_color);
@@ -811,8 +807,8 @@ fn draw_amplitude_labels(
             text_color,
         );
     } else {
-        let max_text = format!("{max_val:.2}");
-        let min_text = format!("{min_val:.2}");
+        let max_text = format!("{:.2}", render_ctx.max_val);
+        let min_text = format!("{:.2}", render_ctx.min_val);
 
         let max_galley = ctx
             .painter
