@@ -120,11 +120,11 @@ pub fn draw_analog(
     // Use the appropriate strategy based on settings
     match analog_settings.render_style {
         crate::displayed_item::AnalogRenderStyle::Step => {
-            let mut strategy = StepStrategy::new();
+            let mut strategy = StepStrategy::default();
             render_with_strategy(&analog_commands.values, &render_ctx, &mut strategy, ctx);
         }
         crate::displayed_item::AnalogRenderStyle::Interpolated => {
-            let mut strategy = InterpolatedStrategy::new();
+            let mut strategy = InterpolatedStrategy::default();
             render_with_strategy(&analog_commands.values, &render_ctx, &mut strategy, ctx);
         }
     }
@@ -494,9 +494,6 @@ pub trait RenderStrategy {
 
         self.render_range_defined(ctx, render_ctx, x, min, max, next);
     }
-
-    fn begin(&mut self) {}
-    fn end(&mut self, _ctx: &mut DrawingContext, _render_ctx: &RenderContext) {}
 }
 
 /// Shared rendering context.
@@ -572,21 +569,11 @@ impl RenderContext {
 }
 
 /// Step-style rendering: horizontal segments with vertical transitions.
+#[derive(Default)]
 pub struct StepStrategy {
     last_point: Option<Pos2>,
 }
 
-impl StepStrategy {
-    pub fn new() -> Self {
-        Self { last_point: None }
-    }
-}
-
-impl Default for StepStrategy {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 impl RenderStrategy for StepStrategy {
     fn reset_state(&mut self) {
@@ -651,25 +638,12 @@ impl RenderStrategy for StepStrategy {
 }
 
 /// Interpolated rendering: diagonal lines connecting consecutive values.
+#[derive(Default)]
 pub struct InterpolatedStrategy {
     last: Option<(Pos2, f64)>,
     started: bool,
 }
 
-impl InterpolatedStrategy {
-    pub fn new() -> Self {
-        Self {
-            last: None,
-            started: false,
-        }
-    }
-}
-
-impl Default for InterpolatedStrategy {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 impl RenderStrategy for InterpolatedStrategy {
     fn reset_state(&mut self) {
@@ -784,8 +758,6 @@ fn render_with_strategy<S: RenderStrategy>(
     strategy: &mut S,
     ctx: &mut DrawingContext,
 ) {
-    strategy.begin();
-
     for (i, cmd) in commands.iter().enumerate() {
         let next = commands.get(i + 1);
         match &cmd.kind {
@@ -797,8 +769,6 @@ fn render_with_strategy<S: RenderStrategy>(
             }
         }
     }
-
-    strategy.end(ctx, render_ctx);
 }
 
 fn draw_amplitude_labels(
