@@ -1722,6 +1722,11 @@ snapshot_ui_with_file_and_msgs! {toggle_variable_indices, "examples/counter.vcd"
     Message::SetShowIndices(false),
 ]}
 
+snapshot_ui_with_file_and_msgs! {toggle_high_value_fill, "examples/counter.vcd", [
+    Message::AddScope(ScopeRef::from_strs(&["tb", "dut"]), false),
+    Message::SetFillHighValues(false),
+]}
+
 snapshot_ui_with_file_and_msgs! {direction_works, "examples/tb_recv.ghw", [
     Message::SetSidePanelVisible(true),
     Message::SetActiveScope(ScopeType::WaveScope(ScopeRef::from_strs(&["tb_recv", "dut"]))),
