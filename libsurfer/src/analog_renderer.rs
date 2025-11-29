@@ -29,26 +29,6 @@ pub enum CommandKind {
     Range { min: f64, max: f64 },
 }
 
-pub struct AnalogRenderConfig {
-    pub line_width_multiplier: f32,
-    pub text_size_multiplier_threshold: f32,
-    pub text_size_multiplier: f32,
-    pub label_alpha: f32,
-    pub background_alpha: u8,
-}
-
-impl Default for AnalogRenderConfig {
-    fn default() -> Self {
-        Self {
-            line_width_multiplier: 1.5,
-            text_size_multiplier_threshold: 1.0,
-            text_size_multiplier: 1.0,
-            label_alpha: 0.7,
-            background_alpha: 200,
-        }
-    }
-}
-
 /// Generate draw commands for a displayed analog variable.
 /// Returns `None` if unrenderable, or a cache-build command if cache not ready.
 pub(crate) fn variable_analog_draw_commands(
@@ -126,11 +106,9 @@ pub fn draw_analog(
     }
 
     let (min_val, max_val) = select_value_range(analog_commands, analog_settings);
-    let config = AnalogRenderConfig::default();
 
     let render_ctx = RenderContext::new(
         color,
-        &config,
         min_val,
         max_val,
         analog_commands,
@@ -151,7 +129,7 @@ pub fn draw_analog(
         }
     }
 
-    draw_amplitude_labels(&render_ctx, frame_width, ctx, &config);
+    draw_amplitude_labels(&render_ctx, frame_width, ctx);
 }
 
 fn select_value_range(cmds: &AnalogDrawingCommands, settings: &AnalogSettings) -> (f64, f64) {
@@ -536,10 +514,8 @@ pub struct RenderContext {
 }
 
 impl RenderContext {
-    #[allow(clippy::too_many_arguments)]
     fn new(
         color: Color32,
-        config: &AnalogRenderConfig,
         min_val: f64,
         max_val: f64,
         analog_commands: &AnalogDrawingCommands,
@@ -548,7 +524,7 @@ impl RenderContext {
         ctx: &DrawingContext,
     ) -> Self {
         Self {
-            stroke: Stroke::new(ctx.theme.linewidth * config.line_width_multiplier, color),
+            stroke: Stroke::new(ctx.theme.linewidth, color),
             value_range: max_val - min_val,
             min_val,
             min_valid_pixel: analog_commands.min_valid_pixel,
@@ -829,18 +805,21 @@ fn draw_amplitude_labels(
     render_ctx: &RenderContext,
     frame_width: f32,
     ctx: &mut DrawingContext,
-    config: &AnalogRenderConfig,
 ) {
+    const SPLIT_LABEL_HEIGHT_THRESHOLD: f32 = 2.0;
+    const LABEL_ALPHA: f32 = 0.7;
+    const BACKGROUND_ALPHA: u8 = 200;
+
     let min_val = render_ctx.min_val;
     let max_val = render_ctx.min_val + render_ctx.value_range;
 
-    let text_size = ctx.cfg.text_size * config.text_size_multiplier;
+    let text_size = ctx.cfg.text_size;
 
-    let text_color = render_ctx.stroke.color.gamma_multiply(config.label_alpha);
-    let bg_color = Color32::from_rgba_unmultiplied(0, 0, 0, config.background_alpha);
+    let text_color = render_ctx.stroke.color.gamma_multiply(LABEL_ALPHA);
+    let bg_color = Color32::from_rgba_unmultiplied(0, 0, 0, BACKGROUND_ALPHA);
     let font = egui::FontId::monospace(text_size);
 
-    if render_ctx.height_scale <= config.text_size_multiplier_threshold {
+    if render_ctx.height_scale < SPLIT_LABEL_HEIGHT_THRESHOLD {
         let combined_text = format!("[{min_val:.2}, {max_val:.2}]");
         let galley = ctx
             .painter
