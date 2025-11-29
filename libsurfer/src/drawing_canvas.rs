@@ -99,8 +99,9 @@ pub struct AnalogDrawingCommands {
     /// Per-pixel drawing commands with flat spans and ranges
     pub values: Vec<AnalogDrawingCommand>,
 
-    /// Used for clipping when interpolating with values outside the viewport.
+    /// Pixel position of timestamp 0 (start of signal data).
     pub min_valid_pixel: f32,
+    /// Pixel position of last timestamp (end of signal data).
     pub max_valid_pixel: f32,
 
     /// Analog rendering settings (style, Y-axis scale, etc.)

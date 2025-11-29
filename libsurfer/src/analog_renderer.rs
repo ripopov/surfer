@@ -419,28 +419,23 @@ impl<'a> CommandBuilder<'a> {
     }
 }
 
-const MIN_VERTICAL_TRANSITION_PX: f32 = 1.0;
-const MIN_HORIZONTAL_SEGMENT_PX: f32 = 0.5;
-
 /// Rendering strategy for analog waveforms.
 pub trait RenderStrategy {
     /// Reset state after encountering undefined values.
     fn reset_state(&mut self);
 
-    /// Render a flat segment with a finite value. Coordinates are pre-clamped.
-    #[allow(clippy::too_many_arguments)]
+    /// Render a flat segment with a finite value. Relies on egui for clamping.
     fn render_flat_defined(
         &mut self,
         ctx: &mut DrawingContext,
         render_ctx: &RenderContext,
-        start_px: f32,
         start_x: f32,
         end_x: f32,
         value: f64,
         next: Option<&AnalogDrawingCommand>,
     );
 
-    /// Render a range segment with finite min/max. Coordinates are pre-clamped.
+    /// Render a range segment with finite min/max. Relies on egui for clamping.
     fn render_range_defined(
         &mut self,
         ctx: &mut DrawingContext,
@@ -456,21 +451,18 @@ pub trait RenderStrategy {
         &mut self,
         ctx: &mut DrawingContext,
         render_ctx: &RenderContext,
-        start_px: f32,
-        end_px: f32,
+        start_x: f32,
+        end_x: f32,
         value: f64,
         next: Option<&AnalogDrawingCommand>,
     ) {
-        let start_x = render_ctx.clamp_x(start_px);
-        let end_x = render_ctx.clamp_x(end_px);
-
         if !value.is_finite() {
             render_ctx.draw_undefined(start_x, end_x, ctx);
             self.reset_state();
             return;
         }
 
-        self.render_flat_defined(ctx, render_ctx, start_px, start_x, end_x, value, next);
+        self.render_flat_defined(ctx, render_ctx, start_x, end_x, value, next);
     }
 
     /// Render a range segment with undefined value handling.
@@ -478,13 +470,11 @@ pub trait RenderStrategy {
         &mut self,
         ctx: &mut DrawingContext,
         render_ctx: &RenderContext,
-        start_px: f32,
+        x: f32,
         min: f64,
         max: f64,
         next: Option<&AnalogDrawingCommand>,
     ) {
-        let x = render_ctx.clamp_x(start_px);
-
         if !min.is_finite() || !max.is_finite() {
             render_ctx.draw_undefined(x, x + 1.0, ctx);
             self.reset_state();
@@ -500,9 +490,9 @@ pub struct RenderContext {
     pub stroke: Stroke,
     pub min_val: f64,
     pub max_val: f64,
-    /// Used for interpolating with values outside the viewport.
+    /// Pixel position of timestamp 0 (start of signal data).
     pub min_valid_pixel: f32,
-    /// Used for interpolating with values outside the viewport.
+    /// Pixel position of last timestamp (end of signal data).
     pub max_valid_pixel: f32,
     pub offset: f32,
     pub height_scale: f32,
@@ -549,11 +539,6 @@ impl RenderContext {
         )
     }
 
-    /// Clamp x to valid pixel range for interpolation at waveform boundaries.
-    pub fn clamp_x(&self, x: f32) -> f32 {
-        x.clamp(self.min_valid_pixel, self.max_valid_pixel)
-    }
-
     pub fn draw_line(&self, from: Pos2, to: Pos2, ctx: &mut DrawingContext) {
         ctx.painter
             .add(PathShape::line(vec![from, to], self.stroke));
@@ -584,7 +569,6 @@ impl RenderStrategy for StepStrategy {
         &mut self,
         ctx: &mut DrawingContext,
         render_ctx: &RenderContext,
-        _start_px: f32,
         start_x: f32,
         end_x: f32,
         value: f64,
@@ -595,9 +579,7 @@ impl RenderStrategy for StepStrategy {
         let p2 = render_ctx.to_screen(end_x, norm, ctx);
 
         if let Some(prev) = self.last_point {
-            if (prev.y - p1.y).abs() > MIN_VERTICAL_TRANSITION_PX {
-                render_ctx.draw_line(Pos2::new(p1.x, prev.y), p1, ctx);
-            }
+            render_ctx.draw_line(Pos2::new(p1.x, prev.y), p1, ctx);
         }
 
         render_ctx.draw_line(p1, p2, ctx);
@@ -624,14 +606,10 @@ impl RenderStrategy for StepStrategy {
         if let Some(prev) = self.last_point {
             let mid = Pos2::new(connect.x, prev.y);
             render_ctx.draw_line(prev, mid, ctx);
-            if (mid.y - connect.y).abs() > MIN_VERTICAL_TRANSITION_PX {
-                render_ctx.draw_line(mid, connect, ctx);
-            }
+            render_ctx.draw_line(mid, connect, ctx);
         }
 
-        if (other.y - connect.y).abs() > MIN_VERTICAL_TRANSITION_PX {
-            render_ctx.draw_line(connect, other, ctx);
-        }
+        render_ctx.draw_line(connect, other, ctx);
 
         self.last_point = Some(other);
     }
@@ -655,7 +633,6 @@ impl RenderStrategy for InterpolatedStrategy {
         &mut self,
         ctx: &mut DrawingContext,
         render_ctx: &RenderContext,
-        start_px: f32,
         start_x: f32,
         end_x: f32,
         value: f64,
@@ -664,22 +641,11 @@ impl RenderStrategy for InterpolatedStrategy {
         let norm = render_ctx.normalize(value);
         let current = render_ctx.to_screen(start_x, norm, ctx);
 
-        if let Some((prev, prev_val)) = self.last {
-            if start_px < render_ctx.min_valid_pixel && prev.x < start_x {
-                let edge = render_ctx.to_screen(
-                    render_ctx.min_valid_pixel,
-                    render_ctx.normalize(prev_val),
-                    ctx,
-                );
-                render_ctx.draw_line(edge, current, ctx);
-            } else {
-                render_ctx.draw_line(prev, current, ctx);
-            }
+        if let Some((prev, _)) = self.last {
+            render_ctx.draw_line(prev, current, ctx);
         } else if !self.started {
             let edge = render_ctx.to_screen(render_ctx.min_valid_pixel.max(0.0), norm, ctx);
-            if (edge.x - current.x).abs() > MIN_HORIZONTAL_SEGMENT_PX {
-                render_ctx.draw_line(edge, current, ctx);
-            }
+            render_ctx.draw_line(edge, current, ctx);
         }
 
         if let Some(next_cmd) = next {
@@ -688,19 +654,16 @@ impl RenderStrategy for InterpolatedStrategy {
             } = &next_cmd.kind
             {
                 if next_val.is_nan() {
-                    let target = render_ctx
-                        .clamp_x(next_cmd.start_px)
-                        .min(render_ctx.max_valid_pixel);
-                    if (current.x - target).abs() > MIN_HORIZONTAL_SEGMENT_PX {
-                        render_ctx.draw_line(current, render_ctx.to_screen(target, norm, ctx), ctx);
-                    }
+                    render_ctx.draw_line(
+                        current,
+                        render_ctx.to_screen(next_cmd.start_px, norm, ctx),
+                        ctx,
+                    );
                 }
             }
         } else if end_x > start_x {
-            let endpoint = render_ctx.to_screen(end_x.min(render_ctx.max_valid_pixel), norm, ctx);
-            if (current.x - endpoint.x).abs() > MIN_HORIZONTAL_SEGMENT_PX {
-                render_ctx.draw_line(current, endpoint, ctx);
-            }
+            let endpoint = render_ctx.to_screen(end_x, norm, ctx);
+            render_ctx.draw_line(current, endpoint, ctx);
         }
 
         self.last = Some((current, value));
