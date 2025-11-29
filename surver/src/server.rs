@@ -1,6 +1,5 @@
 //! Handling of external communication in Surver.
 use bincode::Options;
-use chrono;
 use eyre::{Context, Result, anyhow, bail};
 use http_body_util::Full;
 use hyper::body::Bytes;
@@ -15,7 +14,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Instant, SystemTime};
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
 use tracing::{error, info, warn};
@@ -28,11 +27,6 @@ use crate::{
     WELLEN_SURFER_DEFAULT_OPTIONS, WELLEN_VERSION, X_SURFER_VERSION, X_WELLEN_VERSION,
 };
 
-// Constants
-const ERROR_RELOAD_TOO_FREQUENT: &[u8] = b"{\"error\":\"Reload too frequent\"}";
-const ERROR_FILE_NOT_FOUND: &[u8] = b"{\"error\":\"File not found\"}";
-const INFO_FILE_UNCHANGED: &[u8] = b"{\"info\":\"File unchanged\"}";
-
 struct ReadOnly {
     url: String,
     token: String,
@@ -42,7 +36,6 @@ struct ReadOnly {
     header_len: u64,
     body_len: u64,
     body_progress: Arc<AtomicU64>,
-    reload_guard: Duration,
 }
 
 #[derive(Default)]
@@ -296,16 +289,6 @@ async fn handle_cmd(
         ("reload", []) => {
             let mut state_guard = state.write().expect("State lock poisoned in reload");
             let now = Instant::now();
-            if let Some(last) = state_guard.last_reload_request {
-                if now.duration_since(last) < shared.reload_guard {
-                    drop(state_guard);
-                    return Ok(Response::builder()
-                        .status(StatusCode::TOO_MANY_REQUESTS)
-                        .header(CONTENT_TYPE, JSON_MIME)
-                        .default_header()
-                        .body(Full::from(ERROR_RELOAD_TOO_FREQUENT.to_vec()))?);
-                }
-            }
             // Check file existence, size, and mtime
             let meta = match fs::metadata(&shared.filename) {
                 Ok(m) => m,
@@ -315,7 +298,7 @@ async fn handle_cmd(
                         .status(StatusCode::NOT_FOUND)
                         .header(CONTENT_TYPE, JSON_MIME)
                         .default_header()
-                        .body(Full::from(ERROR_FILE_NOT_FOUND.to_vec()))?);
+                        .body(Full::from(b"error: file not found".to_vec()))?);
                 }
             };
             let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
@@ -328,7 +311,7 @@ async fn handle_cmd(
                     .status(StatusCode::NOT_MODIFIED)
                     .header(CONTENT_TYPE, JSON_MIME)
                     .default_header()
-                    .body(Full::from(INFO_FILE_UNCHANGED.to_vec()))?);
+                    .body(Full::from(b"info: file unchanged".to_vec()))?);
             }
             state_guard.last_file_mtime = Some(mtime);
             info!(
@@ -420,7 +403,6 @@ pub async fn server_main(
     token: Option<String>,
     filename: String,
     started: Option<ServerStartedFlag>,
-    reload_guard: u64,
 ) -> Result<()> {
     // if no token was provided, we generate one
     let token = token.unwrap_or_else(|| {
@@ -462,7 +444,6 @@ pub async fn server_main(
         header_len: 0, // FIXME: get value from wellen
         body_len: header_result.body_len,
         body_progress: Arc::new(AtomicU64::new(0)),
-        reload_guard: Duration::from_secs(reload_guard),
     });
     // state can be written by the loading thread
     let state = Arc::new(RwLock::new(SurverState::default()));

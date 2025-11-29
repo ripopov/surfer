@@ -368,21 +368,27 @@ impl SystemState {
                     };
 
                     // check to see if the response came from a Surfer running in server mode
-
                     if let Some(value) = response.headers().get(HTTP_SERVER_KEY)
                         && matches!(value.to_str(), Ok(HTTP_SERVER_VALUE_SURFER))
                     {
-                        if load_options.keep_variables {
-                            // Request a reload (will also get status)
-                            info!("Reloading from surfer server at: {url}");
-                            server_reload(sender.clone(), url.clone(), 0);
-                        } else {
-                            info!("Connecting to a surfer server at: {url}");
-                            // Request status
-                            get_server_status(sender.clone(), url.clone(), 0);
+                        match load_options {
+                            LoadOptions::Clear => {
+                                info!("Connecting to a surfer server at: {url}");
+                                // Request status
+                                get_server_status(sender.clone(), url.clone(), 0);
+                                // Request hierarchy
+                                get_hierarchy_from_server(
+                                    sender.clone(),
+                                    url.clone(),
+                                    load_options,
+                                );
+                            }
+                            LoadOptions::KeepAvailable | LoadOptions::KeepAll => {
+                                // Request a reload (will also get status and request hierarchy if needed)
+                                info!("Reloading from surfer server at: {url}");
+                                server_reload(sender.clone(), url.clone(), load_options);
+                            }
                         }
-                        // Request hierarchy
-                        get_hierarchy_from_server(sender.clone(), url.clone(), load_options);
                         return;
                     }
 

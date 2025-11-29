@@ -28,7 +28,6 @@ fn start_server(bind_address: &str, port: u16, token: &str, filename: &str) -> S
             token,
             filename,
             Some(started_copy),
-            1,
         ));
     });
 

@@ -38,3 +38,4 @@ whoami = "1.5.1"
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "time", "macros", "rt-multi-thread"] }
 reqwest = { workspace = true }
+filetime = "0.2"

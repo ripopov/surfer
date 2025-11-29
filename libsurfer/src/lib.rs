@@ -1045,6 +1045,9 @@ impl SystemState {
                     .map_err(|e| error!("{e:#?}"))
                     .ok();
             }
+            Message::StopProgressTracker => {
+                self.progress_tracker = None;
+            }
             Message::WaveHeaderLoaded(start, source, load_options, header) => {
                 // for files using the `wellen` backend, we load the header before parsing the body
                 info!(

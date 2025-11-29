@@ -36,9 +36,6 @@ mod main_impl {
             /// waveform file that we want to serve
             #[arg(long)]
             file: String,
-            /// Seconds to guard against repeated reloads
-            #[clap(long)]
-            reload_guard: Option<u64>,
         },
     }
 
@@ -156,7 +153,6 @@ mod main_impl {
             bind_address,
             token,
             file,
-            reload_guard,
         }) = args.command
         {
             let config = SystemState::new()?.user.config;
@@ -164,16 +160,8 @@ mod main_impl {
             // Use CLI override if provided, otherwise use config setting
             let bind_addr = bind_address.unwrap_or(config.server.bind_address);
             let port = port.unwrap_or(config.server.port);
-            let reload_guard = reload_guard.unwrap_or(config.server.reload_guard);
 
-            let res = runtime.block_on(surver::server_main(
-                port,
-                bind_addr,
-                token,
-                file,
-                None,
-                reload_guard,
-            ));
+            let res = runtime.block_on(surver::server_main(port, bind_addr, token, file, None));
             return res;
         }
 

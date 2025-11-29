@@ -37,7 +37,6 @@ async fn server_end_to_end_basic() {
             Some(token_clone),
             file.to_string_lossy().to_string(),
             Some(started_clone),
-            1,
         )
         .await
         {

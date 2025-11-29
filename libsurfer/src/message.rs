@@ -261,6 +261,7 @@ pub enum Message {
     SetVariableTooltip(bool),
     SetScopeTooltip(bool),
     ToggleFullscreen,
+    StopProgressTracker,
     /// Set which time unit to use.
     SetTimeUnit(TimeUnit),
     /// Set how to format the time strings. Passing None resets it to default.

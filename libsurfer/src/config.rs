@@ -661,8 +661,6 @@ pub struct ServerConfig {
     pub bind_address: String,
     /// Default port for the HTTP server
     pub port: u16,
-    /// Seconds to guard against repeated reloads
-    pub reload_guard: u64,
 }
 
 fn default_colors() -> HashMap<String, Color32> {
