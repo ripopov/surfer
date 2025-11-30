@@ -2712,6 +2712,36 @@ snapshot_ui_with_file_and_msgs! {analog_waveform_interpolate_at_start_range, "ex
     },
 ]}
 
+snapshot_ui_with_file_and_msgs! {analog_waveform_scroll_negative, "examples/analog.vcd", [
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.sine_4state"),
+        VariableRef::from_hierarchy_string("top.sine_4state"),
+        VariableRef::from_hierarchy_string("top.sine_4state"),
+        VariableRef::from_hierarchy_string("top.sine_4state"),
+    ]),
+
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        crate::displayed_item::AnalogSettings::step_global(),
+    ),
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(1)),
+        crate::displayed_item::AnalogSettings::step_viewport(),
+    ),
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(2)),
+        crate::displayed_item::AnalogSettings::interpolated_global(),
+    ),
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(3)),
+        crate::displayed_item::AnalogSettings::interpolated_viewport(),
+    ),
+    Message::AddTimeLine(None),
+
+    Message::CanvasScroll { delta: Vec2 { x: 500., y: 0.}, viewport_idx: 0 }
+
+]}
+
 snapshot_ui_with_file_and_msgs! {analog_pulses_no_aliasing1, "examples/analog_pulses.vcd", [
     Message::AddVariables(vec![
         VariableRef::from_hierarchy_string("top.pulse_int"),

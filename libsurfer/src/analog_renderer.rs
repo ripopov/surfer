@@ -463,6 +463,9 @@ pub trait RenderStrategy {
         value: f64,
         next: Option<&AnalogDrawingCommand>,
     ) {
+        let start_x = render_ctx.clamp_x(start_x);
+        let end_x = render_ctx.clamp_x(end_x);
+
         if !value.is_finite() {
             render_ctx.draw_undefined(start_x, end_x, value, ctx);
             self.reset_state();
@@ -482,6 +485,8 @@ pub trait RenderStrategy {
         max: f64,
         next: Option<&AnalogDrawingCommand>,
     ) {
+        let x = render_ctx.clamp_x(x);
+
         if !min.is_finite() || !max.is_finite() {
             // Use whichever value is not finite to determine the color
             let nan_value = if !min.is_finite() { min } else { max };
@@ -563,6 +568,11 @@ impl RenderContext {
             x,
             (1.0 - y_norm) * self.line_height * self.height_scale + self.offset,
         )
+    }
+
+    /// Clamp x to valid pixel range (within VCD file bounds).
+    pub fn clamp_x(&self, x: f32) -> f32 {
+        x.clamp(self.min_valid_pixel, self.max_valid_pixel)
     }
 
     pub fn draw_line(&self, from: Pos2, to: Pos2, ctx: &mut DrawingContext) {
