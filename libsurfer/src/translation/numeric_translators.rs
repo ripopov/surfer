@@ -4,13 +4,13 @@ use crate::wave_container::{ScopeId, VarId};
 use eyre::Result;
 use half::{bf16, f16};
 use num::BigUint;
-use softposit::{P16E1, P32E2, P8E0, Q16E1, Q8E0};
+use softposit::{P8E0, P16E1, P32E2, Q8E0, Q16E1};
 use surfer_translation_types::{
-    translates_all_bit_types, BasicTranslator, TranslationResult, Translator, ValueKind, ValueRepr,
-    VariableInfo, VariableMeta, VariableType, VariableValue,
+    BasicTranslator, TranslationResult, Translator, ValueKind, ValueRepr, VariableInfo,
+    VariableMeta, VariableType, VariableValue, translates_all_bit_types,
 };
 
-use super::{check_single_wordlength, TranslationPreference};
+use super::{TranslationPreference, check_single_wordlength};
 
 /// Types that should default to signed integer conversion
 pub const INTEGER_TYPES: &[Option<VariableType>] = &[
@@ -46,11 +46,7 @@ fn match_variable_type_name(
 fn shortest_float_representation<T: std::fmt::LowerExp + std::fmt::Display>(v: T) -> String {
     let dec = format!("{v}");
     let exp = format!("{v:e}");
-    if dec.len() > exp.len() {
-        exp
-    } else {
-        dec
-    }
+    if dec.len() > exp.len() { exp } else { dec }
 }
 
 /// If `value` is a biguint or consists only of 1 or 0, translates the value using

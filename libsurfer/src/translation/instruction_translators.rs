@@ -1,9 +1,9 @@
-use super::{check_single_wordlength, no_of_digits, TranslationPreference, ValueKind};
+use super::{TranslationPreference, ValueKind, check_single_wordlength, no_of_digits};
 use crate::wave_container::{ScopeId, VarId, VariableMeta};
 
 use eyre::Result;
 use instruction_decoder::Decoder;
-use surfer_translation_types::{check_vector_variable, BasicTranslator, VariableValue};
+use surfer_translation_types::{BasicTranslator, VariableValue, check_vector_variable};
 
 pub struct InstructionTranslator {
     pub name: String,

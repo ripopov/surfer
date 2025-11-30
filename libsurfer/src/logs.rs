@@ -5,12 +5,12 @@ use egui::{RichText, TextWrapMode};
 use egui_extras::{Column, TableBuilder, TableRow};
 use eyre::Result;
 use tracing::{
-    field::{Field, Visit},
     Level,
+    field::{Field, Visit},
 };
 use tracing_subscriber::Layer;
 
-use crate::{message::Message, SystemState};
+use crate::{SystemState, message::Message};
 
 static RECORD_MUTEX: Mutex<Vec<LogMessage>> = Mutex::new(vec![]);
 
@@ -141,7 +141,7 @@ impl SystemState {
 pub fn start_logging() -> Result<()> {
     use std::io::stdout;
 
-    use tracing_subscriber::{fmt, layer::SubscriberExt, Registry};
+    use tracing_subscriber::{Registry, fmt, layer::SubscriberExt};
 
     let filter =
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());

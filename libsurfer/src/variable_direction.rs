@@ -49,11 +49,7 @@ pub fn get_direction_string(
                     } else {
                         // Align other items (can be improved)
                         // The padding depends on if we will render monospace or not
-                        if name_info.is_some() {
-                            "  "
-                        } else {
-                            "    "
-                        }
+                        if name_info.is_some() { "  " } else { "    " }
                     }
                 })
             )

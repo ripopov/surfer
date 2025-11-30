@@ -22,6 +22,7 @@ use crate::translation::DynTranslator;
 use crate::viewport::ViewportStrategy;
 use crate::wave_data::ScopeType;
 use crate::{
+    MoveDir, VariableNameFilterType, WaveSource,
     clock_highlighting::ClockHighlightType,
     config::ArrowKeyBindings,
     dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog},
@@ -34,7 +35,6 @@ use crate::{
     wave_container::{ScopeRef, VariableRef, WaveContainer},
     wave_source::{CxxrtlKind, LoadOptions, WaveFormat},
     wellen::{BodyResult, HeaderResult, LoadSignalsResult},
-    MoveDir, VariableNameFilterType, WaveSource,
 };
 
 type CommandCount = usize;

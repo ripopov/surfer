@@ -10,7 +10,7 @@ use tracing::error;
 use crate::async_util::perform_async_work;
 
 use crate::{
-    async_util::AsyncJob, message::Message, wave_source::STATE_FILE_EXTENSION, SystemState,
+    SystemState, async_util::AsyncJob, message::Message, wave_source::STATE_FILE_EXTENSION,
 };
 
 impl SystemState {

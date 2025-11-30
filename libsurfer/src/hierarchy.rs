@@ -1,4 +1,5 @@
 //! Functions for drawing the left hand panel showing scopes and variables.
+use crate::SystemState;
 use crate::data_container::{DataContainer, VariableType as VarType};
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::message::Message;
@@ -9,7 +10,6 @@ use crate::variable_direction::get_direction_string;
 use crate::view::draw_true_name;
 use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, WaveContainer};
 use crate::wave_data::{ScopeType, WaveData};
-use crate::SystemState;
 use derive_more::{Display, FromStr};
 use ecolor::Color32;
 use egui::text::LayoutJob;
@@ -17,8 +17,8 @@ use egui::{CentralPanel, Frame, Layout, ScrollArea, TextStyle, TopBottomPanel, U
 use emath::Align;
 use enum_iterator::Sequence;
 use epaint::{
-    text::{TextFormat, TextWrapMode},
     Margin,
+    text::{TextFormat, TextWrapMode},
 };
 use eyre::Context;
 use itertools::Itertools;

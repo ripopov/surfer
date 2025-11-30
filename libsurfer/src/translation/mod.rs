@@ -701,9 +701,11 @@ mod tests {
         assert!(!translators.all_translator_names().is_empty());
 
         // Check default translator exists
-        assert!(translators
-            .all_translator_names()
-            .contains(&translators.default.as_str()));
+        assert!(
+            translators
+                .all_translator_names()
+                .contains(&translators.default.as_str())
+        );
 
         // Check we can get a translator by name
         let hex_translator = translators.get_translator("Hexadecimal");

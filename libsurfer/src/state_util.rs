@@ -4,11 +4,11 @@ use ecolor::Color32;
 use egui::Modifiers;
 
 use crate::{
+    SystemState,
     clock_highlighting::ClockHighlightType,
     config::{ArrowKeyBindings, AutoLoad, PrimaryMouseDrag},
     displayed_item::DisplayedItem,
     hierarchy::{HierarchyStyle, ParameterDisplayLocation},
-    SystemState,
 };
 
 impl SystemState {

@@ -8,7 +8,7 @@ use serde::Deserialize;
 use crate::config::{SurferConfig, SurferTheme};
 use crate::time::time_string;
 use crate::view::DrawingContext;
-use crate::{wave_data::WaveData, Message, SystemState};
+use crate::{Message, SystemState, wave_data::WaveData};
 
 /// Geometric constant: tan(22.5°) used for gesture zone calculations
 const TAN_22_5_DEGREES: f32 = 0.41421357;

@@ -1,9 +1,9 @@
-use eyre::anyhow;
 use eyre::Result;
+use eyre::anyhow;
 use pyo3::types::{PyAnyMethods, PyDict, PyModule, PyStringMethods};
 use pyo3::{Bound, Py, Python};
 use std::ffi::{CStr, CString};
-use surfer_translation_types::python::{surfer_pyo3_module, PythonValueKind};
+use surfer_translation_types::python::{PythonValueKind, surfer_pyo3_module};
 use surfer_translation_types::{BasicTranslator, ValueKind, VariableValue};
 use tracing::{error, info};
 

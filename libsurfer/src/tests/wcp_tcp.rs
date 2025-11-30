@@ -1,14 +1,14 @@
+use crate::SystemState;
 use crate::message::Message;
 use crate::wave_source::LoadOptions;
 use crate::wcp::proto::{WcpCSMessage, WcpCommand, WcpSCMessage};
-use crate::SystemState;
 
 use port_check::free_local_ipv4_port_in_range;
 use serde_json::Error as serde_Error;
 use test_log::test;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::time::{sleep, timeout, Duration};
+use tokio::time::{Duration, sleep, timeout};
 
 use itertools::Itertools;
 use lazy_static::lazy_static;

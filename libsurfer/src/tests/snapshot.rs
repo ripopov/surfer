@@ -5,16 +5,17 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use base64::{engine::general_purpose, Engine};
-use egui_skia_renderer::{create_surface, draw_onto_surface, EncodedImageFormat};
+use base64::{Engine, engine::general_purpose};
+use egui_skia_renderer::{EncodedImageFormat, create_surface, draw_onto_surface};
 use emath::Vec2;
 use image::{DynamicImage, ImageFormat};
-use num::{bigint::ToBigInt, BigInt};
+use num::{BigInt, bigint::ToBigInt};
 use project_root::get_project_root;
 use test_log::test;
 use tracing::info;
 
 use crate::{
+    Message, MoveDir, StartupParams, SystemState, WaveSource,
     async_util::AsyncJob,
     clock_highlighting::ClockHighlightType,
     config::SurferConfig,
@@ -30,7 +31,6 @@ use crate::{
     wave_container::{ScopeRef, ScopeRefExt, VariableRef, VariableRefExt},
     wave_data::ScopeType,
     wave_source::{LoadOptions, STATE_FILE_EXTENSION},
-    Message, MoveDir, StartupParams, SystemState, WaveSource,
 };
 
 fn print_image(img: &DynamicImage) {

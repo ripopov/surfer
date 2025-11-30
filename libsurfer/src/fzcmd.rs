@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use regex::Regex;
 
 #[derive(PartialEq, Debug)]

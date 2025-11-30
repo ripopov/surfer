@@ -4,8 +4,8 @@ use eyre::Result;
 use serde::Serialize;
 use serde_json::Error as serde_Error;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 use std::time::Duration;
 use tokio::net::tcp::{ReadHalf, WriteHalf};
@@ -17,8 +17,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::Receiver;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::mpsc::Sender;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info, warn};
 
 use super::{proto::WcpCSMessage, proto::WcpCommand, proto::WcpSCMessage};
@@ -47,7 +47,7 @@ impl<'a> WcpCSReader<'a> {
                     return Err(serde_Error::io(std::io::Error::new(
                         std::io::ErrorKind::UnexpectedEof,
                         "EOF",
-                    )))
+                    )));
                 }
                 Ok(_) => (),
                 Err(e) => return Err(serde_Error::io(e)),

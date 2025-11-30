@@ -1,15 +1,15 @@
 use std::path::PathBuf;
 
+use crate::SystemState;
 use crate::message::Message;
 use crate::tests::snapshot::render_and_compare;
 use crate::wcp::proto::{
     self, MarkerInfo, WcpCSMessage, WcpCommand, WcpEvent, WcpResponse, WcpSCMessage,
 };
-use crate::SystemState;
 use itertools::Itertools;
 
-use eyre::bail;
 use eyre::Result;
+use eyre::bail;
 use futures::Future;
 use num::BigInt;
 use std::sync::atomic::Ordering;

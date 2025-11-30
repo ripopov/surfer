@@ -1,5 +1,5 @@
-use crate::message::Message;
 use crate::SystemState;
+use crate::message::Message;
 use ecolor::Color32;
 use egui::{Layout, RichText};
 use emath::Align;

@@ -1,7 +1,7 @@
 //! Command prompt handling.
 use crate::command_parser::get_parser;
-use crate::fzcmd::{expand_command, parse_command, FuzzyOutput, ParseError};
-use crate::{message::Message, SystemState};
+use crate::fzcmd::{FuzzyOutput, ParseError, expand_command, parse_command};
+use crate::{SystemState, message::Message};
 use egui::scroll_area::ScrollBarVisibility;
 use egui::text::{CCursor, CCursorRange, LayoutJob, TextFormat};
 use egui::{Key, RichText, TextEdit, TextStyle};
@@ -124,7 +124,7 @@ pub fn show_command_prompt(
 
                         let selection = suggestions
                             .get(state.command_prompt.selected)
-                            .map_or(&default, |s| &s.1 .0);
+                            .map_or(&default, |s| &s.1.0);
 
                         if input.chars().last().is_some_and(char::is_whitespace) {
                             // if no input exists for current argument just append

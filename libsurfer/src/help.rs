@@ -4,7 +4,7 @@ use egui_remixicon::icons;
 use emath::{Align2, Pos2};
 
 use crate::wave_source::LoadOptions;
-use crate::{message::Message, SystemState};
+use crate::{SystemState, message::Message};
 
 impl SystemState {
     pub fn help_message(&self, ui: &mut Ui) {

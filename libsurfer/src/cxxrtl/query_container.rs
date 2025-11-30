@@ -3,18 +3,18 @@ use std::{
     sync::Arc,
 };
 
-use base64::{prelude::BASE64_STANDARD, Engine as _};
+use base64::{Engine as _, prelude::BASE64_STANDARD};
 use futures::executor::block_on;
-use num::{bigint::ToBigInt as _, BigInt, BigUint};
+use num::{BigInt, BigUint, bigint::ToBigInt as _};
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
 use surfer_translation_types::VariableValue;
 use tokio::sync::RwLock;
 
 use crate::{
+    EGUI_CONTEXT,
     cxxrtl_container::CxxrtlItem,
     message::Message,
     wave_container::{QueryResult, VariableRef},
-    EGUI_CONTEXT,
 };
 
 use super::sc_message::CxxrtlSample;

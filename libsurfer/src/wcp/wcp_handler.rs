@@ -1,10 +1,10 @@
 use crate::{
+    SystemState, WcpClientCapabilities,
     displayed_item::{DisplayedItem, DisplayedItemRef},
     message::{Message, MessageTarget},
     wave_container::{ScopeRefExt, VariableRef, VariableRefExt},
     wave_data::WaveData,
-    wave_source::{string_to_wavesource, LoadOptions, WaveSource},
-    SystemState, WcpClientCapabilities,
+    wave_source::{LoadOptions, WaveSource, string_to_wavesource},
 };
 
 use futures::executor::block_on;

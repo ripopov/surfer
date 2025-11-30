@@ -7,10 +7,10 @@ use crate::message::MessageTarget;
 use crate::wave_container::SimulationStatus;
 use crate::wave_source::LoadOptions;
 use crate::{
+    SystemState,
     file_dialog::OpenMode,
     message::Message,
     wave_data::{PER_SCROLL_EVENT, SCROLL_EVENTS_PER_PAGE},
-    SystemState,
 };
 
 /// Helper function to add a new toolbar button, setting up icon, hover text etc.

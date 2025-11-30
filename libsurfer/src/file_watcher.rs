@@ -3,7 +3,7 @@ use camino::Utf8Path;
 #[cfg(all(not(windows), not(target_arch = "wasm32")))]
 use notify::Error;
 #[cfg(all(not(windows), not(target_arch = "wasm32")))]
-use notify::{event::ModifyKind, Config, Event, EventKind, RecursiveMode, Watcher};
+use notify::{Config, Event, EventKind, RecursiveMode, Watcher, event::ModifyKind};
 #[cfg(all(not(windows), not(target_arch = "wasm32")))]
 use std::time::Duration;
 #[cfg(all(not(windows), not(target_arch = "wasm32")))]
@@ -88,7 +88,7 @@ impl FileWatcher {
 
 #[cfg(test)]
 mod tests {
-    use crate::file_watcher::{is_same_file, FileWatcher};
+    use crate::file_watcher::{FileWatcher, is_same_file};
     use camino::Utf8Path;
     use std::fs;
     use std::fs::File;

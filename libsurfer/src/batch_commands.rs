@@ -4,12 +4,12 @@ use futures::FutureExt as _;
 use tracing::{error, info, trace};
 
 use crate::{
+    SystemState,
     command_parser::get_parser,
     fzcmd::parse_command,
     message::Message,
     spawn,
     wave_source::{LoadProgress, LoadProgressStatus},
-    SystemState,
 };
 
 impl SystemState {

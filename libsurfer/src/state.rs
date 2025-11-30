@@ -5,6 +5,7 @@ use std::{
 };
 
 use crate::{
+    CanvasState, StartupParams,
     clock_highlighting::ClockHighlightType,
     config::{ArrowKeyBindings, AutoLoad, PrimaryMouseDrag, SurferConfig},
     data_container::DataContainer,
@@ -20,11 +21,10 @@ use crate::{
     wave_container::{ScopeRef, VariableRef, WaveContainer},
     wave_data::WaveData,
     wave_source::{LoadOptions, WaveFormat, WaveSource},
-    CanvasState, StartupParams,
 };
 use egui::{
-    style::{Selection, WidgetVisuals, Widgets},
     CornerRadius, Stroke, Visuals,
+    style::{Selection, WidgetVisuals, Widgets},
 };
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
