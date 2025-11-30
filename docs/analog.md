@@ -46,7 +46,9 @@ Analog mode works with any translator that produces numeric output:
 - Float (IEEE 754, bfloat16, fp8 etc.)
 - Custom translators: Any translator returning numeric strings
 
-Non-numeric values (X, Z, undefined states) are rendered as red-highlighted regions rather than plotted points
+Non-numeric values are rendered as highlighted regions rather than plotted points:
+- **X (undefined)**: Red highlighting
+- **Z (high-impedance)**: Yellow highlighting
 
 ---
 
@@ -95,6 +97,12 @@ Analog signals are represented using two complementary data structures:
    Note: `AnalogDrawingCommand` uses `f32` for pixel positions (`start_px`, `end_px`) to support samples outside viewport bounds (negative values for samples before viewport, values > view_width for samples after viewport). This enables correct interpolation at viewport edges.
 
 Signal values are converted from raw bit vectors to `f64` via the translator system. The `parse_numeric_value()` function handles format-specific parsing (hex, binary, decimal, float) based on the translator name.
+
+**4-State Value Encoding**: X and Z values are encoded as quiet NaNs with distinct payloads:
+- `NAN_UNDEF` (0x7FF8_0000_0000_0000): Undefined/X values
+- `NAN_HIGHIMP` (0x7FF8_0000_0000_0001): High-impedance/Z values
+
+This allows 4-state values to flow through the f64-based pipeline while preserving their type for correct rendering colors. The `is_nan_highimp()` function checks the payload to distinguish Z from X.
 
 ### Analog Cache Structure and Operation
 
