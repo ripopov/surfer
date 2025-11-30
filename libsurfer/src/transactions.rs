@@ -5,12 +5,12 @@ use ftr_parser::types::Transaction;
 use itertools::Itertools;
 use num::BigUint;
 
+use crate::SystemState;
 use crate::message::Message;
 use crate::transaction_container::TransactionStreamRef;
 use crate::transaction_container::{StreamScopeRef, TransactionContainer};
 use crate::wave_data::ScopeType;
 use crate::wave_data::WaveData;
-use crate::SystemState;
 
 // Constants for transaction table drawing and UI labels
 const ROW_HEIGHT: f32 = 15.;
@@ -100,10 +100,10 @@ fn draw_focused_transaction_details(
                         &focused_transaction.get_tx_id().to_string(),
                     );
                     table_row(&mut body, TX_TYPE_LABEL, {
-                        let gen = transactions
+                        let generator = transactions
                             .get_generator(focused_transaction.get_gen_id())
                             .unwrap();
-                        &gen.name
+                        &generator.name
                     });
                     table_row(
                         &mut body,

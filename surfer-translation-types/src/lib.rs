@@ -23,7 +23,7 @@ pub use crate::result::{
 };
 pub use crate::scope_ref::ScopeRef;
 pub use crate::translator::{
-    translates_all_bit_types, BasicTranslator, Translator, VariableNameInfo, WaveSource,
+    BasicTranslator, Translator, VariableNameInfo, WaveSource, translates_all_bit_types,
 };
 pub use crate::variable_index::VariableIndex;
 pub use crate::variable_ref::VariableRef;
@@ -301,7 +301,7 @@ impl<VarId1, ScopeId1> VariableMeta<VarId1, ScopeId1> {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_vector_variable, extend_string, ValueKind};
+    use super::{ValueKind, check_vector_variable, extend_string};
 
     #[test]
     fn binary_only_returns_none() {

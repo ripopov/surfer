@@ -1,6 +1,6 @@
 //! Handling of external communication in Surver.
 use bincode::Options;
-use eyre::{anyhow, bail, Context, Result};
+use eyre::{Context, Result, anyhow, bail};
 use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::server::conn::http1;
@@ -17,11 +17,11 @@ use std::sync::{Arc, RwLock};
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 use wellen::{
-    viewers, CompressedSignal, CompressedTimeTable, FileFormat, Hierarchy, Signal, SignalRef, Time,
+    CompressedSignal, CompressedTimeTable, FileFormat, Hierarchy, Signal, SignalRef, Time, viewers,
 };
 
 use crate::{
-    Status, BINCODE_OPTIONS, HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, SURFER_VERSION,
+    BINCODE_OPTIONS, HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, SURFER_VERSION, Status,
     WELLEN_SURFER_DEFAULT_OPTIONS, WELLEN_VERSION, X_SURFER_VERSION, X_WELLEN_VERSION,
 };
 

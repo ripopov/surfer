@@ -8,13 +8,13 @@ mod main_impl {
     use eyre::Context;
     use eyre::Result;
     use libsurfer::{
+        StartupParams, SystemState,
         batch_commands::read_command_file,
         file_watcher::FileWatcher,
         logs,
         message::Message,
         run_egui,
-        wave_source::{string_to_wavesource, WaveSource},
-        StartupParams, SystemState,
+        wave_source::{WaveSource, string_to_wavesource},
     };
     use tracing::error;
 

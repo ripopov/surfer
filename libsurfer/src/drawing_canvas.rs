@@ -16,6 +16,7 @@ use surfer_translation_types::{
 };
 use tracing::{error, warn};
 
+use crate::CachedDrawData::TransactionDrawData;
 use crate::clock_highlighting::draw_clock_edge_marks;
 use crate::config::SurferTheme;
 use crate::data_container::DataContainer;
@@ -29,10 +30,9 @@ use crate::view::{DrawConfig, DrawingContext, ItemDrawingInfo};
 use crate::viewport::Viewport;
 use crate::wave_container::{QueryResult, VariableRefExt};
 use crate::wave_data::WaveData;
-use crate::CachedDrawData::TransactionDrawData;
 use crate::{
-    displayed_item::DisplayedItem, CachedDrawData, CachedTransactionDrawData, CachedWaveDrawData,
-    Message, SystemState,
+    CachedDrawData, CachedTransactionDrawData, CachedWaveDrawData, Message, SystemState,
+    displayed_item::DisplayedItem,
 };
 
 pub struct DrawnRegion {
@@ -467,9 +467,9 @@ impl SystemState {
                 );
             }
 
-            for gen in &generators {
+            for generator in &generators {
                 // find first visible transaction
-                let first_visible_transaction_index = match gen
+                let first_visible_transaction_index = match generator
                     .transactions
                     .binary_search_by_key(&first_visible_timestamp, |tx| tx.get_end_time())
                 {
@@ -477,7 +477,7 @@ impl SystemState {
                     Err(i) => i,
                 }
                 .saturating_sub(1);
-                let transactions = gen
+                let transactions = generator
                     .transactions
                     .iter()
                     .skip(first_visible_transaction_index);
@@ -532,8 +532,8 @@ impl SystemState {
                             max,
                             gen_ref: TransactionStreamRef::new_gen(
                                 tx_stream_ref.stream_id,
-                                gen.id,
-                                gen.name.clone(),
+                                generator.id,
+                                generator.name.clone(),
                             ),
                         },
                     );

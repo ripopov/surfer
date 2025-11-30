@@ -24,7 +24,7 @@ struct Args {
 pub fn start_logging() -> Result<()> {
     use std::io::stdout;
 
-    use tracing_subscriber::{fmt, layer::SubscriberExt, Registry};
+    use tracing_subscriber::{Registry, fmt, layer::SubscriberExt};
 
     let filter =
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());

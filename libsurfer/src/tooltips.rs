@@ -17,8 +17,9 @@ fn find_transaction<'a>(
 ) -> Option<&'a Transaction> {
     let txs = waves.inner.as_transactions()?;
     let gen_id = gen_ref.gen_id?;
-    let gen = txs.get_generator(gen_id)?;
-    gen.transactions
+    let generator = txs.get_generator(gen_id)?;
+    generator
+        .transactions
         .iter()
         .find(|transaction| transaction.get_tx_id() == tx_ref.id)
 }

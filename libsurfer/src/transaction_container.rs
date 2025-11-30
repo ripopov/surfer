@@ -1,6 +1,6 @@
 use crate::time::{TimeScale, TimeUnit};
 use crate::wave_container::MetaData;
-use ftr_parser::types::{Transaction, TxGenerator, TxStream, FTR};
+use ftr_parser::types::{FTR, Transaction, TxGenerator, TxStream};
 use itertools::Itertools;
 use num::BigUint;
 use serde::{Deserialize, Serialize};
@@ -30,8 +30,8 @@ impl TransactionContainer {
     }
 
     pub fn get_transaction(&self, transaction_ref: &TransactionRef) -> Option<&Transaction> {
-        self.inner.tx_generators.values().find_map(|gen| {
-            gen.transactions
+        self.inner.tx_generators.values().find_map(|g| {
+            g.transactions
                 .iter()
                 .find(|tx| tx.get_tx_id() == transaction_ref.id)
         })
@@ -116,11 +116,11 @@ impl TransactionContainer {
                 .generators
                 .iter()
                 .map(|id| {
-                    let gen = self.get_generator(*id).unwrap();
+                    let generator = self.get_generator(*id).unwrap();
                     TransactionStreamRef {
-                        gen_id: Some(gen.id),
+                        gen_id: Some(generator.id),
                         stream_id: stream_ref.stream_id,
-                        name: gen.name.clone(),
+                        name: generator.name.clone(),
                     }
                 })
                 .collect(),
