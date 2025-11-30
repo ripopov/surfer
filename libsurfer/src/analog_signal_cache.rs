@@ -298,7 +298,12 @@ impl AnalogSignalCache {
 
     pub fn query_time_range(&self, start: u64, end: u64) -> Option<(f64, f64)> {
         let result = self.rmq.query_time_range(start, end)?;
-        Some((result.min, result.max))
+        if result.has_nan {
+            // Propagate NaN so renderer draws undefined for ranges containing 4-state values
+            Some((result.min, NAN_UNDEF))
+        } else {
+            Some((result.min, result.max))
+        }
     }
 
     pub fn query_at_time(&self, time: u64) -> CacheQueryResult {

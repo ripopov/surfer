@@ -2717,6 +2717,7 @@ snapshot_ui_with_file_and_msgs! {analog_pulses_no_aliasing1, "examples/analog_pu
         VariableRef::from_hierarchy_string("top.pulse_int"),
         VariableRef::from_hierarchy_string("top.pulse_int"),
     ]),
+    Message::AddTimeLine(None),
 
     Message::VariableFormatChange(
         MessageTarget::Explicit(DisplayedFieldRef {
@@ -2784,12 +2785,107 @@ snapshot_ui_with_file_and_msgs! {analog_pulses_4state, "examples/analog_pulses.v
         MessageTarget::Explicit(VisibleItemIndex(0)),
         8.0,
     ),
+]}
 
-    // Message::ZoomToRange {
-    //     start: BigInt::from(800000),
-    //     end: BigInt::from(1500000),
-    //     viewport_idx: 0
-    // },
+snapshot_ui_with_file_and_msgs! {analog_pulses_4state_zoom, "examples/analog_pulses.vcd", [
+    Message::AddTimeLine(None),
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.pulse_reg8"),
+        VariableRef::from_hierarchy_string("top.pulse_reg8"),
+    ]),
+
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(1)),
+        crate::displayed_item::AnalogSettings::step_viewport(),
+    ),
+
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(1)),
+        8.0,
+    ),
+
+    Message::ZoomToRange {
+        start: BigInt::from(1300000),
+        end: BigInt::from(1300010),
+        viewport_idx: 0
+    },
+]}
+
+snapshot_ui_with_file_and_msgs! {analog_pulses_4state_zoom2, "examples/analog_pulses.vcd", [
+    Message::AddTimeLine(None),
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.pulse_reg8"),
+        VariableRef::from_hierarchy_string("top.pulse_reg8"),
+        VariableRef::from_hierarchy_string("top.pulse_reg8"),
+        VariableRef::from_hierarchy_string("top.pulse_reg8"),
+    ]),
+
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(1)),
+        crate::displayed_item::AnalogSettings::step_viewport(),
+    ),
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(2)),
+        crate::displayed_item::AnalogSettings::step_global(),
+    ),
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(3)),
+        crate::displayed_item::AnalogSettings::interpolated_global(),
+    ),
+
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(4)),
+        crate::displayed_item::AnalogSettings::interpolated_viewport(),
+    ),
+
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(1)),
+        4.0,
+    ),
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(2)),
+        4.0,
+    ),
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(3)),
+        4.0,
+    ),
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(4)),
+        4.0,
+    ),
+
+    Message::ZoomToRange {
+        start: BigInt::from(1100000),
+        end: BigInt::from(2300010),
+        viewport_idx: 0
+    },
+]}
+
+snapshot_ui_with_file_and_msgs! {analog_pulses_4state_scroll_subscale, "examples/analog_pulses.vcd", [
+    Message::AddTimeLine(None),
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.pulse_reg8"),
+        VariableRef::from_hierarchy_string("top.pulse_reg8"),
+    ]),
+
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(1)),
+        crate::displayed_item::AnalogSettings::interpolated_global(),
+    ),
+
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(1)),
+        4.0,
+    ),
+
+    Message::ZoomToRange {
+        start: BigInt::from(2000002),
+        end: BigInt::from(2000004),
+        viewport_idx: 0
+    },
+
+    Message::CanvasScroll { delta: Vec2 { x: -50., y: 0.}, viewport_idx: 0 }
 ]}
 
 snapshot_ui_with_file_and_msgs! {analog_waveform_negive_amplitude, "examples/analog_negative.vcd", [

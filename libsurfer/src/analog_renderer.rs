@@ -290,18 +290,25 @@ impl<'a> CommandBuilder<'a> {
         let mut px = start_px as u32;
         let end = end_px as u32;
         let mut next_query_time: Option<u64> = None;
+        let mut last_queried_time: Option<u64> = None;
 
         while px < end {
+            // Track if we jumped to this pixel for a specific transition
+            let jumped_to_transition = next_query_time.is_some();
             let t0 = next_query_time.unwrap_or_else(|| self.time_at_pixel(px as f64));
             let t1 = self.time_at_pixel(px as f64 + 1.0);
             next_query_time = None;
 
-            if t0 == t1 {
+            // Skip if we already queried this exact time (optimization for zoomed-out views
+            // where multiple pixels map to the same integer time). Don't skip if we jumped
+            // here for a specific transition.
+            if !jumped_to_transition && last_queried_time == Some(t0) {
                 px += 1;
                 continue;
             }
 
             let query = self.query(t0);
+            last_queried_time = Some(t0);
             let next_change = query.next;
             let is_flat = next_change.is_none_or(|nc| nc >= t1);
 
@@ -653,20 +660,16 @@ impl RenderStrategy for InterpolatedStrategy {
             render_ctx.draw_line(edge, current, ctx);
         }
 
-        if let Some(next_cmd) = next {
-            if let CommandKind::Flat {
-                value: next_val, ..
-            } = &next_cmd.kind
-            {
-                if next_val.is_nan() {
-                    render_ctx.draw_line(
-                        current,
-                        render_ctx.to_screen(next_cmd.start_px, norm, ctx),
-                        ctx,
-                    );
-                }
-            }
-        } else if end_x > start_x {
+        // Check if next command represents undefined values
+        let next_is_undefined = next.map_or(false, |cmd| match &cmd.kind {
+            CommandKind::Flat { value, .. } => !value.is_finite(),
+            CommandKind::Range { min, max } => !min.is_finite() || !max.is_finite(),
+        });
+
+        if next_is_undefined {
+            let endpoint = render_ctx.to_screen(next.unwrap().start_px, norm, ctx);
+            render_ctx.draw_line(current, endpoint, ctx);
+        } else if next.is_none() && end_x > start_x {
             let endpoint = render_ctx.to_screen(end_x, norm, ctx);
             render_ctx.draw_line(current, endpoint, ctx);
         }
