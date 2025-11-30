@@ -282,12 +282,10 @@ impl SystemState {
                 }
             }
         }
-        if draw_variables {
-            if let Some(wave_container) = wave.inner.as_waves() {
-                let scope = ScopeRef::empty();
-                let variables = wave_container.variables_in_scope(&scope);
-                self.filter_and_draw_variable_list(msgs, wave_container, ui, &variables, None);
-            }
+        if draw_variables && let Some(wave_container) = wave.inner.as_waves() {
+            let scope = ScopeRef::empty();
+            let variables = wave_container.variables_in_scope(&scope);
+            self.filter_and_draw_variable_list(msgs, wave_container, ui, &variables, None);
         }
     }
 
@@ -696,14 +694,14 @@ impl SystemState {
 
     fn should_open_header(&self, scope: &ScopeRef) -> bool {
         let mut scope_ref_cell = self.scope_ref_to_expand.borrow_mut();
-        if let Some(state) = scope_ref_cell.as_mut() {
-            if state.strs.starts_with(&scope.strs) {
-                if (state.strs.len() - 1) == scope.strs.len() {
-                    // need to compare vs. parent of signal
-                    *scope_ref_cell = None;
-                }
-                return true;
+        if let Some(state) = scope_ref_cell.as_mut()
+            && state.strs.starts_with(&scope.strs)
+        {
+            if (state.strs.len() - 1) == scope.strs.len() {
+                // need to compare vs. parent of signal
+                *scope_ref_cell = None;
             }
+            return true;
         }
         false
     }

@@ -73,7 +73,8 @@ impl SystemState {
         cmds: I,
     ) -> Vec<Message> {
         trace!("Parsing batch commands");
-        let parsed = cmds
+
+        cmds
             .into_iter()
             // Add line numbers
             .enumerate()
@@ -125,9 +126,7 @@ impl SystemState {
                         .ok()
                 }
             })
-            .collect::<Vec<_>>();
-
-        parsed
+            .collect::<Vec<_>>()
     }
 
     pub fn load_commands_from_url(&mut self, url: String) {

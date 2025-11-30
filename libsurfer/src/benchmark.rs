@@ -117,10 +117,10 @@ impl Timing {
 
     pub fn start(&mut self, name: impl Into<String>) {
         let name = name.into();
-        if let Some(reg) = self.regions.get_mut(&self.active_region) {
-            if !reg.subregions.contains(&name) {
-                reg.subregions.insert(name.clone());
-            }
+        if let Some(reg) = self.regions.get_mut(&self.active_region)
+            && !reg.subregions.contains(&name)
+        {
+            reg.subregions.insert(name.clone());
         }
 
         self.active_region.push(name);

@@ -58,10 +58,10 @@ impl SystemState {
                     }
                     (Key::Home, true, false, false) => msgs.push(Message::ScrollToItem(0)),
                     (Key::End, true, false, false) => {
-                        if let Some(waves) = &self.user.waves {
-                            if waves.displayed_items.len() > 1 {
-                                msgs.push(Message::ScrollToItem(waves.displayed_items.len() - 1));
-                            }
+                        if let Some(waves) = &self.user.waves
+                            && waves.displayed_items.len() > 1
+                        {
+                            msgs.push(Message::ScrollToItem(waves.displayed_items.len() - 1));
                         }
                     }
                     (Key::Space, true, false, false) => {
@@ -141,24 +141,24 @@ impl SystemState {
                     (Key::M, true, false, false) => {
                         if modifiers.alt {
                             msgs.push(Message::SetMenuVisible(!self.show_menu()));
-                        } else if let Some(waves) = self.user.waves.as_ref() {
-                            if let Some(cursor) = waves.cursor.as_ref() {
-                                // Check if a marker already exists at the cursor position
-                                let marker_exists = waves
-                                    .markers
-                                    .values()
-                                    .any(|marker_time| marker_time == cursor);
-                                if !marker_exists {
-                                    msgs.push(Message::AddMarker {
-                                        time: cursor.clone(),
-                                        name: None,
-                                        move_focus: self
-                                            .user
-                                            .config
-                                            .layout
-                                            .move_focus_on_inserted_marker(),
-                                    });
-                                }
+                        } else if let Some(waves) = self.user.waves.as_ref()
+                            && let Some(cursor) = waves.cursor.as_ref()
+                        {
+                            // Check if a marker already exists at the cursor position
+                            let marker_exists = waves
+                                .markers
+                                .values()
+                                .any(|marker_time| marker_time == cursor);
+                            if !marker_exists {
+                                msgs.push(Message::AddMarker {
+                                    time: cursor.clone(),
+                                    name: None,
+                                    move_focus: self
+                                        .user
+                                        .config
+                                        .layout
+                                        .move_focus_on_inserted_marker(),
+                                });
                             }
                         }
                     }
@@ -211,13 +211,10 @@ impl SystemState {
                         }
                     }
                     (Key::F2, true, false, _) => {
-                        if let Some(waves) = &self.user.waves {
-                            if waves.focused_item.is_some() {
-                                msgs.push(Message::ShowCommandPrompt(
-                                    "rename_item ".to_owned(),
-                                    None,
-                                ));
-                            }
+                        if let Some(waves) = &self.user.waves
+                            && waves.focused_item.is_some()
+                        {
+                            msgs.push(Message::ShowCommandPrompt("rename_item ".to_owned(), None));
                         }
                     }
                     (Key::F11, true, false, _) => msgs.push(Message::ToggleFullscreen),

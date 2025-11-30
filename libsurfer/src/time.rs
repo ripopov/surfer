@@ -287,10 +287,10 @@ fn find_auto_scale(time: &BigInt, timescale: &TimeScale) -> TimeUnit {
     let multiplier_digits = timescale.multiplier.unwrap_or(1).ilog10();
     let start_digits = -timescale.unit.exponent();
     for e in (3..=start_digits).step_by(3).rev() {
-        if (time % (BigInt::from(10).pow(e as u32 - multiplier_digits))) == BigInt::from(0) {
-            if let Some(unit) = TimeUnit::from_exponent(e - start_digits) {
-                return unit;
-            }
+        if (time % (BigInt::from(10).pow(e as u32 - multiplier_digits))) == BigInt::from(0)
+            && let Some(unit) = TimeUnit::from_exponent(e - start_digits)
+        {
+            return unit;
         }
     }
     timescale.unit

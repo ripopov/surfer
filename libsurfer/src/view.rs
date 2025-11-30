@@ -309,10 +309,10 @@ impl SystemState {
             self.draw_performance_graph(ctx, &mut msgs);
         }
 
-        if self.user.show_cursor_window {
-            if let Some(waves) = &self.user.waves {
-                self.draw_marker_window(waves, ctx, &mut msgs);
-            }
+        if self.user.show_cursor_window
+            && let Some(waves) = &self.user.waves
+        {
+            self.draw_marker_window(waves, ctx, &mut msgs);
         }
 
         if self
@@ -334,10 +334,11 @@ impl SystemState {
         if self.show_statusbar() {
             self.add_statusbar_panel(ctx, &self.user.waves, &mut msgs);
         }
-        if let Some(waves) = &self.user.waves {
-            if self.show_overview() && !waves.items_tree.is_empty() {
-                self.add_overview_panel(ctx, waves, &mut msgs);
-            }
+        if let Some(waves) = &self.user.waves
+            && self.show_overview()
+            && !waves.items_tree.is_empty()
+        {
+            self.add_overview_panel(ctx, waves, &mut msgs);
         }
 
         if self.show_hierarchy() {
@@ -1486,23 +1487,18 @@ impl SystemState {
     ) -> Option<VariableNameInfo> {
         let meta = wave_container.variable_meta(var).ok();
 
-        let info = self
-            .variable_name_info_cache
+        self.variable_name_info_cache
             .borrow_mut()
             .entry(var.clone())
             .or_insert_with(|| {
                 meta.as_ref().and_then(|meta| {
-                    let info = self
-                        .translators
+                    self.translators
                         .all_translators()
                         .iter()
-                        .find_map(|t| t.variable_name_info(meta));
-                    info
+                        .find_map(|t| t.variable_name_info(meta))
                 })
             })
-            .clone();
-
-        info
+            .clone()
     }
 
     pub fn draw_background(
@@ -1527,10 +1523,11 @@ impl SystemState {
         drawing_info: &ItemDrawingInfo,
         vidx: VisibleItemIndex,
     ) -> Color32 {
-        if let Some(focused) = waves.focused_item {
-            if self.highlight_focused() && focused == vidx {
-                return self.user.config.theme.highlight_background;
-            }
+        if let Some(focused) = waves.focused_item
+            && self.highlight_focused()
+            && focused == vidx
+        {
+            return self.user.config.theme.highlight_background;
         }
         *waves
             .displayed_items

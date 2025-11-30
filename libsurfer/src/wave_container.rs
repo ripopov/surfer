@@ -29,29 +29,19 @@ pub struct MetaData {
 }
 
 /// A backend-specific, numeric reference for fast access to the associated scope.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ScopeId {
+    #[default]
     None,
     Wellen(wellen::ScopeRef),
 }
 
-impl Default for ScopeId {
-    fn default() -> Self {
-        Self::None
-    }
-}
-
 /// A backend-specific, numeric reference for fast access to the associated variable.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum VarId {
+    #[default]
     None,
     Wellen(wellen::VarRef),
-}
-
-impl Default for VarId {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Debug, Default)]

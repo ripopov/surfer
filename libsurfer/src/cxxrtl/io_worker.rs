@@ -44,11 +44,10 @@ where
         loop {
             tokio::select! {
                 rx = self.cs_channel.recv() => {
-                    if let Some(msg) = rx {
-                        if let Err(e) =  self.send_message(msg).await {
+                    if let Some(msg) = rx
+                        && let Err(e) =  self.send_message(msg).await {
                             error!("Failed to send message {e:#?}");
                         }
-                    }
                 }
                 count = self.read.read(&mut buf) => {
                     match count {

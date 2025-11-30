@@ -60,12 +60,11 @@ impl SystemState {
         }
 
         ui.add_space(STATUS_SPACING);
-        if let Some(progress_data) = &self.progress_tracker {
-            if Instant::now().duration_since(progress_data.started)
+        if let Some(progress_data) = &self.progress_tracker
+            && Instant::now().duration_since(progress_data.started)
                 > Duration::from_millis(PROGRESS_DEBOUNCE_MS)
-            {
-                draw_progress_information(ui, progress_data);
-            }
+        {
+            draw_progress_information(ui, progress_data);
         }
     }
 

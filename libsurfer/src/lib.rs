@@ -507,11 +507,10 @@ impl SystemState {
                 waves.focused_item = Some(new_focus_vidx);
             }
             Message::FocusTransaction(tx_ref, tx) => {
-                if tx_ref.is_some() && tx.is_none() {
-                    self.save_current_canvas(format!(
-                        "Focus Transaction id: {}",
-                        tx_ref.as_ref().unwrap().id
-                    ));
+                if let Some(tx_ref) = tx_ref.as_ref()
+                    && tx.is_none()
+                {
+                    self.save_current_canvas(format!("Focus Transaction id: {}", tx_ref.id));
                 }
                 let waves = self.user.waves.as_mut()?;
                 let invalidate = tx.is_none();
@@ -562,10 +561,10 @@ impl SystemState {
                     .map(|name| format!("Remove item {name}"))
                     .unwrap_or("Remove one item".to_string());
                 self.save_current_canvas(undo_msg);
-                if let Some(waves) = self.user.waves.as_mut() {
-                    if let Some(item_ref) = item_ref {
-                        waves.remove_displayed_item(item_ref)
-                    }
+                if let Some(waves) = self.user.waves.as_mut()
+                    && let Some(item_ref) = item_ref
+                {
+                    waves.remove_displayed_item(item_ref)
                 };
             }
             Message::RemoveItems(items) => {
@@ -750,13 +749,12 @@ impl SystemState {
                     }
                     MessageTarget::CurrentSelection => {
                         //If an item is focused, update its format too
-                        if let Some(focused) = focused {
-                            if let Some(DisplayedItem::Variable(displayed_variable)) =
+                        if let Some(focused) = focused
+                            && let Some(DisplayedItem::Variable(displayed_variable)) =
                                 waves.displayed_items.get_mut(&focused)
-                            {
-                                update_format(displayed_variable, DisplayedFieldRef::from(focused));
-                                redraw = true;
-                            }
+                        {
+                            update_format(displayed_variable, DisplayedFieldRef::from(focused));
+                            redraw = true;
                         }
                         for item in waves
                             .items_tree
@@ -887,14 +885,15 @@ impl SystemState {
                     // if no cursor is set, move it to
                     // start of visible area transition for next transition
                     // end of visible area for previous transition
-                    if waves.cursor.is_none() && waves.focused_item.is_some() {
-                        if let Some(vp) = waves.viewports.first() {
-                            waves.cursor = if next {
-                                Some(vp.left_edge_time(&num_timestamps))
-                            } else {
-                                Some(vp.right_edge_time(&num_timestamps))
-                            };
-                        }
+                    if waves.cursor.is_none()
+                        && waves.focused_item.is_some()
+                        && let Some(vp) = waves.viewports.first()
+                    {
+                        waves.cursor = if next {
+                            Some(vp.left_edge_time(&num_timestamps))
+                        } else {
+                            Some(vp.right_edge_time(&num_timestamps))
+                        };
                     }
                     waves.set_cursor_at_transition(next, variable, skip_zero);
                     let moved = waves.go_to_cursor_if_not_in_view();
@@ -2049,10 +2048,10 @@ impl SystemState {
             return;
         };
 
-        if let Some(text) = get_text(waves, item_ref) {
-            if let Some(ctx) = &self.context {
-                ctx.copy_text(text);
-            }
+        if let Some(text) = get_text(waves, item_ref)
+            && let Some(ctx) = &self.context
+        {
+            ctx.copy_text(text);
         }
     }
 }
