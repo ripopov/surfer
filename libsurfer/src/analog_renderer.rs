@@ -661,7 +661,7 @@ impl RenderStrategy for InterpolatedStrategy {
         }
 
         // Check if next command represents undefined values
-        let next_is_undefined = next.map_or(false, |cmd| match &cmd.kind {
+        let next_is_undefined = next.is_some_and(|cmd| match &cmd.kind {
             CommandKind::Flat { value, .. } => !value.is_finite(),
             CommandKind::Range { min, max } => !min.is_finite() || !max.is_finite(),
         });
