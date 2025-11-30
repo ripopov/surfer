@@ -2904,3 +2904,58 @@ snapshot_ui_with_file_and_msgs! {analog_waveform_negive_amplitude, "examples/ana
         4.0,
     )
 ]}
+
+snapshot_ui_with_file_and_msgs! {analog_waveform_ieee_inf_nan, "examples/analog_ieee_inf_nan.vcd", [
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.reg32"),
+        VariableRef::from_hierarchy_string("top.reg32"),
+        VariableRef::from_hierarchy_string("top.reg64"),
+        VariableRef::from_hierarchy_string("top.reg64")
+    ]),
+    Message::AddTimeLine(None),
+    // Set IEEE 754 floating point translators
+    Message::VariableFormatChange(
+        MessageTarget::Explicit(DisplayedFieldRef {
+            item: DisplayedItemRef(1),
+            field: vec![],
+        }),
+        String::from("FP: 32-bit IEEE 754"),
+    ),
+    Message::VariableFormatChange(
+        MessageTarget::Explicit(DisplayedFieldRef {
+            item: DisplayedItemRef(2),
+            field: vec![],
+        }),
+        String::from("FP: 32-bit IEEE 754"),
+    ),
+    Message::VariableFormatChange(
+        MessageTarget::Explicit(DisplayedFieldRef {
+            item: DisplayedItemRef(3),
+            field: vec![],
+        }),
+        String::from("FP: 64-bit IEEE 754"),
+    ),
+    Message::VariableFormatChange(
+        MessageTarget::Explicit(DisplayedFieldRef {
+            item: DisplayedItemRef(4),
+            field: vec![],
+        }),
+        String::from("FP: 64-bit IEEE 754"),
+    ),
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        crate::displayed_item::AnalogSettings::step_global(),
+    ),
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(2)),
+        crate::displayed_item::AnalogSettings::step_global(),
+    ),
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        4.0,
+    ),
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(2)),
+        4.0,
+    )
+]}
