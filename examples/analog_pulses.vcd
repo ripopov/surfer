@@ -2,32 +2,43 @@ $date
     Sun Jul 20 15:38:03 2025
 $end
 $version
-    Python Sinewave VCD Generator
+    Organic VCD Generator ( handcrafted )
 $end
 $timescale
     1ps
 $end
 $scope module top $end
-$var integer 32 ! clk_cnt $end
+$var integer 32 ! pulse_int $end
+$var reg 8 @ pulse_reg8 $end
 $upscope $end
 $enddefinitions $end
 #0
 $dumpvars
 b0 !
+b00000000 @
 $end
 #1000
 b1 !
 #2000
 b1000000 !
 #3000
+bzzzzzzzz @
 b0000000 !
 #1000000
+bxxxxxxxx @
 b10000000 !
 #1100000
 b00000000 !
 #1200000
 b10000000 !
 #1200100
+b00001000 @
+#1300001
+bz @
+#1300002
+bzx @
+#1300003
+b0001000 @
 b00000000 !
 #1800000
 b10000000 !
@@ -37,6 +48,13 @@ b00000000 !
 b100000000 !
 #2000001
 b1000000000 !
+b00001000 @
+#2000002
+b0001z000 @
+#2000003
+b01000000 @
+#2000004
+b00000000 @
 #2000005
 b10000000000 !
 #2000007
@@ -49,3 +67,4 @@ b10000000000 !
 b0000000 !
 #4100000
 b0000001 !
+b11111111 @

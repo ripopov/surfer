@@ -10,7 +10,18 @@ use std::borrow::Cow;
 
 use crate::translation::DynTranslator;
 use crate::wave_container::{SignalAccessor, VariableMeta};
-use surfer_translation_types::{ValueRepr, VariableValue};
+use surfer_translation_types::{ValueKind, ValueRepr, VariableValue};
+
+/// Quiet NaN representing undefined (X) values.
+pub const NAN_UNDEF: f64 = f64::from_bits(0x7FF8_0000_0000_0000_u64);
+
+/// Quiet NaN representing high-impedance (Z) values.
+pub const NAN_HIGHIMP: f64 = f64::from_bits(0x7FF8_0000_0000_0001_u64);
+
+/// Check NaN payload to determine if it represents HighImp.
+pub fn is_nan_highimp(value: f64) -> bool {
+    value.to_bits() == NAN_HIGHIMP.to_bits()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct MinMax {
@@ -301,6 +312,15 @@ pub fn translate_to_numeric(
     value: &VariableValue,
 ) -> Option<f64> {
     let translation = translator.translate(meta, value).ok()?;
+
+    // Check ValueKind first - if it's HighImp or Undef, return appropriate NaN
+    match translation.kind {
+        ValueKind::HighImp => return Some(NAN_HIGHIMP),
+        ValueKind::Undef => return Some(NAN_UNDEF),
+        _ => {}
+    }
+
+    // Try to parse as numeric value
     let value_str: Cow<str> = match &translation.val {
         ValueRepr::Bit(c) => Cow::Owned(c.to_string()),
         ValueRepr::Bits(_, s) => Cow::Borrowed(s),

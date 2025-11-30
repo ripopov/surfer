@@ -6,7 +6,7 @@ use num::{BigInt, ToPrimitive};
 use std::collections::HashMap;
 use surfer_translation_types::ValueKind;
 
-use crate::analog_signal_cache::{AnalogSignalCache, CacheQueryResult};
+use crate::analog_signal_cache::{is_nan_highimp, AnalogSignalCache, CacheQueryResult};
 use crate::displayed_item::{
     AnalogSettings, DisplayedFieldRef, DisplayedItemRef, DisplayedVariable,
 };
@@ -218,7 +218,7 @@ impl CommandOutput {
 }
 
 fn values_equal(a: f64, b: f64) -> bool {
-    (a.is_nan() && b.is_nan()) || (a - b).abs() < f64::EPSILON
+    a.to_bits() == b.to_bits()
 }
 
 impl<'a> CommandBuilder<'a> {
@@ -457,7 +457,7 @@ pub trait RenderStrategy {
         next: Option<&AnalogDrawingCommand>,
     ) {
         if !value.is_finite() {
-            render_ctx.draw_undefined(start_x, end_x, ctx);
+            render_ctx.draw_undefined(start_x, end_x, value, ctx);
             self.reset_state();
             return;
         }
@@ -476,7 +476,9 @@ pub trait RenderStrategy {
         next: Option<&AnalogDrawingCommand>,
     ) {
         if !min.is_finite() || !max.is_finite() {
-            render_ctx.draw_undefined(x, x + 1.0, ctx);
+            // Use whichever value is not finite to determine the color
+            let nan_value = if !min.is_finite() { min } else { max };
+            render_ctx.draw_undefined(x, x + 1.0, nan_value, ctx);
             self.reset_state();
             return;
         }
@@ -544,8 +546,13 @@ impl RenderContext {
             .add(PathShape::line(vec![from, to], self.stroke));
     }
 
-    pub fn draw_undefined(&self, start_x: f32, end_x: f32, ctx: &mut DrawingContext) {
-        let color = ValueKind::Undef.color(self.stroke.color, ctx.theme);
+    pub fn draw_undefined(&self, start_x: f32, end_x: f32, value: f64, ctx: &mut DrawingContext) {
+        let kind = if is_nan_highimp(value) {
+            ValueKind::HighImp
+        } else {
+            ValueKind::Undef
+        };
+        let color = kind.color(self.stroke.color, ctx.theme);
         let min = (ctx.to_screen)(start_x, self.offset);
         let max = (ctx.to_screen)(end_x, self.offset + self.line_height * self.height_scale);
         ctx.painter
