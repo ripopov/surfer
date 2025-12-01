@@ -2769,6 +2769,30 @@ snapshot_ui_with_file_and_msgs! {analog_pulses_no_aliasing1, "examples/analog_pu
     ),
 ]}
 
+snapshot_ui_with_file_and_msgs! {analog_pulses_interpolate_to_range, "examples/analog_pulses.vcd", [
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.pulse_int"),
+        VariableRef::from_hierarchy_string("top.pulse_int"),
+    ]),
+    Message::AddTimeLine(None),
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        crate::displayed_item::AnalogSettings::interpolated_global(),
+    ),
+
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        16.0,
+    ),
+
+    Message::ZoomToRange {
+        start: BigInt::from(1700000),
+        end: BigInt::from(2100000),
+        viewport_idx: 0
+    },
+
+]}
+
 snapshot_ui_with_file_and_msgs! {analog_pulses_no_aliasing2, "examples/analog_pulses.vcd", [
     Message::AddVariables(vec![
         VariableRef::from_hierarchy_string("top.pulse_int"),
@@ -2822,15 +2846,25 @@ snapshot_ui_with_file_and_msgs! {analog_pulses_4state_zoom, "examples/analog_pul
     Message::AddVariables(vec![
         VariableRef::from_hierarchy_string("top.pulse_reg8"),
         VariableRef::from_hierarchy_string("top.pulse_reg8"),
+        VariableRef::from_hierarchy_string("top.pulse_reg8"),
     ]),
 
     Message::SetAnalogSettings(
         MessageTarget::Explicit(VisibleItemIndex(1)),
         crate::displayed_item::AnalogSettings::step_viewport(),
     ),
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(2)),
+        crate::displayed_item::AnalogSettings::interpolated_viewport()
+    ),
 
     Message::ItemHeightScalingFactorChange(
         MessageTarget::Explicit(VisibleItemIndex(1)),
+        8.0,
+    ),
+
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(2)),
         8.0,
     ),
 
@@ -2978,7 +3012,7 @@ snapshot_ui_with_file_and_msgs! {analog_waveform_ieee_inf_nan, "examples/analog_
     ),
     Message::SetAnalogSettings(
         MessageTarget::Explicit(VisibleItemIndex(2)),
-        crate::displayed_item::AnalogSettings::step_global(),
+        crate::displayed_item::AnalogSettings::interpolated_viewport(),
     ),
     Message::ItemHeightScalingFactorChange(
         MessageTarget::Explicit(VisibleItemIndex(0)),

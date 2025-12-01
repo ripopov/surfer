@@ -25,7 +25,6 @@ use crate::data_container::DataContainer;
 use crate::displayed_item::{
     AnalogSettings, DisplayedFieldRef, DisplayedItemRef, DisplayedVariable,
 };
-use crate::displayed_item_tree::VisibleItemIndex;
 use crate::time::get_ticks;
 use crate::tooltips::handle_transaction_tooltip;
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};

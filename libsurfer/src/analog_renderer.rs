@@ -1,12 +1,12 @@
 //! Analog signal rendering: command generation and waveform drawing.
 
-use egui::{emath, Color32, Pos2, Stroke};
+use egui::{Color32, Pos2, Stroke, emath};
 use epaint::PathShape;
 use num::{BigInt, ToPrimitive};
 use std::collections::HashMap;
 use surfer_translation_types::ValueKind;
 
-use crate::analog_signal_cache::{is_nan_highimp, AnalogSignalCache, CacheQueryResult};
+use crate::analog_signal_cache::{AnalogSignalCache, CacheQueryResult, is_nan_highimp};
 use crate::displayed_item::{
     AnalogSettings, DisplayedFieldRef, DisplayedItemRef, DisplayedVariable,
 };
@@ -17,16 +17,19 @@ use crate::view::DrawingContext;
 use crate::viewport::Viewport;
 use crate::wave_data::WaveData;
 
-pub struct AnalogDrawingCommand {
-    pub start_px: f32,
-    pub kind: CommandKind,
-}
-
-pub enum CommandKind {
+pub enum AnalogDrawingCommand {
     /// Constant value from start_px to end_px.
-    Flat { value: f64, end_px: f32 },
-    /// Multiple transitions in one pixel (anti-aliased).
-    Range { min: f64, max: f64 },
+    /// In Step mode: horizontal line at start_val, vertical transition to next.
+    /// In Interpolated mode: line from (start_px, start_val) to (end_px, end_val).
+    Flat {
+        start_px: f32,
+        start_val: f64,
+        end_px: f32,
+        end_val: f64,
+    },
+    /// Multiple transitions in one pixel (anti-aliased vertical bar).
+    /// Rendered identically in both Step and Interpolated modes.
+    Range { px: f32, min_val: f64, max_val: f64 },
 }
 
 /// Generate draw commands for a displayed analog variable.
@@ -101,10 +104,6 @@ pub fn draw_analog(
     let analog_settings = &analog_commands.analog_settings;
     debug_assert!(analog_settings.enabled, "draw_analog called when disabled");
 
-    if !analog_commands.viewport_min.is_finite() || !analog_commands.viewport_max.is_finite() {
-        return;
-    }
-
     let (min_val, max_val) = select_value_range(analog_commands, analog_settings);
 
     let render_ctx = RenderContext::new(
@@ -176,7 +175,7 @@ impl CommandOutput {
     }
 
     fn update_bounds(&mut self, value: f64) {
-        if value.is_finite() {
+        if !value.is_nan() {
             self.viewport_min = self.viewport_min.min(value);
             self.viewport_max = self.viewport_max.max(value);
         }
@@ -184,14 +183,21 @@ impl CommandOutput {
 
     fn emit_flat(&mut self, px: f32, value: f64) {
         match self.pending_flat {
-            Some((_, v)) if values_equal(v, value) => {}
-            Some((start, v)) => {
-                self.commands.push(AnalogDrawingCommand {
+            Some((_, v)) if values_equal(v, value) => {
+                // Same value, extend the flat region (no-op, end_px updated on flush)
+            }
+            Some((start, start_val)) => {
+                // Value changed: flush previous flat
+                let end_val = if start_val.is_finite() && value.is_finite() {
+                    value
+                } else {
+                    start_val
+                };
+                self.commands.push(AnalogDrawingCommand::Flat {
                     start_px: start,
-                    kind: CommandKind::Flat {
-                        value: v,
-                        end_px: px,
-                    },
+                    start_val,
+                    end_px: px,
+                    end_val,
                 });
                 self.pending_flat = Some((px, value));
             }
@@ -199,21 +205,29 @@ impl CommandOutput {
         }
     }
 
-    fn flush_flat(&mut self, end_px: f32) {
-        if let Some((start, v)) = self.pending_flat.take() {
-            self.commands.push(AnalogDrawingCommand {
+    fn emit_range(&mut self, px: f32, min: f64, max: f64, entry_val: f64, exit_val: f64) {
+        // Flush pending flat - end_val is the first transition value (entry to range)
+        // for correct interpolation in Interpolated mode
+        if let Some((start, start_val)) = self.pending_flat.take() {
+            let end_val = if start_val.is_finite() && entry_val.is_finite() {
+                entry_val
+            } else {
+                start_val
+            };
+            self.commands.push(AnalogDrawingCommand::Flat {
                 start_px: start,
-                kind: CommandKind::Flat { value: v, end_px },
+                start_val,
+                end_px: px,
+                end_val,
             });
         }
-    }
-
-    fn emit_range(&mut self, px: f32, min: f64, max: f64) {
-        self.flush_flat(px);
-        self.commands.push(AnalogDrawingCommand {
-            start_px: px,
-            kind: CommandKind::Range { min, max },
+        self.commands.push(AnalogDrawingCommand::Range {
+            px,
+            min_val: min,
+            max_val: max,
         });
+        // Start new flat from exit_val
+        self.pending_flat = Some((px + 1.0, exit_val));
     }
 }
 
@@ -272,6 +286,9 @@ impl<'a> CommandBuilder<'a> {
         self.cache.query_at_time(time)
     }
 
+    /// Captures the most recent sample occurring before the visible viewport.
+    /// This method ensures rendering continuity when a signal value extends from before
+    /// the viewport into the visible area.
     fn add_before_viewport_sample(&mut self) -> Option<f32> {
         let query = self.query(self.time_at_pixel(0.0));
 
@@ -354,10 +371,37 @@ impl<'a> CommandBuilder<'a> {
         if let Some((min, max)) = self.cache.query_time_range(t0, t1.saturating_sub(1)) {
             self.output.update_bounds(min);
             self.output.update_bounds(max);
-            self.output.emit_range(px as f32, min, max);
+
+            // Query the value at the first transition within the pixel (entry value)
+            // This is used as end_val for the preceding Flat in interpolated mode
+            let t0_query = self.query(t0);
+            let entry_val = match t0_query.current {
+                // If t0 is exactly on a transition (jumped here via next_query_time),
+                // the current value is already the first transition value
+                Some((time, value)) if time == t0 => value,
+                // Otherwise t0 is at pixel start, so first transition is at t0_query.next
+                _ => {
+                    if let Some(first_change) = t0_query.next {
+                        self.query(first_change)
+                            .current
+                            .map(|(_, v)| v)
+                            .unwrap_or(min)
+                    } else {
+                        min
+                    }
+                }
+            };
+
+            // Query the value at the end of the range (exit value)
+            let exit_query = self.query(t1.saturating_sub(1));
+            let exit_val = exit_query.current.map(|(_, v)| v).unwrap_or(max);
+
+            self.output
+                .emit_range(px as f32, min, max, entry_val, exit_val);
         }
     }
 
+    /// Extends rendering to include the first sample occurring after the visible viewport.
     fn add_after_viewport_sample(&mut self, end_px: f32) {
         let query = self.query(self.time_at_pixel(end_px as f64));
 
@@ -375,42 +419,35 @@ impl<'a> CommandBuilder<'a> {
         if let Some((_, value)) = after_query.current {
             self.output.update_bounds(value);
 
-            if let Some((start, v)) = self.output.pending_flat.take() {
-                self.output.commands.push(AnalogDrawingCommand {
+            if let Some((start, start_val)) = self.output.pending_flat.take() {
+                self.output.commands.push(AnalogDrawingCommand::Flat {
                     start_px: start,
-                    kind: CommandKind::Flat {
-                        value: v,
-                        end_px: after_px,
-                    },
+                    start_val,
+                    end_px: after_px,
+                    end_val: value,
                 });
-                self.output.pending_flat = Some((after_px, value));
             }
         }
     }
 
     fn finalize(mut self, before_px: Option<f32>) -> AnalogDrawingCommands {
-        // Flush remaining pending flat
-        if let Some((start, v)) = self.output.pending_flat {
-            self.output.commands.push(AnalogDrawingCommand {
+        // Flush remaining pending flat with same end_val (constant to end)
+        if let Some((start, start_val)) = self.output.pending_flat.take() {
+            self.output.commands.push(AnalogDrawingCommand::Flat {
                 start_px: start,
-                kind: CommandKind::Flat {
-                    value: v,
-                    end_px: self.max_valid_pixel,
-                },
+                start_val,
+                end_px: self.max_valid_pixel,
+                end_val: start_val, // Signal stays constant
             });
         }
 
         // Extend first command to include before-viewport sample
         if let Some(before) = before_px {
-            if let Some(first) = self.output.commands.first_mut() {
-                first.start_px = first.start_px.min(before);
+            if let Some(AnalogDrawingCommand::Flat { start_px, .. }) =
+                self.output.commands.first_mut()
+            {
+                *start_px = (*start_px).min(before);
             }
-        }
-
-        // Ensure valid bounds
-        if !self.output.viewport_min.is_finite() || !self.output.viewport_max.is_finite() {
-            self.output.viewport_min = 0.0;
-            self.output.viewport_max = 1.0;
         }
 
         AnalogDrawingCommands {
@@ -431,71 +468,62 @@ pub trait RenderStrategy {
     /// Reset state after encountering undefined values.
     fn reset_state(&mut self);
 
-    /// Render a flat segment with a finite value. Relies on egui for clamping.
-    fn render_flat_defined(
-        &mut self,
-        ctx: &mut DrawingContext,
-        render_ctx: &RenderContext,
-        start_x: f32,
-        end_x: f32,
-        value: f64,
-        next: Option<&AnalogDrawingCommand>,
-    );
+    /// Get the last rendered point (for Range connection).
+    fn last_point(&self) -> Option<Pos2>;
 
-    /// Render a range segment with finite min/max. Relies on egui for clamping.
-    fn render_range_defined(
-        &mut self,
-        ctx: &mut DrawingContext,
-        render_ctx: &RenderContext,
-        x: f32,
-        min: f64,
-        max: f64,
-        next: Option<&AnalogDrawingCommand>,
-    );
+    /// Set the last rendered point (after Range draws).
+    fn set_last_point(&mut self, point: Pos2);
 
-    /// Render a flat segment with undefined value handling.
+    /// Render a flat segment.
+    /// Step: horizontal line at start_val, connect to next.
+    /// Interpolated: line from (start_px, start_val) to (end_px, end_val).
     fn render_flat(
         &mut self,
         ctx: &mut DrawingContext,
         render_ctx: &RenderContext,
-        start_x: f32,
-        end_x: f32,
-        value: f64,
-        next: Option<&AnalogDrawingCommand>,
-    ) {
-        let start_x = render_ctx.clamp_x(start_x);
-        let end_x = render_ctx.clamp_x(end_x);
+        start_px: f32,
+        start_val: f64,
+        end_px: f32,
+        end_val: f64,
+    );
 
-        if !value.is_finite() {
-            render_ctx.draw_undefined(start_x, end_x, value, ctx);
-            self.reset_state();
-            return;
-        }
-
-        self.render_flat_defined(ctx, render_ctx, start_x, end_x, value, next);
-    }
-
-    /// Render a range segment with undefined value handling.
+    /// Render a range segment (default impl, same for both strategies).
+    /// Draws vertical bar at px from min_val to max_val.
     fn render_range(
         &mut self,
         ctx: &mut DrawingContext,
         render_ctx: &RenderContext,
-        x: f32,
-        min: f64,
-        max: f64,
-        next: Option<&AnalogDrawingCommand>,
+        px: f32,
+        min_val: f64,
+        max_val: f64,
     ) {
-        let x = render_ctx.clamp_x(x);
-
-        if !min.is_finite() || !max.is_finite() {
-            // Use whichever value is not finite to determine the color
-            let nan_value = if !min.is_finite() { min } else { max };
-            render_ctx.draw_undefined(x, x + 1.0, nan_value, ctx);
+        if !min_val.is_finite() || !max_val.is_finite() {
+            let nan = if !min_val.is_finite() {
+                min_val
+            } else {
+                max_val
+            };
+            render_ctx.draw_undefined(px, px + 1.0, nan, ctx);
             self.reset_state();
             return;
         }
 
-        self.render_range_defined(ctx, render_ctx, x, min, max, next);
+        let p_min = render_ctx.to_screen(px, render_ctx.normalize(min_val), ctx);
+        let p_max = render_ctx.to_screen(px, render_ctx.normalize(max_val), ctx);
+
+        // Connect from previous to closer endpoint
+        let (connect, other) = match self.last_point() {
+            Some(prev) if (prev.y - p_min.y).abs() < (prev.y - p_max.y).abs() => (p_min, p_max),
+            _ => (p_max, p_min),
+        };
+
+        if let Some(prev) = self.last_point() {
+            render_ctx.draw_line(prev, connect, ctx);
+        }
+
+        // Vertical bar
+        render_ctx.draw_line(connect, other, ctx);
+        self.set_last_point(other);
     }
 }
 
@@ -605,145 +633,112 @@ impl RenderStrategy for StepStrategy {
         self.last_point = None;
     }
 
-    fn render_flat_defined(
+    fn last_point(&self) -> Option<Pos2> {
+        self.last_point
+    }
+
+    fn set_last_point(&mut self, point: Pos2) {
+        self.last_point = Some(point);
+    }
+
+    fn render_flat(
         &mut self,
         ctx: &mut DrawingContext,
         render_ctx: &RenderContext,
-        start_x: f32,
-        end_x: f32,
-        value: f64,
-        _next: Option<&AnalogDrawingCommand>,
+        start_px: f32,
+        start_val: f64,
+        end_px: f32,
+        _end_val: f64, // Ignored in Step mode
     ) {
-        let norm = render_ctx.normalize(value);
-        let p1 = render_ctx.to_screen(start_x, norm, ctx);
-        let p2 = render_ctx.to_screen(end_x, norm, ctx);
+        let start_px = render_ctx.clamp_x(start_px);
+        let end_px = render_ctx.clamp_x(end_px);
 
+        if !start_val.is_finite() {
+            render_ctx.draw_undefined(start_px, end_px, start_val, ctx);
+            self.reset_state();
+            return;
+        }
+
+        let norm = render_ctx.normalize(start_val);
+        let p1 = render_ctx.to_screen(start_px, norm, ctx);
+        let p2 = render_ctx.to_screen(end_px, norm, ctx);
+
+        // Vertical transition from previous
         if let Some(prev) = self.last_point {
             render_ctx.draw_line(Pos2::new(p1.x, prev.y), p1, ctx);
         }
 
+        // Horizontal line
         render_ctx.draw_line(p1, p2, ctx);
         self.last_point = Some(p2);
-    }
-
-    fn render_range_defined(
-        &mut self,
-        ctx: &mut DrawingContext,
-        render_ctx: &RenderContext,
-        x: f32,
-        min: f64,
-        max: f64,
-        _next: Option<&AnalogDrawingCommand>,
-    ) {
-        let p_min = render_ctx.to_screen(x, render_ctx.normalize(min), ctx);
-        let p_max = render_ctx.to_screen(x, render_ctx.normalize(max), ctx);
-
-        let (connect, other) = match self.last_point {
-            Some(prev) if (prev.y - p_min.y).abs() < (prev.y - p_max.y).abs() => (p_min, p_max),
-            _ => (p_max, p_min),
-        };
-
-        if let Some(prev) = self.last_point {
-            let mid = Pos2::new(connect.x, prev.y);
-            render_ctx.draw_line(prev, mid, ctx);
-            render_ctx.draw_line(mid, connect, ctx);
-        }
-
-        render_ctx.draw_line(connect, other, ctx);
-
-        self.last_point = Some(other);
     }
 }
 
 /// Interpolated rendering: diagonal lines connecting consecutive values.
 #[derive(Default)]
 pub struct InterpolatedStrategy {
-    last: Option<(Pos2, f64)>,
+    last_point: Option<Pos2>,
     started: bool,
 }
 
 impl RenderStrategy for InterpolatedStrategy {
     fn reset_state(&mut self) {
-        self.last = None;
+        self.last_point = None;
         self.started = true;
     }
 
-    fn render_flat_defined(
-        &mut self,
-        ctx: &mut DrawingContext,
-        render_ctx: &RenderContext,
-        start_x: f32,
-        end_x: f32,
-        value: f64,
-        next: Option<&AnalogDrawingCommand>,
-    ) {
-        let norm = render_ctx.normalize(value);
-        let current = render_ctx.to_screen(start_x, norm, ctx);
+    fn last_point(&self) -> Option<Pos2> {
+        self.last_point
+    }
 
-        if let Some((prev, _)) = self.last {
-            render_ctx.draw_line(prev, current, ctx);
-        } else if !self.started {
-            let edge = render_ctx.to_screen(render_ctx.min_valid_pixel.max(0.0), norm, ctx);
-            render_ctx.draw_line(edge, current, ctx);
-        }
-
-        // Check if next command represents undefined values
-        let next_is_undefined = next.is_some_and(|cmd| match &cmd.kind {
-            CommandKind::Flat { value, .. } => !value.is_finite(),
-            CommandKind::Range { min, max } => !min.is_finite() || !max.is_finite(),
-        });
-
-        if next_is_undefined {
-            let endpoint = render_ctx.to_screen(next.unwrap().start_px, norm, ctx);
-            render_ctx.draw_line(current, endpoint, ctx);
-        } else if next.is_none() && end_x > start_x {
-            let endpoint = render_ctx.to_screen(end_x, norm, ctx);
-            render_ctx.draw_line(current, endpoint, ctx);
-        }
-
-        self.last = Some((current, value));
+    fn set_last_point(&mut self, point: Pos2) {
+        self.last_point = Some(point);
         self.started = true;
     }
 
-    fn render_range_defined(
+    fn render_flat(
         &mut self,
         ctx: &mut DrawingContext,
         render_ctx: &RenderContext,
-        x: f32,
-        min: f64,
-        max: f64,
-        _next: Option<&AnalogDrawingCommand>,
+        start_px: f32,
+        start_val: f64,
+        end_px: f32,
+        end_val: f64,
     ) {
-        let min_norm = render_ctx.normalize(min);
-        let max_norm = render_ctx.normalize(max);
-        let p_min = render_ctx.to_screen(x, min_norm, ctx);
-        let p_max = render_ctx.to_screen(x, max_norm, ctx);
+        let start_px = render_ctx.clamp_x(start_px);
+        let end_px = render_ctx.clamp_x(end_px);
 
-        let (first, second, second_val) = if let Some((prev, _)) = self.last {
-            let prev_norm = 1.0
-                - (prev.y - render_ctx.offset) / (render_ctx.line_height * render_ctx.height_scale);
+        if !start_val.is_finite() {
+            render_ctx.draw_undefined(start_px, end_px, start_val, ctx);
+            self.reset_state();
+            return;
+        }
 
-            let go_max_first = prev_norm < min_norm
-                || (prev_norm <= max_norm
-                    && (prev_norm - max_norm).abs() < (prev_norm - min_norm).abs());
-
-            if go_max_first {
-                render_ctx.draw_line(prev, p_max, ctx);
-                (p_max, p_min, min)
-            } else {
-                render_ctx.draw_line(prev, p_min, ctx);
-                (p_min, p_max, max)
-            }
-        } else if !self.started {
-            let edge = render_ctx.to_screen(render_ctx.min_valid_pixel, max_norm, ctx);
-            render_ctx.draw_line(edge, p_max, ctx);
-            (p_max, p_min, min)
+        // If end_val is NaN but start_val is finite, render as flat line using start_val
+        let end_val = if end_val.is_finite() {
+            end_val
         } else {
-            (p_max, p_min, min)
+            start_val
         };
 
-        render_ctx.draw_line(first, second, ctx);
-        self.last = Some((second, second_val));
+        let p1 = render_ctx.to_screen(start_px, render_ctx.normalize(start_val), ctx);
+        let p2 = render_ctx.to_screen(end_px, render_ctx.normalize(end_val), ctx);
+
+        // Connect from previous point
+        if let Some(prev) = self.last_point {
+            render_ctx.draw_line(prev, p1, ctx);
+        } else if !self.started {
+            // Connect from viewport edge
+            let edge = render_ctx.to_screen(
+                render_ctx.min_valid_pixel.max(0.0),
+                render_ctx.normalize(start_val),
+                ctx,
+            );
+            render_ctx.draw_line(edge, p1, ctx);
+        }
+
+        render_ctx.draw_line(p1, p2, ctx);
+        self.last_point = Some(p2);
         self.started = true;
     }
 }
@@ -755,14 +750,22 @@ fn render_with_strategy<S: RenderStrategy>(
     strategy: &mut S,
     ctx: &mut DrawingContext,
 ) {
-    for (i, cmd) in commands.iter().enumerate() {
-        let next = commands.get(i + 1);
-        match &cmd.kind {
-            CommandKind::Flat { value, end_px } => {
-                strategy.render_flat(ctx, render_ctx, cmd.start_px, *end_px, *value, next);
+    for cmd in commands {
+        match cmd {
+            AnalogDrawingCommand::Flat {
+                start_px,
+                start_val,
+                end_px,
+                end_val,
+            } => {
+                strategy.render_flat(ctx, render_ctx, *start_px, *start_val, *end_px, *end_val);
             }
-            CommandKind::Range { min, max } => {
-                strategy.render_range(ctx, render_ctx, cmd.start_px, *min, *max, next);
+            AnalogDrawingCommand::Range {
+                px,
+                min_val,
+                max_val,
+            } => {
+                strategy.render_range(ctx, render_ctx, *px, *min_val, *max_val);
             }
         }
     }
