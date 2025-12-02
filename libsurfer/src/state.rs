@@ -137,16 +137,12 @@ impl SystemState {
         // we turn the waveform argument and any startup command file into batch commands
         self.batch_messages = VecDeque::new();
 
-        let load_options = LoadOptions {
-            keep_variables: true,
-            keep_unavailable: true,
-        };
         match args.waves {
             Some(WaveSource::Url(url)) => {
-                self.add_batch_message(Message::LoadWaveformFileFromUrl(url, load_options));
+                self.add_batch_message(Message::LoadWaveformFileFromUrl(url, LoadOptions::KeepAll));
             }
             Some(WaveSource::File(file)) => {
-                self.add_batch_message(Message::LoadFile(file, load_options));
+                self.add_batch_message(Message::LoadFile(file, LoadOptions::KeepAll));
             }
             Some(WaveSource::Data) => error!("Attempted to load data at startup"),
             Some(WaveSource::Cxxrtl(url)) => {
@@ -215,14 +211,14 @@ impl SystemState {
         }
 
         let ((new_wave, load_commands), is_reload) =
-            if load_options.keep_variables && self.user.waves.is_some() {
+            if load_options != LoadOptions::Clear && self.user.waves.is_some() {
                 (
                     self.user.waves.take().unwrap().update_with_waves(
                         new_waves,
                         filename,
                         format,
                         &self.translators,
-                        load_options.keep_unavailable,
+                        load_options == LoadOptions::KeepAll,
                     ),
                     true,
                 )
@@ -233,7 +229,7 @@ impl SystemState {
                         filename,
                         format,
                         &self.translators,
-                        load_options.keep_unavailable,
+                        load_options == LoadOptions::KeepAll,
                     ),
                     true,
                 )

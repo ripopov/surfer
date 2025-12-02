@@ -1275,9 +1275,10 @@ impl SystemState {
             }
             Message::ReloadWaveform(keep_unavailable) => {
                 let waves = self.user.waves.as_ref()?;
-                let options = LoadOptions {
-                    keep_variables: true,
-                    keep_unavailable,
+                let options = if keep_unavailable {
+                    LoadOptions::KeepAll
+                } else {
+                    LoadOptions::KeepAvailable
                 };
                 match &waves.source {
                     WaveSource::File(filename) => {

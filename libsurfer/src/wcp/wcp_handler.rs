@@ -312,13 +312,13 @@ impl SystemState {
                             WaveSource::Url(url) => {
                                 self.update(Message::LoadWaveformFileFromUrl(
                                     url,
-                                    LoadOptions::clean(),
+                                    LoadOptions::Clear,
                                 ));
                                 self.send_response(WcpResponse::ack)
                             }
                             WaveSource::File(file) => {
                                 // FIXME add support for loading transaction files via Message::LoadTransactionFile
-                                let msg = Message::LoadFile(file, LoadOptions::clean());
+                                let msg = Message::LoadFile(file, LoadOptions::Clear);
                                 self.update(msg);
                                 self.send_response(WcpResponse::ack)
                             }

@@ -8,6 +8,7 @@ use std::sync::mpsc::Sender;
 
 use crate::async_util::{perform_async_work, perform_work, sleep_ms};
 use crate::cxxrtl_container::CxxrtlContainer;
+use crate::file_dialog::OpenMode;
 use crate::spawn;
 use crate::util::get_multi_extension;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -167,17 +168,19 @@ impl Display for WaveFormat {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct LoadOptions {
-    pub keep_variables: bool,
-    pub keep_unavailable: bool,
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone, Copy)]
+pub enum LoadOptions {
+    Clear,
+    KeepAvailable,
+    KeepAll,
 }
 
-impl LoadOptions {
-    pub fn clean() -> Self {
-        Self {
-            keep_variables: false,
-            keep_unavailable: false,
+impl Into<LoadOptions> for (OpenMode, bool) {
+    fn into(self) -> LoadOptions {
+        match self {
+            (OpenMode::Open, _) => LoadOptions::Clear,
+            (OpenMode::Switch, false) => LoadOptions::KeepAvailable,
+            (OpenMode::Switch, true) => LoadOptions::KeepAll,
         }
     }
 }
@@ -314,20 +317,20 @@ impl SystemState {
                         self.load_from_bytes(
                             WaveSource::DragAndDrop(Some(path)),
                             bytes.to_vec(),
-                            LoadOptions::clean(),
+                            LoadOptions::Clear,
                         );
                     }
                 } else {
                     self.load_from_bytes(
                         WaveSource::DragAndDrop(path),
                         bytes.to_vec(),
-                        LoadOptions::clean(),
+                        LoadOptions::Clear,
                     );
                 }
                 Ok(())
             }
         } else if let Some(path) = path {
-            self.load_from_file(path, LoadOptions::clean())
+            self.load_from_file(path, LoadOptions::Clear)
         } else {
             Err(anyhow!(
                 "Unknown how to load dropped file w/o path or bytes"
@@ -341,7 +344,7 @@ impl SystemState {
             // so we'll special case
             #[cfg(not(target_arch = "wasm32"))]
             Some(WaveSource::Cxxrtl(kind)) => {
-                self.connect_to_cxxrtl(kind, load_options.keep_variables);
+                self.connect_to_cxxrtl(kind, load_options != LoadOptions::Clear);
             }
             // However, if we don't get a cxxrtl url, we want to continue loading this as
             // a url even if it isn't auto detected as a url.
@@ -572,15 +575,17 @@ impl SystemState {
                 CxxrtlKind::Mailbox => CxxrtlContainer::new_wasm_mailbox(sender.clone()).await,
             };
 
+            let load_options = if keep_variables {
+                LoadOptions::KeepAvailable
+            } else {
+                LoadOptions::Clear
+            };
             let msg = match container {
                 Ok(c) => Message::WavesLoaded(
                     WaveSource::Cxxrtl(kind),
                     WaveFormat::CxxRtl,
                     Box::new(WaveContainer::Cxxrtl(Box::new(Mutex::new(c)))),
-                    LoadOptions {
-                        keep_variables,
-                        keep_unavailable: false,
-                    },
+                    load_options,
                 ),
                 Err(e) => Message::Error(e),
             };

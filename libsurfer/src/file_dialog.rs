@@ -11,7 +11,6 @@ use tracing::error;
 use crate::SystemState;
 use crate::async_util::perform_async_work;
 use crate::message::Message;
-use crate::wave_source::LoadOptions;
 
 #[derive(Debug, Deserialize)]
 pub enum OpenMode {
@@ -113,21 +112,11 @@ impl SystemState {
     }
 
     pub fn open_file_dialog(&mut self, mode: OpenMode) {
-        let keep_unavailable = self.user.config.behavior.keep_during_reload;
-        let keep_variables = match mode {
-            OpenMode::Open => false,
-            OpenMode::Switch => true,
-        };
+        let load_options = (mode, self.user.config.behavior.keep_during_reload).into();
 
         #[cfg(not(target_arch = "wasm32"))]
         let message = move |file: PathBuf| match Utf8PathBuf::from_path_buf(file.clone()) {
-            Ok(utf8_path) => vec![Message::LoadFile(
-                utf8_path,
-                LoadOptions {
-                    keep_variables,
-                    keep_unavailable,
-                },
-            )],
+            Ok(utf8_path) => vec![Message::LoadFile(utf8_path, load_options)],
             Err(_) => {
                 vec![Message::Error(eyre::eyre!(
                     "File path '{}' contains invalid UTF-8",
@@ -137,15 +126,7 @@ impl SystemState {
         };
 
         #[cfg(target_arch = "wasm32")]
-        let message = move |file: Vec<u8>| {
-            vec![Message::LoadFromData(
-                file,
-                LoadOptions {
-                    keep_variables,
-                    keep_unavailable,
-                },
-            )]
-        };
+        let message = move |file: Vec<u8>| vec![Message::LoadFromData(file, load_options)];
 
         self.file_dialog_open(
             "Open waveform file",

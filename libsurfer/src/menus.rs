@@ -128,7 +128,7 @@ impl SystemState {
                 Message::SetUrlEntryVisible(
                     true,
                     Some(Box::new(|url: String| {
-                        Message::LoadWaveformFileFromUrl(url.clone(), LoadOptions::clean())
+                        Message::LoadWaveformFileFromUrl(url.clone(), LoadOptions::Clear)
                     })),
                 ),
             )

@@ -284,7 +284,7 @@ fn response_and_event() {
         msg_sender
             .send(Message::LoadFile(
                 "../examples/counter.vcd".into(),
-                LoadOptions::clean(),
+                LoadOptions::Clear,
             ))
             .unwrap();
         get_json_response(&stream, &mut state)

@@ -363,7 +363,7 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                     Box::new(|word| {
                         Some(Command::Terminal(Message::LoadFile(
                             word.into(),
-                            LoadOptions::clean(),
+                            LoadOptions::Clear,
                         )))
                     }),
                 ),
@@ -372,10 +372,7 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                     Box::new(|word| {
                         Some(Command::Terminal(Message::LoadFile(
                             word.into(),
-                            LoadOptions {
-                                keep_variables: true,
-                                keep_unavailable: false,
-                            },
+                            LoadOptions::KeepAll,
                         )))
                     }),
                 ),
@@ -385,7 +382,7 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                     Box::new(|query, _| {
                         Some(Command::Terminal(Message::LoadWaveformFileFromUrl(
                             query.to_string(),
-                            LoadOptions::clean(), // load_url does not indicate any format restrictions
+                            LoadOptions::Clear, // load_url does not indicate any format restrictions
                         )))
                     }),
                 )),
