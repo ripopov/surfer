@@ -1,4 +1,5 @@
 #![cfg_attr(not(target_arch = "wasm32"), deny(unused_crate_dependencies))]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[cfg(not(target_arch = "wasm32"))]
 mod main_impl {
