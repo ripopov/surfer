@@ -4995,6 +4995,7 @@ dependencies = [
  "egui",
  "emath",
  "eyre",
+ "image",
  "libsurfer",
  "ron",
  "simple-eyre",

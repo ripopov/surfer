@@ -15,6 +15,7 @@ eyre.workspace = true
 eframe.workspace = true
 egui.workspace = true
 emath.workspace = true
+image.workspace = true
 libsurfer = { path = "../libsurfer", default-features = false }
 tokio = { workspace = true, features = ["rt", "time", "macros"] }
 ron.workspace = true
