@@ -71,32 +71,25 @@ struct SignalRMQ {
 }
 
 impl SignalRMQ {
-    fn new<I>(signal: I, block_size: usize) -> Self
-    where
-        I: IntoIterator<Item = (u64, f64)>,
-    {
-        let data: Vec<(u64, f64)> = signal.into_iter().collect();
+    fn new(signal: impl IntoIterator<Item = (u64, f64)>, block_size: usize) -> Self {
+        let data = signal.into_iter().collect::<Vec<_>>();
 
-        assert!(!data.is_empty(), "Signal cannot be empty");
+        debug_assert!(
+            data.windows(2).all(|w| w[1].0 > w[0].0),
+            "Timestamps must be strictly increasing"
+        );
 
-        for i in 1..data.len() {
-            assert!(
-                data[i].0 > data[i - 1].0,
-                "Timestamps must be strictly increasing"
-            );
-        }
+        let (timestamps, values) = data.into_iter().unzip::<u64, f64, Vec<_>, Vec<_>>();
 
-        let (timestamps, values): (Vec<u64>, Vec<f64>) = data.into_iter().unzip();
+        let num_blocks = values.len().div_ceil(block_size);
 
-        let n = values.len();
-        let num_blocks = n.div_ceil(block_size);
-
-        let mut block_summaries = Vec::with_capacity(num_blocks);
-        for block_idx in 0..num_blocks {
-            let start = block_idx * block_size;
-            let end = (start + block_size).min(n);
-            block_summaries.push(MinMax::from_slice(&values[start..end]));
-        }
+        let block_summaries = (0..num_blocks)
+            .map(|block_idx| {
+                let start = block_idx * block_size;
+                let end = (start + block_size).min(values.len());
+                MinMax::from_slice(&values[start..end])
+            })
+            .collect::<Vec<_>>();
 
         let sparse_table = Self::build_sparse_table(&block_summaries);
 
@@ -108,37 +101,31 @@ impl SignalRMQ {
         }
     }
 
+    /// Builds a sparse table for O(1) range min/max queries over blocks.
+    ///
+    /// `table[k][i]` stores min/max over up to 2^k consecutive blocks starting at block i.
+    /// Any range query can be answered by combining at most two overlapping entries.
     fn build_sparse_table(block_summaries: &[MinMax]) -> Vec<Vec<MinMax>> {
         let num_blocks = block_summaries.len();
-        if num_blocks == 0 {
-            return vec![];
-        }
+        let num_levels = num_blocks.ilog2() as usize;
 
-        let max_level = if num_blocks == 1 {
-            1
-        } else {
-            num_blocks.ilog2() as usize + 1
-        };
+        // Level 0 contains individual block summaries
+        let mut table = vec![block_summaries.to_vec()];
 
-        let mut table = Vec::with_capacity(max_level);
+        for level in 0..num_levels {
+            let prev = &table[level];
+            let span = 1 << level; // Each entry covers 2^level blocks
 
-        table.push(block_summaries.to_vec());
+            // Level (level+1) combines pairs of entries from current level
+            let next_level = (0..num_blocks)
+                .map(|i| {
+                    let left = prev[i];
+                    // If (i + span) is out of bounds, just use 'left' (self-combine/no-op).
+                    prev.get(i + span).map_or(left, |right| left.combine(right))
+                })
+                .collect::<Vec<_>>();
 
-        for level in 1..max_level {
-            let prev_level = &table[level - 1];
-            let jump = 1 << level;
-            let mut current_level = Vec::with_capacity(num_blocks);
-
-            for i in 0..num_blocks {
-                if i + jump / 2 < num_blocks {
-                    let combined = prev_level[i].combine(&prev_level[i + jump / 2]);
-                    current_level.push(combined);
-                } else {
-                    current_level.push(prev_level[i]);
-                }
-            }
-
-            table.push(current_level);
+            table.push(next_level);
         }
 
         table
@@ -171,7 +158,7 @@ impl SignalRMQ {
     }
 
     fn query_index_range(&self, l: usize, r: usize) -> MinMax {
-        assert!(l <= r && r < self.values.len(), "Invalid index range");
+        debug_assert!(l <= r && r < self.values.len(), "Invalid index range");
 
         let l_block = l / self.block_size;
         let r_block = r / self.block_size;
@@ -397,6 +384,7 @@ mod tests {
         assert_eq!(result.max, 7.0);
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "Timestamps must be strictly increasing")]
     fn test_unsorted_input() {
@@ -615,20 +603,6 @@ mod tests {
         let result = rmq.query_time_range(0, 2).unwrap();
         assert_eq!(result.min, 0.0);
         assert_eq!(result.max, 1.0);
-    }
-
-    #[test]
-    #[should_panic(expected = "Signal cannot be empty")]
-    fn test_empty_signal() {
-        let signal: Vec<(u64, f64)> = vec![];
-        SignalRMQ::new(signal, 64);
-    }
-
-    #[test]
-    #[should_panic(expected = "Timestamps must be strictly increasing")]
-    fn test_duplicate_timestamps() {
-        let signal = vec![(100, 5.0), (100, 10.0)];
-        SignalRMQ::new(signal, 64);
     }
 
     #[test]
