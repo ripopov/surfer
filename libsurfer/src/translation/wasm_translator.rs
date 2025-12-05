@@ -270,8 +270,8 @@ host_fn!(current_dir() -> String {
         .map_err(|e| extism::Error::msg(format!("{e:#}")))
 });
 
-host_fn!(config_dir() -> Json(Option<String>) {
-    Ok(Json(ProjectDirs::from("org", "surfer-project", "surfer")
+host_fn!(config_dir() -> extism_convert::Json(Option<String>) {
+    Ok(extism_convert::Json(ProjectDirs::from("org", "surfer-project", "surfer")
         .map(|dirs| dirs.config_dir().join("translators"))
         .and_then(|dir| {
             dir.to_str().ok_or_else(|| {
