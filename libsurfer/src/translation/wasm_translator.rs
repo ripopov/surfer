@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use camino::Utf8PathBuf;
+use directories::ProjectDirs;
 use extism::{Manifest, PTR, Plugin, PluginBuilder, Wasm, host_fn};
+use extism_convert;
 use extism_manifest::MemoryOptions;
 use eyre::{Context, anyhow};
 use surfer_translation_types::plugin_types::TranslateParams;
@@ -157,7 +159,7 @@ impl Translator<VarId, ScopeId, Message> for PluginTranslator {
         let mut plugin = self.plugin.lock().unwrap();
         if plugin.function_exists("set_wave_source") {
             plugin
-                .call::<_, ()>("set_wave_source", wave_source)
+                .call::<_, ()>("set_wave_source", extism_convert::Json(wave_source))
                 .map_err(|e| {
                     error!(
                         "Failed to set_wave_source on {}. {e}",

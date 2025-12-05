@@ -15,6 +15,7 @@ notify.workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 directories.workspace = true
 extism = { workspace = true, optional = true }
+extism-convert = "1.13.0"
 extism-manifest = { workspace = true, optional = true }
 futures = { workspace = true, features = ["executor"] }
 tokio = { workspace = true, features = ["macros"] }
