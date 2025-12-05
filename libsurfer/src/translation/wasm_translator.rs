@@ -111,6 +111,13 @@ impl PluginTranslator {
                 extism::UserData::new(()),
                 file_exists,
             )
+            .with_function(
+                "config_dir",
+                [PTR],
+                [PTR],
+                extism::UserData::new(()),
+                config_dir,
+            )
             .build()
             .map_err(|e| anyhow!("Failed to load plugin from {} {e}", file.to_string_lossy()))?;
 
@@ -259,6 +266,16 @@ host_fn!(current_dir() -> String {
             }).map(ToString::to_string)
         })
         .map_err(|e| extism::Error::msg(format!("{e:#}")))
+});
+
+host_fn!(config_dir() -> Json(Option<String>) {
+    Ok(Json(ProjectDirs::from("org", "surfer-project", "surfer")
+        .map(|dirs| dirs.config_dir().join("translators"))
+        .and_then(|dir| {
+            dir.to_str().ok_or_else(|| {
+                anyhow!("{} is not valid utf8", dir.to_string_lossy())
+            }).map(|s| s.to_string()).ok()
+        })))
 });
 
 host_fn!(read_file(filename: String) -> Vec<u8> {
