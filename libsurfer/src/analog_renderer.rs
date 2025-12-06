@@ -1,21 +1,19 @@
 //! Analog signal rendering: command generation and waveform drawing.
 
-use egui::{Color32, Pos2, Stroke, emath};
-use epaint::PathShape;
-use num::{BigInt, ToPrimitive};
-use std::collections::HashMap;
-use surfer_translation_types::ValueKind;
-
 use crate::analog_signal_cache::{AnalogSignalCache, CacheQueryResult, is_nan_highimp};
 use crate::displayed_item::{
     AnalogSettings, DisplayedFieldRef, DisplayedItemRef, DisplayedVariable,
 };
 use crate::drawing_canvas::{AnalogDrawingCommands, DrawingCommands, VariableDrawCommands};
 use crate::message::Message;
-use crate::translation::{TranslatorList, ValueKindExt};
+use crate::translation::TranslatorList;
 use crate::view::DrawingContext;
 use crate::viewport::Viewport;
 use crate::wave_data::WaveData;
+use egui::{Color32, Pos2, Stroke, emath};
+use epaint::PathShape;
+use num::{BigInt, ToPrimitive};
+use std::collections::HashMap;
 
 pub enum AnalogDrawingCommand {
     /// Constant value from start_px to end_px.
@@ -597,12 +595,15 @@ impl RenderContext {
     }
 
     pub fn draw_undefined(&self, start_x: f32, end_x: f32, value: f64, ctx: &mut DrawingContext) {
-        let kind = if is_nan_highimp(value) {
-            ValueKind::HighImp
+        let color = if value == f64::INFINITY {
+            ctx.theme.accent_error.background
+        } else if value == f64::NEG_INFINITY {
+            ctx.theme.variable_dontcare
+        } else if is_nan_highimp(value) {
+            ctx.theme.variable_highimp
         } else {
-            ValueKind::Undef
+            ctx.theme.variable_undef
         };
-        let color = kind.color(self.stroke.color, ctx.theme);
         let min = (ctx.to_screen)(start_x, self.offset);
         let max = (ctx.to_screen)(end_x, self.offset + self.line_height * self.height_scale);
         ctx.painter
