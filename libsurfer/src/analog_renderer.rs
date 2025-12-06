@@ -525,7 +525,8 @@ pub trait RenderStrategy {
     }
 }
 
-/// Shared rendering context.
+/// Coordinate transformation state shared between rendering strategies.
+/// Invariant: `min_val` and `max_val` are always finite.
 pub struct RenderContext {
     pub stroke: Stroke,
     pub min_val: f64,
