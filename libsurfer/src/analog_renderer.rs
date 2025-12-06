@@ -181,7 +181,8 @@ impl CommandOutput {
 
     fn emit_flat(&mut self, px: f32, value: f64) {
         match self.pending_flat {
-            Some((_, v)) if values_equal(v, value) => {
+            // Bit compare to distinguish different NaN payloads ( Undef / HighZ )
+            Some((_, v)) if v.to_bits() == value.to_bits() => {
                 // Same value, extend the flat region (no-op, end_px updated on flush)
             }
             Some((start, start_val)) => {
@@ -227,10 +228,6 @@ impl CommandOutput {
         // Start new flat from exit_val
         self.pending_flat = Some((px + 1.0, exit_val));
     }
-}
-
-fn values_equal(a: f64, b: f64) -> bool {
-    a.to_bits() == b.to_bits()
 }
 
 impl<'a> CommandBuilder<'a> {
