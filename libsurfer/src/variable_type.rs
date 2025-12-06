@@ -40,6 +40,7 @@ impl VariableTypeExt for VariableType {
             VarType::StdLogicVector => VariableType::StdLogicVector,
             VarType::StdULogic => VariableType::StdULogic,
             VarType::StdULogicVector => VariableType::StdULogicVector,
+            VarType::RealParameter => VariableType::RealParameter,
         }
     }
 }

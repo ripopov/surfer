@@ -157,6 +157,7 @@ pub enum ValueKind {
     DontCare,
     Weak,
     Error,
+    Event,
 }
 
 #[cfg_attr(feature = "wasm_plugins", derive(FromBytes, ToBytes))]
@@ -196,6 +197,7 @@ pub enum VariableInfo {
     String,
     /// A real-number variable.
     Real,
+    Event,
 }
 
 #[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
@@ -264,6 +266,8 @@ pub enum VariableType {
     Enum,
     #[display("shortreal")]
     ShortReal,
+    #[display("real parameter")]
+    RealParameter,
 
     // VHDL (these are the types emitted by GHDL)
     #[display("boolean")]
@@ -305,6 +309,7 @@ pub enum VariableEncoding {
     String,
     Real,
     BitVector,
+    Event,
 }
 
 #[cfg(test)]

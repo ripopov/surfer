@@ -48,6 +48,7 @@ pub enum ValueRepr {
     /// The variable value is not present. This is used to draw variables which are
     /// validated by other variables.
     NotPresent,
+    Event,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

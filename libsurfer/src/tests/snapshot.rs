@@ -1783,6 +1783,10 @@ snapshot_ui_with_file_and_msgs! {dinotrace_works, "examples/counter.vcd", [
     Message::ZoomToRange { start: BigInt::from(375), end: BigInt::from(435), viewport_idx: 0 }
 ]}
 
+snapshot_ui_with_file_and_msgs! {draw_events, "examples/events.vcd", [
+    Message::AddScope(ScopeRef::from_strs(&["logic"]), false),
+]}
+
 snapshot_ui_with_file_and_msgs! {direction_works, "examples/tb_recv.ghw", [
     Message::SetSidePanelVisible(true),
     Message::SetActiveScope(ScopeType::WaveScope(ScopeRef::from_strs(&["tb_recv", "dut"]))),

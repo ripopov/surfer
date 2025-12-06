@@ -1,0 +1,18 @@
+$timescale 1ps $end
+$scope module logic $end
+$var event 1 e event $end
+$upscope $end
+$enddefinitions $end
+#0
+#100
+1e
+#200
+1e
+#300
+1e
+#400
+1e
+#500
+1e
+#600
+1e

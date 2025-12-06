@@ -17,6 +17,7 @@ variable_highimp = "c9e124"
 variable_dontcare = "4040ff"
 variable_weak = "808080"
 variable_parameter = "d4d4d4"
+variable_event = "97cdf4"
 transaction_default = "56c126"
 waveform_opacity = 0.2
 wide_opacity = 0.0

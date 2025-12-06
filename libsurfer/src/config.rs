@@ -476,6 +476,9 @@ pub struct SurferTheme {
     pub transaction_default: Color32,
     // Relation arrows of transactions
     pub relation_arrow: SurferRelationArrow,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    /// Color used for constant variables (parameters)
+    pub variable_event: Color32,
 
     /// Opacity with which variable backgrounds are drawn. 0 is fully transparent and 1 is fully
     /// opaque.

@@ -12,7 +12,8 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::f32::consts::PI;
 use surfer_translation_types::{
-    SubFieldFlatTranslationResult, TranslatedValue, ValueKind, VariableInfo, VariableValue,
+    SubFieldFlatTranslationResult, TranslatedValue, ValueKind, VariableInfo, VariableType,
+    VariableValue,
 };
 use tracing::{error, warn};
 
@@ -79,12 +80,6 @@ pub enum DrawingCommands {
     Analog(AnalogDrawingCommands),
 }
 
-pub struct DigitalDrawingCommands {
-    pub is_bool: bool,
-    pub is_clock: bool,
-    pub values: Vec<(f32, DrawnRegion)>,
-}
-
 pub enum AnalogDrawingCommands {
     /// Cache is still being built
     Loading,
@@ -104,6 +99,57 @@ pub enum AnalogDrawingCommands {
         max_valid_pixel: f32,
         analog_settings: AnalogSettings,
     },
+}
+
+/// List of values to draw for a variable. It is an ordered list of values that should
+/// be drawn at the *start time* until the *start time* of the next value
+pub struct DigitalDrawingCommands {
+    pub is_bool: bool,
+    pub is_clock: bool,
+    is_event: bool,
+    pub values: Vec<(f32, DrawnRegion)>,
+}
+
+impl DigitalDrawingCommands {
+    pub fn new_bool() -> Self {
+        Self {
+            values: vec![],
+            is_bool: true,
+            is_event: false,
+            is_clock: false,
+        }
+    }
+
+    pub fn new_event() -> Self {
+        Self {
+            values: vec![],
+            is_bool: true,
+            is_event: true,
+            is_clock: false,
+        }
+    }
+
+    pub fn new_clock() -> Self {
+        Self {
+            values: vec![],
+            is_bool: true,
+            is_event: false,
+            is_clock: true,
+        }
+    }
+
+    pub fn new_wide() -> Self {
+        Self {
+            values: vec![],
+            is_bool: false,
+            is_event: false,
+            is_clock: false,
+        }
+    }
+
+    pub fn push(&mut self, val: (f32, DrawnRegion)) {
+        self.values.push(val);
+    }
 }
 
 pub struct TxDrawingCommands {
@@ -292,11 +338,11 @@ fn variable_digital_draw_commands(
 
         for SubFieldFlatTranslationResult { names, value } in fields {
             let entry = local_commands.entry(names.clone()).or_insert_with(|| {
-                let subinfo = info.get_subinfo(&names);
-                DigitalDrawingCommands {
-                    is_bool: matches!(subinfo, VariableInfo::Bool | VariableInfo::Clock),
-                    is_clock: matches!(subinfo, VariableInfo::Clock),
-                    values: vec![],
+                match info.get_subinfo(&names) {
+                    VariableInfo::Bool => DigitalDrawingCommands::new_bool(),
+                    VariableInfo::Clock => DigitalDrawingCommands::new_clock(),
+                    VariableInfo::Event => DigitalDrawingCommands::new_event(),
+                    _ => DigitalDrawingCommands::new_wide(),
                 }
             });
 
@@ -1006,9 +1052,16 @@ impl SystemState {
                                     .inner
                                     .as_waves()
                                     .and_then(|w| w.variable_meta(&variable.variable_ref).ok())
-                                    .and_then(|meta| {
-                                        meta.is_parameter()
-                                            .then_some(self.user.config.theme.variable_parameter)
+                                    .and_then(|meta| meta.variable_type)
+                                    .and_then(|var_type| match var_type {
+                                        VariableType::VCDEvent => {
+                                            Some(self.user.config.theme.variable_event)
+                                        }
+                                        VariableType::VCDParameter
+                                        | VariableType::RealParameter => {
+                                            Some(self.user.config.theme.variable_parameter)
+                                        }
+                                        _ => None,
                                     })
                                     .unwrap_or(self.user.config.theme.variable_default)
                             } else {
@@ -1023,16 +1076,27 @@ impl SystemState {
                                     .zip(digital_commands.values.iter().skip(1))
                                 {
                                     if digital_commands.is_bool {
-                                        self.draw_bool_transition(
-                                            (old, new),
-                                            new.1.force_anti_alias,
-                                            color,
-                                            y_offset,
-                                            height_scaling_factor,
-                                            digital_commands.is_clock && draw_clock_rising_marker,
-                                            self.fill_high_values(),
-                                            ctx,
-                                        );
+                                        if digital_commands.is_event {
+                                            self.draw_event(
+                                                (old, new),
+                                                color,
+                                                y_offset,
+                                                height_scaling_factor,
+                                                ctx,
+                                            );
+                                        } else {
+                                            self.draw_bool_transition(
+                                                (old, new),
+                                                new.1.force_anti_alias,
+                                                color,
+                                                y_offset,
+                                                height_scaling_factor,
+                                                digital_commands.is_clock
+                                                    && draw_clock_rising_marker,
+                                                self.fill_high_values(),
+                                                ctx,
+                                            );
+                                        }
                                     } else {
                                         self.draw_region(
                                             (old, new),
@@ -1466,6 +1530,45 @@ impl SystemState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn draw_event(
+        &self,
+        ((old_x, prev_region), (new_x, new_region)): (&(f32, DrawnRegion), &(f32, DrawnRegion)),
+        color: Color32,
+        offset: f32,
+        height_scaling_factor: f32,
+        ctx: &mut DrawingContext,
+    ) {
+        if let (Some(_prev_result), Some(_new_result)) = (&prev_region.inner, &new_region.inner) {
+            let trace_coords =
+                |x, y| (ctx.to_screen)(x, y * ctx.cfg.line_height * height_scaling_factor + offset);
+
+            let stroke = Stroke {
+                color,
+                width: self.user.config.theme.linewidth,
+            };
+
+            // Draw both at old_x and new_x lines until the drawing commands are reworked to deal with this as a special case
+            // Otherwise, the first event will not be drawn
+            for x in [old_x, new_x] {
+                ctx.painter.add(PathShape::line(
+                    vec![trace_coords(*x, 0.0), trace_coords(*x, 1.0)],
+                    stroke,
+                ));
+
+                ctx.painter.add(PathShape::convex_polygon(
+                    vec![
+                        trace_coords(*x - 2.5, 0.2),
+                        trace_coords(*x, 0.),
+                        trace_coords(*x + 2.5, 0.2),
+                    ],
+                    color,
+                    stroke,
+                ));
+            }
+        }
+    }
+
     /// Draws a curvy arrow from `start` to `end`.
     fn draw_arrow(
         &self,
@@ -1700,6 +1803,7 @@ impl VariableExt for String {
                     (1., Some(color.gamma_multiply(theme.waveform_opacity)))
                 }
             }
+            (ValueKind::Event, _) => (1., Some(color.gamma_multiply(theme.waveform_opacity))),
         };
         (height, color, background)
     }

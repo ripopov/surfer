@@ -15,6 +15,7 @@ mod basic_translators;
 pub mod clock;
 mod color_translators;
 mod enum_translator;
+mod event_translator;
 mod fixed_point;
 mod instruction_translators;
 pub mod numeric_translators;
@@ -25,6 +26,7 @@ pub mod wasm_translator;
 
 pub use basic_translators::*;
 use clock::ClockTranslator;
+use event_translator::EventTranslator;
 #[cfg(not(target_arch = "wasm32"))]
 use instruction_decoder::Decoder;
 pub use instruction_translators::*;
@@ -316,6 +318,7 @@ pub fn all_translators() -> TranslatorList {
             Arc::new(EnumTranslator {}),
             Arc::new(UnsignedFixedPointTranslator),
             Arc::new(SignedFixedPointTranslator),
+            Arc::new(EventTranslator {}),
         ],
     )
 }
@@ -522,6 +525,10 @@ fn format(
             ),
             kind,
         }),
+        ValueRepr::Event => Some(TranslatedValue {
+            value: "Event".to_string(),
+            kind,
+        }),
     }
 }
 
@@ -616,6 +623,7 @@ impl VariableInfoExt for VariableInfo {
                 VariableInfo::Clock => panic!(),
                 VariableInfo::String => panic!(),
                 VariableInfo::Real => panic!(),
+                VariableInfo::Event => panic!(),
             },
         }
     }
@@ -646,6 +654,7 @@ impl ValueKindExt for ValueKind {
             ValueKind::Weak => theme.variable_weak,
             ValueKind::Error => theme.accent_error.background,
             ValueKind::Normal => user_color,
+            ValueKind::Event => theme.variable_event,
         }
     }
 }
