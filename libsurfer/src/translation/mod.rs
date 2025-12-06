@@ -42,6 +42,8 @@ use crate::{message::Message, wave_container::VariableMeta};
 pub type DynTranslator = dyn Translator<VarId, ScopeId, Message>;
 pub type DynBasicTranslator = dyn BasicTranslator<VarId, ScopeId>;
 
+static DECODERS_DIR: &str = "decoders";
+
 fn translate_with_basic(
     t: &DynBasicTranslator,
     variable: &VariableMeta,
@@ -148,12 +150,12 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
 #[cfg(not(target_arch = "wasm32"))]
 fn find_user_decoders() -> Vec<Box<DynBasicTranslator>> {
     let mut decoders: Vec<Box<DynBasicTranslator>> = vec![];
-    if let Some(proj_dirs) = &*crate::config::PROJECT_DIR {
+    if let Some(proj_dirs) = crate::config::PROJECT_DIR.as_ref() {
         let mut config_decoders = find_user_decoders_at_path(proj_dirs.config_dir());
         decoders.append(&mut config_decoders);
     }
 
-    let mut project_decoders = find_user_decoders_at_path(Path::new(".surfer"));
+    let mut project_decoders = find_user_decoders_at_path(Path::new(crate::config::LOCAL_DIR));
     decoders.append(&mut project_decoders);
 
     decoders
@@ -162,10 +164,12 @@ fn find_user_decoders() -> Vec<Box<DynBasicTranslator>> {
 /// Look for user defined decoders in path.
 #[cfg(not(target_arch = "wasm32"))]
 fn find_user_decoders_at_path(path: &Path) -> Vec<Box<DynBasicTranslator>> {
-    use tracing::error;
+    use tracing::{error, info};
 
     let mut decoders: Vec<Box<DynBasicTranslator>> = vec![];
-    let Ok(decoder_dirs) = std::fs::read_dir(path.join("decoders")) else {
+    let p = path.join(DECODERS_DIR);
+    info!("Looking for user decoders at {}", p.display());
+    let Ok(decoder_dirs) = std::fs::read_dir(path.join(DECODERS_DIR)) else {
         return decoders;
     };
 
@@ -189,32 +193,32 @@ fn find_user_decoders_at_path(path: &Path) -> Vec<Box<DynBasicTranslator>> {
                     {
                         let Ok(text) = std::fs::read_to_string(toml_file.path()) else {
                             warn!(
-                                "Skipping toml file {:?}. Cannot read file.",
-                                toml_file.path()
+                                "Skipping toml file {}. Cannot read file.",
+                                toml_file.path().display()
                             );
                             continue;
                         };
 
                         let Ok(toml_parsed) = text.parse::<Table>() else {
                             warn!(
-                                "Skipping toml file {:?}. Cannot parse toml.",
-                                toml_file.path()
+                                "Skipping toml file {}. Cannot parse toml.",
+                                toml_file.path().display()
                             );
                             continue;
                         };
 
                         let Some(toml_width) = toml_parsed.get("width") else {
                             warn!(
-                                "Skipping toml file {:?}. Mandatory key 'width' is missing.",
-                                toml_file.path()
+                                "Skipping toml file {}. Mandatory key 'width' is missing.",
+                                toml_file.path().display()
                             );
                             continue;
                         };
 
                         if width.clone().is_some_and(|width| width != *toml_width) {
                             warn!(
-                                "Skipping toml file {:?}. Bit widths do not match.",
-                                toml_file.path()
+                                "Skipping toml file {}. Bit widths do not match.",
+                                toml_file.path().display()
                             );
                             continue;
                         } else {
@@ -228,11 +232,19 @@ fn find_user_decoders_at_path(path: &Path) -> Vec<Box<DynBasicTranslator>> {
 
             if let Some(width) = width.and_then(|width| width.as_integer()) {
                 match Decoder::new_from_table(tomls) {
-                    Ok(decoder) => decoders.push(Box::new(InstructionTranslator {
-                        name,
-                        decoder,
-                        num_bits: width.unsigned_abs(),
-                    })),
+                    Ok(decoder) => {
+                        let translator = InstructionTranslator {
+                            name,
+                            decoder,
+                            num_bits: width.unsigned_abs(),
+                        };
+                        tracing::info!(
+                            "Loaded {}-bit instruction decoder: {} ",
+                            width.unsigned_abs(),
+                            translator.name(),
+                        );
+                        decoders.push(Box::new(translator))
+                    }
                     Err(e) => {
                         error!("Error while building decoder {name}");
                         for toml in e {

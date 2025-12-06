@@ -55,6 +55,8 @@ const OLD_CONFIG_FILE: &str = "surfer.toml";
 const CONFIG_FILE: &str = "config.toml";
 #[cfg(not(target_arch = "wasm32"))]
 const THEMES_DIR: &str = "themes";
+#[cfg(not(target_arch = "wasm32"))]
+pub const LOCAL_DIR: &str = ".surfer";
 
 /// Select the function of the arrow keys
 #[derive(Clone, Copy, Debug, Deserialize, Display, FromStr, PartialEq, Eq, Sequence, Serialize)]
@@ -805,7 +807,7 @@ where
 fn find_local_configs() -> Vec<PathBuf> {
     use crate::util::search_upward;
     match std::env::current_dir() {
-        Ok(dir) => search_upward(dir, "/", ".surfer")
+        Ok(dir) => search_upward(dir, "/", LOCAL_DIR)
             .into_iter()
             .filter(|p| p.is_dir()) // Only keep directories and ignore plain files.
             .rev() // Reverse for pre-order traversal of directories.

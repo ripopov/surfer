@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use camino::Utf8PathBuf;
-use directories::ProjectDirs;
 use extism::{Manifest, PTR, Plugin, PluginBuilder, Wasm, host_fn};
 use extism_manifest::MemoryOptions;
 use eyre::{Context, anyhow};
@@ -15,16 +14,20 @@ use surfer_translation_types::{
 };
 use tracing::{error, warn};
 
+use crate::config::{LOCAL_DIR, PROJECT_DIR};
 use crate::message::Message;
 use crate::wave_container::{ScopeId, VarId};
+
+pub static TRANSLATOR_DIR: &str = "translators";
 
 pub fn discover_wasm_translators() -> Vec<Message> {
     let search_dirs = [
         std::env::current_dir()
             .ok()
-            .map(|dir| dir.join(".surfer").join("translators")),
-        ProjectDirs::from("org", "surfer-project", "surfer")
-            .map(|dirs| dirs.data_dir().join("translators")),
+            .map(|dir| dir.join(LOCAL_DIR).join(TRANSLATOR_DIR)),
+        PROJECT_DIR
+            .as_ref()
+            .map(|dirs| dirs.data_dir().join(TRANSLATOR_DIR)),
     ]
     .into_iter()
     .flatten()
