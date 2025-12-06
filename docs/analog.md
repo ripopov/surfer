@@ -98,11 +98,21 @@ Analog signals are represented using two complementary data structures:
 
 Signal values are converted from raw bit vectors to `f64` via the translator system. The `parse_numeric_value()` function handles format-specific parsing (hex, binary, decimal, float) based on the translator name.
 
-**4-State Value Encoding**: X and Z values are encoded as quiet NaNs with distinct payloads:
-- `NAN_UNDEF` (0x7FF8_0000_0000_0000): Undefined/X values
-- `NAN_HIGHIMP` (0x7FF8_0000_0000_0001): High-impedance/Z values
+**Non-Finite Value Handling**: Non-finite floating point values are handled specially:
 
-This allows 4-state values to flow through the f64-based pipeline while preserving their type for correct rendering colors. The `is_nan_highimp()` function checks the payload to distinguish Z from X.
+1. **NaN values** (undefined/X and high-impedance/Z from HDL):
+   - Encoded as quiet NaNs with distinguishing payloads:
+   - `NAN_UNDEF` (0x7FF8_0000_0000_0000): Represents undefined (X) values
+   - `NAN_HIGHIMP` (0x7FF8_0000_0000_0001): Represents high-impedance (Z) values
+   - Use `is_nan_highimp()` to distinguish between them
+
+2. **Infinity values** (Inf/-Inf):
+   - Treated the same as NaN for min/max range computation
+
+3. **Range computation invariant**:
+   - `MinMax.min` and `MinMax.max` always contain finite values (or identity values if all values are non-finite)
+   - `MinMax.has_non_finite` is true if any non-finite value was encountered in the range
+   - When querying ranges with neon-finite values, renderer receives `NAN_UNDEF` signal to draw undefined regions
 
 ### Analog Cache Structure and Operation
 

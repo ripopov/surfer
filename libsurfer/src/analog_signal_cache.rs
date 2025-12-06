@@ -45,15 +45,26 @@ pub fn is_nan_highimp(value: f64) -> bool {
 struct MinMax {
     min: f64,
     max: f64,
-    has_nan: bool,
+    has_non_finite: bool,
 }
 
 impl MinMax {
     fn new(value: f64) -> Self {
-        Self {
-            min: value,
-            max: value,
-            has_nan: value.is_nan(),
+        if value.is_finite() {
+            Self {
+                min: value,
+                max: value,
+                has_non_finite: false,
+            }
+        } else {
+            // Use identity values for min/max operations:
+            // INFINITY.min(x) == x for any finite x
+            // NEG_INFINITY.max(x) == x for any finite x
+            Self {
+                min: f64::INFINITY,
+                max: f64::NEG_INFINITY,
+                has_non_finite: true,
+            }
         }
     }
 
@@ -61,16 +72,14 @@ impl MinMax {
         Self {
             min: self.min.min(other.min),
             max: self.max.max(other.max),
-            has_nan: self.has_nan || other.has_nan,
+            has_non_finite: self.has_non_finite || other.has_non_finite,
         }
     }
 
     fn from_slice(values: &[f64]) -> Self {
-        values.iter().fold(Self::new(values[0]), |acc, &v| Self {
-            min: acc.min.min(v),
-            max: acc.max.max(v),
-            has_nan: acc.has_nan || v.is_nan(),
-        })
+        values
+            .iter()
+            .fold(Self::new(values[0]), |acc, &v| acc.combine(&Self::new(v)))
     }
 }
 
@@ -303,8 +312,8 @@ impl AnalogSignalCache {
 
     pub fn query_time_range(&self, start: u64, end: u64) -> Option<(f64, f64)> {
         let result = self.rmq.query_time_range(start, end)?;
-        if result.has_nan {
-            // Propagate NaN so renderer draws undefined for ranges containing 4-state values
+        if result.has_non_finite {
+            // Propagate NaN so renderer draws undefined for ranges containing non-finite values
             Some((result.min, NAN_UNDEF))
         } else {
             Some((result.min, result.max))
@@ -656,11 +665,11 @@ mod tests {
 
         // Range containing NaN
         let result = rmq.query_time_range(0, 30).unwrap();
-        assert!(result.has_nan);
+        assert!(result.has_non_finite);
 
         // Range NOT containing NaN
         let result = rmq.query_time_range(30, 50).unwrap();
-        assert!(!result.has_nan);
+        assert!(!result.has_non_finite);
         assert_eq!(result.min, 15.0);
         assert_eq!(result.max, 25.0);
     }
@@ -671,9 +680,10 @@ mod tests {
         let rmq = SignalRMQ::new(signal, 4);
 
         let result = rmq.query_time_range(0, 9).unwrap();
-        assert!(result.has_nan);
-        assert!(result.min.is_nan());
-        assert!(result.max.is_nan());
+        assert!(result.has_non_finite);
+        // With identity values, min stays INFINITY and max stays NEG_INFINITY
+        assert_eq!(result.min, f64::INFINITY);
+        assert_eq!(result.max, f64::NEG_INFINITY);
     }
 
     #[test]
@@ -683,18 +693,65 @@ mod tests {
 
         // Query including NaN
         let result = rmq.query_time_range(0, 2).unwrap();
-        assert!(result.has_nan);
+        assert!(result.has_non_finite);
 
-        // Rust's f64::min/max ignores NaN if the other value is not NaN.
-        // This is desirable behavior: we get the min/max of valid numbers,
-        // but we also know there was a NaN via has_nan.
+        // Non-finite values are excluded from min/max computation.
+        // We get the min/max of finite values only.
         assert_eq!(result.min, 1.0);
         assert_eq!(result.max, 3.0);
 
         // Query excluding NaN
         let result = rmq.query_time_range(2, 2).unwrap();
-        assert!(!result.has_nan);
+        assert!(!result.has_non_finite);
         assert_eq!(result.min, 3.0);
+    }
+
+    #[test]
+    fn test_neg_infinity_values() {
+        let signal = vec![(0, 1.0), (1, f64::NEG_INFINITY), (2, 5.0)];
+        let rmq = SignalRMQ::new(signal, 64);
+
+        let result = rmq.query_time_range(0, 2).unwrap();
+        assert!(result.has_non_finite);
+        // NEG_INFINITY is excluded from min/max
+        assert_eq!(result.min, 1.0);
+        assert_eq!(result.max, 5.0);
+    }
+
+    #[test]
+    fn test_mixed_non_finite() {
+        let signal = vec![
+            (0, 1.0),
+            (1, f64::NAN),
+            (2, 3.0),
+            (3, f64::INFINITY),
+            (4, 5.0),
+            (5, f64::NEG_INFINITY),
+            (6, 2.0),
+        ];
+        let rmq = SignalRMQ::new(signal, 64);
+
+        let result = rmq.query_time_range(0, 6).unwrap();
+        assert!(result.has_non_finite);
+        // min/max are the extremes of finite values only
+        assert_eq!(result.min, 1.0);
+        assert_eq!(result.max, 5.0);
+    }
+
+    #[test]
+    fn test_all_infinity() {
+        let signal = vec![
+            (0, f64::INFINITY),
+            (1, f64::NEG_INFINITY),
+            (2, f64::INFINITY),
+        ];
+        let rmq = SignalRMQ::new(signal, 64);
+
+        let result = rmq.query_time_range(0, 2).unwrap();
+        assert!(result.has_non_finite);
+        // No finite values, so min/max remain at identity values
+        assert_eq!(result.min, f64::INFINITY);
+        assert_eq!(result.max, f64::NEG_INFINITY);
     }
 
     #[test]

@@ -175,7 +175,7 @@ impl CommandOutput {
     }
 
     fn update_bounds(&mut self, value: f64) {
-        if !value.is_nan() {
+        if value.is_finite() {
             self.viewport_min = self.viewport_min.min(value);
             self.viewport_max = self.viewport_max.max(value);
         }
@@ -563,30 +563,18 @@ impl RenderContext {
         }
     }
 
-    /// Clamp non-finite values to finite bounds for scaling purposes.
-    /// Returns (min, max) where non-finite values are clamped to f64::MIN/MAX / 2.
-    fn scaling_bounds(&self) -> (f64, f64) {
-        let min = if !self.min_val.is_finite() {
-            f64::MIN / 2.0
-        } else {
-            self.min_val
-        };
-        let max = if !self.max_val.is_finite() {
-            f64::MAX / 2.0
-        } else {
-            self.max_val
-        };
-        (min, max)
-    }
-
     /// Normalize value to [0, 1].
+    /// Invariant: min_val and max_val are always finite (guaranteed by AnalogSignalCache).
     pub fn normalize(&self, value: f64) -> f32 {
-        let (min, max) = self.scaling_bounds();
-        let range = max - min;
-        if !range.is_finite() || range.abs() <= f64::EPSILON {
+        debug_assert!(
+            self.min_val.is_finite() && self.max_val.is_finite(),
+            "RenderContext min_val and max_val must be finite"
+        );
+        let range = self.max_val - self.min_val;
+        if range.abs() <= f64::EPSILON {
             0.5
         } else {
-            ((value - min) / range) as f32
+            ((value - self.min_val) / range) as f32
         }
     }
 
