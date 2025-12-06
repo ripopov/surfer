@@ -4,7 +4,25 @@
 //!
 //! - Construction: O(N + N/B · log(N/B))
 //! - Time queries: O(log N) for binary search + O(1) for min/max
+//!
 //! - Memory: O(N + N/B · log(N/B)) where B is the block size
+//!
+//! Per-sample storage (N samples):
+//! - `timestamps: Vec<u64>` = 8N bytes
+//! - `values: Vec<f64>` = 8N bytes
+//!
+//! Sparse table storage (B = 64 default block size):
+//! - `MinMax` struct = 24 bytes (8 + 8 + 1 + padding)
+//! - num_blocks = ⌈N/B⌉
+//! - num_levels = 1 + ⌊log₂(num_blocks)⌋
+//! - Sparse table = num_blocks × num_levels × 24 bytes
+//!
+//! Total ≈ 16N + (N/64) × (1 + log₂(N/64)) × 24 bytes
+//!
+//! # Examples
+//!   1M Samples ~ 21.3 MB
+//!   100M Samples ~ 2.39 GB
+//!
 
 use std::borrow::Cow;
 
