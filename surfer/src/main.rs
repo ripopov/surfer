@@ -105,6 +105,8 @@ mod main_impl {
 
         logs::start_logging()?;
 
+        std::panic::set_hook(Box::new(panic_handler));
+
         // https://tokio.rs/tokio/topics/bridging
         // We want to run the gui in the main thread, but some long running tasks like
         // loading VCDs should be done asynchronously. We can't just use std::thread to
@@ -221,6 +223,51 @@ mod main_impl {
         eframe::run_native("Surfer", options, Box::new(|cc| Ok(run_egui(cc, state)?))).unwrap();
 
         Ok(())
+    }
+
+    fn panic_handler(info: &std::panic::PanicHookInfo) {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+
+        eprintln!("");
+        eprintln!("Surfer crashed due to a panic 😞");
+        eprintln!("Please report this issue at https://gitlab.com/surfer-project/surfer/-/issues");
+        eprintln!("");
+        eprintln!("Some notes on reports:");
+        eprintln!(
+            "We are happy about any reports, but it makes it much easier for us to fix issues if you:",
+        );
+        eprintln!(" - Include the information below");
+        eprintln!(" - Try to reproduce the issue to give us steps on how to reproduce the issue");
+        eprintln!(" - Include (minimal) waveform file and state file you used");
+        eprintln!("   (you can upload those confidentially, for the surfer team only)");
+        eprintln!("");
+
+        let location = info.location().unwrap();
+        let msg = if let Some(msg) = info.payload().downcast_ref::<&str>() {
+            msg.to_string()
+        } else if let Some(msg) = info.payload().downcast_ref::<String>() {
+            msg.clone()
+        } else {
+            "<panic message not a string>".to_owned()
+        };
+
+        eprintln!(
+            "Surfer version: {} (git: {})",
+            env!("CARGO_PKG_VERSION"),
+            env!("VERGEN_GIT_DESCRIBE"),
+        );
+        eprintln!(
+            "thread '{}' ({:?}) panicked at {}:{}:{:?}",
+            std::thread::current().name().unwrap_or("unknown"),
+            std::thread::current().id(),
+            location.file(),
+            location.line(),
+            location.column(),
+        );
+        eprintln!("  {}", msg);
+        eprintln!("");
+        eprintln!("backtrace:");
+        eprintln!("{}", backtrace);
     }
 
     #[cfg(test)]
