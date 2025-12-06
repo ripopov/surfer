@@ -506,8 +506,8 @@ pub trait RenderStrategy {
             return;
         }
 
-        let p_min = render_ctx.to_screen(px, render_ctx.normalize(min_val), ctx);
-        let p_max = render_ctx.to_screen(px, render_ctx.normalize(max_val), ctx);
+        let p_min = render_ctx.to_screen(px, min_val, ctx);
+        let p_max = render_ctx.to_screen(px, max_val, ctx);
 
         // Connect from previous to closer endpoint
         let (connect, other) = match self.last_point() {
@@ -576,8 +576,9 @@ impl RenderContext {
         }
     }
 
-    /// Convert normalized coordinates to screen position.
-    pub fn to_screen(&self, x: f32, y_norm: f32, ctx: &DrawingContext) -> Pos2 {
+    /// Convert value to screen position.
+    pub fn to_screen(&self, x: f32, y: f64, ctx: &DrawingContext) -> Pos2 {
+        let y_norm = self.normalize(y);
         (ctx.to_screen)(
             x,
             (1.0 - y_norm) * self.line_height * self.height_scale + self.offset,
@@ -648,9 +649,8 @@ impl RenderStrategy for StepStrategy {
             return;
         }
 
-        let norm = render_ctx.normalize(start_val);
-        let p1 = render_ctx.to_screen(start_px, norm, ctx);
-        let p2 = render_ctx.to_screen(end_px, norm, ctx);
+        let p1 = render_ctx.to_screen(start_px, start_val, ctx);
+        let p2 = render_ctx.to_screen(end_px, start_val, ctx);
 
         // Vertical transition from previous
         if let Some(prev) = self.last_point {
@@ -710,19 +710,15 @@ impl RenderStrategy for InterpolatedStrategy {
             start_val
         };
 
-        let p1 = render_ctx.to_screen(start_px, render_ctx.normalize(start_val), ctx);
-        let p2 = render_ctx.to_screen(end_px, render_ctx.normalize(end_val), ctx);
+        let p1 = render_ctx.to_screen(start_px, start_val, ctx);
+        let p2 = render_ctx.to_screen(end_px, end_val, ctx);
 
         // Connect from previous point
         if let Some(prev) = self.last_point {
             render_ctx.draw_line(prev, p1, ctx);
         } else if !self.started {
             // Connect from viewport edge
-            let edge = render_ctx.to_screen(
-                render_ctx.min_valid_pixel.max(0.0),
-                render_ctx.normalize(start_val),
-                ctx,
-            );
+            let edge = render_ctx.to_screen(render_ctx.min_valid_pixel.max(0.0), start_val, ctx);
             render_ctx.draw_line(edge, p1, ctx);
         }
 
@@ -778,7 +774,11 @@ fn draw_amplitude_labels(render_ctx: &RenderContext, frame_width: f32, ctx: &mut
             .layout_no_wrap(combined_text.clone(), font.clone(), text_color);
 
         let label_x = frame_width - galley.size().x - 5.0;
-        let label_pos = render_ctx.to_screen(label_x, 0.5, ctx);
+        let label_pos = render_ctx.to_screen(
+            label_x,
+            (render_ctx.min_val + render_ctx.max_val) / 2.0,
+            ctx,
+        );
 
         let rect = egui::Rect::from_min_size(
             Pos2::new(label_pos.x - 2.0, label_pos.y - galley.size().y / 2.0 - 2.0),
@@ -805,7 +805,7 @@ fn draw_amplitude_labels(render_ctx: &RenderContext, frame_width: f32, ctx: &mut
 
         let label_x = frame_width - max_galley.size().x.max(min_galley.size().x) - 5.0;
 
-        let max_pos = render_ctx.to_screen(label_x, 1.0, ctx);
+        let max_pos = render_ctx.to_screen(label_x, render_ctx.max_val, ctx);
         let max_rect = egui::Rect::from_min_size(
             Pos2::new(max_pos.x - 2.0, max_pos.y - 2.0),
             egui::Vec2::new(max_galley.size().x + 4.0, max_galley.size().y + 4.0),
@@ -819,7 +819,7 @@ fn draw_amplitude_labels(render_ctx: &RenderContext, frame_width: f32, ctx: &mut
             text_color,
         );
 
-        let min_pos = render_ctx.to_screen(label_x, 0.0, ctx);
+        let min_pos = render_ctx.to_screen(label_x, render_ctx.min_val, ctx);
         let min_rect = egui::Rect::from_min_size(
             Pos2::new(min_pos.x - 2.0, min_pos.y - min_galley.size().y - 2.0),
             egui::Vec2::new(min_galley.size().x + 4.0, min_galley.size().y + 4.0),
