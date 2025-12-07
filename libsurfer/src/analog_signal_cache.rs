@@ -25,9 +25,10 @@
 //!
 
 use std::borrow::Cow;
+use std::sync::OnceLock;
 
 use crate::translation::DynTranslator;
-use crate::wave_container::{SignalAccessor, VariableMeta};
+use crate::wave_container::{AnalogCacheKey, SignalAccessor, VariableMeta};
 use surfer_translation_types::{ValueKind, ValueRepr, VariableValue};
 
 /// Quiet NaN representing undefined (X) values.
@@ -41,7 +42,7 @@ pub fn is_nan_highimp(value: f64) -> bool {
     value.to_bits() == NAN_HIGHIMP.to_bits()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 struct MinMax {
     min: f64,
     max: f64,
@@ -322,6 +323,38 @@ impl AnalogSignalCache {
 
     pub fn query_at_time(&self, time: u64) -> CacheQueryResult {
         self.rmq.query_at_time(time)
+    }
+}
+
+/// Wrapper for analog cache with reference counting and lazy initialization.
+///
+/// Used for cache sharing between variables with the same signal+translator combo.
+/// The cache is built asynchronously and set via `OnceLock` when ready.
+pub struct AnalogCacheEntry {
+    inner: OnceLock<AnalogSignalCache>,
+    pub cache_key: AnalogCacheKey,
+    pub generation: u64,
+}
+
+impl AnalogCacheEntry {
+    pub fn new(cache_key: AnalogCacheKey, generation: u64) -> Self {
+        Self {
+            inner: OnceLock::new(),
+            cache_key,
+            generation,
+        }
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.inner.get().is_some()
+    }
+
+    pub fn get(&self) -> Option<&AnalogSignalCache> {
+        self.inner.get()
+    }
+
+    pub fn set(&self, cache: AnalogSignalCache) {
+        let _ = self.inner.set(cache);
     }
 }
 

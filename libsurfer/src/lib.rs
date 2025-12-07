@@ -127,6 +127,10 @@ use crate::wellen::{HeaderResult, convert_format};
 /// things until program exit
 pub(crate) static OUTSTANDING_TRANSACTIONS: AtomicUsize = AtomicUsize::new(0);
 
+/// Counter for analog caches currently being built asynchronously.
+/// Incremented when spawning a cache builder, decremented when AnalogCacheBuilt is handled.
+pub static ANALOG_CACHES_BUILDING: AtomicUsize = AtomicUsize::new(0);
+
 lazy_static! {
     pub static ref EGUI_CONTEXT: RwLock<Option<Arc<egui::Context>>> = RwLock::new(None);
 }
@@ -877,8 +881,8 @@ impl SystemState {
                     .entry(node.item_ref)
                     .and_modify(|item| item.set_height_scaling_factor(scale));
             }
-            Message::SetAnalogSettings(vidx, new_settings) => {
-                self.save_current_canvas("Set analog settings".into());
+            Message::SetAnalogSettings(vidx, new_state) => {
+                self.save_current_canvas("Set analog state".into());
                 self.invalidate_draw_commands();
                 let waves = self.user.waves.as_mut()?;
 
@@ -890,7 +894,7 @@ impl SystemState {
                             .entry(node.item_ref)
                             .and_modify(|item| {
                                 if let DisplayedItem::Variable(var) = item {
-                                    var.analog_settings = new_settings;
+                                    var.analog = new_state.clone();
                                 }
                             });
                     }
@@ -902,7 +906,7 @@ impl SystemState {
                                 .entry(node.item_ref)
                                 .and_modify(|item| {
                                     if let DisplayedItem::Variable(var) = item {
-                                        var.analog_settings = new_settings;
+                                        var.analog = new_state.clone();
                                     }
                                 });
                         }
@@ -915,7 +919,7 @@ impl SystemState {
                         for item_ref in selected_items {
                             waves.displayed_items.entry(item_ref).and_modify(|item| {
                                 if let DisplayedItem::Variable(var) = item {
-                                    var.analog_settings = new_settings;
+                                    var.analog = new_state.clone();
                                 }
                             });
                         }
@@ -1982,43 +1986,83 @@ impl SystemState {
                 }
             }
             Message::BuildAnalogCache {
+                display_id,
                 cache_key,
-                variable_ref,
             } => {
                 let waves = self.user.waves.as_mut()?;
-                if waves.cache_build_in_progress.contains(&cache_key) {
-                    return None; // Ignore duplicate request
+                let generation = waves.cache_generation;
+
+                // Check if already have valid entry (building or ready)
+                let item = waves.displayed_items.get(&display_id)?;
+                let var = match item {
+                    DisplayedItem::Variable(v) => v,
+                    _ => return None,
+                };
+                if var
+                    .analog
+                    .as_ref()?
+                    .cache
+                    .as_ref()
+                    .is_some_and(|e| e.generation == generation)
+                {
+                    return None;
                 }
-                waves.cache_build_in_progress.insert(cache_key.clone());
+
+                // Try to share from another variable (O(n) scan - only during cache build)
+                let existing = waves
+                    .displayed_items
+                    .values()
+                    .filter_map(|item| match item {
+                        DisplayedItem::Variable(v) => v.analog.as_ref()?.cache.as_ref(),
+                        _ => None,
+                    })
+                    .find(|e| e.cache_key == cache_key && e.generation == generation)
+                    .cloned();
+
+                if let Some(entry) = existing {
+                    if let DisplayedItem::Variable(var) =
+                        waves.displayed_items.get_mut(&display_id)?
+                    {
+                        var.analog.as_mut()?.cache = Some(entry);
+                    }
+                    return None; // Shared existing entry (may still be building)
+                }
+
+                // Clone variable_ref only when we need to spawn builder
+                let variable_ref = match waves.displayed_items.get(&display_id)? {
+                    DisplayedItem::Variable(v) => v.variable_ref.clone(),
+                    _ => return None,
+                };
+
+                // Create new entry and spawn builder
+                let entry = std::sync::Arc::new(crate::analog_signal_cache::AnalogCacheEntry::new(
+                    cache_key.clone(),
+                    generation,
+                ));
+                if let DisplayedItem::Variable(var) = waves.displayed_items.get_mut(&display_id)? {
+                    var.analog.as_mut()?.cache = Some(entry.clone());
+                }
+
                 let translator = self.translators.clone_translator(&cache_key.1);
                 waves.build_analog_cache_async(
-                    cache_key,
+                    entry,
                     &variable_ref,
                     translator,
                     &self.channels.msg_sender,
                 );
             }
-            Message::AnalogCacheBuilt {
-                cache_key,
-                cache,
-                error,
-            } => {
+            Message::AnalogCacheBuilt { entry, result } => {
                 OUTSTANDING_TRANSACTIONS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-                let waves = self.user.waves.as_mut()?;
-                waves.cache_build_in_progress.remove(&cache_key);
-                if let Some(cache) = cache {
-                    waves.analog_signal_caches.insert(cache_key.clone(), cache);
-                }
-                if let Some(err) = error {
-                    warn!("Failed to build analog cache for {cache_key:?}: {err}");
+                ANALOG_CACHES_BUILDING.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                match result {
+                    Ok(cache) => {
+                        entry.set(cache);
+                    }
+                    Err(err) => {
+                        warn!("Failed to build analog cache: {err}");
+                    }
                 }
                 self.invalidate_draw_commands();
-            }
-            Message::SweepUnusedAnalogCaches { used_keys } => {
-                let waves = self.user.waves.as_mut()?;
-                waves
-                    .analog_signal_caches
-                    .retain(|key, _| used_keys.contains(key));
             }
             Message::Exit | Message::ToggleFullscreen => {} // Handled in eframe::update
             Message::AddViewport => {

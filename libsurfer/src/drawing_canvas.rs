@@ -9,7 +9,7 @@ use num::bigint::{ToBigInt, ToBigUint};
 use num::{BigInt, BigUint, ToPrimitive, Zero};
 use rayon::prelude::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::f32::consts::PI;
 use surfer_translation_types::{
     SubFieldFlatTranslationResult, TranslatedValue, ValueKind, VariableInfo, VariableType,
@@ -31,7 +31,7 @@ use crate::transaction_container::{TransactionRef, TransactionStreamRef};
 use crate::translation::{TranslationResultExt, TranslatorList, ValueKindExt, VariableInfoExt};
 use crate::view::{DrawConfig, DrawingContext, ItemDrawingInfo};
 use crate::viewport::Viewport;
-use crate::wave_container::{AnalogCacheKey, QueryResult, VariableRefExt};
+use crate::wave_container::{QueryResult, VariableRefExt};
 use crate::wave_data::WaveData;
 use crate::{
     CachedDrawData, CachedTransactionDrawData, CachedWaveDrawData, Message, SystemState,
@@ -103,7 +103,6 @@ pub struct AnalogDrawingCommands {
     /// Pixel position of last timestamp (end of signal data).
     pub max_valid_pixel: f32,
 
-    /// Analog rendering settings (style, Y-axis scale, etc.)
     pub analog_settings: AnalogSettings,
 }
 
@@ -118,8 +117,6 @@ pub(crate) struct VariableDrawCommands {
     pub(crate) display_id: DisplayedItemRef,
     pub(crate) local_commands: HashMap<Vec<String>, DrawingCommands>,
     pub(crate) local_msgs: Vec<Message>,
-    /// Analog cache key used during rendering (for mark-and-sweep invalidation)
-    pub(crate) used_cache_key: Option<AnalogCacheKey>,
 }
 
 /// Common setup for variable draw commands: extracts metadata and determines rendering mode.
@@ -159,7 +156,7 @@ fn variable_draw_commands(
     let translator = waves.variable_translator(&displayed_field_ref, translators);
     let info = translator.variable_info(&meta).unwrap();
 
-    let is_analog_mode = displayed_variable.analog_settings.enabled;
+    let is_analog_mode = displayed_variable.analog.is_some();
     let is_bool = matches!(info, VariableInfo::Bool | VariableInfo::Clock);
 
     if is_analog_mode && !is_bool {
@@ -351,7 +348,6 @@ fn variable_digital_draw_commands(
             .map(|(k, v)| (k, DrawingCommands::Digital(v)))
             .collect(),
         local_msgs,
-        used_cache_key: None,
     })
 }
 
@@ -452,20 +448,13 @@ impl SystemState {
             })
             .collect::<Vec<_>>();
 
-        let mut used_analog_keys = HashSet::new();
-
         for VariableDrawCommands {
             clock_edges: mut new_clock_edges,
             display_id,
             local_commands,
             mut local_msgs,
-            used_cache_key,
         } in commands
         {
-            if let Some(key) = used_cache_key {
-                used_analog_keys.insert(key);
-            }
-
             msgs.append(&mut local_msgs);
             for (field, val) in local_commands {
                 draw_commands.insert(
@@ -478,10 +467,6 @@ impl SystemState {
             }
             clock_edges.append(&mut new_clock_edges);
         }
-
-        msgs.push(Message::SweepUnusedAnalogCaches {
-            used_keys: used_analog_keys,
-        });
 
         let ticks = get_ticks(
             &waves.viewports[viewport_idx],

@@ -4,6 +4,9 @@ use egui::{FontSelection, RichText, Style, WidgetText};
 use emath::Align;
 use epaint::text::LayoutJob;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+use crate::analog_signal_cache::AnalogCacheEntry;
 use surfer_translation_types::VariableInfo;
 
 use crate::config::SurferConfig;
@@ -67,57 +70,29 @@ pub struct FieldFormat {
     pub format: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Default)]
 pub enum AnalogRenderStyle {
     #[default]
     Step,
     Interpolated,
 }
 
-impl std::fmt::Display for AnalogRenderStyle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AnalogRenderStyle::Step => write!(f, "Step"),
-            AnalogRenderStyle::Interpolated => write!(f, "Interpolated"),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Default)]
 pub enum AnalogYAxisScale {
     #[default]
     Viewport,
     Global,
 }
 
-impl std::fmt::Display for AnalogYAxisScale {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AnalogYAxisScale::Viewport => write!(f, "Viewport"),
-            AnalogYAxisScale::Global => write!(f, "Global"),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]
 pub struct AnalogSettings {
-    pub enabled: bool,
     pub render_style: AnalogRenderStyle,
     pub y_axis_scale: AnalogYAxisScale,
 }
 
 impl AnalogSettings {
-    pub fn off() -> Self {
-        Self {
-            enabled: false,
-            render_style: AnalogRenderStyle::Step,
-            y_axis_scale: AnalogYAxisScale::Viewport,
-        }
-    }
-
     pub fn step_viewport() -> Self {
         Self {
-            enabled: true,
             render_style: AnalogRenderStyle::Step,
             y_axis_scale: AnalogYAxisScale::Viewport,
         }
@@ -125,7 +100,6 @@ impl AnalogSettings {
 
     pub fn step_global() -> Self {
         Self {
-            enabled: true,
             render_style: AnalogRenderStyle::Step,
             y_axis_scale: AnalogYAxisScale::Global,
         }
@@ -133,7 +107,6 @@ impl AnalogSettings {
 
     pub fn interpolated_viewport() -> Self {
         Self {
-            enabled: true,
             render_style: AnalogRenderStyle::Interpolated,
             y_axis_scale: AnalogYAxisScale::Viewport,
         }
@@ -141,20 +114,66 @@ impl AnalogSettings {
 
     pub fn interpolated_global() -> Self {
         Self {
-            enabled: true,
             render_style: AnalogRenderStyle::Interpolated,
             y_axis_scale: AnalogYAxisScale::Global,
         }
     }
 }
 
-impl std::fmt::Display for AnalogSettings {
+/// Per-variable analog state (settings + cache). Presence means enabled, None means disabled.
+/// NOTE: Clone is NOT derived - see manual impl below for undo/redo compatibility.
+#[derive(Serialize, Deserialize)]
+pub struct AnalogVarState {
+    pub settings: AnalogSettings,
+    #[serde(skip)]
+    pub cache: Option<Arc<AnalogCacheEntry>>,
+}
+
+impl std::fmt::Debug for AnalogVarState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if !self.enabled {
-            write!(f, "Off")
-        } else {
-            write!(f, "{} ({})", self.render_style, self.y_axis_scale)
+        f.write_str("AnalogVarState")
+    }
+}
+
+// Manual Clone: cache is NOT cloned to avoid holding refs in undo/redo stack.
+// When state is restored from undo/redo, caches are rebuilt on demand.
+impl Clone for AnalogVarState {
+    fn clone(&self) -> Self {
+        Self {
+            settings: self.settings,
+            cache: None, // Intentionally not cloned - rebuilt on demand
         }
+    }
+}
+
+impl PartialEq for AnalogVarState {
+    fn eq(&self, other: &Self) -> bool {
+        self.settings == other.settings
+    }
+}
+
+impl AnalogVarState {
+    pub fn new(settings: AnalogSettings) -> Self {
+        Self {
+            settings,
+            cache: None,
+        }
+    }
+
+    pub fn step_viewport() -> Self {
+        Self::new(AnalogSettings::step_viewport())
+    }
+
+    pub fn step_global() -> Self {
+        Self::new(AnalogSettings::step_global())
+    }
+
+    pub fn interpolated_viewport() -> Self {
+        Self::new(AnalogSettings::interpolated_viewport())
+    }
+
+    pub fn interpolated_global() -> Self {
+        Self::new(AnalogSettings::interpolated_global())
     }
 }
 
@@ -171,7 +190,7 @@ pub struct DisplayedVariable {
     pub format: Option<String>,
     pub field_formats: Vec<FieldFormat>,
     pub height_scaling_factor: Option<f32>,
-    pub analog_settings: AnalogSettings,
+    pub analog: Option<AnalogVarState>,
 }
 
 impl DisplayedVariable {
@@ -218,7 +237,7 @@ impl DisplayedVariable {
             format: self.format,
             field_formats: self.field_formats,
             height_scaling_factor: self.height_scaling_factor,
-            analog_settings: self.analog_settings,
+            analog: self.analog,
         }
     }
 }
@@ -282,7 +301,7 @@ pub struct DisplayedPlaceholder {
     pub format: Option<String>,
     pub field_formats: Vec<FieldFormat>,
     pub height_scaling_factor: Option<f32>,
-    pub analog_settings: AnalogSettings,
+    pub analog: Option<AnalogVarState>,
 }
 
 impl DisplayedPlaceholder {
@@ -302,7 +321,7 @@ impl DisplayedPlaceholder {
             format: self.format,
             field_formats: self.field_formats,
             height_scaling_factor: self.height_scaling_factor,
-            analog_settings: self.analog_settings,
+            analog: self.analog,
         }
     }
 

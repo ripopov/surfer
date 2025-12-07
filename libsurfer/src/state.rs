@@ -257,8 +257,7 @@ impl SystemState {
                             display_item_ref_counter: 0,
                             old_num_timestamps: None,
                             graphics: HashMap::new(),
-                            analog_signal_caches: HashMap::new(),
-                            cache_build_in_progress: HashSet::new(),
+                            cache_generation: 0,
                         },
                         None,
                     ),
@@ -316,8 +315,7 @@ impl SystemState {
             display_item_ref_counter: 0,
             old_num_timestamps: None,
             graphics: HashMap::new(),
-            analog_signal_caches: HashMap::new(),
-            cache_build_in_progress: HashSet::new(),
+            cache_generation: 0,
         };
 
         self.invalidate_draw_commands();
@@ -447,11 +445,7 @@ impl SystemState {
 
     /// Returns true if no analog caches are currently being built
     pub fn analog_caches_ready(&self) -> bool {
-        self.user
-            .waves
-            .as_ref()
-            .map(|w| w.cache_build_in_progress.is_empty())
-            .unwrap_or(true) // No waves = ready
+        crate::ANALOG_CACHES_BUILDING.load(std::sync::atomic::Ordering::SeqCst) == 0
     }
 
     /// Returns the current canvas state

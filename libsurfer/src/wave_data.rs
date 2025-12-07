@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use eyre::{Result, WrapErr};
 use num::bigint::ToBigInt as _;
@@ -20,9 +20,7 @@ use crate::translation::{DynTranslator, TranslatorList, VariableInfoExt};
 use crate::variable_name_type::VariableNameType;
 use crate::view::ItemDrawingInfo;
 use crate::viewport::Viewport;
-use crate::wave_container::{
-    AnalogCacheKey, ScopeRef, VariableMeta, VariableRef, VariableRefExt, WaveContainer,
-};
+use crate::wave_container::{ScopeRef, VariableMeta, VariableRef, VariableRefExt, WaveContainer};
 use crate::wave_source::{WaveFormat, WaveSource};
 use crate::wellen::LoadSignalsCmd;
 use ftr_parser::types::Transaction;
@@ -78,11 +76,9 @@ pub struct WaveData {
     pub total_height: f32,
     #[serde(skip)]
     pub old_num_timestamps: Option<BigInt>,
+    /// Generation counter for analog cache invalidation on waveform reload.
     #[serde(skip)]
-    pub analog_signal_caches:
-        HashMap<AnalogCacheKey, crate::analog_signal_cache::AnalogSignalCache>,
-    #[serde(skip)]
-    pub cache_build_in_progress: HashSet<AnalogCacheKey>,
+    pub cache_generation: u64,
 }
 
 fn select_preferred_translator(var: &VariableMeta, translators: &TranslatorList) -> String {
@@ -200,8 +196,7 @@ impl WaveData {
             graphics: HashMap::new(),
             total_height: 0.,
             old_num_timestamps,
-            analog_signal_caches: HashMap::new(),
-            cache_build_in_progress: HashSet::new(),
+            cache_generation: self.cache_generation + 1, // Invalidate all existing caches
         };
 
         new_wavedata.update_metadata(translators);
@@ -444,7 +439,7 @@ impl WaveData {
                 format: None,
                 field_formats: vec![],
                 height_scaling_factor: None,
-                analog_settings: crate::displayed_item::AnalogSettings::default(),
+                analog: None,
             });
 
             indices.push(self.insert_item(new_variable, Some(target_position), true));
@@ -945,9 +940,10 @@ impl WaveData {
             })
     }
 
+    /// Spawn async worker to build analog cache. Worker holds Arc clone.
     pub fn build_analog_cache_async(
-        &mut self,
-        cache_key: AnalogCacheKey,
+        &self,
+        entry: std::sync::Arc<crate::analog_signal_cache::AnalogCacheEntry>,
         variable_ref: &VariableRef,
         translator: crate::translation::AnyTranslator,
         sender: &std::sync::mpsc::Sender<crate::message::Message>,
@@ -957,9 +953,10 @@ impl WaveData {
 
         let num_timestamps = self.num_timestamps()?.to_u64()?;
 
-        let accessor = wave_container.signal_accessor(cache_key.0).ok()?;
+        let accessor = wave_container.signal_accessor(entry.cache_key.0).ok()?;
 
         let sender_clone = sender.clone();
+        crate::ANALOG_CACHES_BUILDING.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         crate::async_util::perform_work(move || {
             let result = crate::analog_signal_cache::AnalogSignalCache::build(
                 accessor,
@@ -971,14 +968,12 @@ impl WaveData {
 
             let msg = match result {
                 Some(cache) => crate::message::Message::AnalogCacheBuilt {
-                    cache_key,
-                    cache: Some(cache),
-                    error: None,
+                    entry: entry.clone(),
+                    result: Ok(cache),
                 },
                 None => crate::message::Message::AnalogCacheBuilt {
-                    cache_key,
-                    cache: None,
-                    error: Some("Failed to build analog cache".into()),
+                    entry: entry.clone(),
+                    result: Err("Failed to build analog cache".into()),
                 },
             };
 
@@ -991,9 +986,5 @@ impl WaveData {
         });
 
         Some(())
-    }
-
-    pub fn clear_analog_caches(&mut self) {
-        self.analog_signal_caches.clear();
     }
 }

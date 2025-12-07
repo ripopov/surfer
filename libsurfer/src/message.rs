@@ -6,7 +6,6 @@ use emath::{Pos2, Vec2};
 use ftr_parser::types::Transaction;
 use num::BigInt;
 use serde::Deserialize;
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use surver::SurverStatus;
@@ -366,29 +365,20 @@ pub enum Message {
         item: DisplayedItemRef,
         levels: usize,
     },
-    /// Set analog settings for a variable
     SetAnalogSettings(
         MessageTarget<VisibleItemIndex>,
-        crate::displayed_item::AnalogSettings,
+        Option<crate::displayed_item::AnalogVarState>,
     ),
-    /// Build analog cache asynchronously
     BuildAnalogCache {
+        display_id: DisplayedItemRef,
         cache_key: AnalogCacheKey,
-        variable_ref: crate::wave_container::VariableRef,
     },
     #[serde(skip)]
-    /// Analog cache build completed
     AnalogCacheBuilt {
-        cache_key: AnalogCacheKey,
         #[debug(skip)]
-        cache: Option<crate::analog_signal_cache::AnalogSignalCache>,
-        error: Option<String>,
-    },
-    #[serde(skip)]
-    /// Sweep unused analog caches after draw command generation
-    SweepUnusedAnalogCaches {
+        entry: Arc<crate::analog_signal_cache::AnalogCacheEntry>,
         #[debug(skip)]
-        used_keys: HashSet<AnalogCacheKey>,
+        result: Result<crate::analog_signal_cache::AnalogSignalCache, String>,
     },
 
     SetViewportStrategy(ViewportStrategy),

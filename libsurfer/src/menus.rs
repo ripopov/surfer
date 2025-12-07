@@ -565,38 +565,33 @@ impl SystemState {
                 msgs.push(Message::ExpandScope(scope_path));
             }
 
-            if let DisplayedItem::Variable(variable) = displayed_item {
-                if wave_container.supports_analog() {
-                    ui.menu_button("Analog", |ui| {
-                        use crate::displayed_item::AnalogSettings;
-                        let current = &variable.analog_settings;
+            if let DisplayedItem::Variable(variable) = displayed_item
+                && wave_container.supports_analog()
+            {
+                ui.menu_button("Analog", |ui| {
+                    use crate::displayed_item::AnalogVarState;
+                    let current = &variable.analog;
 
-                        let options = [
-                            ("Off", AnalogSettings::off()),
-                            ("Step (Viewport)", AnalogSettings::step_viewport()),
-                            ("Step (Global)", AnalogSettings::step_global()),
-                            (
-                                "Interpolated (Viewport)",
-                                AnalogSettings::interpolated_viewport(),
-                            ),
-                            (
-                                "Interpolated (Global)",
-                                AnalogSettings::interpolated_global(),
-                            ),
-                        ];
+                    let options: [(&str, Option<AnalogVarState>); 5] = [
+                        ("Off", None),
+                        ("Step (Viewport)", Some(AnalogVarState::step_viewport())),
+                        ("Step (Global)", Some(AnalogVarState::step_global())),
+                        (
+                            "Interpolated (Viewport)",
+                            Some(AnalogVarState::interpolated_viewport()),
+                        ),
+                        (
+                            "Interpolated (Global)",
+                            Some(AnalogVarState::interpolated_global()),
+                        ),
+                    ];
 
-                        for (label, settings) in options {
-                            if ui.radio(*current == settings, label).clicked()
-                                && *current != settings
-                            {
-                                msgs.push(Message::SetAnalogSettings(
-                                    affected_vidxs.into(),
-                                    settings,
-                                ));
-                            }
+                    for (label, config) in options {
+                        if ui.radio(*current == config, label).clicked() && *current != config {
+                            msgs.push(Message::SetAnalogSettings(affected_vidxs.into(), config));
                         }
-                    });
-                }
+                    }
+                });
             }
         }
 

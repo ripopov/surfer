@@ -40,6 +40,8 @@ pub(crate) fn variable_analog_draw_commands(
     view_width: f32,
     viewport_idx: usize,
 ) -> Option<VariableDrawCommands> {
+    let render_mode = displayed_variable.analog.as_ref()?;
+
     let wave_container = waves.inner.as_waves()?;
     let displayed_field_ref: DisplayedFieldRef = display_id.into();
     let translator = waves.variable_translator(&displayed_field_ref, translators);
@@ -52,19 +54,27 @@ pub(crate) fn variable_analog_draw_commands(
     let translator_name = translator.name();
     let cache_key = (signal_id, translator_name.clone());
 
-    let num_timestamps_u64 = num_timestamps.to_u64()?;
-    let cache = match waves.analog_signal_caches.get(&cache_key) {
-        Some(cache) if cache.num_timestamps == num_timestamps_u64 => cache,
+    // Check if cache exists and is valid (correct generation)
+    let cache = match &render_mode.cache {
+        Some(entry) if entry.generation == waves.cache_generation => {
+            match entry.get() {
+                Some(cache) => cache,
+                None => {
+                    // Cache is building, skip rendering this frame
+                    return None;
+                }
+            }
+        }
         _ => {
+            // Cache missing or stale - request build
             return Some(VariableDrawCommands {
                 clock_edges: vec![],
                 display_id,
                 local_commands: HashMap::new(),
                 local_msgs: vec![Message::BuildAnalogCache {
+                    display_id,
                     cache_key,
-                    variable_ref: displayed_variable.variable_ref.clone(),
                 }],
-                used_cache_key: None,
             });
         }
     };
@@ -74,7 +84,7 @@ pub(crate) fn variable_analog_draw_commands(
         viewport,
         &num_timestamps,
         view_width,
-        displayed_variable.analog_settings,
+        render_mode.settings,
     )
     .build();
 
@@ -86,7 +96,6 @@ pub(crate) fn variable_analog_draw_commands(
         display_id,
         local_commands,
         local_msgs: vec![],
-        used_cache_key: Some(cache_key),
     })
 }
 
@@ -100,7 +109,6 @@ pub fn draw_analog(
     ctx: &mut DrawingContext,
 ) {
     let analog_settings = &analog_commands.analog_settings;
-    debug_assert!(analog_settings.enabled, "draw_analog called when disabled");
 
     let (min_val, max_val) = select_value_range(analog_commands, analog_settings);
 
@@ -437,12 +445,11 @@ impl<'a> CommandBuilder<'a> {
         }
 
         // Extend first command to include before-viewport sample
-        if let Some(before) = before_px {
-            if let Some(AnalogDrawingCommand::Flat { start_px, .. }) =
+        if let Some(before) = before_px
+            && let Some(AnalogDrawingCommand::Flat { start_px, .. }) =
                 self.output.commands.first_mut()
-            {
-                *start_px = (*start_px).min(before);
-            }
+        {
+            *start_px = (*start_px).min(before);
         }
 
         AnalogDrawingCommands {

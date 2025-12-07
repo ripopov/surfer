@@ -68,16 +68,15 @@ impl SystemState {
         }
 
         // Show analog cache building status
-        if let Some(waves) = waves {
-            let in_progress_count = waves.cache_build_in_progress.len();
-            if in_progress_count > 0 {
-                ui.add_space(STATUS_SPACING);
-                ui.spinner();
-                if in_progress_count == 1 {
-                    ui.label("Building analog cache…");
-                } else {
-                    ui.label(format!("Building {} analog caches…", in_progress_count));
-                }
+        let in_progress_count =
+            crate::ANALOG_CACHES_BUILDING.load(std::sync::atomic::Ordering::SeqCst);
+        if in_progress_count > 0 {
+            ui.add_space(STATUS_SPACING);
+            ui.spinner();
+            if in_progress_count == 1 {
+                ui.label("Building analog cache…");
+            } else {
+                ui.label(format!("Building {} analog caches…", in_progress_count));
             }
         }
     }

@@ -49,16 +49,11 @@ pub enum VarId {
 
 /// A backend-specific, numeric reference for fast access to the associated signal data.
 /// Used as cache key for signal data lookups.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SignalId {
+    #[default]
     None,
     Wellen(wellen::SignalRef),
-}
-
-impl Default for SignalId {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 /// Backend-agnostic enum for accessing signal data.

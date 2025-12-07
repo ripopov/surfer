@@ -64,8 +64,6 @@ Non-numeric values are rendered as highlighted regions rather than plotted point
 
 ---
 
----
-
 ## CXXRTL Limitations
 
 Analog rendering is not supported for CXXRTL live simulation connections due to architectural differences from file-based waveforms.
@@ -84,9 +82,6 @@ Analog signals are represented using two complementary data structures:
 1. **`AnalogSignalCache`** (`analog_signal_cache.rs`): A pre-computed cache containing:
    - `SignalRMQ`: Range Min/Max Query structure for O(1) range queries
    - `global_min` / `global_max`: Signal bounds across entire time range
-   - `num_timestamps`: Total time units (for cache validity checking)
-
-   Caches are keyed by `(SignalRef, translator_name)` in the parent HashMap, enabling cache sharing across aliased variables that point to the same underlying signal.
 
 2. **`AnalogDrawingCommands`** (`drawing_canvas.rs`): Per-frame drawing instructions containing:
    - `viewport_min` / `viewport_max`: Y-axis bounds for visible region
@@ -114,17 +109,27 @@ Signal values are converted from raw bit vectors to `f64` via the translator sys
    - `MinMax.has_non_finite` is true if any non-finite value was encountered in the range
    - When querying ranges with neon-finite values, renderer receives `NAN_UNDEF` signal to draw undefined regions
 
-### Analog Cache Structure and Operation
+### Analog Cache Architecture
 
-The `AnalogSignalCache` wraps a `SignalRMQ` structure optimized for time-range queries:
+The cache system uses reference counting with `Arc<OnceLock<>>` for automatic lifecycle management.
 
+**Per-Variable State** (`displayed_item.rs`):
 ```rust
-// Keyed by (SignalRef, translator_name) in WaveData::analog_signal_caches
-pub struct AnalogSignalCache {
-    pub rmq: SignalRMQ,
-    pub global_min: f64,
-    pub global_max: f64,
-    pub num_timestamps: u64,
+pub struct AnalogVarState {
+    pub settings: AnalogSettings,          // Render style + Y-axis scale
+    pub cache: Option<Arc<AnalogCacheEntry>>,  // Shared cache reference
+}
+```
+
+- `DisplayedVariable.analog: Option<AnalogVarState>` — `None` = disabled, `Some` = enabled
+- Multiple variables with the same signal+translator share the same `Arc<AnalogCacheEntry>`
+
+**Cache Entry** (`analog_signal_cache.rs`):
+```rust
+pub struct AnalogCacheEntry {
+    inner: OnceLock<AnalogSignalCache>,  // Set by worker thread
+    pub cache_key: AnalogCacheKey,        // (SignalRef, translator_name)
+    pub generation: u64,                  // For staleness detection
 }
 ```
 
@@ -132,43 +137,26 @@ pub struct AnalogSignalCache {
 - `SignalId` is the canonical signal identity (handles variable aliases pointing to the same signal)
 - `String` is the translator name (different translators produce different numeric interpretations)
 
-This design enables cache sharing: multiple displayed variables that are aliases to the same underlying signal with the same translator will share a single cache entry.
+**Generation-Based Invalidation**: `WaveData.cache_generation` is incremented on waveform reload. Caches with mismatched generation are considered stale and rebuilt.
 
-**Cache Validity**: A cache is valid when `num_timestamps` matches the waveform length. The signal identity and translator are implicit in the cache key lookup.
-**Cache Invalidation**: The cache uses a mark-and-sweep invalidation strategy, which simplifies the codebase by eliminating explicit per-variable invalidation calls.
-
-*Mark-and-sweep approach* (`SweepUnusedAnalogCaches` message):
-- During draw command generation, each analog variable that successfully uses its cache reports the cache key via `VariableDrawCommands::used_cache_key`
-- After processing all variables, `generate_wave_draw_commands()` collects all used cache keys and sends a `SweepUnusedAnalogCaches { used_keys }` message
-- The message handler retains only caches present in `used_keys`, automatically removing:
-  - Caches for variables no longer displayed
-  - Caches for variables with analog mode disabled
-
-*Cache validation in rendering* (`variable_analog_draw_commands`):
-- The cache key `(SignalRef, translator_name)` ensures the correct cache is retrieved
-- Before using a cache, the renderer validates that `num_timestamps` matches the current waveform length
-- If validation fails (e.g., waveform was reloaded), the cache is not marked as "used" and will be swept
-- A `BuildAnalogCache` message is returned to trigger async rebuild
+**Automatic Cleanup**: When analog mode is disabled (`analog = None`), the `Arc` is dropped. The cache is freed when its reference count reaches zero. No explicit sweep or garbage collection required.
 
 ### Async Cache Building
 
 Cache construction runs on background threads to prevent UI blocking:
 
 **Flow:**
-1. `variable_analog_draw_commands()` checks for valid cache using key `(SignalRef, translator_name)`
-2. If missing/invalid, returns `Message::BuildAnalogCache { signal_ref, translator_name, variable_ref }`
-3. `WaveData::build_analog_cache_async()` spawns background work via `async_util::perform_work()`
-4. Worker creates `SignalAccessor` (cheap Arc clones), iterates signal, builds RMQ
-5. On completion, sends `Message::AnalogCacheBuilt { cache_key: (SignalRef, String), cache, error }`
-6. Main thread inserts cache into `analog_signal_caches` HashMap keyed by `(SignalRef, translator_name)`
-7. Next frame uses the new cache (all aliased variables benefit from the same cache)
+1. Draw command generation checks for valid cache (exists and generation matches)
+2. If missing/stale, returns `Message::BuildAnalogCache { display_id, cache_key }`
+3. Handler scans displayed items for existing shareable entry with same cache key, or creates new `Arc<AnalogCacheEntry>`
+4. Worker thread spawned with Arc clone, builds RMQ structure
+5. On completion, sends `Message::AnalogCacheBuilt { entry: Arc, result }`
+6. Handler calls `entry.set(cache)` — no lookup needed since Arc is passed directly
+7. Next frame uses the ready cache (all variables sharing the Arc benefit immediately)
 
-**Thread Safety**: The `SignalAccessor` holds `Arc<Signal>` and `Arc<TimeTable>`, enabling zero-copy transfer to worker threads. `TranslatorList` uses `Arc<DynTranslator>` for the same reason.
-**Progress Tracking**: `WaveData::cache_build_in_progress` tracks pending builds. Status bar displays "Building analog cache..." when builds are in progress.
-**Repaint Triggering**: Workers increment `OUTSTANDING_TRANSACTIONS` and call `EGUI_CONTEXT.request_repaint()` to ensure the UI updates when cache completes.
+**Thread Safety**: `OnceLock` provides lock-free reads (`get()`) and safe concurrent writes (`set()`). `SignalAccessor` holds `Arc<Signal>` and `Arc<TimeTable>` for zero-copy transfer to workers.
 
-**Why `OUTSTANDING_TRANSACTIONS` instead of `progress_tracker`?**
-Unifying these would require changing `progress_tracker` to `Vec<LoadProgress>`, adding new status variants, and managing concurrent entry lifecycle—added complexity.
+**Undo/Redo Compatibility**: `AnalogVarState::clone()` intentionally sets `cache: None` to avoid holding strong references in the undo/redo stack. Caches are rebuilt on demand when state is restored.
 
 ### Drawing Command Generation
 
