@@ -142,7 +142,7 @@ These are the suggested solutions if it does not work for you:
 Many aspects of Surfer can be configured.
 To learn more about configuration, have a look at our [wiki](https://gitlab.com/surfer-project/surfer/-/wikis/Configuration).
 
-## Server Mode (experimental)
+## Server Mode
 
 It is possible to start Surfer in server mode on one computer and open the waveform viewer on another computer to avoid copying the waveform files. There is also a stand-alone version of the server: Surver. Run
 

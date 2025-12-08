@@ -105,7 +105,11 @@ fn get_info_page(shared: Arc<ReadOnly>, state: Arc<RwLock<SurverState>>) -> Stri
     format!(
         r#"
     <!DOCTYPE html><html lang="en">
-    <head><title>Surver - Surfer Remote Server</title></head><body>
+    <head>
+    <link rel="icon" href="favicon.ico" sizes="any">
+    <title>Surver - Surfer Remote Server</title>
+    </head>
+    <body>
     <h1>Surver - Surfer Remote Server</h1>
     <b>To connect, run:</b> <code>surfer {}</code><br>
     <b>Wellen version:</b> {WELLEN_VERSION}<br>
@@ -349,6 +353,15 @@ async fn handle(
     tx: Sender<LoaderMessage>,
     req: Request<hyper::body::Incoming>,
 ) -> Result<Response<Full<Bytes>>> {
+    // Check if favicon is requested
+    if req.uri().path() == "/favicon.ico" {
+        let favicon_data = include_bytes!("../assets/favicon.ico");
+        return Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "image/x-icon")
+            .header("Cache-Control", "public, max-age=604800")
+            .body(Full::from(&favicon_data[..]))?);
+    }
     // check to see if the correct token was received
     let path_parts = req.uri().path().split('/').skip(1).collect::<Vec<_>>();
 
