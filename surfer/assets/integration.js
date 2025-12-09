@@ -24,7 +24,7 @@ function register_message_listener() {
         const msg = {
           LoadWaveformFileFromUrl: [
             decoded.url,
-            { Clear }
+            "Clear"
           ]
         }
         inject_message(JSON.stringify(msg))
