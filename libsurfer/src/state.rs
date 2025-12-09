@@ -7,7 +7,7 @@ use std::{
 use crate::{
     CanvasState, StartupParams,
     clock_highlighting::ClockHighlightType,
-    config::{ArrowKeyBindings, AutoLoad, PrimaryMouseDrag, SurferConfig},
+    config::{ArrowKeyBindings, AutoLoad, PrimaryMouseDrag, SurferConfig, TransitionValue},
     data_container::DataContainer,
     dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog},
     displayed_item_tree::{DisplayedItemTree, VisibleItemIndex},
@@ -120,6 +120,8 @@ pub struct UserState {
     pub(crate) surver_file_infos: Option<Vec<SurverFileInfo>>,
     #[serde(skip, default)]
     pub(crate) surver_url: Option<String>,
+    #[serde(default)]
+    pub(crate) transition_value: Option<TransitionValue>,
 
     // Path of last saved-to state file
     // Do not serialize as this causes a few issues and doesn't help:

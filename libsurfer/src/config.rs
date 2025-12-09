@@ -68,6 +68,16 @@ pub enum ArrowKeyBindings {
     Scroll,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Display, FromStr, PartialEq, Eq, Sequence, Serialize)]
+pub enum TransitionValue {
+    /// Transition value is the previous value
+    Previous,
+    /// Transition value is the next value
+    Next,
+    /// Transition value is both previous and next value
+    Both,
+}
+
 /// Select the function when dragging with primary mouse button
 #[derive(Debug, Deserialize, Display, PartialEq, Eq, Sequence, Serialize, Clone, Copy)]
 pub enum PrimaryMouseDrag {
@@ -207,10 +217,17 @@ pub struct SurferLayout {
     /// Dinotrace drawing style (thick upper line for all-ones, no upper line for all-zeros)
     #[serde(default)]
     use_dinotrace_style: bool,
+    /// Value to display when cursor is on a transition
+    #[serde(default = "default_next")]
+    transition_value: TransitionValue,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_next() -> TransitionValue {
+    TransitionValue::Next
 }
 
 impl SurferLayout {
@@ -273,6 +290,9 @@ impl SurferLayout {
     }
     pub fn use_dinotrace_style(&self) -> bool {
         self.use_dinotrace_style
+    }
+    pub fn transition_value(&self) -> TransitionValue {
+        self.transition_value
     }
 }
 

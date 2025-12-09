@@ -1,6 +1,11 @@
 use crate::{
-    fzcmd::expand_command, menus::generic_context_menu, time::get_ticks,
+    config::TransitionValue,
+    displayed_item::DisplayedVariable,
+    fzcmd::expand_command,
+    menus::generic_context_menu,
+    time::get_ticks,
     tooltips::variable_tooltip_text,
+    wave_container::{ScopeId, VarId, VariableMeta},
 };
 use ecolor::Color32;
 #[cfg(not(target_arch = "wasm32"))]
@@ -15,10 +20,11 @@ use epaint::{
     text::{FontId, LayoutJob, TextFormat, TextWrapMode},
 };
 use itertools::Itertools;
+use num::{BigUint, Zero};
 use tracing::info;
 
 use surfer_translation_types::{
-    SubFieldFlatTranslationResult, TranslatedValue, Translator, VariableInfo,
+    TranslatedValue, Translator, VariableInfo, VariableValue,
     translator::{TrueName, VariableNameInfo},
 };
 
@@ -1458,52 +1464,97 @@ impl SystemState {
         displayed_field_ref: &DisplayedFieldRef,
         ucursor: &Option<num::BigUint>,
     ) -> Option<String> {
-        if let Some(ucursor) = ucursor {
-            let Some(DisplayedItem::Variable(displayed_variable)) =
-                waves.displayed_items.get(&displayed_field_ref.item)
-            else {
-                return None;
-            };
-            let variable = &displayed_variable.variable_ref;
-            let translator =
-                waves.variable_translator(&displayed_field_ref.without_field(), &self.translators);
-            let meta = waves.inner.as_waves().unwrap().variable_meta(variable);
+        let ucursor = ucursor.as_ref()?;
 
-            let translation_result = waves
-                .inner
-                .as_waves()
-                .unwrap()
-                .query_variable(variable, ucursor)
-                .ok()
-                .flatten()
-                .and_then(|q| q.current)
-                .map(|(_time, value)| meta.and_then(|meta| translator.translate(&meta, &value)));
+        let DisplayedItem::Variable(displayed_variable) =
+            waves.displayed_items.get(&displayed_field_ref.item)?
+        else {
+            return None;
+        };
 
-            if let Some(Ok(s)) = translation_result {
-                let fields = s.format_flat(
-                    &displayed_variable.format,
-                    &displayed_variable.field_formats,
-                    &self.translators,
-                );
+        let variable = &displayed_variable.variable_ref;
+        let translator =
+            waves.variable_translator(&displayed_field_ref.without_field(), &self.translators);
+        let meta = waves
+            .inner
+            .as_waves()
+            .unwrap()
+            .variable_meta(variable)
+            .ok()?;
 
-                let subfield = fields
-                    .iter()
-                    .find(|res| res.names == displayed_field_ref.field);
+        let wave_container = waves.inner.as_waves().unwrap();
+        let query_result = wave_container
+            .query_variable(variable, ucursor)
+            .ok()
+            .flatten()?;
 
-                if let Some(SubFieldFlatTranslationResult {
-                    names: _,
-                    value: Some(TranslatedValue { value: v, kind: _ }),
-                }) = subfield
-                {
-                    Some(v.clone())
-                } else {
-                    Some("-".to_string())
-                }
-            } else {
-                None
-            }
-        } else {
-            None
+        let (time, val) = query_result.current?;
+        let curr = self.translate_query_result(
+            displayed_field_ref,
+            displayed_variable,
+            translator,
+            meta.clone(),
+            val,
+        );
+
+        // If time doesn't match cursor, i.e., we are not at a transition or the cursor is at zero
+        // or we want the next value after the transition, return current
+        if time != *ucursor
+            || BigUint::zero() == *ucursor
+            || self.transition_value() == TransitionValue::Next
+        {
+            return curr;
+        }
+
+        // Otherwise, we need to check the previous value for transition display
+        let prev_query_result = wave_container
+            .query_variable(variable, &(ucursor - BigUint::from(1u8)))
+            .ok()
+            .flatten()?;
+
+        let (_, prev_val) = prev_query_result.current?;
+        let prev = self.translate_query_result(
+            displayed_field_ref,
+            displayed_variable,
+            translator,
+            meta,
+            prev_val,
+        );
+
+        match self.transition_value() {
+            TransitionValue::Previous => Some(format!("←{}", prev.unwrap_or_default())),
+            TransitionValue::Both => match (curr, prev) {
+                (Some(curr_val), Some(prev_val)) => Some(format!("{prev_val} → {curr_val}")),
+                (None, Some(prev_val)) => Some(format!("{prev_val} →")),
+                (Some(curr_val), None) => Some(format!("→ {curr_val}")),
+                _ => None,
+            },
+            TransitionValue::Next => curr, // This will never happen due to the earlier check
+        }
+    }
+
+    fn translate_query_result(
+        &self,
+        displayed_field_ref: &DisplayedFieldRef,
+        displayed_variable: &DisplayedVariable,
+        translator: &dyn Translator<VarId, ScopeId, Message>,
+        meta: VariableMeta,
+        val: VariableValue,
+    ) -> Option<String> {
+        let translated = translator.translate(&meta, &val).ok()?;
+        let fields = translated.format_flat(
+            &displayed_variable.format,
+            &displayed_variable.field_formats,
+            &self.translators,
+        );
+
+        let subfield = fields
+            .iter()
+            .find(|res| res.names == displayed_field_ref.field)?;
+
+        match &subfield.value {
+            Some(TranslatedValue { value, .. }) => Some(value.clone()),
+            None => Some("-".to_string()),
         }
     }
 

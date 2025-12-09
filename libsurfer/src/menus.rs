@@ -6,7 +6,7 @@ use itertools::Itertools;
 use std::sync::atomic::Ordering;
 use surfer_translation_types::{TranslationPreference, Translator, VariableType};
 
-use crate::config::PrimaryMouseDrag;
+use crate::config::{PrimaryMouseDrag, TransitionValue};
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation};
 use crate::message::MessageTarget;
@@ -342,6 +342,19 @@ impl SystemState {
                     .clicked()
                     .then(|| {
                         msgs.push(Message::SetPrimaryMouseDragBehavior(behavior));
+                    });
+                }
+            });
+
+            ui.menu_button("Value at transition", |ui| {
+                for transition_value in enum_iterator::all::<TransitionValue>() {
+                    ui.radio(
+                        self.transition_value() == transition_value,
+                        transition_value.to_string(),
+                    )
+                    .clicked()
+                    .then(|| {
+                        msgs.push(Message::SetTransitionValue(transition_value));
                     });
                 }
             });

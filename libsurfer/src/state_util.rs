@@ -6,7 +6,7 @@ use egui::Modifiers;
 use crate::{
     SystemState,
     clock_highlighting::ClockHighlightType,
-    config::{ArrowKeyBindings, AutoLoad, PrimaryMouseDrag},
+    config::{ArrowKeyBindings, AutoLoad, PrimaryMouseDrag, TransitionValue},
     displayed_item::DisplayedItem,
     hierarchy::{HierarchyStyle, ParameterDisplayLocation},
 };
@@ -195,5 +195,12 @@ impl SystemState {
         self.user
             .use_dinotrace_style
             .unwrap_or_else(|| self.user.config.layout.use_dinotrace_style())
+    }
+
+    #[inline]
+    pub fn transition_value(&self) -> TransitionValue {
+        self.user
+            .transition_value
+            .unwrap_or_else(|| self.user.config.layout.transition_value())
     }
 }

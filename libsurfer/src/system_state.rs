@@ -177,6 +177,7 @@ impl SystemState {
                 show_server_file_window: false,
                 surver_file_infos: None,
                 surver_url: None,
+                transition_value: None,
             },
             translators,
             channels,

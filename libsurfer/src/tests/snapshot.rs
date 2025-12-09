@@ -18,7 +18,7 @@ use crate::{
     Message, MoveDir, StartupParams, SystemState, WaveSource,
     async_util::AsyncJob,
     clock_highlighting::ClockHighlightType,
-    config::SurferConfig,
+    config::{SurferConfig, TransitionValue},
     displayed_item::{DisplayedFieldRef, DisplayedItemRef},
     displayed_item_tree::VisibleItemIndex,
     graphics::{Direction, GrPoint, Graphic, GraphicId},
@@ -725,6 +725,37 @@ snapshot_ui_with_file_and_msgs! {markers_dialog_work, "examples/counter.vcd", [
     Message::ItemColorChange(MessageTarget::Explicit(VisibleItemIndex(7)), Some("Yellow".to_string())),
     Message::CursorSet(BigInt::from(500)),
     Message::SetCursorWindowVisible(true)
+]}
+
+snapshot_ui_with_file_and_msgs! {transition_value_next, "examples/counter.vcd", [
+    Message::SetOverviewVisible(true),
+    Message::SetTransitionValue(TransitionValue::Next),
+    Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
+    Message::AddScope(ScopeRef::from_strs(&["tb", "dut"]), false),
+    Message::CursorSet(BigInt::from(390)),
+]}
+
+snapshot_ui_with_file_and_msgs! {transition_value_previous, "examples/counter.vcd", [
+    Message::SetOverviewVisible(true),
+    Message::SetTransitionValue(TransitionValue::Previous),
+    Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
+    Message::AddScope(ScopeRef::from_strs(&["tb", "dut"]), false),
+    Message::CursorSet(BigInt::from(390)),
+]}
+
+snapshot_ui_with_file_and_msgs! {transition_value_both, "examples/counter.vcd", [
+    Message::SetOverviewVisible(true),
+    Message::SetTransitionValue(TransitionValue::Both),
+    Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
+    Message::AddScope(ScopeRef::from_strs(&["tb", "dut"]), false),
+    Message::CursorSet(BigInt::from(390)),
+]}
+
+snapshot_ui_with_file_and_msgs! {transition_value_both_zero_works, "examples/counter.vcd", [
+    Message::SetOverviewVisible(true),
+    Message::SetTransitionValue(TransitionValue::Both),
+    Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
+    Message::CursorSet(BigInt::from(0)),
 ]}
 
 snapshot_ui_with_file_and_msgs! {add_move_delete_marker, "examples/counter.vcd", [

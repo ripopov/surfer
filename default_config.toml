@@ -42,6 +42,7 @@ highlight_focused = false
 move_focus_on_inserted_marker = true
 fill_high_values = true
 use_dinotrace_style = false
+transition_value = "Next"
 
 [gesture]
 size = 300
