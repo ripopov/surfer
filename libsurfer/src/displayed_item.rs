@@ -70,21 +70,21 @@ pub struct FieldFormat {
     pub format: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Default)]
 pub enum AnalogRenderStyle {
     #[default]
     Step,
     Interpolated,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Default)]
 pub enum AnalogYAxisScale {
     #[default]
     Viewport,
     Global,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
 pub struct AnalogSettings {
     pub render_style: AnalogRenderStyle,
     pub y_axis_scale: AnalogYAxisScale,

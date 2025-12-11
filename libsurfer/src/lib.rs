@@ -104,7 +104,9 @@ use wcp::{proto::WcpCSMessage, proto::WcpEvent, proto::WcpSCMessage};
 use crate::async_util::perform_work;
 use crate::config::{SurferConfig, SurferTheme};
 use crate::dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog};
-use crate::displayed_item::{DisplayedFieldRef, DisplayedItem, DisplayedItemRef, FieldFormat};
+use crate::displayed_item::{
+    AnalogVarState, DisplayedFieldRef, DisplayedItem, DisplayedItemRef, FieldFormat,
+};
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::drawing_canvas::TxDrawingCommands;
 use crate::message::Message;
@@ -881,10 +883,21 @@ impl SystemState {
                     .entry(node.item_ref)
                     .and_modify(|item| item.set_height_scaling_factor(scale));
             }
-            Message::SetAnalogSettings(vidx, new_state) => {
+            Message::SetAnalogSettings(vidx, new_settings) => {
                 self.save_current_canvas("Set analog state".into());
                 self.invalidate_draw_commands();
                 let waves = self.user.waves.as_mut()?;
+
+                // Update settings while preserving existing cache
+                let update = |item: &mut DisplayedItem| {
+                    if let DisplayedItem::Variable(var) = item {
+                        match (&mut var.analog, new_settings) {
+                            (Some(s), Some(new)) => s.settings = new,
+                            (None, Some(new)) => var.analog = Some(AnalogVarState::new(new)),
+                            (_, None) => var.analog = None,
+                        }
+                    }
+                };
 
                 match vidx {
                     MessageTarget::Explicit(vidx) => {
@@ -892,11 +905,7 @@ impl SystemState {
                         waves
                             .displayed_items
                             .entry(node.item_ref)
-                            .and_modify(|item| {
-                                if let DisplayedItem::Variable(var) = item {
-                                    var.analog = new_state.clone();
-                                }
-                            });
+                            .and_modify(update);
                     }
                     MessageTarget::CurrentSelection => {
                         if let Some(focused) = waves.focused_item {
@@ -904,24 +913,13 @@ impl SystemState {
                             waves
                                 .displayed_items
                                 .entry(node.item_ref)
-                                .and_modify(|item| {
-                                    if let DisplayedItem::Variable(var) = item {
-                                        var.analog = new_state.clone();
-                                    }
-                                });
+                                .and_modify(update);
                         }
-
-                        let selected_items: Vec<_> = waves
-                            .items_tree
-                            .iter_visible_selected()
-                            .map(|node| node.item_ref)
-                            .collect();
-                        for item_ref in selected_items {
-                            waves.displayed_items.entry(item_ref).and_modify(|item| {
-                                if let DisplayedItem::Variable(var) = item {
-                                    var.analog = new_state.clone();
-                                }
-                            });
+                        for node in waves.items_tree.iter_visible_selected() {
+                            waves
+                                .displayed_items
+                                .entry(node.item_ref)
+                                .and_modify(update);
                         }
                     }
                 }

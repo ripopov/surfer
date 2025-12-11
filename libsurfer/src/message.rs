@@ -367,7 +367,7 @@ pub enum Message {
     },
     SetAnalogSettings(
         MessageTarget<VisibleItemIndex>,
-        Option<crate::displayed_item::AnalogVarState>,
+        Option<crate::displayed_item::AnalogSettings>,
     ),
     BuildAnalogCache {
         display_id: DisplayedItemRef,

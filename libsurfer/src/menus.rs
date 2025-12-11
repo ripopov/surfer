@@ -569,25 +569,25 @@ impl SystemState {
                 && wave_container.supports_analog()
             {
                 ui.menu_button("Analog", |ui| {
-                    use crate::displayed_item::AnalogVarState;
-                    let current = &variable.analog;
+                    use crate::displayed_item::AnalogSettings;
+                    let current = variable.analog.as_ref().map(|a| a.settings);
 
-                    let options: [(&str, Option<AnalogVarState>); 5] = [
+                    let options: [(&str, Option<AnalogSettings>); 5] = [
                         ("Off", None),
-                        ("Step (Viewport)", Some(AnalogVarState::step_viewport())),
-                        ("Step (Global)", Some(AnalogVarState::step_global())),
+                        ("Step (Viewport)", Some(AnalogSettings::step_viewport())),
+                        ("Step (Global)", Some(AnalogSettings::step_global())),
                         (
                             "Interpolated (Viewport)",
-                            Some(AnalogVarState::interpolated_viewport()),
+                            Some(AnalogSettings::interpolated_viewport()),
                         ),
                         (
                             "Interpolated (Global)",
-                            Some(AnalogVarState::interpolated_global()),
+                            Some(AnalogSettings::interpolated_global()),
                         ),
                     ];
 
                     for (label, config) in options {
-                        if ui.radio(*current == config, label).clicked() && *current != config {
+                        if ui.radio(current == config, label).clicked() && current != config {
                             msgs.push(Message::SetAnalogSettings(affected_vidxs.into(), config));
                         }
                     }
