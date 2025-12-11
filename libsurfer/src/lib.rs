@@ -2001,7 +2001,7 @@ impl SystemState {
                     .as_ref()?
                     .cache
                     .as_ref()
-                    .is_some_and(|e| e.generation == generation)
+                    .is_some_and(|e| e.generation == generation && e.cache_key == cache_key)
                 {
                     return None;
                 }

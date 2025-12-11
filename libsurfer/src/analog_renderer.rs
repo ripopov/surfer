@@ -54,9 +54,11 @@ pub(crate) fn variable_analog_draw_commands(
     let translator_name = translator.name();
     let cache_key = (signal_id, translator_name.clone());
 
-    // Check if cache exists and is valid (correct generation)
+    // Check if cache exists and is valid (correct generation and matching key)
     let cache = match &render_mode.cache {
-        Some(entry) if entry.generation == waves.cache_generation => {
+        Some(entry)
+            if entry.generation == waves.cache_generation && entry.cache_key == cache_key =>
+        {
             match entry.get() {
                 Some(cache) => cache,
                 None => {
