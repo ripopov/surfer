@@ -182,6 +182,7 @@ fn variable_draw_commands(
         &info,
         view_width,
         viewport_idx,
+        use_dinotrace_style,
     )
 }
 
@@ -199,6 +200,7 @@ fn variable_digital_draw_commands(
     info: &VariableInfo,
     view_width: f32,
     viewport_idx: usize,
+    use_dinotrace_style: bool,
 ) -> Option<VariableDrawCommands> {
     let mut clock_edges = vec![];
     let mut local_msgs = vec![];
