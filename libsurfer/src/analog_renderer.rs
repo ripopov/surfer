@@ -144,6 +144,12 @@ fn select_value_range(cmds: &AnalogDrawingCommands, settings: &AnalogSettings) -
         crate::displayed_item::AnalogYAxisScale::Viewport => (cmds.viewport_min, cmds.viewport_max),
         crate::displayed_item::AnalogYAxisScale::Global => (cmds.global_min, cmds.global_max),
     };
+
+    // Handle all-NaN case: min=INFINITY, max=NEG_INFINITY
+    if !min.is_finite() || !max.is_finite() || min > max {
+        return (-0.5, 0.5);
+    }
+
     // Avoid division by zero
     if (min - max).abs() < f64::EPSILON {
         (min - 0.5, max + 0.5)
