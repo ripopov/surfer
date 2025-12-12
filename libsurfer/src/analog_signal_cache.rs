@@ -24,11 +24,11 @@
 //!   100M Samples ~ 2.39 GB
 //!
 
-use std::borrow::Cow;
-use std::sync::OnceLock;
-
 use crate::translation::DynTranslator;
 use crate::wave_container::{AnalogCacheKey, SignalAccessor, VariableMeta};
+use num::ToPrimitive;
+use std::borrow::Cow;
+use std::sync::OnceLock;
 use surfer_translation_types::{ValueKind, ValueRepr, VariableValue};
 
 /// Quiet NaN representing undefined (X) values.
@@ -382,6 +382,14 @@ pub fn translate_to_numeric(
     parse_numeric_value(&value_str, &translator.name())
 }
 
+fn biguint_to_f64(v: &num::BigUint) -> f64 {
+    // For small values that fit in u64, use direct conversion
+    if let Some(val) = v.to_u64() {
+        return val as f64;
+    }
+    v.to_string().parse::<f64>().unwrap_or(f64::INFINITY)
+}
+
 fn parse_numeric_value(s: &str, translator_name: &str) -> Option<f64> {
     let s = s.trim();
     let translator_lower = translator_name.to_lowercase();
@@ -391,18 +399,19 @@ fn parse_numeric_value(s: &str, translator_name: &str) -> Option<f64> {
             .strip_prefix("0x")
             .or_else(|| s.strip_prefix("0X"))
             .unwrap_or(s);
-        u64::from_str_radix(hex_str, 16).ok().map(|v| v as f64)
+        num::BigUint::parse_bytes(hex_str.as_bytes(), 16).map(|v| biguint_to_f64(&v))
     } else if translator_lower.contains("bin") {
         let bin_str = s
             .strip_prefix("0b")
             .or_else(|| s.strip_prefix("0B"))
             .unwrap_or(s);
-        u64::from_str_radix(bin_str, 2).ok().map(|v| v as f64)
+        num::BigUint::parse_bytes(bin_str.as_bytes(), 2).map(|v| biguint_to_f64(&v))
     } else {
         if let Ok(v) = s.parse::<f64>() {
             return Some(v);
         }
-        u64::from_str_radix(s, 16).ok().map(|v| v as f64)
+        // Fallback: try parsing as hex for non-decimal strings
+        num::BigUint::parse_bytes(s.as_bytes(), 16).map(|v| biguint_to_f64(&v))
     }
 }
 
@@ -859,6 +868,32 @@ mod tests {
         assert_eq!(parse_numeric_value("xyz", "Hex"), None);
         assert_eq!(parse_numeric_value("invalid", "Unsigned"), None);
         assert_eq!(parse_numeric_value("12", "Binary"), None);
+
+        // 128-bit max value in hex: 2^128 - 1 = 340282366920938463463374607431768211455
+        let hex_128bit = "ffffffffffffffffffffffffffffffff";
+        let result = parse_numeric_value(hex_128bit, "Hexadecimal");
+        assert_eq!(result, Some(3.402823669209385e38));
+
+        // 256-bit max value in hex: 2^256 - 1
+        let hex_256bit = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+        let result = parse_numeric_value(hex_256bit, "Hex");
+        assert_eq!(result, Some(1.157920892373162e77));
+
+        // Large binary value (128 bits): same as hex_128bit
+        let bin_128bit = "11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111";
+        let result = parse_numeric_value(bin_128bit, "Binary");
+        assert_eq!(result, Some(3.402823669209385e38));
+
+        // 64-bit max value in hex: 2^64 - 1 = 18446744073709551615
+        let hex_64bit = "ffffffffffffffff";
+        let result = parse_numeric_value(hex_64bit, "Hexadecimal");
+        assert_eq!(result, Some(1.8446744073709552e19));
+
+        // Hex and Unsigned should produce same result for same numeric value
+        // 128-bit value as decimal string (from Unsigned translator)
+        let decimal_128bit = "340282366920938463463374607431768211455";
+        let result = parse_numeric_value(decimal_128bit, "Unsigned");
+        assert_eq!(result, Some(3.402823669209385e38));
     }
 
     #[test]

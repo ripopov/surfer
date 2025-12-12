@@ -3023,3 +3023,45 @@ snapshot_ui_with_file_and_msgs! {analog_waveform_ieee_inf_nan, "examples/analog_
         4.0,
     )
 ]}
+
+snapshot_ui_with_file_and_msgs! {analog_waveform_reg1024, "examples/analog.vcd", [
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.reg1024"),
+        VariableRef::from_hierarchy_string("top.reg1024"),
+    ]),
+    Message::AddTimeLine(None),
+
+    Message::VariableFormatChange(
+        MessageTarget::Explicit(DisplayedFieldRef {
+            item: DisplayedItemRef(1),
+            field: vec![],
+        }),
+        String::from("Unsigned"),
+    ),
+
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        Some(crate::displayed_item::AnalogSettings::interpolated_global()),
+    ),
+
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(1)),
+        Some(crate::displayed_item::AnalogSettings::step_global()),
+    ),
+
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        8.0,
+    ),
+
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(1)),
+        8.0,
+    ),
+
+    Message::ZoomToRange {
+        start: BigInt::from(0),
+        end: BigInt::from(11000),
+        viewport_idx: 0
+    },
+]}

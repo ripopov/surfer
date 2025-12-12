@@ -769,6 +769,20 @@ fn render_with_strategy<S: RenderStrategy>(
     }
 }
 
+/// Format amplitude value for display, using scientific notation for extreme values.
+fn format_amplitude_value(value: f64) -> String {
+    const SCIENTIFIC_THRESHOLD_HIGH: f64 = 1e4;
+    const SCIENTIFIC_THRESHOLD_LOW: f64 = 1e-3;
+    let abs_val = value.abs();
+    if abs_val == 0.0 {
+        "0.00".to_string()
+    } else if !(SCIENTIFIC_THRESHOLD_LOW..SCIENTIFIC_THRESHOLD_HIGH).contains(&abs_val) {
+        format!("{:.2e}", value)
+    } else {
+        format!("{:.2}", value)
+    }
+}
+
 fn draw_amplitude_labels(render_ctx: &RenderContext, frame_width: f32, ctx: &mut DrawingContext) {
     const SPLIT_LABEL_HEIGHT_THRESHOLD: f32 = 2.0;
     const LABEL_ALPHA: f32 = 0.7;
@@ -781,7 +795,11 @@ fn draw_amplitude_labels(render_ctx: &RenderContext, frame_width: f32, ctx: &mut
     let font = egui::FontId::monospace(text_size);
 
     if render_ctx.height_scale < SPLIT_LABEL_HEIGHT_THRESHOLD {
-        let combined_text = format!("[{:.2}, {:.2}]", render_ctx.min_val, render_ctx.max_val);
+        let combined_text = format!(
+            "[{}, {}]",
+            format_amplitude_value(render_ctx.min_val),
+            format_amplitude_value(render_ctx.max_val)
+        );
         let galley = ctx
             .painter
             .layout_no_wrap(combined_text.clone(), font.clone(), text_color);
@@ -806,8 +824,8 @@ fn draw_amplitude_labels(render_ctx: &RenderContext, frame_width: f32, ctx: &mut
             text_color,
         );
     } else {
-        let max_text = format!("{:.2}", render_ctx.max_val);
-        let min_text = format!("{:.2}", render_ctx.min_val);
+        let max_text = format_amplitude_value(render_ctx.max_val);
+        let min_text = format_amplitude_value(render_ctx.min_val);
 
         let max_galley = ctx
             .painter
