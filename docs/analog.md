@@ -77,65 +77,25 @@ a custom signal accessor, version-based invalidation for live data, and updates 
 
 ### Signal Representation for Analog Rendering
 
-Analog signals are represented using two complementary data structures:
+Two complementary structures handle analog signals:
 
-1. **`AnalogSignalCache`** (`analog_signal_cache.rs`): A pre-computed cache containing:
-   - `SignalRMQ`: Range Min/Max Query structure for O(1) range queries
-   - `global_min` / `global_max`: Signal bounds across entire time range
+1. **`AnalogSignalCache`** (`analog_signal_cache.rs`): Pre-computed cache with a Range Min/Max Query structure for O(1) range queries, plus global signal bounds.
 
-2. **`AnalogDrawingCommands`** (`drawing_canvas.rs`): Per-frame drawing instructions containing:
-   - `viewport_min` / `viewport_max`: Y-axis bounds for visible region
-   - `global_min` / `global_max`: Copied from cache for global scaling mode
-   - `values`: Vector of `AnalogDrawingCommand` (flat spans or per-pixel ranges)
-   - `min_valid_pixel` / `max_valid_pixel`: Clipping bounds
+2. **`AnalogDrawingCommands`** (`drawing_canvas.rs`): Per-frame drawing instructions with viewport/global Y-axis bounds, clipping bounds, and a vector of draw commands.
+  Pixel positions use f32 to support samples outside viewport (negative or beyond width) for correct edge interpolation.
 
-   Note: `AnalogDrawingCommand` uses `f32` for pixel positions (`start_px`, `end_px`) to support samples outside viewport bounds (negative values for samples before viewport, values > view_width for samples after viewport). This enables correct interpolation at viewport edges.
-
-Signal values are converted from raw bit vectors to `f64` via the translator system. The `parse_numeric_value()` function handles format-specific parsing (hex, binary, decimal, float) based on the translator name.
-
-**Non-Finite Value Handling**: Non-finite floating point values are handled specially:
-
-1. **NaN values** (undefined/X and high-impedance/Z from HDL):
-   - Encoded as quiet NaNs with distinguishing payloads:
-   - `NAN_UNDEF` (0x7FF8_0000_0000_0000): Represents undefined (X) values
-   - `NAN_HIGHIMP` (0x7FF8_0000_0000_0001): Represents high-impedance (Z) values
-   - Use `is_nan_highimp()` to distinguish between them
-
-2. **Infinity values** (Inf/-Inf):
-   - Treated the same as NaN for min/max range computation
-
-3. **Range computation invariant**:
-   - `MinMax.min` and `MinMax.max` always contain finite values (or identity values if all values are non-finite)
-   - `MinMax.has_non_finite` is true if any non-finite value was encountered in the range
-   - When querying ranges with neon-finite values, renderer receives `NAN_UNDEF` signal to draw undefined regions
+Signal values are converted to f64 via translators. Non-finite values get special handling: undefined (X) and high-impedance (Z) are encoded as quiet NaNs with distinguishing payloads (`NAN_UNDEF`, `NAN_HIGHIMP`).
+Infinity is treated like NaN. Range queries always return finite min/max values, with a flag indicating if non-finite values were present.
 
 ### Analog Cache Architecture
 
 The cache system uses reference counting with `Arc<OnceLock<>>` for automatic lifecycle management.
 
-**Per-Variable State** (`displayed_item.rs`):
-```rust
-pub struct AnalogVarState {
-    pub settings: AnalogSettings,          // Render style + Y-axis scale
-    pub cache: Option<Arc<AnalogCacheEntry>>,  // Shared cache reference
-}
-```
+**Per-Variable State** (`displayed_item.rs`): `AnalogVarState` contains render settings and an optional shared cache reference. `DisplayedVariable.analog` is `None` when disabled, `Some` when enabled. Multiple variables with the same signal+translator share the same cache via `Arc`.
 
-- `DisplayedVariable.analog: Option<AnalogVarState>` — `None` = disabled, `Some` = enabled
-- Multiple variables with the same signal+translator share the same `Arc<AnalogCacheEntry>`
+**Cache Entry** (`analog_signal_cache.rs`): `AnalogCacheEntry` wraps the cache in `OnceLock` (set by worker thread), stores the cache key and a generation number for staleness detection.
 
-**Cache Entry** (`analog_signal_cache.rs`):
-```rust
-pub struct AnalogCacheEntry {
-    inner: OnceLock<AnalogSignalCache>,  // Set by worker thread
-    pub cache_key: AnalogCacheKey,        // (SignalRef, translator_name)
-    pub generation: u64,                  // For staleness detection
-}
-```
-
-**Cache Key**: `(wellen::SignalRef, String)` where:
-- `SignalId` is the canonical signal identity (handles variable aliases pointing to the same signal)
-- `String` is the translator name (different translators produce different numeric interpretations)
+**Cache Key**: `(SignalId, String)` — the signal identity (handles aliases) and translator name (different translators produce different numeric interpretations).
 
 **Generation-Based Invalidation**: `WaveData.cache_generation` is incremented on waveform reload. Caches with mismatched generation are considered stale and rebuilt.
 
@@ -162,30 +122,11 @@ Cache construction runs on background threads to prevent UI blocking:
 
 The `CommandBuilder` struct in `analog_renderer.rs` generates minimal draw instructions using a hybrid approach that combines pixel-by-pixel iteration (for correct Range commands in dense regions) with signal-centric positioning (for correct interpolation at viewport edges).
 
-**Algorithm:**
-```
-1. add_before_viewport_sample(): Query sample at viewport start
-   - If sample is before viewport (negative pixel), record its position for interpolation
-
-2. iterate_pixels(): For each pixel in [0, end_px]:
-    t0, t1 = time range for this pixel
-
-    if signal is flat (no change in [t0, t1]):
-        extend or emit Flat command
-        jump ahead to next_change pixel (optimization)
-    else:
-        query cache for (min, max) in [t0, t1)
-        emit Range command
-
-3. add_after_viewport_sample(): Query sample after viewport end
-   - If there's a transition after viewport, include it for right-edge interpolation
-
-4. finalize(): Flush pending commands, ensuring first command starts from before-viewport sample
-```
+**Algorithm:** Query sample before viewport for left-edge interpolation. Iterate pixels: for each pixel's time range, emit Flat if signal is constant (with jump-ahead optimization), or Range if multiple transitions occur. Query sample after viewport for right-edge interpolation. Finalize by flushing pending commands.
 
 **Command Types:**
-- `CommandKind::Flat { value, end_px }`: Constant value spanning pixels (end_px is f32, can extend beyond viewport)
-- `CommandKind::Range { min, max }`: Pixel with multiple transitions, draw vertical bar
+- `Flat`: Constant value spanning pixels, stores start/end positions and values (f32 positions can extend beyond viewport for edge interpolation)
+- `Range`: Pixel with multiple transitions, stores position and min/max values for anti-aliased vertical bar
 
 **Why Hybrid Approach**: The algorithm must handle two distinct scenarios:
 - **Dense regions** (many transitions per pixel): Requires pixel-by-pixel iteration to correctly detect and emit Range commands for anti-aliasing
