@@ -20,7 +20,9 @@ use crate::translation::{DynTranslator, TranslatorList, VariableInfoExt};
 use crate::variable_name_type::VariableNameType;
 use crate::view::ItemDrawingInfo;
 use crate::viewport::Viewport;
-use crate::wave_container::{ScopeRef, VariableMeta, VariableRef, VariableRefExt, WaveContainer};
+use crate::wave_container::{
+    AnalogCacheKey, ScopeRef, VariableMeta, VariableRef, VariableRefExt, WaveContainer,
+};
 use crate::wave_source::{WaveFormat, WaveSource};
 use crate::wellen::LoadSignalsCmd;
 use ftr_parser::types::Transaction;
@@ -79,6 +81,11 @@ pub struct WaveData {
     /// Generation counter for analog cache invalidation on waveform reload.
     #[serde(skip)]
     pub cache_generation: u64,
+    /// Registry of in-flight analog cache builds for sharing.
+    /// Cleared on waveform reload when generation changes.
+    #[serde(skip)]
+    pub inflight_caches:
+        HashMap<AnalogCacheKey, std::sync::Arc<crate::analog_signal_cache::AnalogCacheEntry>>,
 }
 
 fn select_preferred_translator(var: &VariableMeta, translators: &TranslatorList) -> String {
@@ -197,6 +204,7 @@ impl WaveData {
             total_height: 0.,
             old_num_timestamps,
             cache_generation: self.cache_generation + 1, // Invalidate all existing caches
+            inflight_caches: HashMap::new(),
         };
 
         new_wavedata.update_metadata(translators);
@@ -956,7 +964,6 @@ impl WaveData {
         let accessor = wave_container.signal_accessor(entry.cache_key.0).ok()?;
 
         let sender_clone = sender.clone();
-        crate::ANALOG_CACHES_BUILDING.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         crate::async_util::perform_work(move || {
             let result = crate::analog_signal_cache::AnalogSignalCache::build(
                 accessor,

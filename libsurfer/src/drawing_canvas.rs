@@ -86,24 +86,25 @@ pub struct DigitalDrawingCommands {
     pub values: Vec<(f32, DrawnRegion)>,
 }
 
-pub struct AnalogDrawingCommands {
-    /// Viewport min/max for the visible signal range (used for Y-axis scaling)
-    pub viewport_min: f64,
-    pub viewport_max: f64,
-
-    /// Global min/max across entire signal (used for global Y-axis scaling)
-    pub global_min: f64,
-    pub global_max: f64,
-
-    /// Per-pixel drawing commands with flat spans and ranges
-    pub values: Vec<AnalogDrawingCommand>,
-
-    /// Pixel position of timestamp 0 (start of signal data).
-    pub min_valid_pixel: f32,
-    /// Pixel position of last timestamp (end of signal data).
-    pub max_valid_pixel: f32,
-
-    pub analog_settings: AnalogSettings,
+pub enum AnalogDrawingCommands {
+    /// Cache is still being built
+    Loading,
+    /// Cache is ready with drawing data
+    Ready {
+        /// Viewport min/max for the visible signal range (used for Y-axis scaling)
+        viewport_min: f64,
+        viewport_max: f64,
+        /// Global min/max across entire signal (used for global Y-axis scaling)
+        global_min: f64,
+        global_max: f64,
+        /// Per-pixel drawing commands with flat spans and ranges
+        values: Vec<AnalogDrawingCommand>,
+        /// Pixel position of timestamp 0 (start of signal data).
+        min_valid_pixel: f32,
+        /// Pixel position of last timestamp (end of signal data).
+        max_valid_pixel: f32,
+        analog_settings: AnalogSettings,
+    },
 }
 
 pub struct TxDrawingCommands {

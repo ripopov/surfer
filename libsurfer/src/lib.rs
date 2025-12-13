@@ -129,10 +129,6 @@ use crate::wellen::{HeaderResult, convert_format};
 /// things until program exit
 pub(crate) static OUTSTANDING_TRANSACTIONS: AtomicUsize = AtomicUsize::new(0);
 
-/// Counter for analog caches currently being built asynchronously.
-/// Incremented when spawning a cache builder, decremented when AnalogCacheBuilt is handled.
-pub static ANALOG_CACHES_BUILDING: AtomicUsize = AtomicUsize::new(0);
-
 lazy_static! {
     pub static ref EGUI_CONTEXT: RwLock<Option<Arc<egui::Context>>> = RwLock::new(None);
 }
@@ -2006,7 +2002,19 @@ impl SystemState {
                     return None;
                 }
 
-                // Try to share from another variable (O(n) scan - only during cache build)
+                // Try to share from in-flight builds first (handles removed-but-still-building case)
+                if let Some(entry) = waves.inflight_caches.get(&cache_key)
+                    && entry.generation == generation
+                {
+                    if let DisplayedItem::Variable(var) =
+                        waves.displayed_items.get_mut(&display_id)?
+                    {
+                        var.analog.as_mut()?.cache = Some(entry.clone());
+                    }
+                    return None; // Shared from in-flight build
+                }
+
+                // Try to share from another displayed variable (O(n) scan - only during cache build)
                 let existing = waves
                     .displayed_items
                     .values()
@@ -2037,11 +2045,18 @@ impl SystemState {
                     cache_key.clone(),
                     generation,
                 ));
+
                 if let DisplayedItem::Variable(var) = waves.displayed_items.get_mut(&display_id)? {
                     var.analog.as_mut()?.cache = Some(entry.clone());
                 }
 
                 let translator = self.translators.clone_translator(&cache_key.1);
+
+                // Track in-flight build for sharing with other variables
+                waves
+                    .inflight_caches
+                    .insert(cache_key.clone(), entry.clone());
+
                 waves.build_analog_cache_async(
                     entry,
                     &variable_ref,
@@ -2051,7 +2066,10 @@ impl SystemState {
             }
             Message::AnalogCacheBuilt { entry, result } => {
                 OUTSTANDING_TRANSACTIONS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-                ANALOG_CACHES_BUILDING.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                // Remove from in-flight registry (may already be gone if generation changed)
+                if let Some(waves) = self.user.waves.as_mut() {
+                    waves.inflight_caches.remove(&entry.cache_key);
+                }
                 match result {
                     Ok(cache) => {
                         entry.set(cache);

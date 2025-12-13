@@ -62,17 +62,32 @@ pub(crate) fn variable_analog_draw_commands(
             match entry.get() {
                 Some(cache) => cache,
                 None => {
-                    // Cache is building, skip rendering this frame
-                    return None;
+                    // Cache is building, return loading state
+                    let mut local_commands = HashMap::new();
+                    local_commands.insert(
+                        vec![],
+                        DrawingCommands::Analog(AnalogDrawingCommands::Loading),
+                    );
+                    return Some(VariableDrawCommands {
+                        clock_edges: vec![],
+                        display_id,
+                        local_commands,
+                        local_msgs: vec![],
+                    });
                 }
             }
         }
         _ => {
-            // Cache missing or stale - request build
+            // Cache missing or stale - request build and show loading
+            let mut local_commands = HashMap::new();
+            local_commands.insert(
+                vec![],
+                DrawingCommands::Analog(AnalogDrawingCommands::Loading),
+            );
             return Some(VariableDrawCommands {
                 clock_edges: vec![],
                 display_id,
-                local_commands: HashMap::new(),
+                local_commands,
                 local_msgs: vec![Message::BuildAnalogCache {
                     display_id,
                     cache_key,
@@ -110,15 +125,35 @@ pub fn draw_analog(
     frame_width: f32,
     ctx: &mut DrawingContext,
 ) {
-    let analog_settings = &analog_commands.analog_settings;
+    let AnalogDrawingCommands::Ready {
+        viewport_min,
+        viewport_max,
+        global_min,
+        global_max,
+        values,
+        min_valid_pixel,
+        max_valid_pixel,
+        analog_settings,
+    } = analog_commands
+    else {
+        draw_building_indicator(offset, height_scaling_factor, frame_width, ctx);
+        return;
+    };
 
-    let (min_val, max_val) = select_value_range(analog_commands, analog_settings);
+    let (min_val, max_val) = select_value_range(
+        *viewport_min,
+        *viewport_max,
+        *global_min,
+        *global_max,
+        analog_settings,
+    );
 
     let render_ctx = RenderContext::new(
         color,
         min_val,
         max_val,
-        analog_commands,
+        *min_valid_pixel,
+        *max_valid_pixel,
         offset,
         height_scaling_factor,
         ctx,
@@ -128,21 +163,54 @@ pub fn draw_analog(
     match analog_settings.render_style {
         crate::displayed_item::AnalogRenderStyle::Step => {
             let mut strategy = StepStrategy::default();
-            render_with_strategy(&analog_commands.values, &render_ctx, &mut strategy, ctx);
+            render_with_strategy(values, &render_ctx, &mut strategy, ctx);
         }
         crate::displayed_item::AnalogRenderStyle::Interpolated => {
             let mut strategy = InterpolatedStrategy::default();
-            render_with_strategy(&analog_commands.values, &render_ctx, &mut strategy, ctx);
+            render_with_strategy(values, &render_ctx, &mut strategy, ctx);
         }
     }
 
     draw_amplitude_labels(&render_ctx, frame_width, ctx);
 }
 
-fn select_value_range(cmds: &AnalogDrawingCommands, settings: &AnalogSettings) -> (f64, f64) {
+/// Draw a building indicator with animated dots while analog cache is being built.
+fn draw_building_indicator(
+    offset: f32,
+    height_scaling_factor: f32,
+    frame_width: f32,
+    ctx: &mut DrawingContext,
+) {
+    // Animate dots: cycle through ".", "..", "..." every 333ms
+    let elapsed = ctx.painter.ctx().input(|i| i.time);
+    let dot_index = (elapsed / 0.333) as usize % 3;
+    let text = ["Building.  ", "Building.. ", "Building..."][dot_index];
+
+    let text_size = ctx.cfg.text_size;
+    let row_height = ctx.cfg.line_height * height_scaling_factor;
+    let center_y = offset + row_height / 2.0;
+    let center_x = frame_width / 2.0;
+    let pos = (ctx.to_screen)(center_x, center_y);
+
+    ctx.painter.text(
+        pos,
+        egui::Align2::CENTER_CENTER,
+        text,
+        egui::FontId::monospace(text_size),
+        ctx.theme.foreground.gamma_multiply(0.6),
+    );
+}
+
+fn select_value_range(
+    viewport_min: f64,
+    viewport_max: f64,
+    global_min: f64,
+    global_max: f64,
+    settings: &AnalogSettings,
+) -> (f64, f64) {
     let (min, max) = match settings.y_axis_scale {
-        crate::displayed_item::AnalogYAxisScale::Viewport => (cmds.viewport_min, cmds.viewport_max),
-        crate::displayed_item::AnalogYAxisScale::Global => (cmds.global_min, cmds.global_max),
+        crate::displayed_item::AnalogYAxisScale::Viewport => (viewport_min, viewport_max),
+        crate::displayed_item::AnalogYAxisScale::Global => (global_min, global_max),
     };
 
     // Handle all-NaN case: min=INFINITY, max=NEG_INFINITY
@@ -460,7 +528,7 @@ impl<'a> CommandBuilder<'a> {
             *start_px = (*start_px).min(before);
         }
 
-        AnalogDrawingCommands {
+        AnalogDrawingCommands::Ready {
             viewport_min: self.output.viewport_min,
             viewport_max: self.output.viewport_max,
             global_min: self.cache.global_min,
@@ -553,11 +621,13 @@ pub struct RenderContext {
 }
 
 impl RenderContext {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         color: Color32,
         min_val: f64,
         max_val: f64,
-        analog_commands: &AnalogDrawingCommands,
+        min_valid_pixel: f32,
+        max_valid_pixel: f32,
         offset: f32,
         height_scale: f32,
         ctx: &DrawingContext,
@@ -566,8 +636,8 @@ impl RenderContext {
             stroke: Stroke::new(ctx.theme.linewidth, color),
             min_val,
             max_val,
-            min_valid_pixel: analog_commands.min_valid_pixel,
-            max_valid_pixel: analog_commands.max_valid_pixel,
+            min_valid_pixel,
+            max_valid_pixel,
             offset,
             height_scale,
             line_height: ctx.cfg.line_height,

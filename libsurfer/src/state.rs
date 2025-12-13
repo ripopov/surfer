@@ -258,6 +258,7 @@ impl SystemState {
                             old_num_timestamps: None,
                             graphics: HashMap::new(),
                             cache_generation: 0,
+                            inflight_caches: HashMap::new(),
                         },
                         None,
                     ),
@@ -316,6 +317,7 @@ impl SystemState {
             old_num_timestamps: None,
             graphics: HashMap::new(),
             cache_generation: 0,
+            inflight_caches: HashMap::new(),
         };
 
         self.invalidate_draw_commands();
@@ -445,7 +447,10 @@ impl SystemState {
 
     /// Returns true if no analog caches are currently being built
     pub fn analog_caches_ready(&self) -> bool {
-        crate::ANALOG_CACHES_BUILDING.load(std::sync::atomic::Ordering::SeqCst) == 0
+        self.user
+            .waves
+            .as_ref()
+            .is_none_or(|w| w.inflight_caches.is_empty())
     }
 
     /// Returns the current canvas state
