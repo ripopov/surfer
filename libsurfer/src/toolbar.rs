@@ -136,6 +136,17 @@ impl SystemState {
                 Message::OpenCommandFileDialog,
                 true,
             );
+            if self.user.surver_url.is_some() {
+                ui.separator();
+                add_toolbar_button(
+                    ui,
+                    msgs,
+                    icons::FILE_LIST_FILL,
+                    "Select Surver file",
+                    Message::SetServerFileWindowVisible(true),
+                    true,
+                );
+            }
             ui.separator();
             add_toolbar_button(
                 ui,

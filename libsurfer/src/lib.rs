@@ -32,6 +32,7 @@ pub mod message;
 pub mod mousegestures;
 pub mod overview;
 pub mod remote;
+pub mod server_file_window;
 pub mod state;
 pub mod state_file_io;
 pub mod state_util;
@@ -553,6 +554,20 @@ impl SystemState {
                     }
                 }
             }
+            Message::SetServerFileWindowVisible(visibility) => {
+                self.user.show_server_file_window = visibility
+            }
+            Message::LoadAndSetSurverFileIndex(file_index, load_options) => {
+                // Disable file window in case executing from command/test
+                self.user.show_server_file_window = false;
+                if self.user.selected_server_file_index != file_index {
+                    self.user.selected_server_file_index = file_index;
+                    *self.surver_selected_file.borrow_mut() = file_index;
+                    if let Some(url) = self.user.surver_url.as_ref() {
+                        self.load_wave_from_url(url.to_string(), load_options);
+                    }
+                }
+            }
             Message::RemoveItemByIndex(vidx) => {
                 let waves = self.user.waves.as_ref();
                 let item_ref = waves
@@ -1038,15 +1053,21 @@ impl SystemState {
                 self.expand_parameter_section = true;
             }
             Message::LoadFile(filename, load_options) => {
+                self.user.selected_server_file_index = None;
+                *self.surver_selected_file.borrow_mut() = None;
                 #[cfg(not(target_arch = "wasm32"))]
                 self.load_from_file(filename, load_options).ok();
                 #[cfg(target_arch = "wasm32")]
                 error!("Cannot load file from path in WASM");
             }
             Message::LoadWaveformFileFromUrl(url, load_options) => {
+                self.user.selected_server_file_index = None;
+                *self.surver_selected_file.borrow_mut() = None;
                 self.load_wave_from_url(url, load_options);
             }
             Message::LoadFromData(data, load_options) => {
+                self.user.selected_server_file_index = None;
+                *self.surver_selected_file.borrow_mut() = None;
                 self.load_from_data(data, load_options).ok();
             }
             #[cfg(feature = "python")]
@@ -1083,7 +1104,44 @@ impl SystemState {
             }
             Message::SetupCxxrtl(kind) => self.connect_to_cxxrtl(kind, false),
             Message::SurferServerStatus(_start, server, status) => {
-                self.server_status_to_progress(server, status);
+                self.user.surver_file_infos = Some(status.file_infos.clone());
+                info!(
+                    "Received surfer server status from {server}. {} files available.",
+                    status.file_infos.len()
+                );
+                self.user.surver_url = Some(server.clone());
+                if status.file_infos.is_empty() {
+                    warn!("Received surfer server status with no file infos");
+                    return None;
+                }
+                if self.user.selected_server_file_index.is_none() {
+                    if status.file_infos.len() == 1 {
+                        // if only one file is available, select it automatically
+                        self.user.selected_server_file_index = Some(0);
+                        *self.surver_selected_file.borrow_mut() = Some(0);
+                        info!(
+                            "Only one file available on server {}, loading it automatically",
+                            server
+                        );
+                        self.load_wave_from_url(server.clone(), LoadOptions::Clear);
+                    } else {
+                        // if no file is selected, show the server file selection window
+                        self.user.show_server_file_window = true;
+                        self.progress_tracker = None;
+                    }
+                }
+
+                if let Some(file_index) = self.user.selected_server_file_index {
+                    if file_index >= status.file_infos.len() {
+                        warn!(
+                            "Selected server file index {file_index} is out of bounds ({} files available)",
+                            status.file_infos.len()
+                        );
+                        return None;
+                    } else {
+                        self.server_status_to_progress(server, &status.file_infos[file_index]);
+                    }
+                }
             }
             Message::FileDropped(dropped_file) => {
                 self.load_from_dropped(dropped_file)
@@ -1128,7 +1186,7 @@ impl SystemState {
                         // start parsing of the body
                         self.load_wave_body(source, header.body, header.body_len, shared_hierarchy);
                     }
-                    HeaderResult::Remote(hierarchy, file_format, server) => {
+                    HeaderResult::Remote(hierarchy, file_format, server, file_index) => {
                         // register waveform as loaded (but with no variable info yet!)
                         let new_waves = Box::new(WaveContainer::new_remote_waveform(
                             server.clone(),
@@ -1141,7 +1199,11 @@ impl SystemState {
                             load_options,
                         );
                         // body is already being parsed on the server, we need to request the time table though
-                        get_time_table_from_server(self.channels.msg_sender.clone(), server);
+                        get_time_table_from_server(
+                            self.channels.msg_sender.clone(),
+                            server,
+                            file_index,
+                        );
                     }
                 }
             }

@@ -29,6 +29,7 @@ use egui::{
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use surfer_translation_types::Translator;
+use surver::SurverFileInfo;
 use tracing::{error, info, trace, warn};
 
 /// The parts of the program state that need to be serialized when loading/saving state
@@ -111,6 +112,14 @@ pub struct UserState {
     pub(crate) animation_enabled: Option<bool>,
     #[serde(default)]
     pub(crate) use_dinotrace_style: Option<bool>,
+    #[serde(skip, default)]
+    pub(crate) show_server_file_window: bool,
+    #[serde(skip, default)]
+    pub(crate) selected_server_file_index: Option<usize>,
+    #[serde(skip, default)]
+    pub(crate) surver_file_infos: Option<Vec<SurverFileInfo>>,
+    #[serde(skip, default)]
+    pub(crate) surver_url: Option<String>,
 
     // Path of last saved-to state file
     // Do not serialize as this causes a few issues and doesn't help:

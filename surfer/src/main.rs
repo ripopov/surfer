@@ -161,7 +161,7 @@ mod main_impl {
             let bind_addr = bind_address.unwrap_or(config.server.bind_address);
             let port = port.unwrap_or(config.server.port);
 
-            let res = runtime.block_on(surver::server_main(port, bind_addr, token, file, None));
+            let res = runtime.block_on(surver::server_main(port, bind_addr, token, &[file], None));
             return res;
         }
 

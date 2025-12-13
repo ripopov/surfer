@@ -1,16 +1,19 @@
 //! Code for the `surver` executable.
 use clap::Parser;
 use eyre::Result;
-use std::io::stdout;
+use std::{
+    fs::File,
+    io::{BufRead, BufReader, stdout},
+};
 use tokio::runtime::Builder;
 use tracing::subscriber::set_global_default;
 use tracing_subscriber::{EnvFilter, Layer, Registry, fmt, layer::SubscriberExt};
 
-#[derive(clap::Parser, Default)]
+#[derive(Parser, Default)]
 #[command(version = concat!(env!("CARGO_PKG_VERSION"), " (git: ", env!("VERGEN_GIT_DESCRIBE"), ")"), about)]
 struct Args {
-    /// Waveform file in VCD, FST, or GHW format.
-    wave_file: String,
+    #[clap(flatten)]
+    file_group: FileGroup,
     /// Port on which server will listen
     #[clap(long)]
     port: Option<u16>,
@@ -20,6 +23,16 @@ struct Args {
     /// Token used by the client to authenticate to the server
     #[clap(long)]
     token: Option<String>,
+}
+
+#[derive(Debug, Default, clap::Args)]
+#[group(required = true)]
+pub struct FileGroup {
+    /// Waveform files in VCD, FST, or GHW format.
+    wave_files: Vec<String>,
+    /// File with one wave form file name per line
+    #[clap(long)]
+    file: Option<String>,
 }
 
 /// Starts the logging and error handling. Can be used by unittests to get more insights.
@@ -49,6 +62,21 @@ fn main() -> Result<()> {
     // parse arguments
     let args = Args::parse();
 
+    // Handle file lists
+    let mut file_names = args.file_group.wave_files.clone();
+
+    // Append file names from file
+    if let Some(filename) = args.file_group.file {
+        let file = File::open(filename).expect("no such file");
+        let buf = BufReader::new(file);
+        let mut files = buf
+            .lines()
+            .map(|l| l.expect("Could not parse line"))
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<String>>();
+        file_names.append(&mut files);
+    }
+
     // Use CLI override if provided, otherwise use hardcoded defaults
     let bind_addr = args.bind_address.unwrap_or_else(|| "127.0.0.1".to_string());
     let port = args.port.unwrap_or(8911);
@@ -57,7 +85,7 @@ fn main() -> Result<()> {
         port,
         bind_addr,
         args.token,
-        args.wave_file,
+        &file_names,
         None,
     ))
 }

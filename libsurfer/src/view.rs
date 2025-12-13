@@ -342,6 +342,10 @@ impl SystemState {
             self.draw_load_url(ctx, &mut msgs);
         }
 
+        if self.user.show_server_file_window {
+            self.draw_surver_file_window(ctx, &mut msgs);
+        }
+
         if self.show_statusbar() {
             self.add_statusbar_panel(ctx, &self.user.waves, &mut msgs);
         }

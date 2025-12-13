@@ -84,9 +84,15 @@ async fn get_status(server: String) -> Result<SurverStatus> {
     Ok(status)
 }
 
-async fn reload(server: String) -> std::result::Result<SurverStatus, ReloadError> {
+async fn reload(
+    server: String,
+    file_index: usize,
+) -> std::result::Result<SurverStatus, ReloadError> {
     let client = get_client();
-    let response = client.get(format!("{server}/reload")).send().await?;
+    let response = client
+        .get(format!("{server}/{file_index}/reload"))
+        .send()
+        .await?;
     check_response(&server, &response)?;
     let status_code = response.status();
     let body = response.text().await?;
@@ -107,9 +113,12 @@ async fn reload(server: String) -> std::result::Result<SurverStatus, ReloadError
     }
 }
 
-async fn get_hierarchy(server: String) -> Result<HierarchyResponse> {
+async fn get_hierarchy(server: String, file_index: usize) -> Result<HierarchyResponse> {
     let client = get_client();
-    let response = client.get(format!("{server}/get_hierarchy")).send().await?;
+    let response = client
+        .get(format!("{server}/{file_index}/get_hierarchy"))
+        .send()
+        .await?;
     check_response(&server, &response)?;
     let compressed = response.bytes().await?;
     let raw = lz4_flex::decompress_size_prepended(&compressed)?;
@@ -125,10 +134,10 @@ async fn get_hierarchy(server: String) -> Result<HierarchyResponse> {
     })
 }
 
-async fn get_time_table(server: String) -> Result<Vec<wellen::Time>> {
+async fn get_time_table(server: String, file_index: usize) -> Result<Vec<wellen::Time>> {
     let client = get_client();
     let response = client
-        .get(format!("{server}/get_time_table"))
+        .get(format!("{server}/{file_index}/get_time_table"))
         .send()
         .await?;
     check_response(&server, &response)?;
@@ -150,13 +159,14 @@ pub async fn get_signals(
     server: String,
     signals: &[wellen::SignalRef],
     max_url_length: u16,
+    file_index: usize,
 ) -> Result<Vec<(wellen::SignalRef, wellen::Signal)>> {
     if signals.is_empty() {
         return Ok(vec![]);
     }
 
     let max_url_length = max_url_length as usize;
-    let base_url = format!("{server}/get_signals");
+    let base_url = format!("{server}/{file_index}/get_signals");
     let base_len = base_url.len();
 
     let mut all_results = Vec::with_capacity(signals.len());
@@ -246,19 +256,21 @@ pub fn get_hierarchy_from_server(
     sender: Sender<Message>,
     server: String,
     load_options: LoadOptions,
+    file_index: usize,
 ) {
     let start = web_time::Instant::now();
     let source = WaveSource::Url(server.clone());
 
     let task = async move {
-        let res = get_hierarchy(server.clone())
+        let res = get_hierarchy(server.clone(), file_index)
             .await
             .map_err(|e| anyhow!("{e:?}"))
             .with_context(|| format!("Failed to retrieve hierarchy from remote server {server}"));
 
         let msg = match res {
             Ok(h) => {
-                let header = HeaderResult::Remote(Arc::new(h.hierarchy), h.file_format, server);
+                let header =
+                    HeaderResult::Remote(Arc::new(h.hierarchy), h.file_format, server, file_index);
                 Message::WaveHeaderLoaded(start, source, load_options, header)
             }
             Err(e) => Message::Error(e),
@@ -270,12 +282,12 @@ pub fn get_hierarchy_from_server(
     spawn!(task);
 }
 
-pub fn get_time_table_from_server(sender: Sender<Message>, server: String) {
+pub fn get_time_table_from_server(sender: Sender<Message>, server: String, file_index: usize) {
     let start = web_time::Instant::now();
     let source = WaveSource::Url(server.clone());
 
     let task = async move {
-        let res = get_time_table(server.clone())
+        let res = get_time_table(server.clone(), file_index)
             .await
             .map_err(|e| anyhow!("{e:?}"))
             .with_context(|| format!("Failed to retrieve time table from remote server {server}"));
@@ -311,10 +323,15 @@ pub fn get_server_status(sender: Sender<Message>, server: String, delay_ms: u64)
     spawn!(task);
 }
 
-pub fn server_reload(sender: Sender<Message>, server: String, load_options: LoadOptions) {
+pub fn server_reload(
+    sender: Sender<Message>,
+    server: String,
+    load_options: LoadOptions,
+    file_index: usize,
+) {
     let start = web_time::Instant::now();
     let task = async move {
-        let res = reload(server.clone()).await;
+        let res = reload(server.clone(), file_index).await;
         let mut request_hierarchy = false;
 
         let msg = match res {
@@ -332,7 +349,7 @@ pub fn server_reload(sender: Sender<Message>, server: String, load_options: Load
             error!("Failed to send message: {e}");
         }
         if request_hierarchy {
-            get_hierarchy_from_server(sender, server, load_options);
+            get_hierarchy_from_server(sender, server, load_options, file_index);
         }
     };
     spawn!(task);
@@ -361,7 +378,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let signals: Vec<wellen::SignalRef> = vec![];
-            let result = get_signals("http://localhost:8080".to_string(), &signals, 1000).await;
+            let result = get_signals("http://localhost:8080".to_string(), &signals, 1000, 0).await;
 
             // Should return Ok with empty vec without making any network calls
             assert!(result.is_ok());

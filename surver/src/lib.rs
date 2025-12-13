@@ -22,17 +22,21 @@ pub const WELLEN_SURFER_DEFAULT_OPTIONS: wellen::LoadOptions = wellen::LoadOptio
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SurverStatus {
+    pub wellen_version: String,
+    pub surfer_version: String,
+    pub file_infos: Vec<SurverFileInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SurverFileInfo {
     pub bytes: u64,
     pub bytes_loaded: u64,
     pub filename: String,
-    pub wellen_version: String,
-    pub surfer_version: String,
-    pub file_format: wellen::FileFormat,
+    pub format: wellen::FileFormat,
     pub reloading: bool,
     pub last_load_ok: bool,
     // Time for last successful load, if known
     pub last_load_time: Option<u64>,
 }
-
 pub static BINCODE_OPTIONS: LazyLock<bincode::DefaultOptions> =
     LazyLock::new(bincode::DefaultOptions::new);

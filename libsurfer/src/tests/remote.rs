@@ -9,10 +9,10 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
 /// starts the remote server in a background thread
-fn start_server(bind_address: &str, port: u16, token: &str, filename: &str) -> String {
+fn start_server(bind_address: &str, port: u16, token: &str, filenames: &[String]) -> String {
     let addr = format!("http://localhost:{port}/{token}");
     let token = Some(token.to_string());
-    let filename = filename.to_string();
+    let filenames = filenames.to_vec();
     let bind_address = bind_address.to_string();
     let started = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let started_copy = started.clone();
@@ -26,7 +26,7 @@ fn start_server(bind_address: &str, port: u16, token: &str, filename: &str) -> S
             port,
             bind_address.to_string(),
             token,
-            filename,
+            &filenames,
             Some(started_copy),
         ));
     });
@@ -45,12 +45,11 @@ fn run_with_server(
     bind_address: &str,
     port: u16,
     token: &str,
-    filename: &str,
+    filenames: &[String],
     custom_messages: impl Fn() -> Vec<Message>,
 ) -> SystemState {
     // start server in a background thread
-    let url = start_server(bind_address, port, token, filename);
-
+    let url = start_server(bind_address, port, token, filenames);
     // create state and add messages as batch commands
     let mut state = SystemState::new_default_config().unwrap();
 
@@ -80,7 +79,7 @@ const DEFAULT_TOKEN: &str = "1234567890";
 const DEFAULT_IP: &str = "127.0.0.1";
 
 macro_rules! snapshot_ui_remote {
-    ($name:ident, $file:expr, $msgs:expr) => {
+    ($name:ident, $files:expr, $msgs:expr) => {
         #[test]
         fn $name() {
             let port_offset = UNIQUE_PORT_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -91,13 +90,16 @@ macro_rules! snapshot_ui_remote {
                 .unwrap()
                 .try_into()
                 .unwrap();
-            let filename = project_root.join($file);
+            let filenames = $files
+                .iter()
+                .map(|f| project_root.join(f).to_string())
+                .collect::<Vec<_>>();
             let messages = || Vec::from($msgs);
             let mut test_name = "remote/".to_string();
             test_name.push_str(stringify!($name));
 
             render_and_compare(&PathBuf::from(&test_name), || {
-                run_with_server(bind_address, port, token, filename.as_str(), messages)
+                run_with_server(bind_address, port, token, &filenames, messages)
             })
         }
     };
@@ -107,9 +109,20 @@ macro_rules! snapshot_ui_remote {
 
 snapshot_ui_remote!(
     example_vcd_renders,
-    "examples/counter.vcd",
+    ["examples/counter.vcd"],
     [
         Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
         Message::AddScope(ScopeRef::from_strs(&["tb", "dut"]), false),
+    ]
+);
+
+snapshot_ui_remote!(
+    multiple_files_open_second,
+    ["examples/counter.vcd", "examples/counter2.vcd"],
+    [
+        Message::LoadAndSetSurverFileIndex(Some(1), LoadOptions::Clear),
+        Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
+        Message::AddScope(ScopeRef::from_strs(&["tb", "dut"]), false),
+        Message::SetToolbarVisible(true),
     ]
 );

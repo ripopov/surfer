@@ -261,6 +261,8 @@ pub enum Message {
     SetTickLines(bool),
     SetVariableTooltip(bool),
     SetScopeTooltip(bool),
+    SetServerFileWindowVisible(bool),
+    LoadAndSetSurverFileIndex(Option<usize>, LoadOptions),
     ToggleFullscreen,
     StopProgressTracker,
     /// Set which time unit to use.

@@ -28,7 +28,7 @@ use crate::wellen::{
 };
 use crate::{SystemState, message::Message};
 use surver::{
-    HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, SurverStatus, WELLEN_SURFER_DEFAULT_OPTIONS,
+    HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, SurverFileInfo, WELLEN_SURFER_DEFAULT_OPTIONS,
 };
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -353,6 +353,7 @@ impl SystemState {
             _ => {
                 let sender = self.channels.msg_sender.clone();
                 let url_ = url.clone();
+                let file_index = self.user.selected_server_file_index;
                 let task = async move {
                     let maybe_response = reqwest::get(&url)
                         .map(|e| e.with_context(|| format!("Failed fetch download {url}")))
@@ -377,16 +378,30 @@ impl SystemState {
                                 // Request status
                                 get_server_status(sender.clone(), url.clone(), 0);
                                 // Request hierarchy
-                                get_hierarchy_from_server(
-                                    sender.clone(),
-                                    url.clone(),
-                                    load_options,
-                                );
+                                if let Some(file_index) = file_index {
+                                    get_hierarchy_from_server(
+                                        sender.clone(),
+                                        url.clone(),
+                                        load_options,
+                                        file_index,
+                                    );
+                                }
                             }
                             LoadOptions::KeepAvailable | LoadOptions::KeepAll => {
                                 // Request a reload (will also get status and request hierarchy if needed)
-                                info!("Reloading from surfer server at: {url}");
-                                server_reload(sender.clone(), url.clone(), load_options);
+                                if let Some(file_index) = file_index {
+                                    info!("Reloahding from surfer server at: {url}");
+                                    server_reload(
+                                        sender.clone(),
+                                        url.clone(),
+                                        load_options,
+                                        file_index,
+                                    );
+                                } else {
+                                    warn!(
+                                        "Cannot reload from surfer server without a selected file index"
+                                    );
+                                }
                             }
                         }
                         return;
@@ -469,7 +484,7 @@ impl SystemState {
     }
 
     /// uses the server status in order to display a loading bar
-    pub fn server_status_to_progress(&mut self, server: String, status: SurverStatus) {
+    pub fn server_status_to_progress(&mut self, server: String, file_info: &SurverFileInfo) {
         // once the body is loaded, we are no longer interested in the status
         let body_loaded = self
             .user
@@ -482,8 +497,8 @@ impl SystemState {
             let sender = self.channels.msg_sender.clone();
             self.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::ReadingBody(
                 source,
-                status.bytes,
-                Arc::new(AtomicU64::new(status.bytes_loaded)),
+                file_info.bytes,
+                Arc::new(AtomicU64::new(file_info.bytes_loaded)),
             )));
             // get another status update
             get_server_status(sender, server, 250);
@@ -662,12 +677,13 @@ impl SystemState {
             }
             LoadSignalPayload::Remote(server) => {
                 let task = async move {
-                    let res = crate::remote::get_signals(server.clone(), &signals, max_url_length)
-                        .await
-                        .map_err(|e| anyhow!("{e:?}"))
-                        .with_context(|| {
-                            format!("Failed to retrieve signals from remote server {server}")
-                        });
+                    let res =
+                        crate::remote::get_signals(server.clone(), &signals, max_url_length, 0)
+                            .await
+                            .map_err(|e| anyhow!("{e:?}"))
+                            .with_context(|| {
+                                format!("Failed to retrieve signals from remote server {server}")
+                            });
 
                     let msg = match res {
                         Ok(loaded) => {

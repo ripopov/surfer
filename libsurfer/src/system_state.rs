@@ -73,6 +73,7 @@ pub struct SystemState {
     pub(crate) url: RefCell<String>,
     pub(crate) command_prompt_text: RefCell<String>,
     pub(crate) last_canvas_rect: RefCell<Option<Rect>>,
+    pub(crate) surver_selected_file: RefCell<Option<usize>>,
 
     /// These items should be expanded into subfields in the next frame. Cleared after each
     /// frame
@@ -172,6 +173,10 @@ impl SystemState {
                 autoreload_files: None,
                 animation_enabled: None,
                 use_dinotrace_style: None,
+                selected_server_file_index: None,
+                show_server_file_window: false,
+                surver_file_infos: None,
+                surver_url: None,
             },
             translators,
             channels,
@@ -197,6 +202,7 @@ impl SystemState {
             items_to_expand: RefCell::new(vec![]),
             char_to_add_to_prompt: RefCell::new(None),
             scope_ref_to_expand: RefCell::new(None),
+            surver_selected_file: RefCell::new(None),
             expand_parameter_section: false,
 
             url_callback: None,
