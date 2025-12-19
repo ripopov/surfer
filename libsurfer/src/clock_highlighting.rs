@@ -41,6 +41,8 @@ pub fn draw_clock_edge_marks(
         }
         ClockHighlightType::Cycle => {
             // Process clock edges in pairs: every other cycle gets highlighted
+            let fill_color = config.theme.clock_highlight_cycle;
+
             for chunk in clock_edges.chunks(2) {
                 if let [x_start, x_end] = chunk {
                     let Pos2 {
@@ -56,7 +58,7 @@ pub fn draw_clock_edge_marks(
                             },
                         },
                         0.0,
-                        config.theme.clock_highlight_cycle,
+                        fill_color,
                     );
                 }
             }
