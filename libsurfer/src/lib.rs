@@ -884,15 +884,32 @@ impl SystemState {
             Message::ItemHeightScalingFactorChange(vidx, scale) => {
                 self.save_current_canvas(format!("Change item height scaling factor to {scale}"));
                 let waves = self.user.waves.as_mut()?;
-                let vidx = match vidx {
-                    MessageTarget::Explicit(vidx) => vidx,
-                    MessageTarget::CurrentSelection => waves.focused_item?,
-                };
-                let node = waves.items_tree.get_visible(vidx)?;
-                waves
-                    .displayed_items
-                    .entry(node.item_ref)
-                    .and_modify(|item| item.set_height_scaling_factor(scale));
+
+                match vidx {
+                    MessageTarget::Explicit(vidx) => {
+                        let node = waves.items_tree.get_visible(vidx)?;
+                        waves
+                            .displayed_items
+                            .entry(node.item_ref)
+                            .and_modify(|item| item.set_height_scaling_factor(scale));
+                    }
+                    MessageTarget::CurrentSelection => {
+                        if let Some(focused) = waves.focused_item {
+                            let node = waves.items_tree.get_visible(focused)?;
+                            waves
+                                .displayed_items
+                                .entry(node.item_ref)
+                                .and_modify(|item| item.set_height_scaling_factor(scale));
+                        }
+
+                        for node in waves.items_tree.iter_visible_selected() {
+                            waves
+                                .displayed_items
+                                .entry(node.item_ref)
+                                .and_modify(|item| item.set_height_scaling_factor(scale));
+                        }
+                    }
+                }
             }
             Message::SetAnalogSettings(vidx, new_settings) => {
                 self.save_current_canvas("Set analog state".into());

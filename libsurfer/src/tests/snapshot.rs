@@ -2858,13 +2858,10 @@ snapshot_ui_with_file_and_msgs! {analog_pulses_4state_zoom, "examples/analog_pul
         Some(crate::displayed_item::AnalogSettings::interpolated_viewport()),
     ),
 
+    Message::SetItemSelected(VisibleItemIndex(1), true),
+    Message::SetItemSelected(VisibleItemIndex(2), true),
     Message::ItemHeightScalingFactorChange(
-        MessageTarget::Explicit(VisibleItemIndex(1)),
-        8.0,
-    ),
-
-    Message::ItemHeightScalingFactorChange(
-        MessageTarget::Explicit(VisibleItemIndex(2)),
+        MessageTarget::CurrentSelection,
         8.0,
     ),
 
