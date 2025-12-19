@@ -234,10 +234,13 @@ impl WaveContainer {
     }
 
     pub fn new_remote_waveform(
-        server_url: String,
+        server_url: &str,
         hierarchy: std::sync::Arc<wellen::Hierarchy>,
     ) -> Self {
-        WaveContainer::Wellen(Box::new(WellenContainer::new(hierarchy, Some(server_url))))
+        WaveContainer::Wellen(Box::new(WellenContainer::new(
+            hierarchy,
+            Some(server_url.to_string()),
+        )))
     }
 
     /// Creates a new empty wave container. Should only be used as a default for serde. If

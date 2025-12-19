@@ -381,7 +381,7 @@ impl SystemState {
                                 if let Some(file_index) = file_index {
                                     get_hierarchy_from_server(
                                         sender.clone(),
-                                        url.clone(),
+                                        url,
                                         load_options,
                                         file_index,
                                     );
@@ -391,12 +391,7 @@ impl SystemState {
                                 // Request a reload (will also get status and request hierarchy if needed)
                                 if let Some(file_index) = file_index {
                                     info!("Reloahding from surfer server at: {url}");
-                                    server_reload(
-                                        sender.clone(),
-                                        url.clone(),
-                                        load_options,
-                                        file_index,
-                                    );
+                                    server_reload(sender.clone(), url, load_options, file_index);
                                 } else {
                                     warn!(
                                         "Cannot reload from surfer server without a selected file index"
@@ -484,7 +479,7 @@ impl SystemState {
     }
 
     /// uses the server status in order to display a loading bar
-    pub fn server_status_to_progress(&mut self, server: String, file_info: &SurverFileInfo) {
+    pub fn server_status_to_progress(&mut self, server: &str, file_info: &SurverFileInfo) {
         // once the body is loaded, we are no longer interested in the status
         let body_loaded = self
             .user
@@ -493,7 +488,7 @@ impl SystemState {
             .is_some_and(|w| w.inner.body_loaded());
         if !body_loaded {
             // the progress tracker will be cleared once the hierarchy is returned from the server
-            let source = WaveSource::Url(server.clone());
+            let source = WaveSource::Url(server.to_string());
             let sender = self.channels.msg_sender.clone();
             self.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::ReadingBody(
                 source,
@@ -501,7 +496,7 @@ impl SystemState {
                 Arc::new(AtomicU64::new(file_info.bytes_loaded)),
             )));
             // get another status update
-            get_server_status(sender, server, 250);
+            get_server_status(sender, server.to_string(), 250);
         }
     }
 

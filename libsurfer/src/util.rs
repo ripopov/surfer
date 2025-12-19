@@ -38,7 +38,7 @@ pub fn uint_idx_to_alpha_idx(idx: VisibleItemIndex, nvariables: usize) -> String
 }
 
 /// This is the reverse function to uint_idx_to_alpha_idx.
-pub fn alpha_idx_to_uint_idx(idx: String) -> Option<VisibleItemIndex> {
+pub fn alpha_idx_to_uint_idx(idx: &str) -> Option<VisibleItemIndex> {
     let mapped = idx
         .chars()
         .map(|c| match c {
@@ -138,7 +138,7 @@ mod tests {
 
         for (vidx, nvars) in cases {
             let s = uint_idx_to_alpha_idx(vidx, nvars);
-            let back = alpha_idx_to_uint_idx(s).expect("should parse back");
+            let back = alpha_idx_to_uint_idx(&s).expect("should parse back");
             assert_eq!(back, vidx);
         }
     }
@@ -146,12 +146,12 @@ mod tests {
     #[test]
     fn test_alpha_idx_to_uint_idx_invalid_input() {
         // Contains invalid character 'r' which is outside a-p
-        assert!(alpha_idx_to_uint_idx("ar".to_string()).is_none());
+        assert!(alpha_idx_to_uint_idx("ar").is_none());
         // Empty string should fail to parse as hex
-        assert!(alpha_idx_to_uint_idx("".to_string()).is_none());
+        assert!(alpha_idx_to_uint_idx("").is_none());
         // Mixed case / unexpected chars
-        assert!(alpha_idx_to_uint_idx("A".to_string()).is_none());
-        assert!(alpha_idx_to_uint_idx("-".to_string()).is_none());
+        assert!(alpha_idx_to_uint_idx("A").is_none());
+        assert!(alpha_idx_to_uint_idx("-").is_none());
     }
 
     #[test]

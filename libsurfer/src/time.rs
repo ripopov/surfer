@@ -223,15 +223,15 @@ fn strip_trailing_zeros_and_period(time: String) -> String {
 
 /// Format number based on [`TimeStringFormatting`], i.e., possibly group digits together
 /// and use correct separator for each group.
-fn split_and_format_number(time: String, format: &TimeStringFormatting) -> String {
+fn split_and_format_number(time: &str, format: &TimeStringFormatting) -> String {
     match format {
-        TimeStringFormatting::No => time,
+        TimeStringFormatting::No => time.to_string(),
         TimeStringFormatting::Locale => format_locale(time),
         TimeStringFormatting::SI => format_si(time),
     }
 }
 
-fn format_si(time: String) -> String {
+fn format_si(time: &str) -> String {
     if let Some((integer_part, fractional_part)) = time.split_once('.') {
         let integer_result = if integer_part.len() > 4 {
             group_n_chars(integer_part, 3).join(THIN_SPACE)
@@ -247,13 +247,13 @@ fn format_si(time: String) -> String {
             format!("{integer_result}.{fractional_part}")
         }
     } else if time.len() > 4 {
-        group_n_chars(&time, 3).join(THIN_SPACE)
+        group_n_chars(time, 3).join(THIN_SPACE)
     } else {
-        time
+        time.to_string()
     }
 }
 
-fn format_locale(time: String) -> String {
+fn format_locale(time: &str) -> String {
     let locale: Locale = get_locale()
         .unwrap_or_else(|| "en-US".to_string())
         .as_str()
@@ -270,10 +270,10 @@ fn format_locale(time: String) -> String {
                 group_n_chars(integer_part, grouping[0] as usize).join(thousands_sep.as_str());
             format!("{integer_result}{decimal_point}{fractional_part}")
         } else {
-            group_n_chars(&time, grouping[0] as usize).join(thousands_sep.as_str())
+            group_n_chars(time, grouping[0] as usize).join(thousands_sep.as_str())
         }
     } else {
-        time
+        time.to_string()
     }
 }
 
@@ -308,7 +308,7 @@ pub fn time_string(
         return time_string(time, timescale, &auto_timeunit, wanted_time_format);
     }
     if wanted_timeunit == &TimeUnit::None {
-        return split_and_format_number(time.to_string(), &wanted_time_format.format);
+        return split_and_format_number(&time.to_string(), &wanted_time_format.format);
     }
     let wanted_exponent = wanted_timeunit.exponent();
     let data_exponent = timescale.unit.exponent();
@@ -340,7 +340,7 @@ pub fn time_string(
     };
     format!(
         "{scaledtime}{space}{timeunit}",
-        scaledtime = split_and_format_number(timestring, &wanted_time_format.format)
+        scaledtime = split_and_format_number(&timestring, &wanted_time_format.format)
     )
 }
 
@@ -769,28 +769,22 @@ mod test {
         use crate::time::format_si;
 
         // 4-digit rule: no grouping for 4 digits or less
-        assert_eq!(format_si("1234.56".to_string()), "1234.56");
-        assert_eq!(format_si("123.4".to_string()), "123.4");
+        assert_eq!(format_si("1234.56"), "1234.56");
+        assert_eq!(format_si("123.4"), "123.4");
 
         // Grouping for 5+ digits
-        assert_eq!(format_si("12345.67".to_string()), "12\u{2009}345.67");
-        assert_eq!(
-            format_si("1234567.89".to_string()),
-            "1\u{2009}234\u{2009}567.89"
-        );
+        assert_eq!(format_si("12345.67"), "12\u{2009}345.67");
+        assert_eq!(format_si("1234567.89"), "1\u{2009}234\u{2009}567.89");
         // No decimal part
-        assert_eq!(format_si("12345".to_string()), "12\u{2009}345");
-        assert_eq!(format_si("123".to_string()), "123");
+        assert_eq!(format_si("12345"), "12\u{2009}345");
+        assert_eq!(format_si("123"), "123");
 
         // Empty inputs
-        assert_eq!(format_si("0.123".to_string()), "0.123");
-        assert_eq!(format_si("".to_string()), "");
+        assert_eq!(format_si("0.123"), "0.123");
+        assert_eq!(format_si(""), "");
 
         // Decimal grouping
-        assert_eq!(
-            format_si("123.4567890".to_string()),
-            "123.456\u{2009}789\u{2009}0"
-        );
+        assert_eq!(format_si("123.4567890"), "123.456\u{2009}789\u{2009}0");
     }
 
     #[test]

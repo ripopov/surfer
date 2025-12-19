@@ -165,7 +165,7 @@ impl WaveData {
         ctx: &mut DrawingContext,
         x: f32,
         y: f32,
-        text: String,
+        text: &str,
         text_size: f32,
         background_color: &Color32,
         foreground_color: Color32,
@@ -175,7 +175,7 @@ impl WaveData {
         let rect = ctx.painter.text(
             (ctx.to_screen)(x, y),
             Align2::CENTER_CENTER,
-            text.clone(),
+            text,
             FontId::proportional(text_size),
             foreground_color,
         );
@@ -228,7 +228,7 @@ impl WaveData {
                 ctx,
                 x,
                 size.y * 0.5,
-                idx_string,
+                &idx_string,
                 text_size,
                 background_color,
                 theme.foreground,

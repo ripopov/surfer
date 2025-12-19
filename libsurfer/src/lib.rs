@@ -1156,7 +1156,7 @@ impl SystemState {
                         );
                         return None;
                     } else {
-                        self.server_status_to_progress(server, &status.file_infos[file_index]);
+                        self.server_status_to_progress(&server, &status.file_infos[file_index]);
                     }
                 }
             }
@@ -1206,7 +1206,7 @@ impl SystemState {
                     HeaderResult::Remote(hierarchy, file_format, server, file_index) => {
                         // register waveform as loaded (but with no variable info yet!)
                         let new_waves = Box::new(WaveContainer::new_remote_waveform(
-                            server.clone(),
+                            &server,
                             hierarchy.clone(),
                         ));
                         self.on_waves_loaded(
