@@ -3,7 +3,7 @@ use crate::wave_container::{ScopeId, VarId, VariableMeta};
 
 use eyre::Result;
 use itertools::Itertools;
-use num::Zero;
+use num::{One, Zero};
 use surfer_translation_types::{
     BasicTranslator, VariableValue, check_vector_variable, extend_string,
 };
@@ -133,7 +133,7 @@ impl BasicTranslator<VarId, ScopeId> for BitTranslator {
             VariableValue::BigUint(v) => (
                 if (*v).is_zero() {
                     "0".to_string()
-                } else if (*v) == 1u8.into() {
+                } else if (*v).is_one() {
                     "1".to_string()
                 } else {
                     "-".to_string()

@@ -13,7 +13,7 @@ pub(crate) fn big_uint_to_ufixed(uint: &BigUint, lg_scaling_factor: i64) -> Stri
         }
         Ordering::Equal => format!("{uint}"),
         Ordering::Greater => {
-            let mask = (BigUint::one() << lg_scaling_factor) - 1_u32;
+            let mask = (BigUint::one() << lg_scaling_factor) - BigUint::one();
 
             // Split fixed point value into integer and remainder
             let integer_part = uint >> lg_scaling_factor;

@@ -4,7 +4,7 @@ use egui_extras::{Column, TableBuilder};
 use emath::{Align2, Pos2, Rect, Vec2};
 use epaint::{CornerRadius, FontId, Stroke};
 use itertools::Itertools;
-use num::BigInt;
+use num::{BigInt, One};
 
 use crate::SystemState;
 use crate::{
@@ -61,7 +61,7 @@ impl WaveData {
         viewport: &Viewport,
     ) {
         if let Some(marker) = &self.cursor {
-            let num_timestamps = self.num_timestamps().unwrap_or(1.into());
+            let num_timestamps = self.num_timestamps().unwrap_or_else(BigInt::one);
             let x = viewport.pixel_from_time(marker, size.x, &num_timestamps);
             self.draw_vertical_line(x, ctx, size, &theme.cursor.clone().into());
         }
@@ -74,7 +74,7 @@ impl WaveData {
         size: Vec2,
         viewport: &Viewport,
     ) {
-        let num_timestamps = self.num_timestamps().unwrap_or(1.into());
+        let num_timestamps = self.num_timestamps().unwrap_or_else(BigInt::one);
         for (idx, marker) in &self.markers {
             let color = self.get_marker_color(*idx, theme);
             let stroke = Stroke {

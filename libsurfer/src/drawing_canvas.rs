@@ -6,7 +6,7 @@ use eyre::WrapErr;
 use ftr_parser::types::{Transaction, TxGenerator};
 use itertools::Itertools;
 use num::bigint::{ToBigInt, ToBigUint};
-use num::{BigInt, BigUint, ToPrimitive, Zero};
+use num::{BigInt, BigUint, One, ToPrimitive, Zero};
 use rayon::prelude::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -206,7 +206,7 @@ fn variable_digital_draw_commands(
     let mut clock_edges = vec![];
     let mut local_msgs = vec![];
     let displayed_field_ref: DisplayedFieldRef = display_id.into();
-    let num_timestamps = waves.num_timestamps().unwrap_or(1.into());
+    let num_timestamps = waves.num_timestamps().unwrap_or_else(BigInt::one);
 
     let mut local_commands: HashMap<Vec<String>, DigitalDrawingCommands> = HashMap::new();
 
@@ -402,7 +402,7 @@ impl SystemState {
     ) -> Option<CachedDrawData> {
         let mut draw_commands = HashMap::new();
 
-        let num_timestamps = waves.num_timestamps().unwrap_or(1.into());
+        let num_timestamps = waves.num_timestamps().unwrap_or_else(BigInt::one);
         let max_time = num_timestamps.to_f64().unwrap_or(f64::MAX);
         let mut clock_edges = vec![];
         // Compute which timestamp to draw in each pixel. We'll draw from -extra_draw_width to
@@ -479,7 +479,7 @@ impl SystemState {
             &self.user.wanted_timeunit,
             &self.get_time_format(),
             &self.user.config,
-            &waves.num_timestamps().unwrap_or(1.into()),
+            &waves.num_timestamps().unwrap_or_else(BigInt::one),
         );
 
         Some(CachedDrawData::WaveDrawData(CachedWaveDrawData {
@@ -506,7 +506,7 @@ impl SystemState {
         let mut new_focused_tx: Option<&Transaction> = None;
 
         let viewport = waves.viewports[viewport_idx];
-        let num_timestamps = waves.num_timestamps().unwrap_or(1.into());
+        let num_timestamps = waves.num_timestamps().unwrap_or_else(BigInt::one);
 
         let displayed_streams = waves
             .items_tree
@@ -721,7 +721,7 @@ impl SystemState {
         let frame_width = response.rect.width();
         let pointer_pos_global = ui.input(|i| i.pointer.interact_pos());
         let pointer_pos_canvas = pointer_pos_global.map(|p| self.transform_pos(to_screen, p, ui));
-        let num_timestamps = waves.num_timestamps().unwrap_or(1.into());
+        let num_timestamps = waves.num_timestamps().unwrap_or_else(BigInt::one);
 
         if ui.ui_contains_pointer() {
             let pointer_pos = pointer_pos_global.unwrap();
@@ -1121,7 +1121,7 @@ impl SystemState {
             &self.user.wanted_timeunit,
             &self.get_time_format(),
             &self.user.config,
-            &waves.num_timestamps().unwrap_or(1.into()),
+            &waves.num_timestamps().unwrap_or_else(BigInt::one),
         );
 
         if !ticks.is_empty() && self.show_ticks() {
@@ -1600,7 +1600,7 @@ impl SystemState {
     ) -> Option<BigInt> {
         let pos = pointer_pos_canvas?;
         let viewport = &waves.viewports[viewport_idx];
-        let num_timestamps = waves.num_timestamps().unwrap_or(1.into());
+        let num_timestamps = waves.num_timestamps().unwrap_or_else(BigInt::one);
         let timestamp = viewport.as_time_bigint(pos.x, frame_width, &num_timestamps);
         if let Some(utimestamp) = timestamp.to_biguint()
             && let Some(vidx) = waves.get_item_at_y(pos.y)
@@ -1643,7 +1643,11 @@ impl SystemState {
         viewport: &Viewport,
         waves: &WaveData,
     ) {
-        let x = viewport.pixel_from_time(time, size.x, &waves.num_timestamps().unwrap_or(1.into()));
+        let x = viewport.pixel_from_time(
+            time,
+            size.x,
+            &waves.num_timestamps().unwrap_or_else(BigInt::one),
+        );
 
         ctx.painter.line_segment(
             [

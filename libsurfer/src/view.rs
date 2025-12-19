@@ -20,7 +20,7 @@ use epaint::{
     text::{FontId, LayoutJob, TextFormat, TextWrapMode},
 };
 use itertools::Itertools;
-use num::{BigUint, One};
+use num::{BigInt, BigUint, One};
 use tracing::info;
 
 use surfer_translation_types::{
@@ -1650,7 +1650,7 @@ impl SystemState {
             &self.user.wanted_timeunit,
             &self.get_time_format(),
             &self.user.config,
-            &waves.num_timestamps().unwrap_or(1.into()),
+            &waves.num_timestamps().unwrap_or_else(BigInt::one),
         );
 
         waves.draw_ticks(

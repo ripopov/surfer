@@ -745,7 +745,7 @@ impl WaveData {
 
     pub fn go_to_cursor_if_not_in_view(&mut self) -> bool {
         if let Some(cursor) = &self.cursor {
-            let num_timestamps = self.num_timestamps().unwrap_or(1.into());
+            let num_timestamps = self.num_timestamps().unwrap_or_else(BigInt::one);
             self.viewports[0].go_to_cursor_if_not_in_view(cursor, &num_timestamps)
         } else {
             false
@@ -757,7 +757,7 @@ impl WaveData {
         viewport.pixel_from_time(
             self.numbered_marker_time(idx),
             view_width,
-            &self.num_timestamps().unwrap_or(1.into()),
+            &self.num_timestamps().unwrap_or_else(BigInt::one),
         )
     }
 
