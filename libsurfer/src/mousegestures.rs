@@ -6,7 +6,7 @@ use epaint::{FontId, Stroke};
 use serde::Deserialize;
 
 use crate::config::{SurferConfig, SurferTheme};
-use crate::time::time_string;
+use crate::time::TimeFormatter;
 use crate::view::DrawingContext;
 use crate::{Message, SystemState, wave_data::WaveData};
 
@@ -289,26 +289,14 @@ impl SystemState {
         let start_time = waves.viewports[viewport_idx].as_time_bigint(minx, width, &num_timestamps);
         let end_time = waves.viewports[viewport_idx].as_time_bigint(maxx, width, &num_timestamps);
         let diff_time = &end_time - &start_time;
-        let timescale = &waves.inner.metadata().timescale;
-        let time_format = &self.get_time_format();
-        let start_time_str = time_string(
-            &start_time,
-            timescale,
+        let time_formatter = TimeFormatter::new(
+            &waves.inner.metadata().timescale,
             &self.user.wanted_timeunit,
-            time_format,
+            &self.get_time_format(),
         );
-        let end_time_str = time_string(
-            &end_time,
-            timescale,
-            &self.user.wanted_timeunit,
-            time_format,
-        );
-        let diff_time_str = time_string(
-            &diff_time,
-            timescale,
-            &self.user.wanted_timeunit,
-            time_format,
-        );
+        let start_time_str = time_formatter.format(&start_time);
+        let end_time_str = time_formatter.format(&end_time);
+        let diff_time_str = time_formatter.format(&diff_time);
         draw_gesture_text(
             ctx,
             (ctx.to_screen)(current_location.x, current_location.y),

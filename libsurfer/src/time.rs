@@ -10,6 +10,7 @@ use itertools::Itertools;
 use num::{BigInt, BigRational, ToPrimitive};
 use pure_rust_locales::{Locale, locale_match};
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 use sys_locale::get_locale;
 
 use crate::config::SurferConfig;
@@ -17,7 +18,7 @@ use crate::viewport::Viewport;
 use crate::wave_data::WaveData;
 use crate::{Message, SystemState, translation::group_n_chars, view::DrawingContext};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct TimeScale {
     pub unit: TimeUnit,
     pub multiplier: Option<u32>,
@@ -62,6 +63,36 @@ const THIN_SPACE: &str = "\u{2009}";
 
 /// Candidate multipliers used to choose tick spacing.
 pub const TICK_STEPS: [f64; 8] = [1., 2., 2.5, 5., 10., 20., 25., 50.];
+
+/// Cached locale-specific formatting properties.
+struct LocaleFormatCache {
+    grouping: &'static [i64],
+    thousands_sep: String,
+    decimal_point: String,
+}
+
+static LOCALE_FORMAT_CACHE: OnceLock<LocaleFormatCache> = OnceLock::new();
+
+/// Get the cached locale formatting properties.
+fn get_locale_format_cache() -> &'static LocaleFormatCache {
+    LOCALE_FORMAT_CACHE.get_or_init(|| {
+        let locale = get_locale()
+            .unwrap_or_else(|| "en-US".to_string())
+            .as_str()
+            .try_into()
+            .unwrap_or(Locale::en_US);
+        let grouping = locale_match!(locale => LC_NUMERIC::GROUPING);
+        let thousands_sep =
+            locale_match!(locale => LC_NUMERIC::THOUSANDS_SEP).replace('\u{202f}', THIN_SPACE);
+        let decimal_point = locale_match!(locale => LC_NUMERIC::DECIMAL_POINT).to_string();
+
+        LocaleFormatCache {
+            grouping,
+            thousands_sep,
+            decimal_point,
+        }
+    })
+}
 
 impl From<wellen::TimescaleUnit> for TimeUnit {
     fn from(timescale: wellen::TimescaleUnit) -> Self {
@@ -139,7 +170,7 @@ pub fn timeunit_menu(ui: &mut Ui, msgs: &mut Vec<Message>, wanted_timeunit: &Tim
 }
 
 /// How to format the time stamps.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TimeFormat {
     /// How to format the numeric part of the time string.
     format: TimeStringFormatting,
@@ -160,18 +191,31 @@ impl Default for TimeFormat {
 }
 
 impl TimeFormat {
-    /// Utility function to get a copy, but with some values changed.
-    pub fn get_with_changes(
-        &self,
-        format: Option<TimeStringFormatting>,
-        show_space: Option<bool>,
-        show_unit: Option<bool>,
-    ) -> Self {
+    /// Create a new TimeFormat with custom settings.
+    pub fn new(format: TimeStringFormatting, show_space: bool, show_unit: bool) -> Self {
         TimeFormat {
-            format: format.unwrap_or(self.format),
-            show_space: show_space.unwrap_or(self.show_space),
-            show_unit: show_unit.unwrap_or(self.show_unit),
+            format,
+            show_space,
+            show_unit,
         }
+    }
+
+    /// Set the format type.
+    pub fn with_format(mut self, format: TimeStringFormatting) -> Self {
+        self.format = format;
+        self
+    }
+
+    /// Set whether to show space between number and unit.
+    pub fn with_space(mut self, show_space: bool) -> Self {
+        self.show_space = show_space;
+        self
+    }
+
+    /// Set whether to show the time unit.
+    pub fn with_unit(mut self, show_unit: bool) -> Self {
+        self.show_unit = show_unit;
+        self
     }
 }
 
@@ -254,23 +298,18 @@ fn format_si(time: &str) -> String {
 }
 
 fn format_locale(time: &str) -> String {
-    let locale: Locale = get_locale()
-        .unwrap_or_else(|| "en-US".to_string())
-        .as_str()
-        .try_into()
-        .unwrap_or(Locale::en_US);
-    let grouping = locale_match!(locale => LC_NUMERIC::GROUPING);
-    if grouping[0] > 0 {
-        // "\u{202f}" (non-breaking thin space) does not exist in used font, replace with "\u{2009}" (thin space)
-        let thousands_sep =
-            locale_match!(locale => LC_NUMERIC::THOUSANDS_SEP).replace('\u{202f}', THIN_SPACE);
+    let cache = get_locale_format_cache();
+
+    if cache.grouping[0] > 0 {
         if let Some((integer_part, fractional_part)) = time.split_once('.') {
-            let decimal_point = locale_match!(locale => LC_NUMERIC::DECIMAL_POINT);
-            let integer_result =
-                group_n_chars(integer_part, grouping[0] as usize).join(thousands_sep.as_str());
-            format!("{integer_result}{decimal_point}{fractional_part}")
+            let integer_result = group_n_chars(integer_part, cache.grouping[0] as usize)
+                .join(cache.thousands_sep.as_str());
+            format!(
+                "{integer_result}{decimal_point}{fractional_part}",
+                decimal_point = &cache.decimal_point
+            )
         } else {
-            group_n_chars(time, grouping[0] as usize).join(thousands_sep.as_str())
+            group_n_chars(time, cache.grouping[0] as usize).join(cache.thousands_sep.as_str())
         }
     } else {
         time.to_string()
@@ -281,7 +320,7 @@ fn format_locale(time: &str) -> String {
 fn find_auto_scale(time: &BigInt, timescale: &TimeScale) -> TimeUnit {
     // In case of seconds, nothing to do as it is the largest supported unit
     // (unless we want to support minutes etc...)
-    if timescale.unit == TimeUnit::Seconds {
+    if matches!(timescale.unit, TimeUnit::Seconds) {
         return TimeUnit::Seconds;
     }
     let multiplier_digits = timescale.multiplier.unwrap_or(1).ilog10();
@@ -296,52 +335,116 @@ fn find_auto_scale(time: &BigInt, timescale: &TimeScale) -> TimeUnit {
     timescale.unit
 }
 
+/// Formatter for time strings with caching of computed values.
+/// Enables efficient formatting of multiple time values with the same timescale and format settings.
+pub struct TimeFormatter {
+    timescale: TimeScale,
+    wanted_unit: TimeUnit,
+    time_format: TimeFormat,
+    /// Cached exponent difference (wanted - data)
+    exponent_diff: i8,
+    /// Cached unit string (empty if show_unit is false)
+    unit_string: String,
+    /// Cached space string (empty if show_space is false)
+    space_string: String,
+}
+
+impl TimeFormatter {
+    /// Create a new TimeFormatter with the given settings.
+    pub fn new(timescale: &TimeScale, wanted_unit: &TimeUnit, time_format: &TimeFormat) -> Self {
+        // Note: For Auto unit, we defer resolution to format() time since it depends on the value
+        let (exponent_diff, unit_string) = if *wanted_unit == TimeUnit::Auto {
+            // Use placeholder values for Auto - will be computed per-format call
+            (0i8, String::new())
+        } else {
+            let wanted_exponent = wanted_unit.exponent();
+            let data_exponent = timescale.unit.exponent();
+            let exponent_diff = wanted_exponent - data_exponent;
+
+            let unit_string = if time_format.show_unit {
+                wanted_unit.to_string()
+            } else {
+                String::new()
+            };
+
+            (exponent_diff, unit_string)
+        };
+
+        TimeFormatter {
+            timescale: timescale.clone(),
+            wanted_unit: *wanted_unit,
+            time_format: time_format.clone(),
+            exponent_diff,
+            unit_string,
+            space_string: if time_format.show_space {
+                " ".to_string()
+            } else {
+                String::new()
+            },
+        }
+    }
+
+    /// Format a single time value.
+    pub fn format(&self, time: &BigInt) -> String {
+        if self.wanted_unit == TimeUnit::None {
+            return split_and_format_number(&time.to_string(), &self.time_format.format);
+        }
+
+        // Handle Auto unit by resolving it for this specific time value
+        let (exponent_diff, unit_string) = if self.wanted_unit == TimeUnit::Auto {
+            let auto_unit = find_auto_scale(time, &self.timescale);
+            let wanted_exponent = auto_unit.exponent();
+            let data_exponent = self.timescale.unit.exponent();
+            let exp_diff = wanted_exponent - data_exponent;
+
+            let unit_str = if self.time_format.show_unit {
+                auto_unit.to_string()
+            } else {
+                String::new()
+            };
+
+            (exp_diff, unit_str)
+        } else {
+            (self.exponent_diff, self.unit_string.clone())
+        };
+
+        let timestring = if exponent_diff >= 0 {
+            let precision = exponent_diff as usize;
+            strip_trailing_zeros_and_period(format!(
+                "{scaledtime:.precision$}",
+                scaledtime = BigRational::new(
+                    time * self.timescale.multiplier.unwrap_or(1),
+                    (BigInt::from(10)).pow(exponent_diff as u32)
+                )
+                .to_f64()
+                .unwrap_or(f64::NAN)
+            ))
+        } else {
+            (time
+                * self.timescale.multiplier.unwrap_or(1)
+                * (BigInt::from(10)).pow(-exponent_diff as u32))
+            .to_string()
+        };
+
+        format!(
+            "{scaledtime}{space}{unit}",
+            scaledtime = split_and_format_number(&timestring, &self.time_format.format),
+            space = &self.space_string,
+            unit = &unit_string
+        )
+    }
+}
+
 /// Format the time string taking all settings into account.
+/// This function delegates to TimeFormatter which handles the Auto timeunit.
 pub fn time_string(
     time: &BigInt,
     timescale: &TimeScale,
     wanted_timeunit: &TimeUnit,
     wanted_time_format: &TimeFormat,
 ) -> String {
-    if wanted_timeunit == &TimeUnit::Auto {
-        let auto_timeunit = find_auto_scale(time, timescale);
-        return time_string(time, timescale, &auto_timeunit, wanted_time_format);
-    }
-    if wanted_timeunit == &TimeUnit::None {
-        return split_and_format_number(&time.to_string(), &wanted_time_format.format);
-    }
-    let wanted_exponent = wanted_timeunit.exponent();
-    let data_exponent = timescale.unit.exponent();
-    let exponent_diff = wanted_exponent - data_exponent;
-    let timeunit = if wanted_time_format.show_unit {
-        wanted_timeunit.to_string()
-    } else {
-        String::new()
-    };
-    let space = if wanted_time_format.show_space {
-        " ".to_string()
-    } else {
-        String::new()
-    };
-    let timestring = if exponent_diff >= 0 {
-        let precision = exponent_diff as usize;
-        strip_trailing_zeros_and_period(format!(
-            "{scaledtime:.precision$}",
-            scaledtime = BigRational::new(
-                time * timescale.multiplier.unwrap_or(1),
-                (BigInt::from(10)).pow(exponent_diff as u32)
-            )
-            .to_f64()
-            .unwrap_or(f64::NAN)
-        ))
-    } else {
-        (time * timescale.multiplier.unwrap_or(1) * (BigInt::from(10)).pow(-exponent_diff as u32))
-            .to_string()
-    };
-    format!(
-        "{scaledtime}{space}{timeunit}",
-        scaledtime = split_and_format_number(&timestring, &wanted_time_format.format)
-    )
+    let formatter = TimeFormatter::new(timescale, wanted_timeunit, wanted_time_format);
+    formatter.format(time)
 }
 
 impl WaveData {
@@ -361,7 +464,7 @@ impl WaveData {
     pub fn draw_ticks(
         &self,
         color: Option<&Color32>,
-        ticks: &Vec<(String, f32)>,
+        ticks: &[(String, f32)],
         ctx: &DrawingContext<'_>,
         y_offset: f32,
         align: Align2,
@@ -383,11 +486,12 @@ impl WaveData {
 
 impl SystemState {
     pub fn get_time_format(&self) -> TimeFormat {
-        self.user.config.default_time_format.get_with_changes(
-            self.user.time_string_format,
-            None,
-            None,
-        )
+        let time_format = self.user.config.default_time_format.clone();
+        if let Some(time_string_format) = self.user.time_string_format {
+            time_format.with_format(time_string_format)
+        } else {
+            time_format
+        }
     }
 }
 
@@ -442,13 +546,15 @@ pub fn get_ticks(
             .ceil() as f32
             + 1.;
         if high <= max_labels {
+            let time_formatter = TimeFormatter::new(timescale, wanted_timeunit, time_format);
             ticks = (0..high as i16)
                 .map(|v| BigInt::from(((v as f64) * scaled_step + rounded_min_label_time) as i128))
                 .unique()
                 .map(|tick| {
                     (
                         // Time string
-                        time_string(&tick, timescale, wanted_timeunit, time_format),
+                        time_formatter.format(&tick),
+                        // X position
                         viewport.pixel_from_time(&tick, frame_width, num_timestamps),
                     )
                 })
