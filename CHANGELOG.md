@@ -9,6 +9,41 @@ released as a new version.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.5.0] - 2025-12-19
+
+## Added
+
+* Analog drawing.
+* Surver supports multiple files. The file names can also be provided in a text file.
+* Markers can be added through WCP.
+* It is possible to select which value is displayed when the cursor is on a transition. Configuration parameter `transition_value` which can be "Next" (default), "Previous", or "Both". Corresponding Settings menu entry available.
+* The variable filter textbox tooltip displays the error message in case of regex errors.
+* Context menu for empty part of the variable name and variable value columns that can add dividers and timelines.
+* Drawing mode inspired by Dinotrace: vectors with all zeros are drawn without the top line and with wide bottom line, vectors with all ones are drawn with wide top line. Enable in the menu or by using the configuration parameter `use_dinotrace_style` (bool). Line width for wide lines set by the theme parameter `thick_linewidth` (float).
+* Reload in server mode will reload the server side file (if it is modified since last load).
+* New configuration parameters:
+  * `animation_enabled` (bool) can be used to turn off UI animations, also in the Settings menu.
+  * `animation_time` (float) time for UI animation in seconds.
+  * `max_url_length` (unsigned integer) max length of an url, only change if behind a proxy that limits it.
+
+## Changed
+
+* Design parameters can now be shown in the tooltip instead or not at all, in addition to Scopes or Variables. New configuration `parameter_display_location` which can be "Scopes", "Variables", "Tooltips", or "None".
+* The marker information window renders a bit better (right-aligned times) and can be accessed through the context menu in the name column for markers.
+
+## Fixed
+
+* Surfer is more likely to deal with incorrect mouse/keyboard inputs in a graceful way.
+* The North and South mouse gestures are no longer mixed up,
+* The variable filter textbox didn't update the error indication when, e.g., deleting all text.
+* Signal highlighting on reload with missing variables.
+* It is possible to load an arbitrary number of variables from a server connection without getting an invalid URL.
+* The waveform height can be changed for multiple selectable variables at once using the context menu.
+
+## Removed
+
+* Configuration parameter `show_parameters_in_scopes`. Use `parameter_display_location` instead.
+
 ## [0.4.0] - 2025-11-06
 
 ## Added
@@ -209,7 +244,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Initial numbered version
 
 
-[Unreleased]: https://gitlab.com/surfer-project/surfer/-/compare/v0.4.0...main
+[Unreleased]: https://gitlab.com/surfer-project/surfer/-/compare/v0.5.0...main
+[0.5.0]: https://gitlab.com/surfer-project/surfer/-/tree/v0.5.0
 [0.4.0]: https://gitlab.com/surfer-project/surfer/-/tree/v0.4.0
 [0.3.0]: https://gitlab.com/surfer-project/surfer/-/tree/v0.3.0
 [0.2.0]: https://gitlab.com/surfer-project/surfer/-/tree/v0.2.0
