@@ -12,8 +12,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::f32::consts::PI;
 use surfer_translation_types::{
-    SubFieldFlatTranslationResult, TranslatedValue, ValueKind, VariableInfo, VariableType,
-    VariableValue,
+    SubFieldFlatTranslationResult, TranslatedValue, ValueKind, VariableInfo, VariableValue,
 };
 use tracing::{error, warn};
 
@@ -100,50 +99,36 @@ pub enum AnalogDrawingCommands {
         analog_settings: AnalogSettings,
     },
 }
+#[derive(Clone, PartialEq, Debug)]
+pub enum DigitalDrawingType {
+    Bool,
+    Clock,
+    Event,
+    Vector,
+}
 
+impl From<&VariableInfo> for DigitalDrawingType {
+    fn from(info: &VariableInfo) -> Self {
+        match info {
+            VariableInfo::Bool => DigitalDrawingType::Bool,
+            VariableInfo::Clock => DigitalDrawingType::Clock,
+            VariableInfo::Event => DigitalDrawingType::Event,
+            _ => DigitalDrawingType::Vector,
+        }
+    }
+}
 /// List of values to draw for a variable. It is an ordered list of values that should
 /// be drawn at the *start time* until the *start time* of the next value
 pub struct DigitalDrawingCommands {
-    pub is_bool: bool,
-    pub is_clock: bool,
-    is_event: bool,
+    pub drawing_type: DigitalDrawingType,
     pub values: Vec<(f32, DrawnRegion)>,
 }
 
 impl DigitalDrawingCommands {
-    pub fn new_bool() -> Self {
-        Self {
+    pub fn new_from_variable_info(info: &VariableInfo) -> Self {
+        DigitalDrawingCommands {
+            drawing_type: DigitalDrawingType::from(info),
             values: vec![],
-            is_bool: true,
-            is_event: false,
-            is_clock: false,
-        }
-    }
-
-    pub fn new_event() -> Self {
-        Self {
-            values: vec![],
-            is_bool: true,
-            is_event: true,
-            is_clock: false,
-        }
-    }
-
-    pub fn new_clock() -> Self {
-        Self {
-            values: vec![],
-            is_bool: true,
-            is_event: false,
-            is_clock: true,
-        }
-    }
-
-    pub fn new_wide() -> Self {
-        Self {
-            values: vec![],
-            is_bool: false,
-            is_event: false,
-            is_clock: false,
         }
     }
 
@@ -203,7 +188,10 @@ fn variable_draw_commands(
     let info = translator.variable_info(&meta).unwrap();
 
     let is_analog_mode = displayed_variable.analog.is_some();
-    let is_bool = matches!(info, VariableInfo::Bool | VariableInfo::Clock);
+    let is_bool = matches!(
+        info,
+        VariableInfo::Bool | VariableInfo::Clock | VariableInfo::Event
+    );
 
     if is_analog_mode && !is_bool {
         return crate::analog_renderer::variable_analog_draw_commands(
@@ -338,12 +326,7 @@ fn variable_digital_draw_commands(
 
         for SubFieldFlatTranslationResult { names, value } in fields {
             let entry = local_commands.entry(names.clone()).or_insert_with(|| {
-                match info.get_subinfo(&names) {
-                    VariableInfo::Bool => DigitalDrawingCommands::new_bool(),
-                    VariableInfo::Clock => DigitalDrawingCommands::new_clock(),
-                    VariableInfo::Event => DigitalDrawingCommands::new_event(),
-                    _ => DigitalDrawingCommands::new_wide(),
-                }
+                DigitalDrawingCommands::new_from_variable_info(info.get_subinfo(&names))
             });
 
             let prev = prev_values.get(&names);
@@ -365,7 +348,7 @@ fn variable_digital_draw_commands(
                     .or_insert(value.clone())
                     .clone_from(&value);
 
-                if let VariableInfo::Clock = info.get_subinfo(&names) {
+                if entry.drawing_type == DigitalDrawingType::Clock {
                     match value.as_ref().map(|result| result.value.as_str()) {
                         Some("1") => {
                             if !is_last_timestep && !is_first_timestep {
@@ -377,7 +360,7 @@ fn variable_digital_draw_commands(
                     }
                 }
 
-                entry.values.push((
+                entry.push((
                     *pixel,
                     DrawnRegion {
                         inner: value,
@@ -1036,11 +1019,6 @@ impl SystemState {
             match drawing_info {
                 ItemDrawingInfo::Variable(variable_info) => {
                     if let Some(commands) = draw_commands.get(&variable_info.displayed_field_ref) {
-                        // Get background color and determine best text color
-                        let background_color =
-                            self.get_background_color(waves, drawing_info, vidx, item_count);
-                        let text_color =
-                            self.user.config.theme.get_best_text_color(background_color);
                         let height_scaling_factor = displayed_item.map_or(
                             1.0,
                             super::displayed_item::DisplayedItem::height_scaling_factor,
@@ -1052,16 +1030,14 @@ impl SystemState {
                                     .inner
                                     .as_waves()
                                     .and_then(|w| w.variable_meta(&variable.variable_ref).ok())
-                                    .and_then(|meta| meta.variable_type)
-                                    .and_then(|var_type| match var_type {
-                                        VariableType::VCDEvent => {
+                                    .and_then(|meta| {
+                                        if meta.is_event() {
                                             Some(self.user.config.theme.variable_event)
-                                        }
-                                        VariableType::VCDParameter
-                                        | VariableType::RealParameter => {
+                                        } else if meta.is_parameter() {
                                             Some(self.user.config.theme.variable_parameter)
+                                        } else {
+                                            None
                                         }
-                                        _ => None,
                                     })
                                     .unwrap_or(self.user.config.theme.variable_default)
                             } else {
@@ -1070,42 +1046,69 @@ impl SystemState {
                         });
                         match commands {
                             DrawingCommands::Digital(digital_commands) => {
-                                for (old, new) in digital_commands
-                                    .values
-                                    .iter()
-                                    .zip(digital_commands.values.iter().skip(1))
-                                {
-                                    if digital_commands.is_bool {
-                                        if digital_commands.is_event {
-                                            self.draw_event(
-                                                (old, new),
-                                                color,
-                                                y_offset,
-                                                height_scaling_factor,
-                                                ctx,
-                                            );
-                                        } else {
+                                match digital_commands.drawing_type {
+                                    DigitalDrawingType::Bool | DigitalDrawingType::Clock => {
+                                        let draw_clock = (digital_commands.drawing_type
+                                            == DigitalDrawingType::Clock)
+                                            && draw_clock_rising_marker;
+                                        let draw_background = self.fill_high_values();
+                                        for (old, new) in digital_commands
+                                            .values
+                                            .iter()
+                                            .zip(digital_commands.values.iter().skip(1))
+                                        {
                                             self.draw_bool_transition(
                                                 (old, new),
                                                 new.1.force_anti_alias,
                                                 color,
                                                 y_offset,
                                                 height_scaling_factor,
-                                                digital_commands.is_clock
-                                                    && draw_clock_rising_marker,
-                                                self.fill_high_values(),
+                                                draw_clock,
+                                                draw_background,
                                                 ctx,
                                             );
                                         }
-                                    } else {
-                                        self.draw_region(
-                                            (old, new),
-                                            color,
-                                            y_offset,
-                                            height_scaling_factor,
-                                            ctx,
-                                            text_color,
+                                    }
+                                    DigitalDrawingType::Event => {
+                                        for event in digital_commands.values.iter() {
+                                            self.draw_event(
+                                                event,
+                                                color,
+                                                y_offset,
+                                                height_scaling_factor,
+                                                ctx,
+                                            );
+                                        }
+                                    }
+                                    DigitalDrawingType::Vector => {
+                                        // Get background color and determine best text color
+                                        let background_color = self.get_background_color(
+                                            waves,
+                                            drawing_info,
+                                            vidx,
+                                            item_count,
                                         );
+
+                                        let text_color = self
+                                            .user
+                                            .config
+                                            .theme
+                                            .get_best_text_color(background_color);
+
+                                        for (old, new) in digital_commands
+                                            .values
+                                            .iter()
+                                            .zip(digital_commands.values.iter().skip(1))
+                                        {
+                                            self.draw_region(
+                                                (old, new),
+                                                color,
+                                                y_offset,
+                                                height_scaling_factor,
+                                                ctx,
+                                                text_color,
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -1530,16 +1533,15 @@ impl SystemState {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn draw_event(
         &self,
-        ((old_x, prev_region), (new_x, new_region)): (&(f32, DrawnRegion), &(f32, DrawnRegion)),
+        (x, prev_region): &(f32, DrawnRegion),
         color: Color32,
         offset: f32,
         height_scaling_factor: f32,
         ctx: &mut DrawingContext,
     ) {
-        if let (Some(_prev_result), Some(_new_result)) = (&prev_region.inner, &new_region.inner) {
+        if prev_region.inner.is_some() {
             let trace_coords =
                 |x, y| (ctx.to_screen)(x, y * ctx.cfg.line_height * height_scaling_factor + offset);
 
@@ -1549,23 +1551,20 @@ impl SystemState {
             };
 
             // Draw both at old_x and new_x lines until the drawing commands are reworked to deal with this as a special case
-            // Otherwise, the first event will not be drawn
-            for x in [old_x, new_x] {
-                ctx.painter.add(PathShape::line(
-                    vec![trace_coords(*x, 0.0), trace_coords(*x, 1.0)],
-                    stroke,
-                ));
+            // Otherwise, not drawing the old_x (new_x) value will cause the first (last) event to not be drawn
+            let top = trace_coords(*x, 0.0);
+            ctx.painter
+                .add(PathShape::line(vec![top, trace_coords(*x, 1.0)], stroke));
 
-                ctx.painter.add(PathShape::convex_polygon(
-                    vec![
-                        trace_coords(*x - 2.5, 0.2),
-                        trace_coords(*x, 0.),
-                        trace_coords(*x + 2.5, 0.2),
-                    ],
-                    color,
-                    stroke,
-                ));
-            }
+            ctx.painter.add(PathShape::convex_polygon(
+                vec![
+                    trace_coords(*x - 2.5, 0.2),
+                    top,
+                    trace_coords(*x + 2.5, 0.2),
+                ],
+                color,
+                stroke,
+            ));
         }
     }
 

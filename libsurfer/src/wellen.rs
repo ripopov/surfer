@@ -384,7 +384,7 @@ impl WellenContainer {
             VarId::Wellen(id) => Ok(id),
             VarId::None => {
                 let h = &self.hierarchy;
-                let Some(var) = h.lookup_var(r.path.strs(), &r.name) else {
+                let Some(var) = h.lookup_var(r.path.strs(), r.name.clone()) else {
                     bail!("Failed to find variable: {r:?}")
                 };
                 Ok(var)

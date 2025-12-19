@@ -33,7 +33,10 @@ pub struct VariableMeta<VarId, ScopeId> {
 impl<VarId, ScopeId> VariableMeta<VarId, ScopeId> {
     /// Parameter
     pub fn is_parameter(&self) -> bool {
-        matches!(self.variable_type, Some(VariableType::VCDParameter))
+        matches!(
+            self.variable_type,
+            Some(VariableType::VCDParameter | VariableType::RealParameter)
+        )
     }
 
     /// Parameter
