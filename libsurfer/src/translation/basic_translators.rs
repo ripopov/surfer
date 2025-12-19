@@ -269,7 +269,7 @@ fn decode_lebxxx(value: &num::BigUint) -> Result<num::BigUint, &'static str> {
 
     let first: num::BigUint = bytes.first().cloned().unwrap_or(0).into();
     bytes.iter().skip(1).try_fold(first, |result, b| {
-        if (b & 0x80 == 0) != (result == 0u8.into()) {
+        if (b & 0x80 == 0) != (result.is_zero()) {
             Err("invalid flag")
         } else {
             Ok((result << 7) + (*b & 0x7f))
@@ -310,7 +310,7 @@ impl BasicTranslator<VarId, ScopeId> for LebTranslator {
     }
 
     fn translates(&self, variable: &VariableMeta) -> Result<TranslationPreference> {
-        check_wordlength(variable.num_bits, |n| (n % 8 == 0) && n > 0)
+        check_wordlength(variable.num_bits, |n| (n.is_multiple_of(8)) && n > 0)
     }
 }
 

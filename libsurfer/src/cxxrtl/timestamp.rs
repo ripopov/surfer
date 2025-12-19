@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use eyre::{Context, Result};
-use num::{BigUint, Zero};
+use num::BigUint;
 use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone)]
@@ -13,8 +13,8 @@ pub struct CxxrtlTimestamp {
 impl CxxrtlTimestamp {
     pub fn zero() -> Self {
         Self {
-            seconds: BigUint::zero(),
-            femtoseconds: BigUint::zero(),
+            seconds: BigUint::ZERO,
+            femtoseconds: BigUint::ZERO,
         }
     }
 

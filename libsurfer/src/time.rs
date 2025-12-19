@@ -7,7 +7,7 @@ use enum_iterator::Sequence;
 use epaint::{FontId, Stroke};
 use ftr_parser::types::Timescale;
 use itertools::Itertools;
-use num::{BigInt, BigRational, ToPrimitive};
+use num::{BigInt, BigRational, ToPrimitive, Zero};
 use pure_rust_locales::{Locale, locale_match};
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
@@ -81,17 +81,21 @@ fn get_locale_format_cache() -> &'static LocaleFormatCache {
             .as_str()
             .try_into()
             .unwrap_or(Locale::en_US);
-        let grouping = locale_match!(locale => LC_NUMERIC::GROUPING);
-        let thousands_sep =
-            locale_match!(locale => LC_NUMERIC::THOUSANDS_SEP).replace('\u{202f}', THIN_SPACE);
-        let decimal_point = locale_match!(locale => LC_NUMERIC::DECIMAL_POINT).to_string();
-
-        LocaleFormatCache {
-            grouping,
-            thousands_sep,
-            decimal_point,
-        }
+        create_cache(&locale)
     })
+}
+
+fn create_cache(locale: &Locale) -> LocaleFormatCache {
+    let grouping = locale_match!(locale => LC_NUMERIC::GROUPING);
+    let thousands_sep =
+        locale_match!(locale => LC_NUMERIC::THOUSANDS_SEP).replace('\u{202f}', THIN_SPACE);
+    let decimal_point = locale_match!(locale => LC_NUMERIC::DECIMAL_POINT).to_string();
+
+    LocaleFormatCache {
+        grouping,
+        thousands_sep,
+        decimal_point,
+    }
 }
 
 impl From<wellen::TimescaleUnit> for TimeUnit {
@@ -270,7 +274,7 @@ fn strip_trailing_zeros_and_period(time: String) -> String {
 fn split_and_format_number(time: &str, format: &TimeStringFormatting) -> String {
     match format {
         TimeStringFormatting::No => time.to_string(),
-        TimeStringFormatting::Locale => format_locale(time),
+        TimeStringFormatting::Locale => format_locale(time, get_locale_format_cache()),
         TimeStringFormatting::SI => format_si(time),
     }
 }
@@ -297,9 +301,7 @@ fn format_si(time: &str) -> String {
     }
 }
 
-fn format_locale(time: &str) -> String {
-    let cache = get_locale_format_cache();
-
+fn format_locale(time: &str, cache: &LocaleFormatCache) -> String {
     if cache.grouping[0] > 0 {
         if let Some((integer_part, fractional_part)) = time.split_once('.') {
             let integer_result = group_n_chars(integer_part, cache.grouping[0] as usize)
@@ -326,7 +328,7 @@ fn find_auto_scale(time: &BigInt, timescale: &TimeScale) -> TimeUnit {
     let multiplier_digits = timescale.multiplier.unwrap_or(1).ilog10();
     let start_digits = -timescale.unit.exponent();
     for e in (3..=start_digits).step_by(3).rev() {
-        if (time % (BigInt::from(10).pow(e as u32 - multiplier_digits))) == BigInt::from(0)
+        if (time % (BigInt::from(10).pow(e as u32 - multiplier_digits))).is_zero()
             && let Some(unit) = TimeUnit::from_exponent(e - start_digits)
         {
             return unit;
@@ -1183,6 +1185,133 @@ mod test {
             find_auto_scale(&BigInt::from(1), &ts),
             TimeUnit::FemtoSeconds
         );
+    }
+
+    #[test]
+    fn test_locale_cache_en_us() {
+        use crate::time::{create_cache, format_locale};
+        use pure_rust_locales::Locale;
+
+        let locale = Locale::en_US;
+        let cache = create_cache(&locale);
+
+        // en_US uses period as decimal point and comma as thousands separator
+        let result = format_locale("1234567.89", &cache);
+        assert_eq!(result, "1,234,567.89");
+    }
+
+    #[test]
+    fn test_locale_cache_de_de() {
+        use crate::time::{create_cache, format_locale};
+        use pure_rust_locales::Locale;
+
+        let locale = Locale::de_DE;
+        let cache = create_cache(&locale);
+
+        let result = format_locale("1234567.89", &cache);
+        assert_eq!(result, "1.234.567,89");
+    }
+
+    #[test]
+    fn test_locale_cache_fr_fr() {
+        use crate::time::{create_cache, format_locale};
+        use pure_rust_locales::Locale;
+
+        let locale = Locale::fr_FR;
+        let cache = create_cache(&locale);
+
+        // fr_FR typically uses space/thin_space and comma
+        let result = format_locale("1234567.89", &cache);
+        // Verify it produces valid output
+        assert_eq!(result, "1\u{2009}234\u{2009}567,89");
+    }
+
+    #[test]
+    fn test_locale_cache_small_numbers() {
+        use crate::time::{create_cache, format_locale};
+        use pure_rust_locales::Locale;
+
+        let locale = Locale::en_US;
+        let cache = create_cache(&locale);
+
+        // Numbers smaller than grouping threshold should remain unchanged
+        assert_eq!(format_locale("123", &cache), "123");
+        assert_eq!(format_locale("12.34", &cache), "12.34");
+        assert_eq!(format_locale("0", &cache), "0");
+    }
+
+    #[test]
+    fn test_locale_cache_consistency_across_locales() {
+        use crate::time::create_cache;
+        use pure_rust_locales::Locale;
+
+        // Verify that creating cache for the same locale twice produces consistent results
+        let cache1 = create_cache(&Locale::en_US);
+        let cache2 = create_cache(&Locale::en_US);
+
+        assert_eq!(cache1.thousands_sep, cache2.thousands_sep);
+        assert_eq!(cache1.decimal_point, cache2.decimal_point);
+        assert_eq!(cache1.grouping, cache2.grouping);
+    }
+
+    #[test]
+    fn test_create_cache_from_various_locales() {
+        use crate::time::{create_cache, format_locale};
+        use pure_rust_locales::Locale;
+
+        // Test that create_cache works for many Locale variants without panicking
+        let locales = vec![
+            Locale::en_US,
+            Locale::de_DE,
+            Locale::fr_FR,
+            Locale::es_ES,
+            Locale::it_IT,
+            Locale::pt_BR,
+            Locale::pt_PT,
+            Locale::ja_JP,
+            Locale::zh_CN,
+            Locale::zh_TW,
+            Locale::ru_RU,
+            Locale::ko_KR,
+            Locale::pl_PL,
+            Locale::tr_TR,
+            Locale::nl_NL,
+            Locale::sv_SE,
+            Locale::da_DK,
+            Locale::fi_FI,
+            Locale::el_GR,
+            Locale::hu_HU,
+            Locale::cs_CZ,
+            Locale::ro_RO,
+            Locale::th_TH,
+            Locale::vi_VN,
+            Locale::ar_SA,
+            Locale::he_IL,
+            Locale::id_ID,
+            Locale::uk_UA,
+            Locale::en_GB,
+            Locale::en_AU,
+            Locale::en_CA,
+            Locale::en_NZ,
+            Locale::en_IN,
+            Locale::fr_CA,
+            Locale::de_AT,
+            Locale::de_CH,
+            Locale::fr_CH,
+            Locale::it_CH,
+            Locale::es_MX,
+            Locale::es_AR,
+        ];
+
+        for locale in locales {
+            let cache = create_cache(&locale);
+            // Check so that it is not empty for a sample number
+            assert!(
+                !format_locale("1234567.89", &cache).is_empty(),
+                "Failed for {:?}",
+                locale
+            );
+        }
     }
 }
 

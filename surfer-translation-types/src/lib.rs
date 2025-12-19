@@ -48,7 +48,7 @@ pub fn check_vector_variable(s: &str) -> Option<(String, ValueKind)> {
         Some(("UNDEF WEAK".to_string(), ValueKind::Undef))
     } else if s.contains('h') || s.contains('l') {
         Some(("WEAK".to_string(), ValueKind::Weak))
-    } else if s.chars().all(|c| c == '0' || c == '1') {
+    } else if s.chars().all(|c| matches!(c, '0' | '1')) {
         None
     } else {
         Some(("UNKNOWN VALUES".to_string(), ValueKind::Undef))

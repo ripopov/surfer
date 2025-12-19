@@ -3,7 +3,7 @@ use crate::translation::fixed_point::{big_uint_to_sfixed, big_uint_to_ufixed};
 use crate::wave_container::{ScopeId, VarId};
 use eyre::Result;
 use half::{bf16, f16};
-use num::BigUint;
+use num::{BigUint, One};
 use softposit::{P8E0, P16E1, P32E2, Q8E0, Q16E1};
 use surfer_translation_types::{
     BasicTranslator, TranslationResult, Translator, ValueKind, ValueRepr, VariableInfo,
@@ -106,7 +106,7 @@ impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
 
 /// Computes the signed value string for a given BigUint and bit width.
 fn compute_signed_value(v: &BigUint, num_bits: u64) -> String {
-    let signweight = BigUint::from(1u8) << (num_bits - 1);
+    let signweight = BigUint::one() << (num_bits - 1);
     if v < &signweight {
         format!("{v}")
     } else {

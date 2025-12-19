@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use eyre::{Result, WrapErr};
 use num::bigint::ToBigInt as _;
-use num::{BigInt, BigUint, ToPrimitive, Zero};
+use num::{BigInt, BigUint, One, ToPrimitive, Zero};
 use serde::{Deserialize, Serialize};
 use surfer_translation_types::{TranslationPreference, Translator, VariableValue};
 use tracing::{error, info, warn};
@@ -290,7 +290,7 @@ impl WaveData {
             let new_num_timestamps = self
                 .inner
                 .max_timestamp()
-                .unwrap_or_else(|| BigUint::from(1u32))
+                .unwrap_or_else(BigUint::one)
                 .to_bigint()
                 .unwrap();
             if new_num_timestamps != old_num_timestamps {
@@ -904,7 +904,7 @@ impl WaveData {
                     if next_value.is_ok_and(|r| {
                         r.is_some_and(|r| {
                             r.current.is_some_and(|v| match v.1 {
-                                VariableValue::BigUint(v) => v == BigUint::from(0u8),
+                                VariableValue::BigUint(v) => v.is_zero(),
                                 _ => false,
                             })
                         })
@@ -927,7 +927,7 @@ impl WaveData {
     pub fn num_timestamps(&self) -> Option<BigInt> {
         self.inner
             .max_timestamp()
-            .and_then(|r| if r == BigUint::zero() { None } else { Some(r) })
+            .and_then(|r| if r.is_zero() { None } else { Some(r) })
             .and_then(|r| r.to_bigint())
     }
 

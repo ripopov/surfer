@@ -27,12 +27,12 @@ type RestCommand = Box<dyn Fn(&str) -> Option<Command<Message>>>;
 
 /// Match str with wave file extensions, currently: vcd, fst, ghw
 fn is_wave_file_extension(ext: &str) -> bool {
-    ext == "vcd" || ext == "fst" || ext == "ghw"
+    matches!(ext, "vcd" | "fst" | "ghw")
 }
 
 /// Match str with command file extensions, currently: sucl
 fn is_command_file_extension(ext: &str) -> bool {
-    ext == "sucl"
+    matches!(ext, "sucl")
 }
 
 /// Split part of a query at whitespace
