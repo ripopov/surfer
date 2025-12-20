@@ -13,6 +13,7 @@ use tracing::warn;
 
 mod basic_translators;
 pub mod clock;
+mod color_translators;
 mod enum_translator;
 mod fixed_point;
 mod instruction_translators;
@@ -298,6 +299,9 @@ pub fn all_translators() -> TranslatorList {
         Arc::new(IdenticalMSBsTranslator {}),
         #[cfg(feature = "f128")]
         Arc::new(QuadPrecisionTranslator {}),
+        Arc::new(color_translators::RGBTranslator {}),
+        Arc::new(color_translators::GrayScaleTranslator {}),
+        Arc::new(color_translators::YCbCrTranslator {}),
     ];
 
     #[cfg(not(target_arch = "wasm32"))]

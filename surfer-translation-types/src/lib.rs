@@ -55,6 +55,23 @@ pub fn check_vector_variable(s: &str) -> Option<(String, ValueKind)> {
     }
 }
 
+/// Return kind for a binary representation
+pub fn kind_for_binary_representation(s: &str) -> ValueKind {
+    if s.contains('x') {
+        ValueKind::Undef
+    } else if s.contains('z') {
+        ValueKind::HighImp
+    } else if s.contains('-') {
+        ValueKind::DontCare
+    } else if s.contains('u') || s.contains('w') {
+        ValueKind::Undef
+    } else if s.contains('h') || s.contains('l') {
+        ValueKind::Weak
+    } else {
+        ValueKind::Normal
+    }
+}
+
 /// VCD bit extension
 pub fn extend_string(val: &str, num_bits: u64) -> String {
     if num_bits > val.len() as u64 {
