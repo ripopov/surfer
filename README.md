@@ -119,7 +119,7 @@ the API for messages is unstable.
 
 ## Project Status
 
-Surfer is still in early development, but it is in a usable state. In fact, if
+Surfer is in a usable state. In fact, if
 you are able to take advantage of the extensibility such as with the
 [Spade](https://spade-lang.org) integration, you may even prefer it to the alternatives.
 
@@ -143,6 +143,7 @@ As an indication of the status of the project, here is an incomplete list of sup
   - [x] Octal values
   - [x] VHDL nine-valued std_ulogic support
   - [x] ASCII
+  - [x] Fixed-point based on bit-index (`fixed_pkg`)
   - [x] Floating-point
     - [x] IEEE 754 binary128 (quad), use feature `f128`, using [f128](https://docs.rs/f128/) (requires gcc)
     - [x] IEEE 754 binary64 (double)
@@ -151,6 +152,7 @@ As an indication of the status of the project, here is an incomplete list of sup
     - [x] bfloat16, using [half](https://docs.rs/half/)
     - [x] 8-bit E5M2
     - [x] 8-bit E4M3
+    - [ ] Based on bit-inded (`float_pkg`)
   - [x] Posit, using [softposit](https://docs.rs/softposit/)
     - [x] 32-bit, two exponent bits
     - [x] 16-bit, one exponent bit
@@ -159,16 +161,12 @@ As an indication of the status of the project, here is an incomplete list of sup
     - [x] Quire for 16-bit, one exponent bit
     - [x] Quire for 8-bit, no exponent bit
   - [x] Instruction decoding using [instruction-decoder](https://github.com/ics-jku/instruction-decoder)
-    - [x] RV32I
-      - [x] M
-      - [x] A
-      - [x] F
-      - [x] D
+    - [x] RV32
     - [x] RV64
-    - [ ] Arm
     - [x] MIPS
     - [x] LoongArch64 (LA64)
-  - [ ] Compressed integers
+    - [ ] Arm
+  - [x] Compressed integers
     - [x] LEB128 (also for other bitwidths than 128)
   - [x] Number of ones
   - [x] Leading/trailing zeros/ones
@@ -186,7 +184,7 @@ As an indication of the status of the project, here is an incomplete list of sup
 - [x] VS Code [extension](https://marketplace.visualstudio.com/items?itemName=surfer-project.surfer)
 - [x] Remote support
   - [x] Serving wave forms from remote server
-  - [ ] Multi-file support for remote server
+  - [x] Multi-file support for remote server
   - [ ] Remote control of Surfer
 - [x] Scripting
   - [x] Loading of commands on startup
@@ -196,6 +194,7 @@ As an indication of the status of the project, here is an incomplete list of sup
 - [ ] Computed variables, e.g., `a >= 100`
 - [ ] Clock period time unit
 - [x] Configurable color schemes
+- [x] Analog drawing
 
 ## License
 
