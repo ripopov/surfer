@@ -521,7 +521,7 @@ impl SystemState {
             .iter()
             .map(|var| {
                 let meta = wave_container.variable_meta(var).ok();
-                let name_info = self.get_variable_name_info(wave_container, var);
+                let name_info = self.get_variable_name_info(var, &meta);
                 (var, meta, name_info)
             })
             .sorted_by_key(|(_, _, name_info)| {
