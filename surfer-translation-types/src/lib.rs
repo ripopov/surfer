@@ -35,6 +35,7 @@ pub struct PluginConfig(pub HashMap<String, String>);
 
 /// Turn vector variable string into name and corresponding color if it
 /// includes values other than 0 and 1. If only 0 and 1, return None.
+#[must_use]
 pub fn check_vector_variable(s: &str) -> Option<(String, ValueKind)> {
     if s.contains('x') {
         Some(("UNDEF".to_string(), ValueKind::Undef))
@@ -56,6 +57,7 @@ pub fn check_vector_variable(s: &str) -> Option<(String, ValueKind)> {
 }
 
 /// Return kind for a binary representation
+#[must_use]
 pub fn kind_for_binary_representation(s: &str) -> ValueKind {
     if s.contains('x') {
         ValueKind::Undef
@@ -73,6 +75,7 @@ pub fn kind_for_binary_representation(s: &str) -> ValueKind {
 }
 
 /// VCD bit extension
+#[must_use]
 pub fn extend_string(val: &str, num_bits: u64) -> String {
     if num_bits > val.len() as u64 {
         let extra_count = num_bits - val.len() as u64;
@@ -104,7 +107,7 @@ impl VariableValue {
     /// with default handling of other values.
     ///
     /// The value passed to the handler is guaranteed to only contain 0 and 1, but it is not
-    /// padded to the length of the vector, i.e. leading zeros can be missing. Use [extend_string]
+    /// padded to the length of the vector, i.e. leading zeros can be missing. Use [`extend_string`]
     /// on the result to add the padding.
     pub fn handle_bits<E>(
         self,
@@ -285,7 +288,7 @@ pub struct VariableMeta<VarId, ScopeId> {
     pub direction: Option<VariableDirection>,
     pub enum_map: HashMap<String, String>,
     /// Indicates how the variable is stored. A variable of "type" boolean for example
-    /// could be stored as a String or as a BitVector.
+    /// could be stored as a String or as a `BitVector`.
     pub encoding: VariableEncoding,
 }
 

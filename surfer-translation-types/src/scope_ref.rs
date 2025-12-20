@@ -30,7 +30,7 @@ impl<ScopeId> AsRef<ScopeRef<ScopeId>> for ScopeRef<ScopeId> {
 impl<ScopeId> Hash for ScopeRef<ScopeId> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // id is intentionally not hashed, since it is only a performance hint
-        self.strs.hash(state)
+        self.strs.hash(state);
     }
 }
 

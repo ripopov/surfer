@@ -25,7 +25,7 @@ fn find_transaction<'a>(
 }
 
 #[must_use]
-pub fn variable_tooltip_text(meta: &Option<VariableMeta>, variable: &VariableRef) -> String {
+pub fn variable_tooltip_text(meta: Option<&VariableMeta>, variable: &VariableRef) -> String {
     if let Some(meta) = meta {
         format!(
             "{}\nNum bits: {}\nType: {}\nDirection: {}",

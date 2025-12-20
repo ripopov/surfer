@@ -17,7 +17,7 @@ impl SystemState {
     pub fn add_statusbar_panel(
         &self,
         ctx: &Context,
-        waves: &Option<WaveData>,
+        waves: Option<&WaveData>,
         msgs: &mut Vec<Message>,
     ) {
         TopBottomPanel::bottom("statusbar")
@@ -36,7 +36,7 @@ impl SystemState {
             });
     }
 
-    fn draw_statusbar(&self, ui: &mut Ui, waves: &Option<WaveData>, msgs: &mut Vec<Message>) {
+    fn draw_statusbar(&self, ui: &mut Ui, waves: Option<&WaveData>, msgs: &mut Vec<Message>) {
         ui.visuals_mut().override_text_color =
             Some(self.user.config.theme.primary_ui_color.foreground);
         ui.with_layout(Layout::left_to_right(Align::RIGHT), |ui| {
@@ -46,7 +46,7 @@ impl SystemState {
     }
 
     /// Draw left-aligned status bar elements: wave source and generation date
-    fn draw_statusbar_left(&self, ui: &mut Ui, waves: &Option<WaveData>) {
+    fn draw_statusbar_left(&self, ui: &mut Ui, waves: Option<&WaveData>) {
         if let Some(waves) = waves {
             ui.label(waves.source.to_string());
             if let Some(datetime) = waves.inner.metadata().date {
@@ -83,7 +83,7 @@ impl SystemState {
     }
 
     /// Draw right-aligned status bar elements: cursor time, undo info, and count
-    fn draw_statusbar_right(&self, ui: &mut Ui, waves: &Option<WaveData>, msgs: &mut Vec<Message>) {
+    fn draw_statusbar_right(&self, ui: &mut Ui, waves: Option<&WaveData>, msgs: &mut Vec<Message>) {
         if let Some(waves) = waves {
             ui.with_layout(Layout::right_to_left(Align::RIGHT), |ui| {
                 if let Some(time) = &waves.cursor {

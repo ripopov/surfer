@@ -572,7 +572,7 @@ impl WaveData {
                 .inner
                 .load_stream_into_memory(gen_ref.stream_id)
             {
-                Ok(_) => info!("(Generator {gen_id}) Finished loading transactions!"),
+                Ok(()) => info!("(Generator {gen_id}) Finished loading transactions!"),
                 Err(_) => return,
             }
         }
@@ -613,7 +613,7 @@ impl WaveData {
                 .inner
                 .load_stream_into_memory(stream_ref.stream_id)
             {
-                Ok(_) => info!(
+                Ok(()) => info!(
                     "(Stream {}) Finished loading transactions!",
                     stream_ref.stream_id
                 ),

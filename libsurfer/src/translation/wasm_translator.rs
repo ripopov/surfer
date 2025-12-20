@@ -66,7 +66,7 @@ pub fn discover_wasm_translators() -> Vec<Message> {
                         dir.to_string_lossy()
                     );
                 })
-                .unwrap_or_else(|_| vec![])
+                .unwrap_or_else(|()| vec![])
         })
         .filter_map(|file| {
             file.clone()

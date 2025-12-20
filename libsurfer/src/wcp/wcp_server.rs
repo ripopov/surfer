@@ -163,7 +163,7 @@ impl WcpServer {
                     }
                 }
 
-                _ = stop_signal_waiter => {
+                () = stop_signal_waiter => {
                     break;
                 }
             }
@@ -241,7 +241,7 @@ impl WcpServer {
                     self.send_message(&mut writer, &s2c).await;
                 }
 
-                _ = stop_signal_waiter => {
+                () = stop_signal_waiter => {
                     return Err(serde_Error::io(std::io::Error::new(
                         std::io::ErrorKind::ConnectionAborted,
                         "Server terminated",

@@ -1028,10 +1028,8 @@ impl SystemState {
                                     } else {
                                         transactions.len() - 1
                                     }
-                                } else if vec_idx as i32 - 1 > 0 {
-                                    vec_idx - 1
                                 } else {
-                                    0
+                                    vec_idx.saturating_sub(1)
                                 }
                             },
                         );
@@ -1788,7 +1786,11 @@ impl SystemState {
                             self.get_variable_value(
                                 waves,
                                 &field_ref,
-                                &waves.cursor.as_ref().and_then(num::BigInt::to_biguint),
+                                waves
+                                    .cursor
+                                    .as_ref()
+                                    .and_then(num::BigInt::to_biguint)
+                                    .as_ref(),
                             )
                         } else {
                             None

@@ -94,7 +94,7 @@ fn separate_until_comma(query: &str) -> (String, String, String, String) {
         .unwrap_or((String::new(), query.into(), String::new(), String::new()))
 }
 
-fn split_query(query: &str, greed: ParamGreed) -> (String, String, String, String) {
+fn split_query(query: &str, greed: &ParamGreed) -> (String, String, String, String) {
     match greed {
         ParamGreed::Word => separate_first_word(query),
         ParamGreed::OptionalWord => separate_optional_word(query),
@@ -116,7 +116,7 @@ pub fn parse_command<T>(query: &str, command: Command<T>) -> Result<T, ParseErro
             _ => Err(ParseError::ExtraParameters(query.into())),
         },
         Command::NonTerminal(greed, _, parsing_function) => {
-            let (_, greed_match, _delim, rest) = split_query(query, greed);
+            let (_, greed_match, _delim, rest) = split_query(query, &greed);
 
             match greed_match.as_ref() {
                 "" => Err(ParseError::MissingParameters),
@@ -149,9 +149,9 @@ pub struct FuzzyOutput {
 fn handle_non_terminal_fuzz<T>(
     previous_query: &str,
     query: &str,
-    greed: ParamGreed,
+    greed: &ParamGreed,
     suggestions: &[String],
-    parser: Parser<T>,
+    parser: &Parser<T>,
 ) -> FuzzyOutput {
     let (leading_whitespace, current_section, delim, rest_query) = split_query(query, greed);
     let rest_query = delim.clone() + &rest_query;
@@ -192,9 +192,9 @@ fn handle_non_terminal_fuzz<T>(
                 let next_result = handle_non_terminal_fuzz(
                     &current_query,
                     &rest_query,
-                    next_greed,
+                    &next_greed,
                     &next_suggestions,
-                    next_parser,
+                    &next_parser,
                 );
                 match next_result {
                     FuzzyOutput {
@@ -234,7 +234,7 @@ fn handle_non_terminal_fuzz<T>(
 pub fn expand_command<T>(query: &str, command: Command<T>) -> FuzzyOutput {
     match command {
         Command::NonTerminal(greed, suggestions, parser) => {
-            let fuzz_result = handle_non_terminal_fuzz("", query, greed, &suggestions, parser);
+            let fuzz_result = handle_non_terminal_fuzz("", query, &greed, &suggestions, &parser);
             match fuzz_result {
                 FuzzyOutput {
                     expanded,

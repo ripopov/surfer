@@ -40,8 +40,7 @@ pub(crate) fn draw_open_sibling_state_file_dialog(
                     let load_button = ui.button("Load");
                     let dont_load_button = ui.button("Don't load");
                     ctx.memory_mut(|mem| {
-                        if mem.focused() != Some(load_button.id)
-                            && mem.focused() != Some(dont_load_button.id)
+                        if !matches!(mem.focused(), Some(id) if id == load_button.id || id == dont_load_button.id)
                         {
                             mem.request_focus(load_button.id);
                         }
@@ -93,8 +92,7 @@ pub(crate) fn draw_reload_waveform_dialog(
                 let reload_button = ui.button("Reload");
                 let leave_button = ui.button("Leave");
                 ctx.memory_mut(|mem| {
-                    if mem.focused() != Some(reload_button.id)
-                        && mem.focused() != Some(leave_button.id)
+                    if !matches!(mem.focused(), Some(id) if id == reload_button.id || id == leave_button.id)
                     {
                         mem.request_focus(reload_button.id);
                     }

@@ -931,7 +931,7 @@ impl SystemState {
             &mut ctx,
             viewport_idx,
         );
-        self.handle_canvas_context_menu(response, waves, to_screen, &mut ctx, msgs, viewport_idx);
+        self.handle_canvas_context_menu(&response, waves, to_screen, &mut ctx, msgs, viewport_idx);
     }
 
     fn draw_wave_data(
@@ -1542,7 +1542,7 @@ impl SystemState {
 
     fn handle_canvas_context_menu(
         &self,
-        response: Response,
+        response: &Response,
         waves: &WaveData,
         to_screen: RectTransform,
         ctx: &mut DrawingContext,
@@ -1679,12 +1679,15 @@ impl VariableExt for String {
     ) -> (f32, Color32, Option<Color32>) {
         let color = value_kind.color(user_color, theme);
         let (height, background) = match (value_kind, self) {
-            (ValueKind::HighImp, _) => (0.5, None),
-            (ValueKind::Undef, _) => (0.5, None),
-            (ValueKind::DontCare, _) => (0.5, None),
-            (ValueKind::Warn, _) => (0.5, None),
-            (ValueKind::Error, _) => (0.5, None),
-            (ValueKind::Custom(_), _) => (0.5, None),
+            (
+                ValueKind::HighImp
+                | ValueKind::Undef
+                | ValueKind::DontCare
+                | ValueKind::Warn
+                | ValueKind::Error
+                | ValueKind::Custom(_),
+                _,
+            ) => (0.5, None),
             (ValueKind::Weak, other) => {
                 if other.to_lowercase() == "l" {
                     (0., None)

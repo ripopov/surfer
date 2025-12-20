@@ -21,7 +21,7 @@ use epaint::{
     text::{FontId, LayoutJob, TextFormat, TextWrapMode},
 };
 use itertools::Itertools;
-use num::{BigInt, BigUint, One};
+use num::{BigInt, BigUint, One, Zero};
 use tracing::info;
 
 use surfer_translation_types::{
@@ -358,7 +358,7 @@ impl SystemState {
         }
 
         if self.show_statusbar() {
-            self.add_statusbar_panel(ctx, &self.user.waves, &mut msgs);
+            self.add_statusbar_panel(ctx, self.user.waves.as_ref(), &mut msgs);
         }
         if let Some(waves) = &self.user.waves
             && self.show_overview()
@@ -875,7 +875,7 @@ impl SystemState {
                     if field.field.is_empty() {
                         let wave_container = waves.inner.as_waves().unwrap();
                         let meta = wave_container.variable_meta(&field.root).ok();
-                        variable_tooltip_text(&meta, &field.root)
+                        variable_tooltip_text(meta.as_ref(), &field.root)
                     } else {
                         "From translator".to_string()
                     }
@@ -1400,7 +1400,7 @@ impl SystemState {
                         let v = self.get_variable_value(
                             waves,
                             &drawing_info.displayed_field_ref,
-                            &ucursor,
+                            ucursor.as_ref(),
                         );
                         if let Some(v) = v {
                             ui.label(
@@ -1460,9 +1460,9 @@ impl SystemState {
         &self,
         waves: &WaveData,
         displayed_field_ref: &DisplayedFieldRef,
-        ucursor: &Option<num::BigUint>,
+        ucursor: Option<&num::BigUint>,
     ) -> Option<String> {
-        let ucursor = ucursor.as_ref()?;
+        let ucursor = ucursor?;
 
         let DisplayedItem::Variable(displayed_variable) =
             waves.displayed_items.get(&displayed_field_ref.item)?
@@ -1498,7 +1498,7 @@ impl SystemState {
         // If time doesn't match cursor, i.e., we are not at a transition or the cursor is at zero
         // or we want the next value after the transition, return current
         if time != *ucursor
-            || BigUint::ZERO == *ucursor
+            || (*ucursor).is_zero()
             || self.transition_value() == TransitionValue::Next
         {
             return curr;

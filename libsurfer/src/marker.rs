@@ -42,17 +42,6 @@ impl WaveData {
             .unwrap_or(theme.cursor.color)
     }
 
-    /// Draw a vertical line at the given x position with the specified stroke
-    fn draw_vertical_line(&self, x: f32, ctx: &mut DrawingContext, size: Vec2, stroke: Stroke) {
-        ctx.painter.line_segment(
-            [
-                (ctx.to_screen)(x + 0.5, -0.5),
-                (ctx.to_screen)(x + 0.5, size.y),
-            ],
-            stroke,
-        );
-    }
-
     pub fn draw_cursor(
         &self,
         theme: &SurferTheme,
@@ -63,7 +52,7 @@ impl WaveData {
         if let Some(marker) = &self.cursor {
             let num_timestamps = self.num_timestamps().unwrap_or_else(BigInt::one);
             let x = viewport.pixel_from_time(marker, size.x, &num_timestamps);
-            self.draw_vertical_line(x, ctx, size, theme.cursor.clone().into());
+            draw_vertical_line(x, ctx, size, theme.cursor.clone().into());
         }
     }
 
@@ -82,7 +71,7 @@ impl WaveData {
                 width: theme.cursor.width,
             };
             let x = viewport.pixel_from_time(marker, size.x, &num_timestamps);
-            self.draw_vertical_line(x, ctx, size, stroke);
+            draw_vertical_line(x, ctx, size, stroke);
         }
     }
 
@@ -237,15 +226,6 @@ impl WaveData {
 }
 
 impl SystemState {
-    /// Generate the message for a marker click based on its index
-    fn marker_click_message(marker_idx: u8, cursor: &Option<BigInt>) -> Message {
-        if marker_idx < CURSOR_MARKER_IDX {
-            Message::GoToMarkerPosition(marker_idx, 0)
-        } else {
-            Message::GoToTime(cursor.clone(), 0)
-        }
-    }
-
     pub fn draw_marker_window(&self, waves: &WaveData, ctx: &Context, msgs: &mut Vec<Message>) {
         let mut open = true;
 
@@ -301,9 +281,9 @@ impl SystemState {
                             for (marker_idx, _, widget_text) in &markers {
                                 header.col(|ui| {
                                     if ui.label(widget_text.clone()).clicked() {
-                                        msgs.push(Self::marker_click_message(
+                                        msgs.push(marker_click_message(
                                             *marker_idx,
-                                            &waves.cursor,
+                                            waves.cursor.as_ref(),
                                         ));
                                     }
                                 });
@@ -319,9 +299,9 @@ impl SystemState {
                                 body.row(row_height, |mut row| {
                                     row.col(|ui| {
                                         if ui.label(row_widget_text.clone()).clicked() {
-                                            msgs.push(Self::marker_click_message(
+                                            msgs.push(marker_click_message(
                                                 *marker_idx,
-                                                &waves.cursor,
+                                                waves.cursor.as_ref(),
                                             ));
                                         }
                                     });
@@ -425,4 +405,24 @@ fn get_marker_background_color(item: &DisplayedItem, theme: &SurferTheme) -> Col
     item.color()
         .and_then(|color| theme.get_color(color))
         .unwrap_or(theme.cursor.color)
+}
+
+/// Draw a vertical line at the given x position with the specified stroke
+fn draw_vertical_line(x: f32, ctx: &mut DrawingContext, size: Vec2, stroke: Stroke) {
+    ctx.painter.line_segment(
+        [
+            (ctx.to_screen)(x + 0.5, -0.5),
+            (ctx.to_screen)(x + 0.5, size.y),
+        ],
+        stroke,
+    );
+}
+
+/// Generate the message for a marker click based on its index
+fn marker_click_message(marker_idx: u8, cursor: Option<&BigInt>) -> Message {
+    if marker_idx < CURSOR_MARKER_IDX {
+        Message::GoToMarkerPosition(marker_idx, 0)
+    } else {
+        Message::GoToTime(cursor.cloned(), 0)
+    }
 }

@@ -30,7 +30,7 @@ pub enum TrueName {
 }
 
 /// Provides a way for translators to "change" the name of variables in the variable list.
-/// Most translators should not produce VariableNameInfo since it is a global thing that
+/// Most translators should not produce `VariableNameInfo` since it is a global thing that
 /// is done on _all_ variables, not just those which have had the translator applied.
 ///
 /// An example use case is translators for HDLs which want to translate from automatically

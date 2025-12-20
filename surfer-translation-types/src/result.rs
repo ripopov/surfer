@@ -82,7 +82,7 @@ pub struct SubFieldTranslationResult {
 }
 
 impl SubFieldTranslationResult {
-    pub fn new(name: impl ToString, result: TranslationResult) -> Self {
+    pub fn new(name: &impl ToString, result: TranslationResult) -> Self {
         SubFieldTranslationResult {
             name: name.to_string(),
             result,
@@ -97,6 +97,7 @@ pub struct TranslatedValue {
 }
 
 impl TranslatedValue {
+    #[must_use]
     pub fn from_basic_translate(result: (String, ValueKind)) -> Self {
         TranslatedValue {
             value: result.0,
@@ -104,7 +105,7 @@ impl TranslatedValue {
         }
     }
 
-    pub fn new(value: impl ToString, kind: ValueKind) -> Self {
+    pub fn new(value: &impl ToString, kind: ValueKind) -> Self {
         TranslatedValue {
             value: value.to_string(),
             kind,
