@@ -112,7 +112,7 @@ impl SystemState {
         };
         let distance = end_location - start_location;
         if distance.length_sq() >= self.user.config.gesture.deadzone {
-            match gesture_type(&self.user.config.gesture.mapping, distance) {
+            match gesture_type(self.user.config.gesture.mapping, distance) {
                 GestureKind::ZoomToFit => {
                     msgs.push(Message::ZoomToFit { viewport_idx });
                 }
@@ -170,7 +170,7 @@ impl SystemState {
         };
         let distance = current_location - start_location;
         if distance.length_sq() >= self.user.config.gesture.deadzone {
-            match gesture_type(&self.user.config.gesture.mapping, distance) {
+            match gesture_type(self.user.config.gesture.mapping, distance) {
                 GestureKind::ZoomToFit => self.draw_gesture_line(
                     start_location,
                     current_location,
@@ -196,13 +196,19 @@ impl SystemState {
                     ctx,
                 ),
                 GestureKind::GoToEnd => {
-                    self.draw_gesture_line(start_location, current_location, "Go to end", true, ctx)
+                    self.draw_gesture_line(
+                        start_location,
+                        current_location,
+                        "Go to end",
+                        true,
+                        ctx,
+                    );
                 }
                 GestureKind::ZoomOut => {
-                    self.draw_gesture_line(start_location, current_location, "Zoom out", true, ctx)
+                    self.draw_gesture_line(start_location, current_location, "Zoom out", true, ctx);
                 }
                 GestureKind::Cancel => {
-                    self.draw_gesture_line(start_location, current_location, "Cancel", false, ctx)
+                    self.draw_gesture_line(start_location, current_location, "Cancel", false, ctx);
                 }
             }
         } else {
@@ -492,7 +498,7 @@ fn draw_gesture_help(
 }
 
 /// Determine which mouse gesture ([`GestureKind`]) is currently drawn.
-fn gesture_type(zones: &GestureZones, delta: Vec2) -> GestureKind {
+fn gesture_type(zones: GestureZones, delta: Vec2) -> GestureKind {
     let tan225x = TAN_22_5_DEGREES * delta.x;
     let tan225y = TAN_22_5_DEGREES * delta.y;
     if delta.x < 0.0 {
@@ -578,19 +584,19 @@ mod tests {
 
         // Pure cardinal directions
         assert_eq!(
-            gesture_type(&zones, Vec2::new(100.0, 0.0)),
+            gesture_type(zones, Vec2::new(100.0, 0.0)),
             GestureKind::GoToEnd
         ); // East
         assert_eq!(
-            gesture_type(&zones, Vec2::new(-100.0, 0.0)),
+            gesture_type(zones, Vec2::new(-100.0, 0.0)),
             GestureKind::GoToStart
         ); // West
         assert_eq!(
-            gesture_type(&zones, Vec2::new(0.0, -100.0)),
+            gesture_type(zones, Vec2::new(0.0, -100.0)),
             GestureKind::ZoomToFit
         ); // North
         assert_eq!(
-            gesture_type(&zones, Vec2::new(0.0, 100.0)),
+            gesture_type(zones, Vec2::new(0.0, 100.0)),
             GestureKind::Cancel
         ); // South
     }
@@ -601,19 +607,19 @@ mod tests {
 
         // 45-degree diagonals (should be in the diagonal zones)
         assert_eq!(
-            gesture_type(&zones, Vec2::new(100.0, -100.0)),
+            gesture_type(zones, Vec2::new(100.0, -100.0)),
             GestureKind::ZoomIn
         ); // Northeast
         assert_eq!(
-            gesture_type(&zones, Vec2::new(100.0, 100.0)),
+            gesture_type(zones, Vec2::new(100.0, 100.0)),
             GestureKind::ZoomOut
         ); // Southeast
         assert_eq!(
-            gesture_type(&zones, Vec2::new(-100.0, 100.0)),
+            gesture_type(zones, Vec2::new(-100.0, 100.0)),
             GestureKind::ZoomOut
         ); // Southwest
         assert_eq!(
-            gesture_type(&zones, Vec2::new(-100.0, -100.0)),
+            gesture_type(zones, Vec2::new(-100.0, -100.0)),
             GestureKind::ZoomIn
         ); // Northwest
     }
@@ -625,21 +631,21 @@ mod tests {
         // Test vectors just inside the east zone boundary (tan(22.5°) ≈ 0.414)
         // For east: |y| < tan(22.5°) * x
         assert_eq!(
-            gesture_type(&zones, Vec2::new(100.0, 40.0)),
+            gesture_type(zones, Vec2::new(100.0, 40.0)),
             GestureKind::GoToEnd
         ); // East
         assert_eq!(
-            gesture_type(&zones, Vec2::new(100.0, -40.0)),
+            gesture_type(zones, Vec2::new(100.0, -40.0)),
             GestureKind::GoToEnd
         ); // East
 
         // Test vectors just outside the east zone boundary (should be southeast/northeast)
         assert_eq!(
-            gesture_type(&zones, Vec2::new(100.0, 50.0)),
+            gesture_type(zones, Vec2::new(100.0, 50.0)),
             GestureKind::ZoomOut
         ); // Southeast
         assert_eq!(
-            gesture_type(&zones, Vec2::new(100.0, -50.0)),
+            gesture_type(zones, Vec2::new(100.0, -50.0)),
             GestureKind::ZoomIn
         ); // Northeast
     }
@@ -650,21 +656,21 @@ mod tests {
 
         // Test vectors just inside the west zone boundary
         assert_eq!(
-            gesture_type(&zones, Vec2::new(-100.0, 40.0)),
+            gesture_type(zones, Vec2::new(-100.0, 40.0)),
             GestureKind::GoToStart
         ); // West
         assert_eq!(
-            gesture_type(&zones, Vec2::new(-100.0, -40.0)),
+            gesture_type(zones, Vec2::new(-100.0, -40.0)),
             GestureKind::GoToStart
         ); // West
 
         // Test vectors just outside the west zone boundary
         assert_eq!(
-            gesture_type(&zones, Vec2::new(-100.0, 50.0)),
+            gesture_type(zones, Vec2::new(-100.0, 50.0)),
             GestureKind::ZoomOut
         ); // Southwest
         assert_eq!(
-            gesture_type(&zones, Vec2::new(-100.0, -50.0)),
+            gesture_type(zones, Vec2::new(-100.0, -50.0)),
             GestureKind::ZoomIn
         ); // Northwest
     }

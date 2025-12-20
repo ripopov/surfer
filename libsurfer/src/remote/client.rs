@@ -397,7 +397,7 @@ mod tests {
             let len = signal_url_len(sig_ref.unwrap().index());
 
             // Verify the calculated length matches actual string length
-            let actual = format!("/{}", idx);
+            let actual = format!("/{idx}");
             assert_eq!(
                 len,
                 actual.len(),
@@ -420,7 +420,7 @@ mod tests {
             wellen::SignalRef::from_index(999),
         ]
         .into_iter()
-        .filter_map(|s| s)
+        .flatten()
         .collect();
 
         let url = format_signal_url(base_url, &signals);

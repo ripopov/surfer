@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 /// a-p. This is nice because it makes for some easily typed ids.
 /// The function first formats the number as a hex digit and then performs
 /// the mapping.
+#[must_use]
 pub fn uint_idx_to_alpha_idx(idx: VisibleItemIndex, nvariables: usize) -> String {
     // this calculates how many hex digits we need to represent nvariables
     // unwrap because the result should always fit into usize and because
@@ -37,7 +38,7 @@ pub fn uint_idx_to_alpha_idx(idx: VisibleItemIndex, nvariables: usize) -> String
         .collect()
 }
 
-/// This is the reverse function to uint_idx_to_alpha_idx.
+/// This is the reverse function to `uint_idx_to_alpha_idx`.
 pub fn alpha_idx_to_uint_idx(idx: &str) -> Option<VisibleItemIndex> {
     let mapped = idx
         .chars()
@@ -92,7 +93,8 @@ fn get_multi_extension_from_filename(filename: &str) -> Option<String> {
 
 /// Get the full extension of a path, including all extensions.
 /// For example, for "foo.tar.gz", this function returns "tar.gz", and not just "gz",
-/// like path.extension() would.
+/// like `path.extension()` would.
+#[must_use]
 pub fn get_multi_extension(path: &Utf8PathBuf) -> Option<String> {
     // Find the first . in the path, if any. Return the rest of the path.
     if let Some(filename) = path.file_name() {
@@ -173,7 +175,7 @@ mod tests {
         // Trailing dot: extension becomes empty string
         assert_eq!(
             get_multi_extension_from_filename("foo."),
-            Some("".to_string())
+            Some(String::new())
         );
     }
 
@@ -199,7 +201,7 @@ mod tests {
         let name2 = "ß.";
         assert_eq!(
             get_multi_extension_from_filename(name2),
-            Some("".to_string())
+            Some(String::new())
         );
     }
 
@@ -232,7 +234,7 @@ mod tests {
         }
 
         // Start searching from c upwards, but only within root
-        let found = search_upward(&c, root, &item_name);
+        let found = search_upward(&c, root, item_name);
         // Expect closest-first order: c/target.txt, then a/target.txt
         assert_eq!(found, vec![item_c, item_a]);
     }

@@ -13,22 +13,27 @@ pub struct TransactionContainer {
 }
 
 impl TransactionContainer {
+    #[must_use]
     pub fn get_streams(&self) -> Vec<&TxStream> {
         self.inner.tx_streams.values().collect()
     }
 
+    #[must_use]
     pub fn get_stream(&self, stream_id: usize) -> Option<&TxStream> {
         self.inner.get_stream(stream_id)
     }
 
+    #[must_use]
     pub fn get_stream_from_name(&self, name: String) -> Option<&TxStream> {
         self.inner.get_stream_from_name(name)
     }
 
+    #[must_use]
     pub fn get_generators(&self) -> Vec<&TxGenerator> {
         self.inner.tx_generators.values().collect()
     }
 
+    #[must_use]
     pub fn get_transaction(&self, transaction_ref: &TransactionRef) -> Option<&Transaction> {
         self.inner.tx_generators.values().find_map(|g| {
             g.transactions
@@ -37,9 +42,11 @@ impl TransactionContainer {
         })
     }
 
+    #[must_use]
     pub fn get_generator(&self, gen_id: usize) -> Option<&TxGenerator> {
         self.inner.get_generator(gen_id)
     }
+    #[must_use]
     pub fn get_generator_from_name(
         &self,
         stream_id: Option<usize>,
@@ -48,15 +55,17 @@ impl TransactionContainer {
         self.inner.get_generator_from_name(stream_id, gen_name)
     }
 
+    #[must_use]
     pub fn get_transactions_from_generator(&self, gen_id: usize) -> Vec<usize> {
         self.get_generator(gen_id)
             .unwrap()
             .transactions
             .iter()
-            .map(|t| t.get_tx_id())
+            .map(ftr_parser::types::Transaction::get_tx_id)
             .collect_vec()
     }
 
+    #[must_use]
     pub fn get_transactions_from_stream(&self, stream_id: usize) -> Vec<usize> {
         self.get_stream(stream_id)
             .unwrap()
@@ -67,11 +76,12 @@ impl TransactionContainer {
                     .unwrap()
                     .transactions
                     .iter()
-                    .map(|t| t.get_tx_id())
+                    .map(ftr_parser::types::Transaction::get_tx_id)
                     .collect_vec()
             })
             .collect()
     }
+    #[must_use]
     pub fn stream_scope_exists(&self, stream_scope: &StreamScopeRef) -> bool {
         match stream_scope {
             StreamScopeRef::Root => true,
@@ -80,6 +90,7 @@ impl TransactionContainer {
         }
     }
 
+    #[must_use]
     pub fn stream_names(&self) -> Vec<String> {
         let mut names = vec![String::from("tr")];
         let mut stream_names: Vec<String> = self
@@ -92,6 +103,7 @@ impl TransactionContainer {
         names
     }
 
+    #[must_use]
     pub fn generator_names(&self) -> Vec<String> {
         self.get_generators()
             .into_iter()
@@ -99,6 +111,7 @@ impl TransactionContainer {
             .collect()
     }
 
+    #[must_use]
     pub fn generators_in_stream(&self, stream_scope: &StreamScopeRef) -> Vec<TransactionStreamRef> {
         match stream_scope {
             StreamScopeRef::Root => self
@@ -128,10 +141,12 @@ impl TransactionContainer {
         }
     }
 
+    #[must_use]
     pub fn max_timestamp(&self) -> Option<BigUint> {
         Some(BigUint::try_from(&self.inner.max_timestamp).unwrap())
     }
 
+    #[must_use]
     pub fn metadata(&self) -> MetaData {
         let timescale = self.inner.time_scale;
         MetaData {
@@ -144,10 +159,12 @@ impl TransactionContainer {
         }
     }
 
+    #[must_use]
     pub fn body_loaded(&self) -> bool {
         true // for now
     }
 
+    #[must_use]
     pub fn is_fully_loaded(&self) -> bool {
         true // for now
     }
@@ -171,6 +188,7 @@ impl Display for StreamScopeRef {
 }
 
 impl StreamScopeRef {
+    #[must_use]
     pub fn new_stream_from_name(transactions: &TransactionContainer, name: String) -> Self {
         let stream = transactions
             .inner
@@ -212,6 +230,7 @@ impl Display for TransactionStreamRef {
 }
 
 impl TransactionStreamRef {
+    #[must_use]
     pub fn new_stream(stream_id: usize, name: String) -> Self {
         TransactionStreamRef {
             stream_id,
@@ -219,6 +238,7 @@ impl TransactionStreamRef {
             name,
         }
     }
+    #[must_use]
     pub fn new_gen(stream_id: usize, gen_id: usize, name: String) -> Self {
         TransactionStreamRef {
             stream_id,
@@ -227,10 +247,12 @@ impl TransactionStreamRef {
         }
     }
 
+    #[must_use]
     pub fn is_generator(&self) -> bool {
         self.gen_id.is_some()
     }
 
+    #[must_use]
     pub fn is_stream(&self) -> bool {
         self.is_generator().not()
     }

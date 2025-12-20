@@ -159,6 +159,7 @@ where
 }
 
 impl WaveData {
+    #[must_use]
     pub fn update_with_waves(
         mut self,
         new_waves: Box<WaveContainer>,
@@ -281,8 +282,8 @@ impl WaveData {
             .expect("internal error: failed to load variables")
     }
 
-    /// Needs to be called after update_with, once the new number of timestamps is available in
-    /// the inner WaveContainer.
+    /// Needs to be called after `update_with`, once the new number of timestamps is available in
+    /// the inner `WaveContainer`.
     pub fn update_viewports(&mut self) {
         if let Some(old_num_timestamps) = std::mem::take(&mut self.old_num_timestamps) {
             // FIXME: I'm not sure if Defaulting to 1 time step is the right thing to do if we
@@ -359,6 +360,7 @@ impl WaveData {
             .collect()
     }
 
+    #[must_use]
     pub fn select_preferred_translator(
         &self,
         var: VariableMeta,
@@ -367,6 +369,7 @@ impl WaveData {
         select_preferred_translator(&var, translators)
     }
 
+    #[must_use]
     pub fn variable_translator<'a>(
         &'a self,
         field: &DisplayedFieldRef,
@@ -507,7 +510,7 @@ impl WaveData {
                     .checked_sub(1)
                     .map(VisibleItemIndex),
             }
-        })
+        });
     }
 
     pub fn add_divider(&mut self, name: Option<String>, vidx: Option<VisibleItemIndex>) {
@@ -665,6 +668,7 @@ impl WaveData {
     /// - an unfolded group, insert index is to the first element of the group
     /// - a folded group, insert index is to before the next sibling (if exists)
     /// - otherwise insert index is past it on the same level
+    #[must_use]
     pub fn insert_position(&self, vidx: Option<VisibleItemIndex>) -> Option<TargetPosition> {
         let vidx = vidx?;
         let item_index = self.items_tree.to_displayed(vidx)?;
@@ -690,6 +694,7 @@ impl WaveData {
     }
 
     /// Return insert position as last item
+    #[must_use]
     pub fn end_insert_position(&self) -> TargetPosition {
         TargetPosition {
             before: ItemIndex(self.items_tree.len()),
@@ -697,6 +702,7 @@ impl WaveData {
         }
     }
 
+    #[must_use]
     pub fn index_for_ref_or_focus(&self, item_ref: Option<DisplayedItemRef>) -> Option<ItemIndex> {
         if let Some(item_ref) = item_ref {
             self.items_tree
@@ -762,10 +768,12 @@ impl WaveData {
     }
 
     #[inline]
+    #[must_use]
     pub fn numbered_marker_time(&self, idx: u8) -> &BigInt {
         self.markers.get(&idx).unwrap()
     }
 
+    #[must_use]
     pub fn viewport_all(&self) -> Viewport {
         Viewport::new()
     }
@@ -783,11 +791,13 @@ impl WaveData {
     }
 
     #[inline]
+    #[must_use]
     pub fn any_displayed(&self) -> bool {
         !self.displayed_items.is_empty()
     }
 
     /// Find the top-most of the currently visible items.
+    #[must_use]
     pub fn get_top_item(&self) -> usize {
         let default = if self.drawing_infos.is_empty() {
             0
@@ -802,6 +812,7 @@ impl WaveData {
     }
 
     /// Find the item at a given y-location.
+    #[must_use]
     pub fn get_item_at_y(&self, y: f32) -> Option<VisibleItemIndex> {
         if self.drawing_infos.is_empty() {
             return None;
@@ -924,6 +935,7 @@ impl WaveData {
     /// Returns the number of timestamps in the current waves. For now, this adjusts the
     /// number of timestamps as returned by wave sources if they specify 0 timestamps. This is
     /// done to avoid having to consider what happens with the viewport.
+    #[must_use]
     pub fn num_timestamps(&self) -> Option<BigInt> {
         self.inner
             .max_timestamp()
@@ -931,6 +943,7 @@ impl WaveData {
             .and_then(|r| r.to_bigint())
     }
 
+    #[must_use]
     pub fn get_displayed_item_index(
         &self,
         item_ref: &DisplayedItemRef,

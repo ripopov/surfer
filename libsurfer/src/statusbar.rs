@@ -76,7 +76,7 @@ impl SystemState {
                 if in_progress_count == 1 {
                     ui.label("Building analog cache…");
                 } else {
-                    ui.label(format!("Building {} analog caches…", in_progress_count));
+                    ui.label(format!("Building {in_progress_count} analog caches…"));
                 }
             }
         }

@@ -11,6 +11,7 @@ pub struct ClockTranslator {
 }
 
 impl ClockTranslator {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             inner: AnyTranslator::Basic(Arc::new(BitTranslator {})),

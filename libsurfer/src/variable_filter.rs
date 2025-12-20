@@ -77,10 +77,11 @@ impl Default for VariableFilter {
 }
 
 impl VariableFilter {
+    #[must_use]
     pub fn new() -> VariableFilter {
         VariableFilter {
             name_filter_type: VariableNameFilterType::Contain,
-            name_filter_str: String::from(""),
+            name_filter_str: String::new(),
             name_filter_case_insensitive: true,
 
             include_inputs: true,
@@ -124,11 +125,7 @@ impl VariableFilter {
                 VariableNameFilterType::Contain => escape(&filter_str),
                 _ => unreachable!(),
             };
-            let rebuild = cache
-                .regex_pattern
-                .as_ref()
-                .map(|p| p != &pat)
-                .unwrap_or(true)
+            let rebuild = (cache.regex_pattern.as_ref() != Some(&pat))
                 || cache.regex_case_insensitive != case_insensitive
                 || cache.regex.is_none();
 

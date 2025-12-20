@@ -51,7 +51,7 @@ fn translate_with_basic(
     variable: &VariableMeta,
     value: &VariableValue,
 ) -> Result<TranslationResult> {
-    let (val, kind) = t.basic_translate(variable.num_bits.unwrap_or(0) as u64, value);
+    let (val, kind) = t.basic_translate(u64::from(variable.num_bits.unwrap_or(0)), value);
     Ok(TranslationResult {
         val: ValueRepr::String(val),
         kind,
@@ -68,6 +68,7 @@ pub enum AnyTranslator {
 }
 
 impl AnyTranslator {
+    #[must_use]
     pub fn is_basic(&self) -> bool {
         matches!(self, AnyTranslator::Basic(_))
     }
@@ -224,9 +225,8 @@ fn find_user_decoders_at_path(path: &Path) -> Vec<Arc<DynBasicTranslator>> {
                                 toml_file.path().display()
                             );
                             continue;
-                        } else {
-                            width = Some(toml_width.clone());
                         }
+                        width = Some(toml_width.clone());
 
                         tomls.push(toml_parsed);
                     }
@@ -246,7 +246,7 @@ fn find_user_decoders_at_path(path: &Path) -> Vec<Arc<DynBasicTranslator>> {
                             width.unsigned_abs(),
                             translator.name(),
                         );
-                        decoders.push(Arc::new(translator))
+                        decoders.push(Arc::new(translator));
                     }
                     Err(e) => {
                         error!("Error while building decoder {name}");
@@ -263,6 +263,7 @@ fn find_user_decoders_at_path(path: &Path) -> Vec<Arc<DynBasicTranslator>> {
     decoders
 }
 
+#[must_use]
 pub fn all_translators() -> TranslatorList {
     // WASM does not need mut, non-wasm does so we'll allow it
     #[allow(unused_mut)]
@@ -328,6 +329,7 @@ pub struct TranslatorList {
 }
 
 impl TranslatorList {
+    #[must_use]
     pub fn new(basic: Vec<Arc<DynBasicTranslator>>, translators: Vec<Arc<DynTranslator>>) -> Self {
         Self {
             default: "Hexadecimal".to_string(),
@@ -360,6 +362,7 @@ impl TranslatorList {
             .collect()
     }
 
+    #[must_use]
     pub fn all_translators(&self) -> Vec<&AnyTranslator> {
         #[cfg(feature = "python")]
         let python_translator = self.python_translator.as_ref().map(|(_, _, t)| t);
@@ -368,6 +371,7 @@ impl TranslatorList {
         self.inner.values().chain(python_translator).collect()
     }
 
+    #[must_use]
     pub fn basic_translator_names(&self) -> Vec<&str> {
         self.inner
             .iter()
@@ -375,6 +379,7 @@ impl TranslatorList {
             .collect()
     }
 
+    #[must_use]
     pub fn get_translator(&self, name: &str) -> &AnyTranslator {
         #[cfg(feature = "python")]
         let python_translator = || {
@@ -391,6 +396,7 @@ impl TranslatorList {
             .unwrap_or_else(|| panic!("No translator called {name}"))
     }
 
+    #[must_use]
     pub fn clone_translator(&self, name: &str) -> AnyTranslator {
         self.get_translator(name).clone()
     }
@@ -399,6 +405,7 @@ impl TranslatorList {
         self.inner.insert(t.name(), t);
     }
 
+    #[must_use]
     pub fn is_valid_translator(&self, meta: &VariableMeta, candidate: &str) -> bool {
         self.get_translator(candidate)
             .translates(meta)

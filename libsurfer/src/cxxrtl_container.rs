@@ -115,11 +115,11 @@ pub struct CxxrtlData {
     module_item_cache: HashMap<ScopeRef, CachedData<HashMap<VariableRef, CxxrtlItem>>>,
     all_items_cache: CachedData<HashMap<VariableRef, CxxrtlItem>>,
 
-    /// We use the CachedData system to keep track of if we have sent a query request,
-    /// but the actual data is stored in the interval_query_cache.
+    /// We use the `CachedData` system to keep track of if we have sent a query request,
+    /// but the actual data is stored in the `interval_query_cache`.
     ///
     /// The held value in the query result is the end timestamp of the current current
-    /// interval_query_cache
+    /// `interval_query_cache`
     query_result: CachedData<CxxrtlTimestamp>,
     interval_query_cache: QueryContainer,
 
@@ -299,14 +299,14 @@ impl CxxrtlContainer {
                     };
                     match msg {
                         SCMessage::greeting { .. } => {
-                            info!("Received cxxrtl greeting")
+                            info!("Received cxxrtl greeting");
                         }
                         SCMessage::response(response) => {
                             if let Some(cb) = self.sending.callback_queue.pop_front() {
-                                cb(response, &mut self.data)
+                                cb(response, &mut self.data);
                             } else {
-                                error!("Got a CXXRTL message with no corresponding callback")
-                            };
+                                error!("Got a CXXRTL message with no corresponding callback");
+                            }
                         }
                         SCMessage::error(e) => {
                             error!("CXXRTL error: '{}'", e.message);
@@ -555,6 +555,7 @@ impl CxxrtlContainer {
             }))
     }
 
+    #[must_use]
     pub fn max_displayed_timestamp(&self) -> Option<CxxrtlTimestamp> {
         self.data.query_result.get().map(|t| (*t).clone())
     }

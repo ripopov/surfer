@@ -81,11 +81,11 @@ fn get_locale_format_cache() -> &'static LocaleFormatCache {
             .as_str()
             .try_into()
             .unwrap_or(Locale::en_US);
-        create_cache(&locale)
+        create_cache(locale)
     })
 }
 
-fn create_cache(locale: &Locale) -> LocaleFormatCache {
+fn create_cache(locale: Locale) -> LocaleFormatCache {
     let grouping = locale_match!(locale => LC_NUMERIC::GROUPING);
     let thousands_sep =
         locale_match!(locale => LC_NUMERIC::THOUSANDS_SEP).replace('\u{202f}', THIN_SPACE);
@@ -131,7 +131,7 @@ impl From<ftr_parser::types::Timescale> for TimeUnit {
 
 impl TimeUnit {
     /// Get the power-of-ten exponent for a time unit.
-    fn exponent(&self) -> i8 {
+    fn exponent(self) -> i8 {
         match self {
             TimeUnit::ZeptoSeconds => -21,
             TimeUnit::AttoSeconds => -18,
@@ -195,7 +195,8 @@ impl Default for TimeFormat {
 }
 
 impl TimeFormat {
-    /// Create a new TimeFormat with custom settings.
+    /// Create a new `TimeFormat` with custom settings.
+    #[must_use]
     pub fn new(format: TimeStringFormatting, show_space: bool, show_unit: bool) -> Self {
         TimeFormat {
             format,
@@ -205,18 +206,21 @@ impl TimeFormat {
     }
 
     /// Set the format type.
+    #[must_use]
     pub fn with_format(mut self, format: TimeStringFormatting) -> Self {
         self.format = format;
         self
     }
 
     /// Set whether to show space between number and unit.
+    #[must_use]
     pub fn with_space(mut self, show_space: bool) -> Self {
         self.show_space = show_space;
         self
     }
 
     /// Set whether to show the time unit.
+    #[must_use]
     pub fn with_unit(mut self, show_unit: bool) -> Self {
         self.show_unit = show_unit;
         self
@@ -271,7 +275,7 @@ fn strip_trailing_zeros_and_period(time: String) -> String {
 
 /// Format number based on [`TimeStringFormatting`], i.e., possibly group digits together
 /// and use correct separator for each group.
-fn split_and_format_number(time: &str, format: &TimeStringFormatting) -> String {
+fn split_and_format_number(time: &str, format: TimeStringFormatting) -> String {
     match format {
         TimeStringFormatting::No => time.to_string(),
         TimeStringFormatting::Locale => format_locale(time, get_locale_format_cache()),
@@ -345,14 +349,15 @@ pub struct TimeFormatter {
     time_format: TimeFormat,
     /// Cached exponent difference (wanted - data)
     exponent_diff: i8,
-    /// Cached unit string (empty if show_unit is false)
+    /// Cached unit string (empty if `show_unit` is false)
     unit_string: String,
-    /// Cached space string (empty if show_space is false)
+    /// Cached space string (empty if `show_space` is false)
     space_string: String,
 }
 
 impl TimeFormatter {
-    /// Create a new TimeFormatter with the given settings.
+    /// Create a new `TimeFormatter` with the given settings.
+    #[must_use]
     pub fn new(timescale: &TimeScale, wanted_unit: &TimeUnit, time_format: &TimeFormat) -> Self {
         // Note: For Auto unit, we defer resolution to format() time since it depends on the value
         let (exponent_diff, unit_string) = if *wanted_unit == TimeUnit::Auto {
@@ -387,9 +392,10 @@ impl TimeFormatter {
     }
 
     /// Format a single time value.
+    #[must_use]
     pub fn format(&self, time: &BigInt) -> String {
         if self.wanted_unit == TimeUnit::None {
-            return split_and_format_number(&time.to_string(), &self.time_format.format);
+            return split_and_format_number(&time.to_string(), self.time_format.format);
         }
 
         // Handle Auto unit by resolving it for this specific time value
@@ -430,7 +436,7 @@ impl TimeFormatter {
 
         format!(
             "{scaledtime}{space}{unit}",
-            scaledtime = split_and_format_number(&timestring, &self.time_format.format),
+            scaledtime = split_and_format_number(&timestring, self.time_format.format),
             space = &self.space_string,
             unit = &unit_string
         )
@@ -438,7 +444,8 @@ impl TimeFormatter {
 }
 
 /// Format the time string taking all settings into account.
-/// This function delegates to TimeFormatter which handles the Auto timeunit.
+/// This function delegates to `TimeFormatter` which handles the Auto timeunit.
+#[must_use]
 pub fn time_string(
     time: &BigInt,
     timescale: &TimeScale,
@@ -465,14 +472,14 @@ impl WaveData {
     /// Draw the text for each tick location.
     pub fn draw_ticks(
         &self,
-        color: Option<&Color32>,
+        color: Option<Color32>,
         ticks: &[(String, f32)],
         ctx: &DrawingContext<'_>,
         y_offset: f32,
         align: Align2,
         config: &SurferConfig,
     ) {
-        let color = *color.unwrap_or(&config.theme.foreground);
+        let color = color.unwrap_or(config.theme.foreground);
 
         for (tick_text, x) in ticks {
             ctx.painter.text(
@@ -501,6 +508,7 @@ impl SystemState {
 /// The method is based on guessing the length of the time string and
 /// is inspired by the corresponding code in Matplotlib.
 #[allow(clippy::too_many_arguments)]
+#[must_use]
 pub fn get_ticks(
     viewport: &Viewport,
     timescale: &TimeScale,
@@ -526,15 +534,15 @@ pub fn get_ticks(
         .abs()
         .log10()
         .round() as i16;
-    let max_labelwidth = (rightexp.max(leftexp) + 3) as f32 * char_width;
+    let max_labelwidth = f32::from(rightexp.max(leftexp) + 3) * char_width;
     let max_labels = ((frame_width * config.theme.ticks.density) / max_labelwidth).floor() + 2.;
     let scale = 10.0f64.powf(
         ((viewport.curr_right - viewport.curr_left)
             .absolute(num_timestamps)
             .inner()
-            / max_labels as f64)
-            .log10()
-            .floor(),
+            / f64::from(max_labels))
+        .log10()
+        .floor(),
     );
 
     let mut ticks: Vec<(String, f32)> = [].to_vec();
@@ -550,7 +558,9 @@ pub fn get_ticks(
         if high <= max_labels {
             let time_formatter = TimeFormatter::new(timescale, wanted_timeunit, time_format);
             ticks = (0..high as i16)
-                .map(|v| BigInt::from(((v as f64) * scaled_step + rounded_min_label_time) as i128))
+                .map(|v| {
+                    BigInt::from((f64::from(v) * scaled_step + rounded_min_label_time) as i128)
+                })
                 .unique()
                 .map(|tick| {
                     (
@@ -869,7 +879,7 @@ mod test {
         assert_eq!(strip_trailing_zeros_and_period("123".into()), "123");
         assert_eq!(strip_trailing_zeros_and_period("0.000".into()), "0");
         assert_eq!(strip_trailing_zeros_and_period("0.100".into()), "0.1");
-        assert_eq!(strip_trailing_zeros_and_period("".into()), "");
+        assert_eq!(strip_trailing_zeros_and_period(String::new()), "");
     }
 
     #[test]
@@ -1193,7 +1203,7 @@ mod test {
         use pure_rust_locales::Locale;
 
         let locale = Locale::en_US;
-        let cache = create_cache(&locale);
+        let cache = create_cache(locale);
 
         // en_US uses period as decimal point and comma as thousands separator
         let result = format_locale("1234567.89", &cache);
@@ -1206,7 +1216,7 @@ mod test {
         use pure_rust_locales::Locale;
 
         let locale = Locale::de_DE;
-        let cache = create_cache(&locale);
+        let cache = create_cache(locale);
 
         let result = format_locale("1234567.89", &cache);
         assert_eq!(result, "1.234.567,89");
@@ -1218,7 +1228,7 @@ mod test {
         use pure_rust_locales::Locale;
 
         let locale = Locale::fr_FR;
-        let cache = create_cache(&locale);
+        let cache = create_cache(locale);
 
         // fr_FR typically uses space/thin_space and comma
         let result = format_locale("1234567.89", &cache);
@@ -1232,7 +1242,7 @@ mod test {
         use pure_rust_locales::Locale;
 
         let locale = Locale::en_US;
-        let cache = create_cache(&locale);
+        let cache = create_cache(locale);
 
         // Numbers smaller than grouping threshold should remain unchanged
         assert_eq!(format_locale("123", &cache), "123");
@@ -1246,8 +1256,8 @@ mod test {
         use pure_rust_locales::Locale;
 
         // Verify that creating cache for the same locale twice produces consistent results
-        let cache1 = create_cache(&Locale::en_US);
-        let cache2 = create_cache(&Locale::en_US);
+        let cache1 = create_cache(Locale::en_US);
+        let cache2 = create_cache(Locale::en_US);
 
         assert_eq!(cache1.thousands_sep, cache2.thousands_sep);
         assert_eq!(cache1.decimal_point, cache2.decimal_point);
@@ -1304,12 +1314,11 @@ mod test {
         ];
 
         for locale in locales {
-            let cache = create_cache(&locale);
+            let cache = create_cache(locale);
             // Check so that it is not empty for a sample number
             assert!(
                 !format_locale("1234567.89", &cache).is_empty(),
-                "Failed for {:?}",
-                locale
+                "Failed for {locale:?}"
             );
         }
     }
@@ -1356,18 +1365,13 @@ mod get_ticks_tests {
         for (label, x) in &ticks {
             assert!(
                 *x >= last_x,
-                "tick x not monotonic: {} < {} for label {}",
-                x,
-                last_x,
-                label
+                "tick x not monotonic: {x} < {last_x} for label {label}"
             );
             last_x = *x;
-            assert!(*x >= 0.0, "tick x < 0: {}", x);
+            assert!(*x >= 0.0, "tick x < 0: {x}");
             assert!(
                 *x <= frame_width,
-                "tick x > frame_width: {} > {}",
-                x,
-                frame_width
+                "tick x > frame_width: {x} > {frame_width}"
             );
             labels.push(label.clone());
         }
@@ -1425,18 +1429,13 @@ mod get_ticks_tests {
         for (label, x) in &ticks {
             assert!(
                 *x >= last_x,
-                "tick x not monotonic: {} < {} for label {}",
-                x,
-                last_x,
-                label
+                "tick x not monotonic: {x} < {last_x} for label {label}"
             );
             last_x = *x;
-            assert!(*x >= 0.0, "tick x < 0: {}", x);
+            assert!(*x >= 0.0, "tick x < 0: {x}");
             assert!(
                 *x <= frame_width,
-                "tick x > frame_width: {} > {}",
-                x,
-                frame_width
+                "tick x > frame_width: {x} > {frame_width}"
             );
             labels.push(label.clone());
         }

@@ -57,6 +57,7 @@ pub enum WaveSource {
 pub const STATE_FILE_EXTENSION: &str = "surf.ron";
 
 impl WaveSource {
+    #[must_use]
     pub fn as_file(&self) -> Option<&Utf8Path> {
         match self {
             WaveSource::File(path) => Some(path.as_path()),
@@ -64,6 +65,7 @@ impl WaveSource {
         }
     }
 
+    #[must_use]
     pub fn path(&self) -> Option<&Utf8PathBuf> {
         match self {
             WaveSource::File(path) => Some(path),
@@ -72,6 +74,7 @@ impl WaveSource {
         }
     }
 
+    #[must_use]
     pub fn sibling_state_file(&self) -> Option<Utf8PathBuf> {
         let path = self.path()?;
         let directory = path.parent()?;
@@ -92,12 +95,15 @@ impl WaveSource {
         None
     }
 
+    #[must_use]
     pub fn into_translation_type(&self) -> surfer_translation_types::WaveSource {
         use surfer_translation_types::WaveSource as Ws;
         match self {
             WaveSource::File(file) => Ws::File(file.to_string()),
             WaveSource::Data => Ws::Data,
-            WaveSource::DragAndDrop(file) => Ws::DragAndDrop(file.as_ref().map(|f| f.to_string())),
+            WaveSource::DragAndDrop(file) => {
+                Ws::DragAndDrop(file.as_ref().map(std::string::ToString::to_string))
+            }
             WaveSource::Url(u) => Ws::Url(u.clone()),
             WaveSource::Cxxrtl(_) => Ws::Cxxrtl,
         }
@@ -177,9 +183,9 @@ pub enum LoadOptions {
     KeepAll,
 }
 
-impl Into<LoadOptions> for (OpenMode, bool) {
-    fn into(self) -> LoadOptions {
-        match self {
+impl From<(OpenMode, bool)> for LoadOptions {
+    fn from(val: (OpenMode, bool)) -> Self {
+        match val {
             (OpenMode::Open, _) => LoadOptions::Clear,
             (OpenMode::Switch, false) => LoadOptions::KeepAvailable,
             (OpenMode::Switch, true) => LoadOptions::KeepAll,
@@ -193,6 +199,7 @@ pub struct LoadProgress {
 }
 
 impl LoadProgress {
+    #[must_use]
     pub fn new(progress: LoadProgressStatus) -> Self {
         LoadProgress {
             started: Instant::now(),
@@ -740,5 +747,5 @@ pub fn draw_progress_information(ui: &mut egui::Ui, progress_data: &LoadProgress
                 .desired_width(300.);
             ui.add(progress_bar);
         }
-    };
+    }
 }

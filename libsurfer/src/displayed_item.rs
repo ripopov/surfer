@@ -36,6 +36,7 @@ pub struct DisplayedFieldRef {
 }
 
 impl DisplayedFieldRef {
+    #[must_use]
     pub fn without_field(&self) -> DisplayedFieldRef {
         DisplayedFieldRef {
             item: self.item,
@@ -91,6 +92,7 @@ pub struct AnalogSettings {
 }
 
 impl AnalogSettings {
+    #[must_use]
     pub fn step_viewport() -> Self {
         Self {
             render_style: AnalogRenderStyle::Step,
@@ -98,6 +100,7 @@ impl AnalogSettings {
         }
     }
 
+    #[must_use]
     pub fn step_global() -> Self {
         Self {
             render_style: AnalogRenderStyle::Step,
@@ -105,6 +108,7 @@ impl AnalogSettings {
         }
     }
 
+    #[must_use]
     pub fn interpolated_viewport() -> Self {
         Self {
             render_style: AnalogRenderStyle::Interpolated,
@@ -112,6 +116,7 @@ impl AnalogSettings {
         }
     }
 
+    #[must_use]
     pub fn interpolated_global() -> Self {
         Self {
             render_style: AnalogRenderStyle::Interpolated,
@@ -153,6 +158,7 @@ impl PartialEq for AnalogVarState {
 }
 
 impl AnalogVarState {
+    #[must_use]
     pub fn new(settings: AnalogSettings) -> Self {
         Self {
             settings,
@@ -160,18 +166,22 @@ impl AnalogVarState {
         }
     }
 
+    #[must_use]
     pub fn step_viewport() -> Self {
         Self::new(AnalogSettings::step_viewport())
     }
 
+    #[must_use]
     pub fn step_global() -> Self {
         Self::new(AnalogSettings::step_global())
     }
 
+    #[must_use]
     pub fn interpolated_viewport() -> Self {
         Self::new(AnalogSettings::interpolated_viewport())
     }
 
+    #[must_use]
     pub fn interpolated_global() -> Self {
         Self::new(AnalogSettings::interpolated_global())
     }
@@ -194,6 +204,7 @@ pub struct DisplayedVariable {
 }
 
 impl DisplayedVariable {
+    #[must_use]
     pub fn get_format(&self, field: &[String]) -> Option<&String> {
         if field.is_empty() {
             self.format.as_ref()
@@ -206,6 +217,7 @@ impl DisplayedVariable {
     }
 
     /// Updates the variable after a new waveform has been loaded.
+    #[must_use]
     pub fn update(
         &self,
         new_waves: &WaveContainer,
@@ -225,6 +237,7 @@ impl DisplayedVariable {
         }
     }
 
+    #[must_use]
     pub fn into_placeholder(mut self) -> DisplayedPlaceholder {
         self.variable_ref.clear_id(); // placeholders do not refer to currently loaded variables
         DisplayedPlaceholder {
@@ -258,6 +271,7 @@ pub struct DisplayedMarker {
 }
 
 impl DisplayedMarker {
+    #[must_use]
     pub fn marker_text(&self, color: &Color32) -> WidgetText {
         let style = Style::default();
         let mut layout_job = LayoutJob::default();
@@ -277,8 +291,7 @@ impl DisplayedMarker {
 
     fn marker_name(&self) -> String {
         self.name
-            .as_ref()
-            .cloned()
+            .clone()
             .unwrap_or_else(|| DEFAULT_MARKER_NAME.to_string())
     }
 }
@@ -305,6 +318,7 @@ pub struct DisplayedPlaceholder {
 }
 
 impl DisplayedPlaceholder {
+    #[must_use]
     pub fn into_variable(
         self,
         variable_info: VariableInfo,
@@ -382,6 +396,7 @@ impl DisplayedGroup {
 }
 
 impl DisplayedItem {
+    #[must_use]
     pub fn color(&self) -> Option<&str> {
         match self {
             DisplayedItem::Variable(variable) => variable.color.as_deref(),
@@ -394,18 +409,19 @@ impl DisplayedItem {
         }
     }
 
-    pub fn set_color(&mut self, color_name: Option<String>) {
+    pub fn set_color(&mut self, color_name: &Option<String>) {
         match self {
-            DisplayedItem::Variable(variable) => variable.color.clone_from(&color_name),
-            DisplayedItem::Divider(divider) => divider.color.clone_from(&color_name),
-            DisplayedItem::Marker(marker) => marker.color.clone_from(&color_name),
-            DisplayedItem::TimeLine(timeline) => timeline.color.clone_from(&color_name),
-            DisplayedItem::Placeholder(placeholder) => placeholder.color.clone_from(&color_name),
-            DisplayedItem::Stream(stream) => stream.color.clone_from(&color_name),
-            DisplayedItem::Group(group) => group.color.clone_from(&color_name),
+            DisplayedItem::Variable(variable) => variable.color.clone_from(color_name),
+            DisplayedItem::Divider(divider) => divider.color.clone_from(color_name),
+            DisplayedItem::Marker(marker) => marker.color.clone_from(color_name),
+            DisplayedItem::TimeLine(timeline) => timeline.color.clone_from(color_name),
+            DisplayedItem::Placeholder(placeholder) => placeholder.color.clone_from(color_name),
+            DisplayedItem::Stream(stream) => stream.color.clone_from(color_name),
+            DisplayedItem::Group(group) => group.color.clone_from(color_name),
         }
     }
 
+    #[must_use]
     pub fn name(&self) -> String {
         match self {
             DisplayedItem::Variable(variable) => variable
@@ -438,7 +454,7 @@ impl DisplayedItem {
         }
     }
 
-    /// Widget displayed in variable list for the wave form, may include additional info compared to name()
+    /// Widget displayed in variable list for the wave form, may include additional info compared to `name()`
     pub fn add_to_layout_job(
         &self,
         color: &Color32,
@@ -522,6 +538,7 @@ impl DisplayedItem {
         }
     }
 
+    #[must_use]
     pub fn has_overwritten_name(&self) -> bool {
         match self {
             DisplayedItem::Variable(variable) => variable.manual_name.is_some(),
@@ -534,6 +551,7 @@ impl DisplayedItem {
         }
     }
 
+    #[must_use]
     pub fn background_color(&self) -> Option<&str> {
         match self {
             DisplayedItem::Variable(variable) => variable.background_color.as_deref(),
@@ -546,32 +564,33 @@ impl DisplayedItem {
         }
     }
 
-    pub fn set_background_color(&mut self, color_name: Option<String>) {
+    pub fn set_background_color(&mut self, color_name: &Option<String>) {
         match self {
             DisplayedItem::Variable(variable) => {
-                variable.background_color.clone_from(&color_name);
+                variable.background_color.clone_from(color_name);
             }
             DisplayedItem::Divider(divider) => {
-                divider.background_color.clone_from(&color_name);
+                divider.background_color.clone_from(color_name);
             }
             DisplayedItem::Marker(marker) => {
-                marker.background_color.clone_from(&color_name);
+                marker.background_color.clone_from(color_name);
             }
             DisplayedItem::TimeLine(timeline) => {
-                timeline.background_color.clone_from(&color_name);
+                timeline.background_color.clone_from(color_name);
             }
             DisplayedItem::Placeholder(placeholder) => {
-                placeholder.background_color.clone_from(&color_name);
+                placeholder.background_color.clone_from(color_name);
             }
             DisplayedItem::Stream(stream) => {
-                stream.background_color.clone_from(&color_name);
+                stream.background_color.clone_from(color_name);
             }
             DisplayedItem::Group(group) => {
-                group.background_color.clone_from(&color_name);
+                group.background_color.clone_from(color_name);
             }
         }
     }
 
+    #[must_use]
     pub fn height_scaling_factor(&self) -> f32 {
         match self {
             DisplayedItem::Variable(variable) => variable.height_scaling_factor,
@@ -585,7 +604,7 @@ impl DisplayedItem {
         match self {
             DisplayedItem::Variable(variable) => variable.height_scaling_factor = Some(scale),
             DisplayedItem::Placeholder(placeholder) => {
-                placeholder.height_scaling_factor = Some(scale)
+                placeholder.height_scaling_factor = Some(scale);
             }
             _ => {}
         }

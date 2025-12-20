@@ -98,6 +98,7 @@ pub enum AutoLoad {
 }
 
 impl AutoLoad {
+    #[must_use]
     pub fn from_bool(auto_load: bool) -> Self {
         if auto_load {
             AutoLoad::Always
@@ -112,7 +113,7 @@ pub struct SurferConfig {
     pub layout: SurferLayout,
     #[serde(deserialize_with = "deserialize_theme")]
     pub theme: SurferTheme,
-    /// Mouse gesture configurations. Color and linewidth are configured in the theme using [SurferTheme::gesture].
+    /// Mouse gesture configurations. Color and linewidth are configured in the theme using [`SurferTheme::gesture`].
     pub gesture: SurferGesture,
     pub behavior: SurferBehavior,
     /// Time stamp format
@@ -141,18 +142,22 @@ pub struct SurferConfig {
 }
 
 impl SurferConfig {
+    #[must_use]
     pub fn default_clock_highlight_type(&self) -> ClockHighlightType {
         self.default_clock_highlight_type
     }
 
+    #[must_use]
     pub fn autoload_sibling_state_files(&self) -> AutoLoad {
         self.autoload_sibling_state_files
     }
 
+    #[must_use]
     pub fn autoreload_files(&self) -> AutoLoad {
         self.autoreload_files
     }
 
+    #[must_use]
     pub fn animation_enabled(&self) -> bool {
         self.animation_enabled
     }
@@ -231,66 +236,87 @@ fn default_next() -> TransitionValue {
 }
 
 impl SurferLayout {
+    #[must_use]
     pub fn show_hierarchy(&self) -> bool {
         self.show_hierarchy
     }
+    #[must_use]
     pub fn show_menu(&self) -> bool {
         self.show_menu
     }
+    #[must_use]
     pub fn show_ticks(&self) -> bool {
         self.show_ticks
     }
+    #[must_use]
     pub fn show_tooltip(&self) -> bool {
         self.show_tooltip
     }
+    #[must_use]
     pub fn show_scope_tooltip(&self) -> bool {
         self.show_scope_tooltip
     }
+    #[must_use]
     pub fn show_default_timeline(&self) -> bool {
         self.show_default_timeline
     }
+    #[must_use]
     pub fn show_toolbar(&self) -> bool {
         self.show_toolbar
     }
+    #[must_use]
     pub fn show_overview(&self) -> bool {
         self.show_overview
     }
+    #[must_use]
     pub fn show_statusbar(&self) -> bool {
         self.show_statusbar
     }
+    #[must_use]
     pub fn align_names_right(&self) -> bool {
         self.align_names_right
     }
+    #[must_use]
     pub fn show_variable_indices(&self) -> bool {
         self.show_variable_indices
     }
+    #[must_use]
     pub fn show_variable_direction(&self) -> bool {
         self.show_variable_direction
     }
+    #[must_use]
     pub fn default_zoom_factor(&self) -> f32 {
         self.default_zoom_factor
     }
+    #[must_use]
     pub fn show_empty_scopes(&self) -> bool {
         self.show_empty_scopes
     }
+    #[must_use]
     pub fn parameter_display_location(&self) -> ParameterDisplayLocation {
         self.parameter_display_location
     }
+    #[must_use]
     pub fn highlight_focused(&self) -> bool {
         self.highlight_focused
     }
+    #[must_use]
     pub fn move_focus_on_inserted_marker(&self) -> bool {
         self.move_focus_on_inserted_marker
     }
+    #[must_use]
     pub fn fill_high_values(&self) -> bool {
         self.fill_high_values
     }
+    #[must_use]
     pub fn hierarchy_style(&self) -> HierarchyStyle {
         self.hierarchy_style
     }
+    #[must_use]
     pub fn use_dinotrace_style(&self) -> bool {
         self.use_dinotrace_style
     }
+    #[must_use]
     pub fn transition_value(&self) -> TransitionValue {
         self.transition_value
     }
@@ -308,17 +334,19 @@ pub struct SurferBehavior {
 }
 
 impl SurferBehavior {
+    #[must_use]
     pub fn primary_button_drag_behavior(&self) -> PrimaryMouseDrag {
         self.primary_button_drag_behavior
     }
 
+    #[must_use]
     pub fn arrow_key_bindings(&self) -> ArrowKeyBindings {
         self.arrow_key_bindings
     }
 }
 
 #[derive(Debug, Deserialize)]
-/// Mouse gesture configurations. Color and linewidth are configured in the theme using [SurferTheme::gesture].
+/// Mouse gesture configurations. Color and linewidth are configured in the theme using [`SurferTheme::gesture`].
 pub struct SurferGesture {
     /// Size of the overlay help
     pub size: f32,
@@ -491,36 +519,38 @@ pub struct SurferTheme {
     pub theme_names: Vec<String>,
 }
 
-fn get_luminance(color: &Color32) -> f32 {
+fn get_luminance(color: Color32) -> f32 {
     let rg = if color.r() < 10 {
-        color.r() as f32 / 3294.0
+        f32::from(color.r()) / 3294.0
     } else {
-        (color.r() as f32 / 269.0 + 0.0513).powf(2.4)
+        (f32::from(color.r()) / 269.0 + 0.0513).powf(2.4)
     };
     let gg = if color.g() < 10 {
-        color.g() as f32 / 3294.0
+        f32::from(color.g()) / 3294.0
     } else {
-        (color.g() as f32 / 269.0 + 0.0513).powf(2.4)
+        (f32::from(color.g()) / 269.0 + 0.0513).powf(2.4)
     };
     let bg = if color.b() < 10 {
-        color.b() as f32 / 3294.0
+        f32::from(color.b()) / 3294.0
     } else {
-        (color.b() as f32 / 269.0 + 0.0513).powf(2.4)
+        (f32::from(color.b()) / 269.0 + 0.0513).powf(2.4)
     };
     0.2126 * rg + 0.7152 * gg + 0.0722 * bg
 }
 
 impl SurferTheme {
-    pub fn get_color(&self, color: &str) -> Option<&Color32> {
-        self.colors.get(color)
+    #[must_use]
+    pub fn get_color(&self, color: &str) -> Option<Color32> {
+        self.colors.get(color).copied()
     }
 
-    pub fn get_best_text_color(&self, backgroundcolor: &Color32) -> &Color32 {
+    #[must_use]
+    pub fn get_best_text_color(&self, backgroundcolor: Color32) -> Color32 {
         // Based on https://ux.stackexchange.com/questions/82056/how-to-measure-the-contrast-between-any-given-color-and-white
 
         // Compute luminance
-        let l_foreground = get_luminance(&self.foreground);
-        let l_alt_text_color = get_luminance(&self.alt_text_color);
+        let l_foreground = get_luminance(self.foreground);
+        let l_alt_text_color = get_luminance(self.alt_text_color);
         let l_background = get_luminance(backgroundcolor);
 
         // Compute contrast ratio
@@ -531,9 +561,9 @@ impl SurferTheme {
 
         // Return color with highest contrast
         if cr_foreground > cr_alt_text_color {
-            &self.foreground
+            self.foreground
         } else {
-            &self.alt_text_color
+            self.alt_text_color
         }
     }
 
@@ -625,11 +655,7 @@ impl SurferTheme {
                 .map(|p| p.join(&theme_path))
                 .filter(|p| p.exists())
                 .collect();
-            if !local_themes.is_empty() {
-                theme = local_themes
-                    .into_iter()
-                    .fold(theme, |t, p| t.add_source(File::from(p).required(false)));
-            } else {
+            if local_themes.is_empty() {
                 // If no local themes exist, search in the config directory.
                 if let Some(proj_dirs) = &*PROJECT_DIR {
                     let config_theme_path = proj_dirs.config_dir().join(theme_path);
@@ -637,6 +663,10 @@ impl SurferTheme {
                         theme = theme.add_source(File::from(config_theme_path).required(false));
                     }
                 }
+            } else {
+                theme = local_themes
+                    .into_iter()
+                    .fold(theme, |t, p| t.add_source(File::from(p).required(false)));
             }
         }
 
@@ -721,7 +751,9 @@ impl SurferConfig {
             config::FileFormat::Toml,
         ));
 
-        let config = if !force_default_config {
+        let config = if force_default_config {
+            config
+        } else {
             if let Some(proj_dirs) = &*PROJECT_DIR {
                 let config_file = proj_dirs.config_dir().join(CONFIG_FILE);
                 config = config.add_source(File::from(config_file).required(false));
@@ -745,8 +777,6 @@ impl SurferConfig {
                     c.add_source(File::from(p.join(CONFIG_FILE)).required(false))
                 })
                 .add_source(Environment::with_prefix("surfer")) // Add environment finally
-        } else {
-            config
         };
 
         config
@@ -789,7 +819,10 @@ fn hex_string_to_color32(mut str: String) -> Result<Color32> {
 }
 
 fn all_theme_names() -> Vec<String> {
-    BUILTIN_THEMES.keys().map(|s| s.to_string()).collect()
+    BUILTIN_THEMES
+        .keys()
+        .map(std::string::ToString::to_string)
+        .collect()
 }
 
 fn deserialize_hex_color<'de, D>(deserializer: D) -> Result<Color32, D::Error>

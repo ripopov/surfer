@@ -426,7 +426,7 @@ impl SystemState {
         };
         if let Some(load_commands) = load_commands {
             self.load_variables(load_commands);
-        };
+        }
 
         // reset drag to avoid confusion
         self.user.drag_started = false;
@@ -534,7 +534,7 @@ impl SystemState {
             match server {
                 Ok(mut server) => server.run().await,
                 Err(m) => {
-                    error!("Could not start WCP server. {m:?}")
+                    error!("Could not start WCP server. {m:?}");
                 }
             }
         }));

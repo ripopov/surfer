@@ -92,9 +92,8 @@ impl SystemState {
             let active_scope = waves.active_scope.as_ref().unwrap_or(&empty_scope);
             match active_scope {
                 ScopeType::WaveScope(scope) => {
-                    let wave_container = match waves.inner.as_waves() {
-                        Some(wc) => wc,
-                        None => return,
+                    let Some(wave_container) = waves.inner.as_waves() else {
+                        return;
                     };
                     let variables =
                         self.filtered_variables(&wave_container.variables_in_scope(scope), false);
@@ -306,7 +305,7 @@ impl SystemState {
         response.drag_started().then(|| {
             msgs.push(Message::VariableDragStarted(VisibleItemIndex(
                 wave.display_item_ref_counter,
-            )))
+            )));
         });
 
         if scroll_to_label {
@@ -371,9 +370,8 @@ impl SystemState {
         ui: &mut Ui,
     ) {
         // Extract wave container once to avoid repeated as_waves().unwrap() calls
-        let wave_container = match wave.inner.as_waves() {
-            Some(wc) => wc,
-            None => return,
+        let Some(wave_container) = wave.inner.as_waves() else {
+            return;
         };
 
         let Some(child_scopes) = wave_container
@@ -471,9 +469,8 @@ impl SystemState {
         ui: &mut Ui,
     ) {
         // Extract wave container once to avoid unwrap
-        let wave_container = match wave.inner.as_waves() {
-            Some(wc) => wc,
-            None => return,
+        let Some(wave_container) = wave.inner.as_waves() else {
+            return;
         };
 
         let Some(child_scopes) = wave_container
@@ -537,12 +534,11 @@ impl SystemState {
                     .and_then(|info| info.priority)
                     .unwrap_or_default()
             })
-            .skip(row_range.as_ref().map(|r| r.start).unwrap_or(0))
+            .skip(row_range.as_ref().map_or(0, |r| r.start))
             .take(
                 row_range
                     .as_ref()
-                    .map(|r| r.end - r.start)
-                    .unwrap_or(variables.len()),
+                    .map_or(variables.len(), |r| r.end - r.start),
             );
 
         // Precompute common font metrics once per frame to avoid expensive per-row work.
@@ -605,54 +601,51 @@ impl SystemState {
                 |ui| {
                     let mut label = LayoutJob::default();
 
-                    match name_info.and_then(|info| info.true_name) {
-                        Some(name) => {
-                            let direction_size = direction.chars().count();
-                            let index_size = index.chars().count();
-                            let value_size = value.chars().count();
-                            let used_space =
-                                (direction_size + index_size + value_size) as f32 * char_width_mono;
-                            // The button padding is added by egui on selectable labels
-                            let available_space =
-                                ui.available_width() - ui.spacing().button_padding.x * 2.;
-                            let space_for_name = available_space - used_space;
+                    if let Some(name) = name_info.and_then(|info| info.true_name) {
+                        let direction_size = direction.chars().count();
+                        let index_size = index.chars().count();
+                        let value_size = value.chars().count();
+                        let used_space =
+                            (direction_size + index_size + value_size) as f32 * char_width_mono;
+                        // The button padding is added by egui on selectable labels
+                        let available_space =
+                            ui.available_width() - ui.spacing().button_padding.x * 2.;
+                        let space_for_name = available_space - used_space;
 
-                            let text_format = TextFormat {
-                                font_id: monospace_font.clone(),
-                                color: self.user.config.theme.foreground,
-                                ..Default::default()
-                            };
+                        let text_format = TextFormat {
+                            font_id: monospace_font.clone(),
+                            color: self.user.config.theme.foreground,
+                            ..Default::default()
+                        };
 
-                            label.append(&direction, 0.0, text_format.clone());
+                        label.append(&direction, 0.0, text_format.clone());
 
-                            draw_true_name(
-                                &name,
-                                &mut label,
-                                monospace_font.clone(),
-                                self.user.config.theme.foreground,
-                                char_width_mono,
-                                space_for_name,
-                            );
+                        draw_true_name(
+                            &name,
+                            &mut label,
+                            monospace_font.clone(),
+                            self.user.config.theme.foreground,
+                            char_width_mono,
+                            space_for_name,
+                        );
 
-                            label.append(&index, 0.0, text_format.clone());
-                            label.append(&value, 0.0, text_format.clone());
-                        }
-                        None => {
-                            let text_format = TextFormat {
-                                font_id: body_font.clone(),
-                                color: self.user.config.theme.foreground,
-                                ..Default::default()
-                            };
-                            let name = if display_full_path {
-                                variable.full_path().join(".")
-                            } else {
-                                variable.name.clone()
-                            };
-                            label.append(&direction, 0.0, text_format.clone());
-                            label.append(&name, 0.0, text_format.clone());
-                            label.append(&index, 0.0, text_format.clone());
-                            label.append(&value, 0.0, text_format.clone());
-                        }
+                        label.append(&index, 0.0, text_format.clone());
+                        label.append(&value, 0.0, text_format.clone());
+                    } else {
+                        let text_format = TextFormat {
+                            font_id: body_font.clone(),
+                            color: self.user.config.theme.foreground,
+                            ..Default::default()
+                        };
+                        let name = if display_full_path {
+                            variable.full_path().join(".")
+                        } else {
+                            variable.name.clone()
+                        };
+                        label.append(&direction, 0.0, text_format.clone());
+                        label.append(&name, 0.0, text_format.clone());
+                        label.append(&index, 0.0, text_format.clone());
+                        label.append(&value, 0.0, text_format.clone());
                     }
 
                     let mut response = ui.add(egui::Button::selectable(false, label));
@@ -675,7 +668,7 @@ impl SystemState {
                     response.drag_started().then(|| {
                         msgs.push(Message::VariableDragStarted(VisibleItemIndex(
                             self.user.waves.as_ref().unwrap().display_item_ref_counter,
-                        )))
+                        )));
                     });
                     response.drag_stopped().then(|| {
                         if ui.input(|i| i.pointer.hover_pos().unwrap_or_default().x)

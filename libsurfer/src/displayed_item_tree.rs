@@ -33,7 +33,7 @@ pub struct ItemIndex(pub usize);
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub struct TargetPosition {
-    /// before which index to insert, may be in a range of 0..=tree.len() to allow for appending
+    /// before which index to insert, may be in a range of `0..=tree.len()` to allow for appending
     pub before: ItemIndex,
     /// at which level to insert, if None the level is derived from the item before
     pub level: u8, // TODO go back to Option and implement
@@ -53,7 +53,7 @@ impl<'a> Iterator for VisibleItemIterator<'a> {
         let this_item = self.items.get(this_idx);
         if this_item.is_some() {
             self.next_idx = next_visible_item(self.items, this_idx);
-        };
+        }
         this_item
     }
 }
@@ -115,8 +115,7 @@ impl<'a> Iterator for VisibleItemIteratorExtraInfo<'a> {
             let has_child = self
                 .items
                 .get(this_idx + 1)
-                .map(|item| item.level > this_level)
-                .unwrap_or(false);
+                .is_some_and(|item| item.level > this_level);
             Some(Info {
                 node: &self.items[this_idx],
                 idx: ItemIndex(this_idx),
@@ -136,7 +135,7 @@ impl<'a> Iterator for VisibleItemIteratorExtraInfo<'a> {
 /// of the item. The items are stored in-order.
 /// For documentation on the properties of a node, see the [Node] struct.
 ///
-/// Note also infos on the [VisibleItemIndex] and [ItemIndex] types w.r.t. stability of these
+/// Note also infos on the [`VisibleItemIndex`] and [`ItemIndex`] types w.r.t. stability of these
 /// index types.
 ///
 /// Invariants:
@@ -147,14 +146,17 @@ pub struct DisplayedItemTree {
 }
 
 impl DisplayedItemTree {
+    #[must_use]
     pub fn new() -> Self {
         DisplayedItemTree { items: vec![] }
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.items.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
@@ -164,6 +166,7 @@ impl DisplayedItemTree {
     }
 
     /// Iterate through all visible items
+    #[must_use]
     pub fn iter_visible(&self) -> VisibleItemIterator<'_> {
         VisibleItemIterator {
             items: &self.items,
@@ -178,6 +181,7 @@ impl DisplayedItemTree {
         }
     }
 
+    #[must_use]
     pub fn iter_visible_extra(&self) -> VisibleItemIteratorExtraInfo<'_> {
         VisibleItemIteratorExtraInfo {
             items: &self.items,
@@ -191,14 +195,17 @@ impl DisplayedItemTree {
     }
 
     /// Iterate through items, skipping invisible items, return index of n-th visible item
+    #[must_use]
     pub fn get_visible(&self, index: VisibleItemIndex) -> Option<&Node> {
         self.iter_visible().nth(index.0)
     }
 
+    #[must_use]
     pub fn get_visible_extra(&self, index: VisibleItemIndex) -> Option<Info<'_>> {
         self.iter_visible_extra().nth(index.0)
     }
 
+    #[must_use]
     pub fn get(&self, index: ItemIndex) -> Option<&Node> {
         self.items.get(index.0)
     }
@@ -207,6 +214,7 @@ impl DisplayedItemTree {
         self.items.get_mut(index.0)
     }
 
+    #[must_use]
     pub fn to_displayed(&self, index: VisibleItemIndex) -> Option<ItemIndex> {
         self.get_visible_extra(index)?.idx.into()
     }
@@ -239,8 +247,7 @@ impl DisplayedItemTree {
             .iter()
             .skip(start_idx + 1)
             .enumerate()
-            .filter_map(|(idx, x)| (x.level <= level).then_some(idx + start_idx + 1))
-            .next()
+            .find_map(|(idx, x)| (x.level <= level).then_some(idx + start_idx + 1))
             .unwrap_or(self.items.len())
     }
 
@@ -499,10 +506,13 @@ impl DisplayedItemTree {
             [last] => {
                 0..last
                     .level
-                    .saturating_add(1 + (f(last) && last.unfolded) as u8)
+                    .saturating_add(1 + u8::from(f(last) && last.unfolded))
             }
             [pre, post, ..] => {
-                post.level..pre.level.saturating_add(1 + (f(pre) && pre.unfolded) as u8)
+                post.level
+                    ..pre
+                        .level
+                        .saturating_add(1 + u8::from(f(pre) && pre.unfolded))
             }
         }
     }
@@ -563,10 +573,11 @@ impl DisplayedItemTree {
             (to, from + 1)
         };
         for node in self.iter_visible_mut().skip(from).take(to - from) {
-            node.selected = selected
+            node.selected = selected;
         }
     }
 
+    #[must_use]
     pub fn subtree_contains(
         &self,
         ItemIndex(root): ItemIndex,
@@ -577,7 +588,7 @@ impl DisplayedItemTree {
     }
 }
 
-/// Find the index of the next visible item, or return items.len()
+/// Find the index of the next visible item, or return `items.len()`
 ///
 /// Precondition: `this_idx` must be a valid `items` index
 fn next_visible_item(items: &[Node], this_idx: usize) -> usize {
@@ -623,10 +634,10 @@ fn check_location(items: &[Node], target_position: TargetPosition) -> Result<(),
         (Some(before), Some(after)) => after..=before.saturating_add(1),
     };
 
-    if !valid_range.contains(&target_position.level) {
-        Err(MoveError::InvalidLevel)
-    } else {
+    if valid_range.contains(&target_position.level) {
         Ok(())
+    } else {
+        Err(MoveError::InvalidLevel)
     }
 }
 
@@ -634,9 +645,9 @@ fn shift_subtree_to_level(nodes: &mut [Node], target_level: u8) -> Result<(), Mo
     let Some(from_level) = nodes.first().map(|node| node.level) else {
         return Ok(());
     };
-    let level_corr = (target_level as i16) - (from_level as i16);
+    let level_corr = i16::from(target_level) - i16::from(from_level);
     for elem in nodes.iter_mut() {
-        elem.level = (elem.level as i16 + level_corr)
+        elem.level = (i16::from(elem.level) + level_corr)
             .try_into()
             .map_err(|_| MoveError::InvalidLevel)?;
     }
@@ -656,7 +667,7 @@ mod tests {
                 level,
                 unfolded,
                 selected,
-            })
+            });
         }
         tree
     }
@@ -722,7 +733,7 @@ mod tests {
                 (4, 8, 6, false, false),
                 (5, 9, 7, false, true),
             ]
-        )
+        );
     }
 
     #[test]
@@ -741,8 +752,8 @@ mod tests {
             vec![0xff, 0, 1, 2, 20, 200, 3, 30, 31, 4, 5]
         );
         assert_eq!(tree.items[0].level, 0);
-        assert_eq!(tree.items[0].selected, false);
-        assert_eq!(tree.items[0].unfolded, true);
+        assert!(!tree.items[0].selected);
+        assert!(tree.items[0].unfolded);
     }
 
     #[test]
@@ -763,8 +774,8 @@ mod tests {
             vec![0, 1, 2, 20, 200, 3, 30, 31, 0xff, 4, 5]
         );
         assert_eq!(tree.items[7].level, 1);
-        assert_eq!(tree.items[7].selected, false);
-        assert_eq!(tree.items[7].unfolded, true);
+        assert!(!tree.items[7].selected);
+        assert!(tree.items[7].unfolded);
     }
 
     #[test]
@@ -783,8 +794,8 @@ mod tests {
             vec![0, 1, 2, 20, 200, 3, 30, 0xff, 31, 4, 5]
         );
         assert_eq!(tree.items[7].level, 2);
-        assert_eq!(tree.items[7].selected, false);
-        assert_eq!(tree.items[7].unfolded, true);
+        assert!(!tree.items[7].selected);
+        assert!(tree.items[7].unfolded);
     }
 
     #[test]
@@ -1173,7 +1184,7 @@ mod tests {
         assert_eq!(
             tree.items.iter().map(|x| x.item_ref.0).collect_vec(),
             vec![0, 2, 1]
-        )
+        );
     }
 
     #[test]

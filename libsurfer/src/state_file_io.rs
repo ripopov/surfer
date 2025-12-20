@@ -41,13 +41,12 @@ impl SystemState {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn load_state_file(&mut self, path: Option<PathBuf>) {
         let messages = move |path: PathBuf| {
-            let source = match Utf8PathBuf::from_path_buf(path.clone()) {
-                Ok(p) => p,
-                Err(_) => {
-                    let err = eyre::eyre!("File path '{}' contains invalid UTF-8", path.display());
-                    tracing::error!("{err:#?}");
-                    return vec![Message::Error(err)];
-                }
+            let source = if let Ok(p) = Utf8PathBuf::from_path_buf(path.clone()) {
+                p
+            } else {
+                let err = eyre::eyre!("File path '{}' contains invalid UTF-8", path.display());
+                tracing::error!("{err:#?}");
+                return vec![Message::Error(err)];
             };
 
             match std::fs::read(source.as_std_path()) {

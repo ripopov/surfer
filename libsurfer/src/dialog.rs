@@ -1,4 +1,3 @@
-use crate::SystemState;
 use crate::message::Message;
 use ecolor::Color32;
 use egui::{Layout, RichText};
@@ -15,16 +14,14 @@ pub struct OpenSiblingStateFileDialog {
     do_not_show_again: bool,
 }
 
-impl SystemState {
-    /// Draw a dialog that asks the user if it wants to load a state file situated in the same directory as the waveform file.
-    pub(crate) fn draw_open_sibling_state_file_dialog(
-        &self,
-        ctx: &egui::Context,
-        dialog: &OpenSiblingStateFileDialog,
-        msgs: &mut Vec<Message>,
-    ) {
-        let mut do_not_show_again = dialog.do_not_show_again;
-        egui::Window::new("State file detected")
+/// Draw a dialog that asks the user if it wants to load a state file situated in the same directory as the waveform file.
+pub(crate) fn draw_open_sibling_state_file_dialog(
+    ctx: &egui::Context,
+    dialog: OpenSiblingStateFileDialog,
+    msgs: &mut Vec<Message>,
+) {
+    let mut do_not_show_again = dialog.do_not_show_again;
+    egui::Window::new("State file detected")
             .auto_sized()
             .collapsible(false)
             .fixed_pos(ctx.available_rect().center())
@@ -46,7 +43,7 @@ impl SystemState {
                         if mem.focused() != Some(load_button.id)
                             && mem.focused() != Some(dont_load_button.id)
                         {
-                            mem.request_focus(load_button.id)
+                            mem.request_focus(load_button.id);
                         }
                     });
 
@@ -67,59 +64,57 @@ impl SystemState {
                     }
                 });
             });
-    }
+}
 
-    /// Draw a dialog that asks for user confirmation before re-loading a file.
-    /// This is triggered by a file loading event from disk.
-    pub(crate) fn draw_reload_waveform_dialog(
-        &self,
-        ctx: &egui::Context,
-        dialog: &ReloadWaveformDialog,
-        msgs: &mut Vec<Message>,
-    ) {
-        let mut do_not_show_again = dialog.do_not_show_again;
-        egui::Window::new("File Change")
-            .auto_sized()
-            .collapsible(false)
-            .fixed_pos(ctx.available_rect().center())
-            .show(ctx, |ui| {
-                let label = ui.label(RichText::new("File on disk has changed. Reload?").heading());
-                ui.set_width(label.rect.width());
-                ui.add_space(5.0);
-                ui.checkbox(
-                    &mut do_not_show_again,
-                    "Remember my decision for this session",
-                );
-                ui.add_space(14.0);
-                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                    // Sets the style when focused
-                    ui.style_mut().visuals.widgets.active.weak_bg_fill = Color32::BLUE;
-                    let reload_button = ui.button("Reload");
-                    let leave_button = ui.button("Leave");
-                    ctx.memory_mut(|mem| {
-                        if mem.focused() != Some(reload_button.id)
-                            && mem.focused() != Some(leave_button.id)
-                        {
-                            mem.request_focus(reload_button.id)
-                        }
-                    });
-
-                    if reload_button.clicked() {
-                        msgs.push(Message::CloseReloadWaveformDialog {
-                            reload_file: true,
-                            do_not_show_again,
-                        });
-                    } else if leave_button.clicked() {
-                        msgs.push(Message::CloseReloadWaveformDialog {
-                            reload_file: false,
-                            do_not_show_again,
-                        });
-                    } else if do_not_show_again != dialog.do_not_show_again {
-                        msgs.push(Message::UpdateReloadWaveformDialog(ReloadWaveformDialog {
-                            do_not_show_again,
-                        }));
+/// Draw a dialog that asks for user confirmation before re-loading a file.
+/// This is triggered by a file loading event from disk.
+pub(crate) fn draw_reload_waveform_dialog(
+    ctx: &egui::Context,
+    dialog: ReloadWaveformDialog,
+    msgs: &mut Vec<Message>,
+) {
+    let mut do_not_show_again = dialog.do_not_show_again;
+    egui::Window::new("File Change")
+        .auto_sized()
+        .collapsible(false)
+        .fixed_pos(ctx.available_rect().center())
+        .show(ctx, |ui| {
+            let label = ui.label(RichText::new("File on disk has changed. Reload?").heading());
+            ui.set_width(label.rect.width());
+            ui.add_space(5.0);
+            ui.checkbox(
+                &mut do_not_show_again,
+                "Remember my decision for this session",
+            );
+            ui.add_space(14.0);
+            ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
+                // Sets the style when focused
+                ui.style_mut().visuals.widgets.active.weak_bg_fill = Color32::BLUE;
+                let reload_button = ui.button("Reload");
+                let leave_button = ui.button("Leave");
+                ctx.memory_mut(|mem| {
+                    if mem.focused() != Some(reload_button.id)
+                        && mem.focused() != Some(leave_button.id)
+                    {
+                        mem.request_focus(reload_button.id);
                     }
                 });
+
+                if reload_button.clicked() {
+                    msgs.push(Message::CloseReloadWaveformDialog {
+                        reload_file: true,
+                        do_not_show_again,
+                    });
+                } else if leave_button.clicked() {
+                    msgs.push(Message::CloseReloadWaveformDialog {
+                        reload_file: false,
+                        do_not_show_again,
+                    });
+                } else if do_not_show_again != dialog.do_not_show_again {
+                    msgs.push(Message::UpdateReloadWaveformDialog(ReloadWaveformDialog {
+                        do_not_show_again,
+                    }));
+                }
             });
-    }
+        });
 }

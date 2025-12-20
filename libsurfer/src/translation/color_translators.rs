@@ -18,7 +18,7 @@ impl BasicTranslator<VarId, ScopeId> for RGBTranslator {
     fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
         match value {
             VariableValue::BigUint(v) => {
-                let nibble_length = (num_bits + 2) / 3;
+                let nibble_length = num_bits.div_ceil(3);
                 let b = v % (BigUint::one() << nibble_length);
                 let g = (v >> nibble_length) % (BigUint::one() << nibble_length);
                 let r = (v >> (2 * nibble_length)) % (BigUint::one() << nibble_length);
@@ -37,7 +37,7 @@ impl BasicTranslator<VarId, ScopeId> for RGBTranslator {
                         (b << scale).to_u8().unwrap_or(255),
                     )
                 };
-                let s = format!("#{:02x}{:02x}{:02x}", r_u8, g_u8, b_u8);
+                let s = format!("#{r_u8:02x}{g_u8:02x}{b_u8:02x}");
                 (s, ValueKind::Custom(Color32::from_rgb(r_u8, g_u8, b_u8)))
             }
             VariableValue::String(s) => (s.clone(), kind_for_binary_representation(s)),
@@ -67,7 +67,7 @@ impl BasicTranslator<VarId, ScopeId> for YCbCrTranslator {
     fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
         match value {
             VariableValue::BigUint(v) => {
-                let nibble_length = (num_bits + 2) / 3;
+                let nibble_length = num_bits.div_ceil(3);
                 let cr = v % (BigUint::one() << nibble_length);
                 let cb = (v >> nibble_length) % (BigUint::one() << nibble_length);
                 let y = (v >> (2 * nibble_length)) % (BigUint::one() << nibble_length);
@@ -86,7 +86,7 @@ impl BasicTranslator<VarId, ScopeId> for YCbCrTranslator {
                         (cr << scale).to_u8().unwrap_or(255),
                     )
                 };
-                let s = format!("#{:02x}{:02x}{:02x}", y_u8, cb_u8, cr_u8);
+                let s = format!("#{y_u8:02x}{cb_u8:02x}{cr_u8:02x}");
                 let (r_u8, g_u8, b_u8) = ycbcr_to_rgb(y_u8, cb_u8, cr_u8);
                 (s, ValueKind::Custom(Color32::from_rgb(r_u8, g_u8, b_u8)))
             }
@@ -124,7 +124,7 @@ impl BasicTranslator<VarId, ScopeId> for GrayScaleTranslator {
                     let scale = 8 - num_bits;
                     (v << scale).to_u8().unwrap_or(255)
                 };
-                let s = format!("#{:02x}", g);
+                let s = format!("#{g:02x}");
                 (s, ValueKind::Custom(Color32::from_gray(g)))
             }
             VariableValue::String(s) => (s.clone(), kind_for_binary_representation(s)),
@@ -135,16 +135,16 @@ impl BasicTranslator<VarId, ScopeId> for GrayScaleTranslator {
 // Convert YCbCr (BT.601) to RGB. Inputs and outputs are 8-bit.
 // Uses floating-point coefficients with rounding and clamps to [0, 255].
 fn ycbcr_to_rgb(y: u8, cb: u8, cr: u8) -> (u8, u8, u8) {
-    let y_f = y as f32;
-    let cb_i = (cb as i32 - 128) as f32;
-    let cr_i = (cr as i32 - 128) as f32;
+    let y_f = f32::from(y);
+    let cb_i = (i32::from(cb) - 128) as f32;
+    let cr_i = (i32::from(cr) - 128) as f32;
 
     let r = (y_f + 1.402_f32 * cr_i).round() as i32;
     let g = (y_f - 0.344136_f32 * cb_i - 0.714136_f32 * cr_i).round() as i32;
     let b = (y_f + 1.772_f32 * cb_i).round() as i32;
 
     fn clamp_u8(x: i32) -> u8 {
-        x.max(0).min(255) as u8
+        x.clamp(0, 255) as u8
     }
 
     (clamp_u8(r), clamp_u8(g), clamp_u8(b))
@@ -166,7 +166,7 @@ mod test {
             let actual_color = Color32::from_rgb(expected_r, expected_g, expected_b);
             assert_eq!(color, &actual_color, "Color mismatch");
         } else {
-            panic!("Expected Custom color value, got {:?}", result);
+            panic!("Expected Custom color value, got {result:?}");
         }
     }
 
@@ -341,7 +341,7 @@ mod test {
             let expected = Color32::from_gray(g);
             assert_eq!(color, &expected, "Gray color mismatch");
         } else {
-            panic!("Expected Custom color value, got {:?}", result);
+            panic!("Expected Custom color value, got {result:?}");
         }
     }
 
@@ -456,13 +456,7 @@ mod test {
         let db = ab.abs_diff(eb);
         assert!(
             dr <= tol && dg <= tol && db <= tol,
-            "actual={:?} expected={:?} tol={} diffs=({}, {}, {})",
-            actual,
-            expected,
-            tol,
-            dr,
-            dg,
-            db
+            "actual={actual:?} expected={expected:?} tol={tol} diffs=({dr}, {dg}, {db})"
         );
     }
 
@@ -499,9 +493,10 @@ mod test {
     // === YCbCr Translator Tests ===
     fn translate_ycbcr(num_bits: u64, y: u8, cb: u8, cr: u8) -> (String, ValueKind) {
         let translator = YCbCrTranslator {};
-        let nibble_length = ((num_bits + 2) / 3) as u32;
-        let packed: u32 =
-            ((y as u32) << (2 * nibble_length)) | ((cb as u32) << nibble_length) | (cr as u32);
+        let nibble_length = num_bits.div_ceil(3) as u32;
+        let packed: u32 = (u32::from(y) << (2 * nibble_length))
+            | (u32::from(cb) << nibble_length)
+            | u32::from(cr);
         let value = VariableValue::BigUint(BigUint::from(packed));
         translator.basic_translate(num_bits, &value)
     }

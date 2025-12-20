@@ -16,9 +16,9 @@ use num::{BigInt, One, ToPrimitive};
 use std::collections::HashMap;
 
 pub enum AnalogDrawingCommand {
-    /// Constant value from start_px to end_px.
-    /// In Step mode: horizontal line at start_val, vertical transition to next.
-    /// In Interpolated mode: line from (start_px, start_val) to (end_px, end_val).
+    /// Constant value from `start_px` to `end_px`.
+    /// In Step mode: horizontal line at `start_val`, vertical transition to next.
+    /// In Interpolated mode: line from (`start_px`, `start_val`) to (`end_px`, `end_val`).
     Flat {
         start_px: f32,
         start_val: f64,
@@ -59,22 +59,21 @@ pub(crate) fn variable_analog_draw_commands(
         Some(entry)
             if entry.generation == waves.cache_generation && entry.cache_key == cache_key =>
         {
-            match entry.get() {
-                Some(cache) => cache,
-                None => {
-                    // Cache is building, return loading state
-                    let mut local_commands = HashMap::new();
-                    local_commands.insert(
-                        vec![],
-                        DrawingCommands::Analog(AnalogDrawingCommands::Loading),
-                    );
-                    return Some(VariableDrawCommands {
-                        clock_edges: vec![],
-                        display_id,
-                        local_commands,
-                        local_msgs: vec![],
-                    });
-                }
+            if let Some(cache) = entry.get() {
+                cache
+            } else {
+                // Cache is building, return loading state
+                let mut local_commands = HashMap::new();
+                local_commands.insert(
+                    vec![],
+                    DrawingCommands::Analog(AnalogDrawingCommands::Loading),
+                );
+                return Some(VariableDrawCommands {
+                    clock_edges: vec![],
+                    display_id,
+                    local_commands,
+                    local_msgs: vec![],
+                });
             }
         }
         _ => {
@@ -391,8 +390,8 @@ impl<'a> CommandBuilder<'a> {
         while px < end {
             // Track if we jumped to this pixel for a specific transition
             let jumped_to_transition = next_query_time.is_some();
-            let t0 = next_query_time.unwrap_or_else(|| self.time_at_pixel(px as f64));
-            let t1 = self.time_at_pixel(px as f64 + 1.0);
+            let t0 = next_query_time.unwrap_or_else(|| self.time_at_pixel(f64::from(px)));
+            let t1 = self.time_at_pixel(f64::from(px) + 1.0);
             next_query_time = None;
 
             // Skip if we already queried this exact time (optimization for zoomed-out views
@@ -461,10 +460,7 @@ impl<'a> CommandBuilder<'a> {
                 // Otherwise t0 is at pixel start, so first transition is at t0_query.next
                 _ => {
                     if let Some(first_change) = t0_query.next {
-                        self.query(first_change)
-                            .current
-                            .map(|(_, v)| v)
-                            .unwrap_or(min)
+                        self.query(first_change).current.map_or(min, |(_, v)| v)
                     } else {
                         min
                     }
@@ -473,7 +469,7 @@ impl<'a> CommandBuilder<'a> {
 
             // Query the value at the end of the range (exit value)
             let exit_query = self.query(t1.saturating_sub(1));
-            let exit_val = exit_query.current.map(|(_, v)| v).unwrap_or(max);
+            let exit_val = exit_query.current.map_or(max, |(_, v)| v);
 
             self.output
                 .emit_range(px as f32, min, max, entry_val, exit_val);
@@ -482,7 +478,7 @@ impl<'a> CommandBuilder<'a> {
 
     /// Extends rendering to include the first sample occurring after the visible viewport.
     fn add_after_viewport_sample(&mut self, end_px: f32) {
-        let query = self.query(self.time_at_pixel(end_px as f64));
+        let query = self.query(self.time_at_pixel(f64::from(end_px)));
 
         let Some(next_time) = query.next else {
             return;
@@ -553,8 +549,8 @@ pub trait RenderStrategy {
     fn set_last_point(&mut self, point: Pos2);
 
     /// Render a flat segment.
-    /// Step: horizontal line at start_val, connect to next.
-    /// Interpolated: line from (start_px, start_val) to (end_px, end_val).
+    /// Step: horizontal line at `start_val`, connect to next.
+    /// Interpolated: line from (`start_px`, `start_val`) to (`end_px`, `end_val`).
     fn render_flat(
         &mut self,
         ctx: &mut DrawingContext,
@@ -566,7 +562,7 @@ pub trait RenderStrategy {
     );
 
     /// Render a range segment (default impl, same for both strategies).
-    /// Draws vertical bar at px from min_val to max_val.
+    /// Draws vertical bar at px from `min_val` to `max_val`.
     fn render_range(
         &mut self,
         ctx: &mut DrawingContext,
@@ -576,10 +572,10 @@ pub trait RenderStrategy {
         max_val: f64,
     ) {
         if !min_val.is_finite() || !max_val.is_finite() {
-            let nan = if !min_val.is_finite() {
-                min_val
-            } else {
+            let nan = if min_val.is_finite() {
                 max_val
+            } else {
+                min_val
             };
             render_ctx.draw_undefined(px, px + 1.0, nan, ctx);
             self.reset_state();
@@ -645,7 +641,8 @@ impl RenderContext {
     }
 
     /// Normalize value to [0, 1].
-    /// Invariant: min_val and max_val are always finite (guaranteed by AnalogSignalCache).
+    /// Invariant: `min_val` and `max_val` are always finite (guaranteed by `AnalogSignalCache`).
+    #[must_use]
     pub fn normalize(&self, value: f64) -> f32 {
         debug_assert!(
             self.min_val.is_finite() && self.max_val.is_finite(),
@@ -660,6 +657,7 @@ impl RenderContext {
     }
 
     /// Convert value to screen position.
+    #[must_use]
     pub fn to_screen(&self, x: f32, y: f64, ctx: &DrawingContext) -> Pos2 {
         let y_norm = self.normalize(y);
         (ctx.to_screen)(
@@ -669,6 +667,7 @@ impl RenderContext {
     }
 
     /// Clamp x to valid pixel range (within VCD file bounds).
+    #[must_use]
     pub fn clamp_x(&self, x: f32) -> f32 {
         x.clamp(self.min_valid_pixel, self.max_valid_pixel)
     }
@@ -847,9 +846,9 @@ fn format_amplitude_value(value: f64) -> String {
     if abs_val == 0.0 {
         "0.00".to_string()
     } else if !(SCIENTIFIC_THRESHOLD_LOW..SCIENTIFIC_THRESHOLD_HIGH).contains(&abs_val) {
-        format!("{:.2e}", value)
+        format!("{value:.2e}")
     } else {
-        format!("{:.2}", value)
+        format!("{value:.2}")
     }
 }
 

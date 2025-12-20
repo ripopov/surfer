@@ -131,7 +131,7 @@ macro_rules! wcp_test {
 
 async fn send_commands(tx: &Sender<WcpCSMessage>, cmds: Vec<WcpCommand>) -> Result<()> {
     for cmd in cmds {
-        tx.send(WcpCSMessage::command(cmd)).await?
+        tx.send(WcpCSMessage::command(cmd)).await?;
     }
     Ok(())
 }

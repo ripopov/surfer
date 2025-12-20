@@ -85,7 +85,7 @@ impl SystemState {
     }
 
     pub fn menu_contents(&self, ui: &mut Ui, msgs: &mut Vec<Message>) {
-        /// Helper function to get a new ButtonBuilder.
+        /// Helper function to get a new `ButtonBuilder`.
         fn b(text: impl Into<String>, message: Message) -> ButtonBuilder {
             ButtonBuilder::new(text, message)
         }
@@ -618,7 +618,7 @@ impl SystemState {
         }
 
         if displayed_item.has_overwritten_name() && ui.button("Reset Name").clicked() {
-            msgs.push(Message::ItemNameChange(Some(vidx), None))
+            msgs.push(Message::ItemNameChange(Some(vidx), None));
         }
 
         if ui.button("Remove").clicked() {
@@ -711,11 +711,11 @@ impl SystemState {
                     name: None,
                     before: Some(info.idx),
                     items: Some(items),
-                })
+                });
             }
             if matches!(displayed_item, DisplayedItem::Group(_)) {
                 if ui.button("Dissolve").clicked() {
-                    msgs.push(Message::GroupDissolve(Some(displayed_item_id)))
+                    msgs.push(Message::GroupDissolve(Some(displayed_item_id)));
                 }
 
                 let (text, msg, msg_recursive) = if info.node.unfolded {
@@ -732,17 +732,17 @@ impl SystemState {
                     )
                 };
                 if ui.button(text).clicked() {
-                    msgs.push(msg)
+                    msgs.push(msg);
                 }
                 if ui.button(text.to_owned() + " recursive").clicked() {
-                    msgs.push(msg_recursive)
+                    msgs.push(msg_recursive);
                 }
             }
         });
         if let DisplayedItem::Marker(_) = displayed_item {
             ui.separator();
             if ui.button("View markers").clicked() {
-                msgs.push(Message::SetCursorWindowVisible(true))
+                msgs.push(Message::SetCursorWindowVisible(true));
             }
         }
     }

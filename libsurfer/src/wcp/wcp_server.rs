@@ -173,9 +173,10 @@ impl WcpServer {
 
     async fn initiate(&mut self) {
         let stream = self.stream.take().unwrap();
-        match self.handle_client(stream).await {
-            Err(error) => warn!("WCP Client disconnected with error: {error:#?}"),
-            Ok(()) => info!("WCP client disconnected"),
+        if let Err(error) = self.handle_client(stream).await {
+            warn!("WCP Client disconnected with error: {error:#?}");
+        } else {
+            info!("WCP client disconnected");
         }
     }
 
@@ -183,9 +184,10 @@ impl WcpServer {
         info!("WCP New connection: {}", stream.peer_addr().unwrap());
 
         //handle connection from client
-        match self.handle_client(stream).await {
-            Err(error) => warn!("WCP Client disconnected with error: {error:#?}"),
-            Ok(()) => info!("WCP client disconnected"),
+        if let Err(error) = self.handle_client(stream).await {
+            warn!("WCP Client disconnected with error: {error:#?}");
+        } else {
+            info!("WCP client disconnected");
         }
     }
 
@@ -193,7 +195,7 @@ impl WcpServer {
         match serde_json::to_string(message) {
             Ok(message) => {
                 if let Err(error) = stream.write_all(message.as_bytes()).await {
-                    warn!("WCP Sending of message failed: {error:#?}")
+                    warn!("WCP Sending of message failed: {error:#?}");
                 }
             }
             Err(error) => warn!("Serializing message failed: {error:#?}"),
@@ -220,18 +222,14 @@ impl WcpServer {
 
             tokio::select! {
                 msg = reader.read_frame() => {
-                    let msg = match msg? {
-                        Some(msg) => msg,
-                        None => continue,
-                    };
-
+                    let Some(msg) = msg? else { continue };
                     if let WcpCSMessage::command(WcpCommand::shutdown) = msg {
                         return Ok(());
                     }
 
                     if let Err(e) = self.sender.send(msg).await {
-                        error!("Failed to send wcp message into main thread {e}")
-                    };
+                        error!("Failed to send wcp message into main thread {e}");
+                    }
 
                     // request repaint of the Surfer UI
                     if let Some(ctx) = &self.ctx {

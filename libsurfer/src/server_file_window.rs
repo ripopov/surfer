@@ -26,16 +26,16 @@ impl SystemState {
                                         )
                                         .on_hover_ui(|ui| {
                                             ui.set_max_width(ui.spacing().tooltip_width);
-                                            if !file_info.last_load_ok {
-                                                ui.colored_label(
-                                                    egui::Color32::RED,
-                                                    "File cannot be loaded. See logs for details.",
-                                                );
-                                            } else {
+                                            if file_info.last_load_ok {
                                                 ui.label(format!(
                                                     "Size: {} bytes",
                                                     file_info.bytes
                                                 ));
+                                            } else {
+                                                ui.colored_label(
+                                                    egui::Color32::RED,
+                                                    "File cannot be loaded. See logs for details.",
+                                                );
                                             }
                                         });
 
@@ -92,7 +92,7 @@ impl SystemState {
         }
 
         if !open {
-            msgs.push(Message::SetServerFileWindowVisible(false))
+            msgs.push(Message::SetServerFileWindowVisible(false));
         }
     }
 }

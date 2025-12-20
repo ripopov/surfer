@@ -24,7 +24,7 @@ const CURSOR_MARKER_IDX: u8 = 255;
 
 impl WaveData {
     /// Get the color for a marker by its index, falling back to cursor color if not found
-    fn get_marker_color<'a>(&self, idx: u8, theme: &'a SurferTheme) -> &'a Color32 {
+    fn get_marker_color(&self, idx: u8, theme: &SurferTheme) -> Color32 {
         self.items_tree
             .iter()
             .find_map(|node| {
@@ -39,17 +39,17 @@ impl WaveData {
                 }
                 None
             })
-            .unwrap_or(&theme.cursor.color)
+            .unwrap_or(theme.cursor.color)
     }
 
     /// Draw a vertical line at the given x position with the specified stroke
-    fn draw_vertical_line(&self, x: f32, ctx: &mut DrawingContext, size: Vec2, stroke: &Stroke) {
+    fn draw_vertical_line(&self, x: f32, ctx: &mut DrawingContext, size: Vec2, stroke: Stroke) {
         ctx.painter.line_segment(
             [
                 (ctx.to_screen)(x + 0.5, -0.5),
                 (ctx.to_screen)(x + 0.5, size.y),
             ],
-            *stroke,
+            stroke,
         );
     }
 
@@ -63,7 +63,7 @@ impl WaveData {
         if let Some(marker) = &self.cursor {
             let num_timestamps = self.num_timestamps().unwrap_or_else(BigInt::one);
             let x = viewport.pixel_from_time(marker, size.x, &num_timestamps);
-            self.draw_vertical_line(x, ctx, size, &theme.cursor.clone().into());
+            self.draw_vertical_line(x, ctx, size, theme.cursor.clone().into());
         }
     }
 
@@ -78,14 +78,15 @@ impl WaveData {
         for (idx, marker) in &self.markers {
             let color = self.get_marker_color(*idx, theme);
             let stroke = Stroke {
-                color: *color,
+                color,
                 width: theme.cursor.width,
             };
             let x = viewport.pixel_from_time(marker, size.x, &num_timestamps);
-            self.draw_vertical_line(x, ctx, size, &stroke);
+            self.draw_vertical_line(x, ctx, size, stroke);
         }
     }
 
+    #[must_use]
     pub fn can_add_marker(&self) -> bool {
         self.markers.len() < MAX_MARKERS
     }
@@ -155,7 +156,7 @@ impl WaveData {
     pub fn move_marker_to_cursor(&mut self, idx: u8) {
         if let Some(location) = self.cursor.clone() {
             self.set_marker_position(idx, &location);
-        };
+        }
     }
 
     /// Draw text with background box at the specified position
@@ -167,7 +168,7 @@ impl WaveData {
         y: f32,
         text: &str,
         text_size: f32,
-        background_color: &Color32,
+        background_color: Color32,
         foreground_color: Color32,
         padding: f32,
     ) {
@@ -184,11 +185,8 @@ impl WaveData {
         let min = Pos2::new(rect.min.x - padding, rect.min.y - padding);
         let max = Pos2::new(rect.max.x + padding, rect.max.y + padding);
 
-        ctx.painter.rect_filled(
-            Rect { min, max },
-            CornerRadius::default(),
-            *background_color,
-        );
+        ctx.painter
+            .rect_filled(Rect { min, max }, CornerRadius::default(), background_color);
 
         // Draw text on top of background
         ctx.painter.text(
@@ -274,7 +272,7 @@ impl SystemState {
                             Some((
                                 marker.idx,
                                 waves.numbered_marker_time(marker.idx),
-                                marker.marker_text(text_color),
+                                marker.marker_text(&text_color),
                             ))
                         }
                         _ => None,
@@ -394,7 +392,7 @@ impl SystemState {
                     .unwrap_or(&BigInt::from(0)),
             );
 
-            let text_color = *self.user.config.theme.get_best_text_color(background_color);
+            let text_color = self.user.config.theme.get_best_text_color(background_color);
 
             // Create galley
             let galley =
@@ -406,11 +404,8 @@ impl SystemState {
             let min = (ctx.to_screen)(x - offset_width, y_offset - gap);
             let max = (ctx.to_screen)(x + offset_width, y_bottom + gap);
 
-            ctx.painter.rect_filled(
-                Rect { min, max },
-                CornerRadius::default(),
-                *background_color,
-            );
+            ctx.painter
+                .rect_filled(Rect { min, max }, CornerRadius::default(), background_color);
 
             // Draw actual text on top of rectangle
             ctx.painter.galley(
@@ -426,8 +421,8 @@ impl SystemState {
 }
 
 /// Get the background color for a marker or cursor, with fallback to theme cursor color
-fn get_marker_background_color<'a>(item: &DisplayedItem, theme: &'a SurferTheme) -> &'a Color32 {
+fn get_marker_background_color(item: &DisplayedItem, theme: &SurferTheme) -> Color32 {
     item.color()
         .and_then(|color| theme.get_color(color))
-        .unwrap_or(&theme.cursor.color)
+        .unwrap_or(theme.cursor.color)
 }

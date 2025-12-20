@@ -166,6 +166,7 @@ impl SystemState {
     }
 }
 
+#[must_use]
 pub fn read_command_file(cmd_file: &Utf8PathBuf) -> Vec<String> {
     std::fs::read_to_string(cmd_file)
         .map_err(|e| error!("Failed to read commands from {cmd_file}. {e:#?}"))
@@ -179,6 +180,7 @@ pub fn read_command_file(cmd_file: &Utf8PathBuf) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[must_use]
 pub fn read_command_bytes(bytes: Vec<u8>) -> Vec<String> {
     String::from_utf8(bytes)
         .map_err(|e| error!("Failed to read commands from file. {e:#?}"))

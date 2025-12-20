@@ -41,6 +41,7 @@ pub struct Timing {
 }
 
 impl Timing {
+    #[must_use]
     pub fn new() -> Self {
         let initial = vec![(
             vec![],
@@ -193,14 +194,14 @@ impl SystemState {
                     ui.horizontal(|ui| {
                         ui.monospace(format!(
                             "99%: {:.3}",
-                            frame_times_f32.iter().cloned().sum::<f32>()
+                            frame_times_f32.iter().copied().sum::<f32>()
                                 / frame_times_f32.len() as f32
                         ));
                         ui.monospace(format!(
                             "Average: {:.3}",
                             frame_times_f32
                                 .iter()
-                                .cloned()
+                                .copied()
                                 .sorted_by(f32_cmp)
                                 .skip((frame_times_f32.len() as f32 * 0.99) as usize)
                                 .sum::<f32>()
@@ -211,7 +212,7 @@ impl SystemState {
                             "min: {:.3}",
                             frame_times_f32
                                 .iter()
-                                .cloned()
+                                .copied()
                                 .min_by(f32_cmp)
                                 .unwrap_or(0.)
                         ));
@@ -220,7 +221,7 @@ impl SystemState {
                             "max: {:.3}",
                             frame_times_f32
                                 .iter()
-                                .cloned()
+                                .copied()
                                 .max_by(f32_cmp)
                                 .unwrap_or(0.)
                         ));
@@ -238,7 +239,7 @@ impl SystemState {
                     plot_ui.line(Line::new(
                         "egui CPU draw time",
                         PlotPoints::from_ys_f32(
-                            &self.rendering_cpu_times.iter().cloned().collect::<Vec<_>>(),
+                            &self.rendering_cpu_times.iter().copied().collect::<Vec<_>>(),
                         ),
                     ));
 

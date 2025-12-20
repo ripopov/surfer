@@ -77,8 +77,7 @@ pub fn extend_string(val: &str, num_bits: u64) -> String {
     if num_bits > val.len() as u64 {
         let extra_count = num_bits - val.len() as u64;
         let extra_value = match val.chars().next() {
-            Some('0') => "0",
-            Some('1') => "0",
+            Some('0' | '1') => "0",
             Some('x') => "x",
             Some('z') => "z",
             // If we got weird characters, this is probably a string, so we don't
@@ -120,9 +119,9 @@ impl VariableValue {
                         subfields: vec![],
                         kind,
                     });
-                } else {
-                    v
                 }
+                // v contains only 0 and 1
+                v
             }
         };
 

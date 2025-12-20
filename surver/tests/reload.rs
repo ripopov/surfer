@@ -76,7 +76,7 @@ async fn server_reload_with_overwrite() {
     for _ in 0..100 {
         // ~10s
         let st_resp = client
-            .get(format!("{}/get_status", base))
+            .get(format!("{base}/get_status"))
             .send()
             .await
             .unwrap();
@@ -106,11 +106,7 @@ async fn server_reload_with_overwrite() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Trigger reload; should be accepted (202)
-    let resp = client
-        .get(format!("{}/0/reload", base))
-        .send()
-        .await
-        .unwrap();
+    let resp = client.get(format!("{base}/0/reload")).send().await.unwrap();
     assert_eq!(
         resp.status(),
         StatusCode::ACCEPTED,
@@ -122,7 +118,7 @@ async fn server_reload_with_overwrite() {
     for _ in 0..100 {
         // up to ~10s
         let st_resp = client
-            .get(format!("{}/get_status", base))
+            .get(format!("{base}/get_status"))
             .send()
             .await
             .unwrap();
@@ -138,11 +134,7 @@ async fn server_reload_with_overwrite() {
     assert!(reload_complete, "reload did not finish in expected time");
 
     // 2) Reload with unchanged file -> 304 Not Modified
-    let resp = client
-        .get(format!("{}/0/reload", base))
-        .send()
-        .await
-        .unwrap();
+    let resp = client.get(format!("{base}/0/reload")).send().await.unwrap();
     assert_eq!(
         resp.status(),
         StatusCode::NOT_MODIFIED,

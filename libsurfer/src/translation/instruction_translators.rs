@@ -18,7 +18,7 @@ impl BasicTranslator<VarId, ScopeId> for InstructionTranslator {
 
     fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
         let u64_value = match value {
-            VariableValue::BigUint(v) => v.to_u64_digits().last().cloned(),
+            VariableValue::BigUint(v) => v.to_u64_digits().last().copied(),
             VariableValue::String(s) => match check_vector_variable(s) {
                 Some(v) => return v,
                 None => u64::from_str_radix(s, 2).ok(),
@@ -47,6 +47,7 @@ impl BasicTranslator<VarId, ScopeId> for InstructionTranslator {
     }
 }
 
+#[must_use]
 pub fn new_rv32_translator() -> InstructionTranslator {
     InstructionTranslator {
         name: "RV32".into(),
@@ -88,6 +89,7 @@ pub fn new_rv32_translator() -> InstructionTranslator {
     }
 }
 
+#[must_use]
 pub fn new_rv64_translator() -> InstructionTranslator {
     InstructionTranslator {
         name: "RV64".into(),
@@ -136,6 +138,7 @@ pub fn new_rv64_translator() -> InstructionTranslator {
     }
 }
 
+#[must_use]
 pub fn new_mips_translator() -> InstructionTranslator {
     InstructionTranslator {
         name: "MIPS".into(),
@@ -147,6 +150,7 @@ pub fn new_mips_translator() -> InstructionTranslator {
     }
 }
 
+#[must_use]
 pub fn new_la64_translator() -> InstructionTranslator {
     InstructionTranslator {
         name: "LA64".into(),

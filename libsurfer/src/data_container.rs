@@ -19,6 +19,7 @@ pub enum VariableType {
 }
 
 impl VariableType {
+    #[must_use]
     pub fn name(&self) -> String {
         match self {
             VariableType::Variable(v) => v.name.clone(),
@@ -28,10 +29,12 @@ impl VariableType {
 }
 
 impl DataContainer {
+    #[must_use]
     pub fn __new_empty() -> Self {
         DataContainer::Empty
     }
 
+    #[must_use]
     pub fn as_waves(&self) -> Option<&WaveContainer> {
         match self {
             DataContainer::Waves(w) => Some(w),
@@ -48,6 +51,7 @@ impl DataContainer {
         }
     }
 
+    #[must_use]
     pub fn as_transactions(&self) -> Option<&TransactionContainer> {
         match self {
             DataContainer::Waves(_) => None,
@@ -64,6 +68,7 @@ impl DataContainer {
         }
     }
 
+    #[must_use]
     pub fn is_waves(&self) -> bool {
         match self {
             DataContainer::Waves(_) => true,
@@ -72,6 +77,7 @@ impl DataContainer {
         }
     }
 
+    #[must_use]
     pub fn is_transactions(&self) -> bool {
         match self {
             DataContainer::Waves(_) => false,
@@ -80,6 +86,7 @@ impl DataContainer {
         }
     }
 
+    #[must_use]
     pub fn max_timestamp(&self) -> Option<BigUint> {
         match self {
             DataContainer::Waves(w) => w.max_timestamp(),
@@ -88,6 +95,7 @@ impl DataContainer {
         }
     }
 
+    #[must_use]
     pub fn root_scopes(&self) -> Vec<ScopeType> {
         match self {
             DataContainer::Waves(w) => {
@@ -104,6 +112,7 @@ impl DataContainer {
         }
     }
 
+    #[must_use]
     pub fn scope_exists(&self, scope: &ScopeType) -> bool {
         match (self, scope) {
             (DataContainer::Waves(waves), WaveScope(scope)) => waves.scope_exists(scope),
@@ -114,6 +123,7 @@ impl DataContainer {
         }
     }
 
+    #[must_use]
     pub fn scope_names(&self) -> Vec<String> {
         match self {
             DataContainer::Waves(w) => w.scope_names(),
@@ -122,6 +132,7 @@ impl DataContainer {
         }
     }
 
+    #[must_use]
     pub fn variable_names(&self) -> Vec<String> {
         match self {
             DataContainer::Waves(w) => w.variable_names(),
@@ -130,6 +141,7 @@ impl DataContainer {
         }
     }
 
+    #[must_use]
     pub fn variables_in_scope(&self, scope: &ScopeType) -> Vec<VariableType> {
         match (self, scope) {
             (DataContainer::Waves(w), WaveScope(s)) => {
@@ -150,6 +162,7 @@ impl DataContainer {
         }
     }
 
+    #[must_use]
     pub fn metadata(&self) -> MetaData {
         match self {
             DataContainer::Waves(w) => w.metadata(),
@@ -165,6 +178,7 @@ impl DataContainer {
         }
     }
 
+    #[must_use]
     pub fn body_loaded(&self) -> bool {
         match self {
             DataContainer::Waves(w) => w.body_loaded(),
@@ -173,6 +187,7 @@ impl DataContainer {
         }
     }
 
+    #[must_use]
     pub fn is_fully_loaded(&self) -> bool {
         match self {
             DataContainer::Waves(w) => w.is_fully_loaded(),
@@ -181,6 +196,7 @@ impl DataContainer {
         }
     }
 
+    #[must_use]
     pub fn simulation_status(&self) -> Option<SimulationStatus> {
         match self {
             DataContainer::Waves(w) => w.simulation_status(),

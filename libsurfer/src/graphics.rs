@@ -18,6 +18,7 @@ pub enum Direction {
 }
 
 impl Direction {
+    #[must_use]
     pub fn as_vector(&self) -> Vec2 {
         match self {
             Direction::North => Vec2::new(0., -1.),

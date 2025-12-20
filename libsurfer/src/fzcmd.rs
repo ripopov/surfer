@@ -9,6 +9,7 @@ pub enum RestQuery {
     Empty,
 }
 impl RestQuery {
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         *self == RestQuery::Empty
     }
@@ -58,7 +59,7 @@ pub enum ParseError {
 }
 
 fn separate_first_word(query: &str) -> (String, String, String, String) {
-    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(\W*)(\w*)(\W?)(.*)"#).unwrap());
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\W*)(\w*)(\W?)(.*)").unwrap());
     let captures = RE.captures_iter(query).next().unwrap();
 
     (
@@ -70,20 +71,15 @@ fn separate_first_word(query: &str) -> (String, String, String, String) {
 }
 
 fn separate_optional_word(query: &str) -> (String, String, String, String) {
-    if query.chars().all(|c| c.is_whitespace()) {
-        (
-            "".to_string(),
-            " ".to_string(),
-            "".to_string(),
-            "".to_string(),
-        )
+    if query.chars().all(char::is_whitespace) {
+        (String::new(), " ".to_string(), String::new(), String::new())
     } else {
         separate_first_word(query)
     }
 }
 
 fn separate_until_comma(query: &str) -> (String, String, String, String) {
-    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(\W*)([^,]*)(,?)(.*)"#).unwrap());
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\W*)([^,]*)(,?)(.*)").unwrap());
 
     RE.captures_iter(query)
         .next()
@@ -95,7 +91,7 @@ fn separate_until_comma(query: &str) -> (String, String, String, String) {
                 captures[4].into(),
             )
         })
-        .unwrap_or(("".into(), query.into(), "".into(), "".into()))
+        .unwrap_or((String::new(), query.into(), String::new(), String::new()))
 }
 
 fn split_query(query: &str, greed: ParamGreed) -> (String, String, String, String) {
@@ -103,7 +99,12 @@ fn split_query(query: &str, greed: ParamGreed) -> (String, String, String, Strin
         ParamGreed::Word => separate_first_word(query),
         ParamGreed::OptionalWord => separate_optional_word(query),
         ParamGreed::ToComma => separate_until_comma(query),
-        ParamGreed::Rest => ("".into(), query.trim_start().into(), "".into(), "".into()),
+        ParamGreed::Rest => (
+            String::new(),
+            query.trim_start().into(),
+            String::new(),
+            String::new(),
+        ),
         ParamGreed::Custom(matcher) => matcher(query),
     }
 }
@@ -161,7 +162,7 @@ fn handle_non_terminal_fuzz<T>(
             suggestions: if previous_query
                 .chars()
                 .last()
-                .is_some_and(|c| c.is_whitespace())
+                .is_some_and(char::is_whitespace)
             {
                 let s = suggestions
                     .iter()
@@ -178,8 +179,7 @@ fn handle_non_terminal_fuzz<T>(
         let best_expansion = {
             let expansion = expanded_commands
                 .first()
-                .map(|(query, _)| query)
-                .unwrap_or(&current_section);
+                .map_or(&current_section, |(query, _)| query);
 
             parser(expansion, rest_query.clone().into()).map(|command| (expansion, command))
         };
@@ -258,7 +258,7 @@ pub fn expand_command<T>(query: &str, command: Command<T>) -> FuzzyOutput {
             }
         }
         Command::Terminal(_) => FuzzyOutput {
-            expanded: "".into(),
+            expanded: String::new(),
             suggestions: Err(FuzzyError::ReachedTerminal),
         },
     }
@@ -287,7 +287,7 @@ fn fuzzy_score(line: &str, query: &str) -> (i64, Vec<bool>) {
 
     let mut matches = vec![false; line.len()];
     for i in indices {
-        matches[i] = true
+        matches[i] = true;
     }
     (score, matches)
 }
@@ -480,25 +480,34 @@ mod tests {
             ["cpu_test_harness", "cpu"],
             "cpu",
             ["cpu", "cpu_test_harness"]
-        )
+        );
     }
 
     #[test]
     fn separate_first_word_handles_empty_string() {
         let result = separate_first_word("");
-        assert_eq!(result, ("".into(), "".into(), "".into(), "".into()));
+        assert_eq!(
+            result,
+            (String::new(), String::new(), String::new(), String::new())
+        );
     }
 
     #[test]
     fn separate_first_word_handles_whitespace_only() {
         let result = separate_first_word("   ");
-        assert_eq!(result, ("   ".into(), "".into(), "".into(), "".into()));
+        assert_eq!(
+            result,
+            ("   ".into(), String::new(), String::new(), String::new())
+        );
     }
 
     #[test]
     fn separate_first_word_handles_single_word() {
         let result = separate_first_word("test");
-        assert_eq!(result, ("".into(), "test".into(), "".into(), "".into()));
+        assert_eq!(
+            result,
+            (String::new(), "test".into(), String::new(), String::new())
+        );
     }
 
     #[test]
@@ -506,20 +515,26 @@ mod tests {
         let result = separate_first_word("test hello");
         assert_eq!(
             result,
-            ("".into(), "test".into(), " ".into(), "hello".into())
+            (String::new(), "test".into(), " ".into(), "hello".into())
         );
     }
 
     #[test]
     fn separate_until_comma_handles_empty_string() {
         let result = separate_until_comma("");
-        assert_eq!(result, ("".into(), "".into(), "".into(), "".into()));
+        assert_eq!(
+            result,
+            (String::new(), String::new(), String::new(), String::new())
+        );
     }
 
     #[test]
     fn separate_until_comma_handles_no_comma() {
         let result = separate_until_comma("test");
-        assert_eq!(result, ("".into(), "test".into(), "".into(), "".into()));
+        assert_eq!(
+            result,
+            (String::new(), "test".into(), String::new(), String::new())
+        );
     }
 
     #[test]
@@ -527,7 +542,7 @@ mod tests {
         let result = separate_until_comma("first,second");
         assert_eq!(
             result,
-            ("".into(), "first".into(), ",".into(), "second".into())
+            (String::new(), "first".into(), ",".into(), "second".into())
         );
     }
 

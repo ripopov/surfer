@@ -94,7 +94,7 @@ where
             self.read_buf.pop_front();
 
             new_messages
-                .push(String::from_utf8(message).context("Got non-utf8 characters from cxxrtl")?)
+                .push(String::from_utf8(message).context("Got non-utf8 characters from cxxrtl")?);
         }
 
         Ok(new_messages)

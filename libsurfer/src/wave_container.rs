@@ -15,7 +15,7 @@ pub type ScopeRef = surfer_translation_types::ScopeRef<ScopeId>;
 pub type VariableRef = surfer_translation_types::VariableRef<VarId, ScopeId>;
 pub type VariableMeta = surfer_translation_types::VariableMeta<VarId, ScopeId>;
 
-/// Cache key for analog signal data: (signal_id, translator_name)
+/// Cache key for analog signal data: (`signal_id`, `translator_name`)
 pub type AnalogCacheKey = (SignalId, String);
 
 #[derive(Debug, Clone)]
@@ -64,7 +64,8 @@ pub enum SignalAccessor {
 }
 
 impl SignalAccessor {
-    /// Iterator over signal changes as (time_u64, value) pairs
+    /// Iterator over signal changes as (`time_u64`, value) pairs
+    #[must_use]
     pub fn iter_changes(&self) -> Box<dyn Iterator<Item = (u64, VariableValue)> + '_> {
         match self {
             SignalAccessor::Wellen(accessor) => accessor.iter_changes(),
@@ -96,7 +97,7 @@ impl ScopeRefExt for ScopeRef {
         Self { strs, id }
     }
 
-    /// Creates a ScopeRef from a string with each scope separated by `.`
+    /// Creates a `ScopeRef` from a string with each scope separated by `.`
     fn from_hierarchy_string(s: &str) -> Self {
         let strs = s.split('.').map(std::string::ToString::to_string).collect();
         let id = ScopeId::default();
@@ -229,10 +230,12 @@ pub enum WaveContainer {
 }
 
 impl WaveContainer {
+    #[must_use]
     pub fn new_waveform(hierarchy: std::sync::Arc<wellen::Hierarchy>) -> Self {
         WaveContainer::Wellen(Box::new(WellenContainer::new(hierarchy, None)))
     }
 
+    #[must_use]
     pub fn new_remote_waveform(
         server_url: &str,
         hierarchy: std::sync::Arc<wellen::Hierarchy>,
@@ -244,8 +247,9 @@ impl WaveContainer {
     }
 
     /// Creates a new empty wave container. Should only be used as a default for serde. If
-    /// no wave container is present, the WaveData should be None, rather than this being
+    /// no wave container is present, the `WaveData` should be None, rather than this being
     /// Empty
+    #[must_use]
     pub fn __new_empty() -> Self {
         WaveContainer::Empty
     }
@@ -259,6 +263,7 @@ impl WaveContainer {
         }
     }
 
+    #[must_use]
     pub fn wants_anti_aliasing(&self) -> bool {
         match self {
             WaveContainer::Wellen(_) => true,
@@ -271,6 +276,7 @@ impl WaveContainer {
     /// Returns true if all requested signals have been loaded.
     /// Used for testing to make sure the GUI is at its final state before taking a
     /// snapshot.
+    #[must_use]
     pub fn is_fully_loaded(&self) -> bool {
         match self {
             WaveContainer::Wellen(f) => f.is_fully_loaded(),
@@ -280,6 +286,7 @@ impl WaveContainer {
     }
 
     /// Returns the full names of all variables in the design.
+    #[must_use]
     pub fn variable_names(&self) -> Vec<String> {
         match self {
             WaveContainer::Wellen(f) => f.variable_names(),
@@ -290,6 +297,7 @@ impl WaveContainer {
     }
 
     /// Return all variables (excluding parameters) in the whole design.
+    #[must_use]
     pub fn variables(&self, include_parameters: bool) -> Vec<VariableRef> {
         match self {
             WaveContainer::Wellen(f) => f.variables(include_parameters),
@@ -299,6 +307,7 @@ impl WaveContainer {
     }
 
     /// Return all variables (excluding parameters) in a scope.
+    #[must_use]
     pub fn variables_in_scope(&self, scope: &ScopeRef) -> Vec<VariableRef> {
         match self {
             WaveContainer::Wellen(f) => f.variables_in_scope(scope),
@@ -308,6 +317,7 @@ impl WaveContainer {
     }
 
     /// Return all parameters in a scope.
+    #[must_use]
     pub fn parameters_in_scope(&self, scope: &ScopeRef) -> Vec<VariableRef> {
         match self {
             WaveContainer::Wellen(f) => f.parameters_in_scope(scope),
@@ -318,6 +328,7 @@ impl WaveContainer {
     }
 
     /// Return true if there are no variables or parameters in the scope.
+    #[must_use]
     pub fn no_variables_in_scope(&self, scope: &ScopeRef) -> bool {
         match self {
             WaveContainer::Wellen(f) => f.no_variables_in_scope(scope),
@@ -397,7 +408,7 @@ impl WaveContainer {
             _ => bail!("Invalid signal accessor combination"),
         }
     }
-    /// Get the SignalId for a variable (canonical signal identity for cache keys)
+    /// Get the `SignalId` for a variable (canonical signal identity for cache keys)
     pub fn signal_id(&self, variable: &VariableRef) -> Result<SignalId> {
         match self {
             WaveContainer::Wellen(f) => Ok(SignalId::Wellen(f.signal_ref(variable)?)),
@@ -407,6 +418,7 @@ impl WaveContainer {
     }
 
     /// Check if a signal is already loaded (data available)
+    #[must_use]
     pub fn is_signal_loaded(&self, signal_id: &SignalId) -> bool {
         match (self, signal_id) {
             (WaveContainer::Wellen(f), SignalId::Wellen(signal_ref)) => {
@@ -417,6 +429,7 @@ impl WaveContainer {
     }
 
     /// Looks up the variable _by name_ and returns a new reference with an updated `id` if the variable is found.
+    #[must_use]
     pub fn update_variable_ref(&self, variable: &VariableRef) -> Option<VariableRef> {
         match self {
             WaveContainer::Wellen(f) => f.update_variable_ref(variable),
@@ -426,6 +439,7 @@ impl WaveContainer {
     }
 
     /// Returns the full names of all scopes in the design.
+    #[must_use]
     pub fn scope_names(&self) -> Vec<String> {
         match self {
             WaveContainer::Wellen(f) => f.scope_names(),
@@ -440,6 +454,7 @@ impl WaveContainer {
         }
     }
 
+    #[must_use]
     pub fn metadata(&self) -> MetaData {
         match self {
             WaveContainer::Wellen(f) => f.metadata(),
@@ -465,6 +480,7 @@ impl WaveContainer {
         }
     }
 
+    #[must_use]
     pub fn root_scopes(&self) -> Vec<ScopeRef> {
         match self {
             WaveContainer::Wellen(f) => f.root_scopes(),
@@ -481,6 +497,7 @@ impl WaveContainer {
         }
     }
 
+    #[must_use]
     pub fn max_timestamp(&self) -> Option<BigUint> {
         match self {
             WaveContainer::Wellen(f) => f.max_timestamp(),
@@ -493,6 +510,7 @@ impl WaveContainer {
         }
     }
 
+    #[must_use]
     pub fn scope_exists(&self, scope: &ScopeRef) -> bool {
         match self {
             WaveContainer::Wellen(f) => f.scope_exists(scope),
@@ -503,6 +521,7 @@ impl WaveContainer {
 
     /// Returns a human readable string with information about a scope.
     /// The scope name itself should not be included, since it will be prepended automatically.
+    #[must_use]
     pub fn get_scope_tooltip_data(&self, scope: &ScopeRef) -> String {
         match self {
             WaveContainer::Wellen(f) => f.get_scope_tooltip_data(scope),
@@ -515,6 +534,7 @@ impl WaveContainer {
     /// Returns the simulation status for this wave source if it exists. Wave sources which have no
     /// simulation status should return None here, otherwise buttons for controlling simulation
     /// will be shown
+    #[must_use]
     pub fn simulation_status(&self) -> Option<SimulationStatus> {
         match self {
             WaveContainer::Wellen(_) => None,
@@ -552,6 +572,7 @@ impl WaveContainer {
         }
     }
 
+    #[must_use]
     pub fn body_loaded(&self) -> bool {
         match self {
             WaveContainer::Wellen(inner) => inner.body_loaded(),
@@ -562,6 +583,7 @@ impl WaveContainer {
 
     /// Returns true if this wave container supports analog rendering options in the GUI.
     /// Currently only the wellen backend (VCD/FST/GHW) supports analog rendering.
+    #[must_use]
     pub fn supports_analog(&self) -> bool {
         matches!(self, WaveContainer::Wellen(_))
     }

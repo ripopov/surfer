@@ -80,7 +80,7 @@ async fn server_end_to_end_basic() {
 
     // 3) Status endpoint
     let resp = client
-        .get(format!("{}/get_status", base))
+        .get(format!("{base}/get_status"))
         .send()
         .await
         .unwrap();
@@ -100,7 +100,7 @@ async fn server_end_to_end_basic() {
 
     // 4) Hierarchy endpoint (lz4-compressed bincode), just check non-empty
     let resp = client
-        .get(format!("{}/0/get_hierarchy", base))
+        .get(format!("{base}/0/get_hierarchy"))
         .send()
         .await
         .unwrap();
@@ -110,7 +110,7 @@ async fn server_end_to_end_basic() {
 
     // 5) Timetable endpoint (waits until loaded)
     let resp = client
-        .get(format!("{}/0/get_time_table", base))
+        .get(format!("{base}/0/get_time_table"))
         .send()
         .await
         .unwrap();
@@ -120,7 +120,7 @@ async fn server_end_to_end_basic() {
 
     // 6) Signals endpoint with no IDs -> empty body
     let resp = client
-        .get(format!("{}/0/get_signals", base))
+        .get(format!("{base}/0/get_signals"))
         .send()
         .await
         .unwrap();
@@ -191,7 +191,7 @@ async fn server_loads_multiple_files() {
 
     // Get status to verify both files are loaded
     let resp = client
-        .get(format!("{}/get_status", base))
+        .get(format!("{base}/get_status"))
         .send()
         .await
         .unwrap();
@@ -214,7 +214,7 @@ async fn server_loads_multiple_files() {
     // Verify hierarchy endpoints for both files exist
     for file_idx in 0..2 {
         let resp = client
-            .get(format!("{}/{}/get_hierarchy", base, file_idx))
+            .get(format!("{base}/{file_idx}/get_hierarchy"))
             .send()
             .await
             .unwrap();
@@ -233,7 +233,7 @@ async fn server_loads_multiple_files() {
     // Verify time table for both files
     for file_idx in 0..2 {
         let resp = client
-            .get(format!("{}/{}/get_time_table", base, file_idx))
+            .get(format!("{base}/{file_idx}/get_time_table"))
             .send()
             .await
             .unwrap();

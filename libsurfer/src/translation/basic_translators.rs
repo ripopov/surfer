@@ -12,6 +12,7 @@ use surfer_translation_types::{
 /// Splits a string into groups of `n` characters.
 /// If the string length is not divisible by `n`, the first group will be shorter.
 /// The string must only consist of ASCII characters.
+#[must_use]
 pub fn group_n_chars(s: &str, n: usize) -> Vec<&str> {
     let mut groups = Vec::new();
     let len = s.len();
@@ -29,7 +30,8 @@ pub fn group_n_chars(s: &str, n: usize) -> Vec<&str> {
     groups
 }
 
-/// Number of digits for digit_size, simply ceil(num_bits/digit_size)
+/// Number of digits for `digit_size`, simply `ceil(num_bits/digit_size)`
+#[must_use]
 pub fn no_of_digits(num_bits: u64, digit_size: u64) -> usize {
     if num_bits.is_multiple_of(digit_size) {
         (num_bits / digit_size) as usize
@@ -54,13 +56,14 @@ fn map_to_radix(s: &str, radix: usize, num_bits: u64) -> (String, ValueKind) {
         g if g.contains('w') => "w".to_string(),
         g if g.contains('h') => "h".to_string(),
         g if g.contains('l') => "l".to_string(),
-        g => match u8::from_str_radix(g, 2) {
-            Ok(val) => format!("{:x}", val),
-            Err(_) => {
+        g => {
+            if let Ok(val) = u8::from_str_radix(g, 2) {
+                format!("{val:x}")
+            } else {
                 had_invalid_digit = true;
                 "?".to_string()
             }
-        },
+        }
     })
     .join("");
 
@@ -249,14 +252,14 @@ fn decode_lebxxx(value: &num::BigUint) -> Result<num::BigUint, &'static str> {
     match bytes.first() {
         Some(b) if b & 0x80 != 0 => return Err("invalid MSB"),
         _ => (),
-    };
+    }
 
-    let first: num::BigUint = bytes.first().cloned().unwrap_or(0).into();
+    let first: num::BigUint = bytes.first().copied().unwrap_or(0).into();
     bytes.iter().skip(1).try_fold(first, |result, b| {
-        if (b & 0x80 == 0) != (result.is_zero()) {
-            Err("invalid flag")
-        } else {
+        if (b & 0x80 == 0) == (result.is_zero()) {
             Ok((result << 7) + (*b & 0x7f))
+        } else {
+            Err("invalid flag")
         }
     })
 }

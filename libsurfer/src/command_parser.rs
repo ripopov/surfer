@@ -40,7 +40,7 @@ fn is_command_file_extension(ext: &str) -> bool {
 /// fzcmd splits at regex "words" which does not include special characters
 /// like '#'. This function can be used instead via `ParamGreed::Custom(&separate_at_space)`
 fn separate_at_space(query: &str) -> (String, String, String, String) {
-    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(\s*)(\S*)(\s?)(.*)"#).unwrap());
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\s*)(\S*)(\s?)(.*)").unwrap());
 
     let captures = RE.captures_iter(query).next().unwrap();
 

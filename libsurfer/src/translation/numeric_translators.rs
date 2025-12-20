@@ -38,8 +38,7 @@ fn match_variable_type_name(
 ) -> bool {
     variable_type_name
         .as_ref()
-        .map(|type_name| candidates.iter().any(|c| type_name.eq_ignore_ascii_case(c)))
-        .unwrap_or(false)
+        .is_some_and(|type_name| candidates.iter().any(|c| type_name.eq_ignore_ascii_case(c)))
 }
 
 #[inline]
@@ -51,7 +50,7 @@ fn shortest_float_representation<T: std::fmt::LowerExp + std::fmt::Display>(v: T
 
 /// If `value` is a biguint or consists only of 1 or 0, translates the value using
 /// `biguint_translator`. If `value` contains other values such as X, Z etc. the result
-/// is the corresponding ValueKind
+/// is the corresponding `ValueKind`
 fn translate_numeric(
     biguint_translator: impl Fn(BigUint) -> String,
     value: &VariableValue,
@@ -104,7 +103,7 @@ impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
     }
 }
 
-/// Computes the signed value string for a given BigUint and bit width.
+/// Computes the signed value string for a given `BigUint` and bit width.
 fn compute_signed_value(v: &BigUint, num_bits: u64) -> String {
     let signweight = BigUint::one() << (num_bits - 1);
     if v < &signweight {
@@ -343,7 +342,7 @@ impl BasicTranslator<VarId, ScopeId> for PositQuire16Translator {
                 } else {
                     0
                 };
-                let val = lsb as u128 | ((msb as u128) << 64);
+                let val = u128::from(lsb) | (u128::from(msb) << 64);
                 format!("{p}", p = Q16E1::from_bits(val))
             },
             v,
@@ -372,10 +371,10 @@ fn decode_e5m2(v: u8) -> String {
             }
         }
         (0, ..) => shortest_float_representation(
-            ((sign * mant as i8) as f32) * 0.0000152587890625f32, // 0.0000152587890625 = 2^-16
+            f32::from(sign * mant as i8) * 0.0000152587890625f32, // 0.0000152587890625 = 2^-16
         ),
         _ => shortest_float_representation(
-            ((sign * (4 + mant as i8)) as f32) * 2.0f32.powi(exp as i32 - 17), // 17 = 15 (bias) + 2 (mantissa bits)
+            f32::from(sign * (4 + mant as i8)) * 2.0f32.powi(i32::from(exp) - 17), // 17 = 15 (bias) + 2 (mantissa bits)
         ),
     }
 }
@@ -413,9 +412,9 @@ fn decode_e4m3(v: u8) -> String {
                 "0".to_string()
             }
         }
-        (0, ..) => shortest_float_representation(((sign * mant as i8) as f32) * 0.001953125f32), // 0.001953125 = 2^-9
+        (0, ..) => shortest_float_representation(f32::from(sign * mant as i8) * 0.001953125f32), // 0.001953125 = 2^-9
         _ => shortest_float_representation(
-            ((sign * (8 + mant) as i8) as f32) * 2.0f32.powi(exp as i32 - 10), // 10 = 7 (bias) + 3 (mantissa bits)
+            f32::from(sign * (8 + mant) as i8) * 2.0f32.powi(i32::from(exp) - 10), // 10 = 7 (bias) + 3 (mantissa bits)
         ),
     }
 }
@@ -490,7 +489,7 @@ impl Translator<VarId, ScopeId, Message> for SignedFixedPointTranslator {
     ) -> Result<TranslationResult> {
         let (string, value_kind) = if let Some(idx) = &variable.index {
             translate_numeric(
-                |v| big_uint_to_sfixed(&v, variable.num_bits.unwrap_or(0) as u64, -idx.lsb),
+                |v| big_uint_to_sfixed(&v, u64::from(variable.num_bits.unwrap_or(0)), -idx.lsb),
                 value,
             )
         } else {

@@ -33,7 +33,7 @@ where
         info!("Starting async task");
         f();
     }}
-    info!("Returning from perform work")
+    info!("Returning from perform work");
 }
 
 // Spawn an async task on the appropriate runtime.

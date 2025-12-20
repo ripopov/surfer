@@ -173,11 +173,13 @@ mod tests {
         let vars = vec![&v1, &v2];
         let map = compute_minimal_display_map(&vars);
         assert_eq!(
-            map.get(&v1.full_path_string()).map(|s| s.as_str()),
+            map.get(&v1.full_path_string())
+                .map(std::string::String::as_str),
             Some("a")
         );
         assert_eq!(
-            map.get(&v2.full_path_string()).map(|s| s.as_str()),
+            map.get(&v2.full_path_string())
+                .map(std::string::String::as_str),
             Some("b")
         );
     }
@@ -191,15 +193,18 @@ mod tests {
         let map = compute_minimal_display_map(&vars);
 
         assert_eq!(
-            map.get(&v1.full_path_string()).map(|s| s.as_str()),
+            map.get(&v1.full_path_string())
+                .map(std::string::String::as_str),
             Some("top.dut.x")
         );
         assert_eq!(
-            map.get(&v2.full_path_string()).map(|s| s.as_str()),
+            map.get(&v2.full_path_string())
+                .map(std::string::String::as_str),
             Some("other.dut.x")
         );
         assert_eq!(
-            map.get(&v3.full_path_string()).map(|s| s.as_str()),
+            map.get(&v3.full_path_string())
+                .map(std::string::String::as_str),
             Some(ELLIPSIS.to_owned() + "sub.x").as_deref()
         );
     }
@@ -211,11 +216,13 @@ mod tests {
         let vars = vec![&v1, &v2];
         let map = compute_minimal_display_map(&vars);
         assert_eq!(
-            map.get(&v1.full_path_string()).map(|s| s.as_str()),
+            map.get(&v1.full_path_string())
+                .map(std::string::String::as_str),
             Some("x")
         );
         assert_eq!(
-            map.get(&v2.full_path_string()).map(|s| s.as_str()),
+            map.get(&v2.full_path_string())
+                .map(std::string::String::as_str),
             Some("a.x")
         );
     }

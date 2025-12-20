@@ -213,7 +213,7 @@ pub enum Message {
     /// However, there is a configuration setting that the user can overwrite.
     #[serde(skip)]
     SuggestReloadWaveform,
-    /// Close the 'reload_waveform' dialog.
+    /// Close the '`reload_waveform`' dialog.
     /// The `reload_file` boolean is the return value of the dialog.
     /// If `do_not_show_again` is true, the `reload_file` setting will be persisted.
     #[serde(skip)]

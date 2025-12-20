@@ -174,7 +174,7 @@ mod tests {
                 .wait_timeout(started, Duration::from_secs(10))
                 .unwrap();
             started = result.0;
-            if *started == true {
+            if *started {
                 panic!("Callback was called");
             }
         }
@@ -263,6 +263,6 @@ mod tests {
         assert!(!is_same_file(&file1, &file2));
         let mut complicated_file2 = dir.clone();
         complicated_file2.push("../dir/file2");
-        assert!(is_same_file(&complicated_file2, &file2))
+        assert!(is_same_file(&complicated_file2, &file2));
     }
 }

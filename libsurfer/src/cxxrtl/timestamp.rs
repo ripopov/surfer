@@ -11,6 +11,7 @@ pub struct CxxrtlTimestamp {
 }
 
 impl CxxrtlTimestamp {
+    #[must_use]
     pub fn zero() -> Self {
         Self {
             seconds: BigUint::ZERO,
@@ -29,6 +30,7 @@ impl CxxrtlTimestamp {
         })
     }
 
+    #[must_use]
     pub fn from_femtoseconds(femto: BigUint) -> Self {
         Self {
             seconds: &femto / BigUint::from(1_000_000_000_000_000u64),
@@ -36,6 +38,7 @@ impl CxxrtlTimestamp {
         }
     }
 
+    #[must_use]
     pub fn as_femtoseconds(&self) -> BigUint {
         &self.seconds * BigUint::from(1_000_000_000_000_000u64) + &self.femtoseconds
     }

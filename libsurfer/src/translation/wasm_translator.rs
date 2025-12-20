@@ -64,7 +64,7 @@ pub fn discover_wasm_translators() -> Vec<Message> {
                     warn!(
                         "Failed to read dir entries in {}. {e}",
                         dir.to_string_lossy()
-                    )
+                    );
                 })
                 .unwrap_or_else(|_| vec![])
         })
@@ -142,7 +142,7 @@ impl Translator<VarId, ScopeId, Message> for PluginTranslator {
                     self.file.to_string_lossy()
                 );
             })
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .unwrap_or_default()
     }
 
@@ -155,7 +155,7 @@ impl Translator<VarId, ScopeId, Message> for PluginTranslator {
                     error!(
                         "Failed to set_wave_source on {}. {e}",
                         self.file.to_string_lossy()
-                    )
+                    );
                 })
                 .ok();
         }
@@ -256,7 +256,7 @@ host_fn!(current_dir() -> String {
         .and_then(|dir| {
             dir.to_str().ok_or_else(|| {
                 anyhow!("{} is not valid utf8", dir.to_string_lossy())
-            }).map(|s| s.to_string())
+            }).map(std::string::ToString::to_string)
         })
         .map_err(|e| extism::Error::msg(format!("{e:#}")))
 });

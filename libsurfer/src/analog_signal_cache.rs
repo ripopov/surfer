@@ -13,9 +13,9 @@
 //!
 //! Sparse table storage (B = 64 default block size):
 //! - `MinMax` struct = 24 bytes (8 + 8 + 1 + padding)
-//! - num_blocks = ⌈N/B⌉
-//! - num_levels = 1 + ⌊log₂(num_blocks)⌋
-//! - Sparse table = num_blocks × num_levels × 24 bytes
+//! - `num_blocks` = ⌈N/B⌉
+//! - `num_levels` = 1 + ⌊`log₂(num_blocks)`⌋
+//! - Sparse table = `num_blocks` × `num_levels` × 24 bytes
 //!
 //! Total ≈ 16N + (N/64) × (1 + log₂(N/64)) × 24 bytes
 //!
@@ -37,7 +37,8 @@ pub const NAN_UNDEF: f64 = f64::from_bits(0x7FF8_0000_0000_0000_u64);
 /// Quiet NaN representing high-impedance (Z) values.
 pub const NAN_HIGHIMP: f64 = f64::from_bits(0x7FF8_0000_0000_0001_u64);
 
-/// Check NaN payload to determine if it represents HighImp.
+/// Check NaN payload to determine if it represents `HighImp`.
+#[must_use]
 pub fn is_nan_highimp(value: f64) -> bool {
     value.to_bits() == NAN_HIGHIMP.to_bits()
 }
@@ -93,7 +94,7 @@ struct SignalRMQ {
     timestamps: Vec<u64>,
     values: Vec<f64>,
     block_size: usize,
-    /// sparse_table[level][block_idx] contains min/max for 2^level blocks starting at block_idx
+    /// `sparse_table`[level][block_idx] contains min/max for 2^level blocks starting at `block_idx`
     /// Level 0 contains individual block summaries.
     sparse_table: Vec<Vec<MinMax>>,
 }
@@ -311,6 +312,7 @@ impl AnalogSignalCache {
         })
     }
 
+    #[must_use]
     pub fn query_time_range(&self, start: u64, end: u64) -> Option<(f64, f64)> {
         let result = self.rmq.query_time_range(start, end)?;
         if result.has_non_finite {
@@ -321,6 +323,7 @@ impl AnalogSignalCache {
         }
     }
 
+    #[must_use]
     pub fn query_at_time(&self, time: u64) -> CacheQueryResult {
         self.rmq.query_at_time(time)
     }
@@ -337,6 +340,7 @@ pub struct AnalogCacheEntry {
 }
 
 impl AnalogCacheEntry {
+    #[must_use]
     pub fn new(cache_key: AnalogCacheKey, generation: u64) -> Self {
         Self {
             inner: OnceLock::new(),
@@ -493,7 +497,7 @@ mod tests {
     fn test_large_signal_multiple_blocks() {
         let mut signal = Vec::new();
         for i in 0..1000 {
-            signal.push((i as u64, (i % 100) as f64));
+            signal.push((i as u64, f64::from(i % 100)));
         }
 
         let rmq = SignalRMQ::new(signal, 32);
@@ -530,7 +534,7 @@ mod tests {
 
     #[test]
     fn test_monotonic_increasing() {
-        let signal: Vec<_> = (0..100).map(|i| (i as u64, i as f64)).collect();
+        let signal: Vec<_> = (0..100).map(|i| (i as u64, f64::from(i))).collect();
         let rmq = SignalRMQ::new(signal, 32);
 
         let result = rmq.query_time_range(0, 99).unwrap();
@@ -544,7 +548,7 @@ mod tests {
 
     #[test]
     fn test_monotonic_decreasing() {
-        let signal: Vec<_> = (0..100).map(|i| (i as u64, (99 - i) as f64)).collect();
+        let signal: Vec<_> = (0..100).map(|i| (i as u64, f64::from(99 - i))).collect();
         let rmq = SignalRMQ::new(signal, 32);
 
         let result = rmq.query_time_range(0, 99).unwrap();
@@ -632,7 +636,7 @@ mod tests {
 
     #[test]
     fn test_small_block_size() {
-        let signal: Vec<_> = (0..20).map(|i| (i as u64, i as f64)).collect();
+        let signal: Vec<_> = (0..20).map(|i| (i as u64, f64::from(i))).collect();
         let rmq = SignalRMQ::new(signal, 2);
 
         let result = rmq.query_time_range(0, 19).unwrap();
@@ -646,7 +650,7 @@ mod tests {
 
     #[test]
     fn test_large_block_size() {
-        let signal: Vec<_> = (0..20).map(|i| (i as u64, i as f64)).collect();
+        let signal: Vec<_> = (0..20).map(|i| (i as u64, f64::from(i))).collect();
         let rmq = SignalRMQ::new(signal, 100);
 
         let result = rmq.query_time_range(0, 19).unwrap();
@@ -687,7 +691,7 @@ mod tests {
 
     #[test]
     fn test_index_range_query() {
-        let signal: Vec<_> = (0..100).map(|i| (i as u64, i as f64)).collect();
+        let signal: Vec<_> = (0..100).map(|i| (i as u64, f64::from(i))).collect();
         let rmq = SignalRMQ::new(signal, 32);
 
         let result = rmq.query_index_range(10, 20);
@@ -701,7 +705,7 @@ mod tests {
 
     #[test]
     fn test_nans_in_signal() {
-        let mut signal: Vec<_> = (0..100).map(|i| (i + i as u64, i as f64)).collect();
+        let mut signal: Vec<_> = (0..100).map(|i| (i + i, i as f64)).collect();
         signal[10].1 = f64::NAN;
         let rmq = SignalRMQ::new(signal, 32);
 
@@ -798,7 +802,7 @@ mod tests {
 
     #[test]
     fn test_single_block_query() {
-        let signal: Vec<_> = (0..10).map(|i| (i as u64, i as f64)).collect();
+        let signal: Vec<_> = (0..10).map(|i| (i as u64, f64::from(i))).collect();
         let rmq = SignalRMQ::new(signal, 64);
 
         // All samples in one block
@@ -809,7 +813,7 @@ mod tests {
 
     #[test]
     fn test_cross_block_boundary() {
-        let signal: Vec<_> = (0..100).map(|i| (i as u64, i as f64)).collect();
+        let signal: Vec<_> = (0..100).map(|i| (i as u64, f64::from(i))).collect();
         let rmq = SignalRMQ::new(signal, 32);
 
         // Query that crosses block boundary at 32

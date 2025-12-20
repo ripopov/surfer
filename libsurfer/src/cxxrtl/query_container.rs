@@ -26,6 +26,7 @@ pub struct QueryContainer {
 }
 
 impl QueryContainer {
+    #[must_use]
     pub fn empty() -> Self {
         QueryContainer {
             variable_values: Arc::new(RwLock::new(BTreeMap::new())),
@@ -48,6 +49,7 @@ impl QueryContainer {
         tokio::task::spawn(task);
     }
 
+    #[must_use]
     pub fn query(&self, var: &VariableRef, query_time: BigInt) -> QueryResult {
         let values = block_on(self.variable_values.read());
 

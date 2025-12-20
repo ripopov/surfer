@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 pub struct Relative(pub f64);
 
 impl Relative {
+    #[must_use]
     pub fn absolute(&self, num_timestamps: &BigInt) -> Absolute {
         Absolute(
             self.0
@@ -31,14 +32,17 @@ impl Relative {
         )
     }
 
+    #[must_use]
     pub fn inner(&self) -> f64 {
         self.0
     }
 
+    #[must_use]
     pub fn min(&self, other: &Relative) -> Self {
         Self(self.0.min(other.0))
     }
 
+    #[must_use]
     pub fn max(&self, other: &Relative) -> Self {
         Self(self.0.max(other.0))
     }
@@ -58,6 +62,7 @@ impl std::ops::Div for Relative {
 pub struct Absolute(pub f64);
 
 impl Absolute {
+    #[must_use]
     pub fn relative(&self, num_timestamps: &BigInt) -> Relative {
         Relative(
             self.0
@@ -67,6 +72,7 @@ impl Absolute {
         )
     }
 
+    #[must_use]
     pub fn inner(&self) -> f64 {
         self.0
     }
@@ -133,22 +139,27 @@ impl Default for Viewport {
 }
 
 impl Viewport {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
+    #[must_use]
     pub fn left_edge_time(self, num_timestamps: &BigInt) -> BigInt {
         BigInt::from(self.curr_left.absolute(num_timestamps).0 as i64)
     }
+    #[must_use]
     pub fn right_edge_time(self, num_timestamps: &BigInt) -> BigInt {
         BigInt::from(self.curr_right.absolute(num_timestamps).0 as i64)
     }
 
+    #[must_use]
     pub fn as_absolute_time(&self, x: f64, view_width: f32, num_timestamps: &BigInt) -> Absolute {
-        let time_spacing = self.width_absolute(num_timestamps) / view_width as f64;
+        let time_spacing = self.width_absolute(num_timestamps) / f64::from(view_width);
 
         self.curr_left.absolute(num_timestamps) + time_spacing * x
     }
 
+    #[must_use]
     pub fn as_time_bigint(&self, x: f32, view_width: f32, num_timestamps: &BigInt) -> BigInt {
         let Viewport {
             curr_left: left,
@@ -170,14 +181,16 @@ impl Viewport {
 
     /// Computes which x-pixel corresponds to the specified time adduming the viewport is rendered
     /// into a viewport of `view_width`
+    #[must_use]
     pub fn pixel_from_time(&self, time: &BigInt, view_width: f32, num_timestamps: &BigInt) -> f32 {
         let distance_from_left =
             Absolute(time.to_f64().unwrap()) - self.curr_left.absolute(num_timestamps);
 
-        (((distance_from_left / self.width_absolute(num_timestamps)).0) * (view_width as f64))
+        (((distance_from_left / self.width_absolute(num_timestamps)).0) * f64::from(view_width))
             as f32
     }
 
+    #[must_use]
     pub fn pixel_from_absolute_time(
         &self,
         time: Absolute,
@@ -186,7 +199,7 @@ impl Viewport {
     ) -> f32 {
         let distance_from_left = time - self.curr_left.absolute(num_timestamps);
 
-        (((distance_from_left / self.width_absolute(num_timestamps)).0) * (view_width as f64))
+        (((distance_from_left / self.width_absolute(num_timestamps)).0) * f64::from(view_width))
             as f32
     }
 
@@ -195,6 +208,7 @@ impl Viewport {
     /// Tries to keep the current zoom level and position. If zoom is not possible it
     /// will zoom in as much as needed to keep border margins. If the new waveform is
     /// too short, the viewport will be moved to the left as much as needed for the zoom level.
+    #[must_use]
     pub fn clip_to(&self, old_num_timestamps: &BigInt, new_num_timestamps: &BigInt) -> Viewport {
         let left_timestamp = self.curr_left.absolute(old_num_timestamps);
         let right_timestamp = self.curr_right.absolute(old_num_timestamps);
@@ -290,19 +304,19 @@ impl Viewport {
             ..
         } = &self;
 
-        let (target_left, target_right) =
-            match mouse_ptr_timestamp.map(|t| Absolute::from(&t).relative(num_timestamps)) {
-                Some(mouse_location) => (
-                    (*left - mouse_location) / Relative(delta) + mouse_location,
-                    (*right - mouse_location) / Relative(delta) + mouse_location,
-                ),
-                None => {
-                    let mid_point = self.midpoint();
-                    let offset = self.half_width() * delta;
+        let (target_left, target_right) = if let Some(mouse_location) =
+            mouse_ptr_timestamp.map(|t| Absolute::from(&t).relative(num_timestamps))
+        {
+            (
+                (*left - mouse_location) / Relative(delta) + mouse_location,
+                (*right - mouse_location) / Relative(delta) + mouse_location,
+            )
+        } else {
+            let mid_point = self.midpoint();
+            let offset = self.half_width() * delta;
 
-                    (mid_point - offset, mid_point + offset)
-                }
-            };
+            (mid_point - offset, mid_point + offset)
+        };
 
         self.set_viewport_to_clipped(target_left, target_right, num_timestamps);
     }
@@ -417,7 +431,7 @@ impl Viewport {
 
     fn set_target_left(&mut self, target_left: Relative) {
         if let ViewportStrategy::Instant = self.move_strategy {
-            self.curr_left = target_left
+            self.curr_left = target_left;
         } else {
             self.target_left = target_left;
             self.move_start_left = self.curr_left;
@@ -426,7 +440,7 @@ impl Viewport {
     }
     fn set_target_right(&mut self, target_right: Relative) {
         if let ViewportStrategy::Instant = self.move_strategy {
-            self.curr_right = target_right
+            self.curr_right = target_right;
         } else {
             self.target_right = target_right;
             self.move_start_right = self.curr_right;
@@ -452,11 +466,11 @@ impl Viewport {
 
                         self.curr_left = Relative(ease_in_out_size(
                             self.move_start_left.0..=self.target_left.0,
-                            (*move_duration as f64) / (*duration as f64),
+                            f64::from(*move_duration) / f64::from(*duration),
                         ));
                         self.curr_right = Relative(ease_in_out_size(
                             self.move_start_right.0..=self.target_right.0,
-                            (*move_duration as f64) / (*duration as f64),
+                            f64::from(*move_duration) / f64::from(*duration),
                         ));
                     }
                 }
@@ -464,11 +478,13 @@ impl Viewport {
         }
     }
 
+    #[must_use]
     pub fn is_moving(&self) -> bool {
         self.move_duration.is_some()
     }
 }
 
+#[must_use]
 pub fn ease_in_out_size(r: RangeInclusive<f64>, t: f64) -> f64 {
     r.start() + ((r.end() - r.start()) * -((std::f64::consts::PI * t).cos() - 1.) / 2.)
 }
@@ -534,9 +550,7 @@ mod tests {
         let width = (vp.curr_right - vp.curr_left).0;
         assert!(
             width + f64::EPSILON >= rel_min,
-            "width {} < min {}",
-            width,
-            rel_min
+            "width {width} < min {rel_min}"
         );
     }
 

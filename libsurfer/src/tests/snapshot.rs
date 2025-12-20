@@ -190,7 +190,7 @@ pub(crate) fn render_and_compare_inner(
 }
 
 pub(crate) fn render_and_compare(filename: &Path, state: impl Fn() -> SystemState) {
-    render_and_compare_inner(filename, state, Vec2::new(1280., 720.), false, 0.99999)
+    render_and_compare_inner(filename, state, Vec2::new(1280., 720.), false, 0.99999);
 }
 
 macro_rules! snapshot_ui {
@@ -391,7 +391,7 @@ fn render_readme_screenshot() {
         Vec2::new(1440., 810.),
         true,
         0.99,
-    )
+    );
 }
 
 snapshot_ui! {startup_screen_looks_fine, || {
@@ -842,7 +842,7 @@ snapshot_ui_with_file_and_msgs! {toggle_tick_lines, "examples/counter.vcd", [
 
 snapshot_ui_with_file_and_msgs! {command_prompt, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
-    Message::ShowCommandPrompt("".to_string(), None)
+    Message::ShowCommandPrompt(String::new(), None)
 ]}
 
 snapshot_ui_with_file_and_msgs! {command_prompt_with_init_text, "examples/counter.vcd", [
@@ -851,7 +851,7 @@ snapshot_ui_with_file_and_msgs! {command_prompt_with_init_text, "examples/counte
 ]}
 
 snapshot_ui_with_file_and_msgs! {command_prompt_next_command, "examples/counter.vcd", [
-    Message::ShowCommandPrompt("".to_string(), None),
+    Message::ShowCommandPrompt(String::new(), None),
     Message::CommandPromptUpdate { suggestions: vec![("test".to_string(), vec![true, true, false, false]); 10] },
     Message::SelectNextCommand,
     Message::SelectNextCommand,
@@ -861,7 +861,7 @@ snapshot_ui_with_file_and_msgs! {command_prompt_next_command, "examples/counter.
 ]}
 
 snapshot_ui_with_file_and_msgs! {command_prompt_prev_command, "examples/counter.vcd", [
-    Message::ShowCommandPrompt("".to_string(), None),
+    Message::ShowCommandPrompt(String::new(), None),
     Message::CommandPromptUpdate { suggestions: vec![("test".to_string(), vec![true, true, false, false]); 10] },
     Message::SelectNextCommand,
     Message::SelectNextCommand,
@@ -903,7 +903,7 @@ snapshot_ui_with_file_and_msgs!(
     command_prompt_scroll_bounds_prev,
     "examples/counter.vcd",
     [
-        Message::ShowCommandPrompt("".to_string(), None),
+        Message::ShowCommandPrompt(String::new(), None),
         Message::CommandPromptUpdate {
             suggestions: vec![("test".to_string(), vec![true, true, false, false]); 5]
         },
@@ -915,7 +915,7 @@ snapshot_ui_with_file_and_msgs!(
     command_prompt_scroll_bounds_next,
     "examples/counter.vcd",
     [
-        Message::ShowCommandPrompt("".to_string(), None),
+        Message::ShowCommandPrompt(String::new(), None),
         Message::CommandPromptUpdate {
             suggestions: vec![("test".to_string(), vec![true, true, false, false]); 5]
         },
@@ -1528,8 +1528,8 @@ snapshot_ui!(load_keep_all_works, || {
     loop {
         state.handle_async_messages();
         state.handle_batch_commands();
-        if let Some(waves) = &state.user.waves {
-            if waves.source
+        if let Some(waves) = &state.user.waves
+            && waves.source
                 == WaveSource::File(
                     get_project_root()
                         .unwrap()
@@ -1538,9 +1538,8 @@ snapshot_ui!(load_keep_all_works, || {
                         .try_into()
                         .unwrap(),
                 )
-            {
-                break;
-            }
+        {
+            break;
         }
     }
     wait_for_waves_fully_loaded(&mut state, 10);
@@ -1590,8 +1589,8 @@ snapshot_ui!(load_keep_signal_remove_unavailable_works, || {
     loop {
         state.handle_async_messages();
         state.handle_batch_commands();
-        if let Some(waves) = &state.user.waves {
-            if waves.source
+        if let Some(waves) = &state.user.waves
+            && waves.source
                 == WaveSource::File(
                     get_project_root()
                         .unwrap()
@@ -1600,9 +1599,8 @@ snapshot_ui!(load_keep_signal_remove_unavailable_works, || {
                         .try_into()
                         .unwrap(),
                 )
-            {
-                break;
-            }
+        {
+            break;
         }
     }
     wait_for_waves_fully_loaded(&mut state, 10);
@@ -1949,10 +1947,8 @@ fn handle_messages_until(
 snapshot_ui!(save_and_start_with_state, || {
     // FIXME refactor startup code so that we can test the actual code,
     // not with a separate load command like here
-    let save_file = env::temp_dir().join(format!(
-        "save_and_start_with_state.{}",
-        STATE_FILE_EXTENSION
-    ));
+    let save_file =
+        env::temp_dir().join(format!("save_and_start_with_state.{STATE_FILE_EXTENSION}"));
     let mut state = SystemState::new_default_config()
         .unwrap()
         .with_params(StartupParams {
@@ -2190,7 +2186,7 @@ snapshot_ui!(switch_and_switch_back, || {
 });
 
 snapshot_ui!(save_and_load, || {
-    let save_file = env::temp_dir().join(format!("save_and_load.{}", STATE_FILE_EXTENSION));
+    let save_file = env::temp_dir().join(format!("save_and_load.{STATE_FILE_EXTENSION}"));
     let mut state = SystemState::new_default_config()
         .unwrap()
         .with_params(StartupParams {

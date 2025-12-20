@@ -50,7 +50,7 @@ pub(crate) fn big_uint_to_ufixed(uint: &BigUint, lg_scaling_factor: i64) -> Stri
 /// where `as_signed()` interprets the `uint` as a signed value using two's complement.
 pub(crate) fn big_uint_to_sfixed(uint: &BigUint, num_bits: u64, lg_scaling_factor: i64) -> String {
     if num_bits == 0 {
-        return "".to_string();
+        return String::new();
     }
     if uint.bit(num_bits - 1) {
         let inverted_uint = (BigUint::one() << num_bits) - uint;
@@ -112,22 +112,22 @@ mod tests {
             BigUint::from_str("12345678901234567890").unwrap(),
             20,
             "11773756886705.9401416778564453125",
-        )
+        );
     }
 
     #[test]
     fn test_value_less_than_one() {
-        ucheck(1_u32, 10, "0.0009765625")
+        ucheck(1_u32, 10, "0.0009765625");
     }
 
     #[test]
     fn test_zero_value() {
-        ucheck(0_u32, 16, "0")
+        ucheck(0_u32, 16, "0");
     }
 
     #[test]
     fn test_negative_scaling_factor() {
-        ucheck(500_u32, -1, "1000")
+        ucheck(500_u32, -1, "1000");
     }
 
     #[test]
@@ -140,7 +140,7 @@ mod tests {
     fn test_negative_exact_integer() {
         scheck(0xFCC_u32, 12, 2, "-13");
         scheck(0x100_u32, 9, 7, "-2");
-        scheck(256_u32, 9, 8, "-1")
+        scheck(256_u32, 9, 8, "-1");
     }
 
     #[test]

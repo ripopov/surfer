@@ -52,7 +52,7 @@ mod main_impl {
         /// is implemented.
         #[clap(long, short, verbatim_doc_comment)]
         command_file: Option<Utf8PathBuf>,
-        /// Alias for --command_file to support VUnit
+        /// Alias for --`command_file` to support `VUnit`
         #[clap(long)]
         script: Option<Utf8PathBuf>,
 
@@ -79,36 +79,6 @@ mod main_impl {
                 (None, Some(sc)) => Some(sc),
                 (None, None) => None,
             }
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn command_file_prefers_single_sources() {
-            // Only --command_file
-            let args = Args::parse_from(["surfer", "--command-file", "C:/tmp/cmds.sucl"]);
-            let cf = args.command_file().unwrap();
-            assert!(cf.ends_with("cmds.sucl"));
-
-            // Only --script
-            let args = Args::parse_from(["surfer", "--script", "C:/tmp/scr.sucl"]);
-            let cf = args.command_file().unwrap();
-            assert!(cf.ends_with("scr.sucl"));
-        }
-
-        #[test]
-        fn command_file_conflict_returns_none() {
-            let args = Args::parse_from([
-                "surfer",
-                "--command-file",
-                "C:/tmp/cmds.sucl",
-                "--script",
-                "C:/tmp/scr.sucl",
-            ]);
-            assert!(args.command_file().is_none());
         }
     }
 
@@ -217,7 +187,7 @@ mod main_impl {
                 let sender = state.channels.msg_sender.clone();
                 FileWatcher::new(&path, move || {
                     if let Err(e) = sender.send(Message::SuggestReloadWaveform) {
-                        error!("Message ReloadWaveform did not send:\n{e}")
+                        error!("Message ReloadWaveform did not send:\n{e}");
                     }
                 })
                 .inspect_err(|err| error!("Cannot set up the file watcher:\n{err}"))
@@ -251,6 +221,36 @@ mod main_impl {
         eframe::run_native("Surfer", options, Box::new(|cc| Ok(run_egui(cc, state)?))).unwrap();
 
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn command_file_prefers_single_sources() {
+            // Only --command_file
+            let args = Args::parse_from(["surfer", "--command-file", "C:/tmp/cmds.sucl"]);
+            let cf = args.command_file().unwrap();
+            assert!(cf.ends_with("cmds.sucl"));
+
+            // Only --script
+            let args = Args::parse_from(["surfer", "--script", "C:/tmp/scr.sucl"]);
+            let cf = args.command_file().unwrap();
+            assert!(cf.ends_with("scr.sucl"));
+        }
+
+        #[test]
+        fn command_file_conflict_returns_none() {
+            let args = Args::parse_from([
+                "surfer",
+                "--command-file",
+                "C:/tmp/cmds.sucl",
+                "--script",
+                "C:/tmp/scr.sucl",
+            ]);
+            assert!(args.command_file().is_none());
+        }
     }
 }
 

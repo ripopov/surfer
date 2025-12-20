@@ -64,8 +64,10 @@ impl FileInfo {
                 dur.as_secs() as i64,
                 dur.subsec_nanos(),
             )
-            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
-            .unwrap_or_else(|| "Incorrect timestamp".to_string());
+            .map_or_else(
+                || "Incorrect timestamp".to_string(),
+                |dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+            );
         }
         "unknown".to_string()
     }
@@ -110,12 +112,12 @@ enum LoaderMessage {
 
 type SignalRequest = Vec<SignalRef>;
 
-fn get_info_page(shared: Arc<ReadOnly>, state: Arc<RwLock<SurverState>>) -> String {
+fn get_info_page(shared: &Arc<ReadOnly>, state: &Arc<RwLock<SurverState>>) -> String {
     let state_guard = state.read().expect("State lock poisoned in get_info_page");
     let html_table_content = state_guard
         .file_infos
         .iter()
-        .map(|fi| fi.html_table_line())
+        .map(FileInfo::html_table_line)
         .collect::<Vec<_>>()
         .join("\n");
     drop(state_guard);
@@ -142,7 +144,7 @@ fn get_info_page(shared: Arc<ReadOnly>, state: Arc<RwLock<SurverState>>) -> Stri
     )
 }
 
-fn get_hierarchy(state: Arc<RwLock<SurverState>>, file_index: usize) -> Result<Vec<u8>> {
+fn get_hierarchy(state: &Arc<RwLock<SurverState>>, file_index: usize) -> Result<Vec<u8>> {
     let state_guard = state.read().expect("State lock poisoned in get_hierarchy");
     let file_info = &state_guard.file_infos[file_index];
     let mut raw = BINCODE_OPTIONS.serialize(&file_info.file_format)?;
@@ -158,7 +160,7 @@ fn get_hierarchy(state: Arc<RwLock<SurverState>>, file_index: usize) -> Result<V
     Ok(compressed)
 }
 
-async fn get_timetable(state: Arc<RwLock<SurverState>>, file_index: usize) -> Result<Vec<u8>> {
+async fn get_timetable(state: &Arc<RwLock<SurverState>>, file_index: usize) -> Result<Vec<u8>> {
     // poll to see when the time table is available
     #[allow(unused_assignments)]
     let mut table = vec![];
@@ -166,7 +168,7 @@ async fn get_timetable(state: Arc<RwLock<SurverState>>, file_index: usize) -> Re
         {
             let state = state.read().unwrap();
             if !state.file_infos[file_index].timetable.is_empty() {
-                table = state.file_infos[file_index].timetable.clone();
+                table.clone_from(&state.file_infos[file_index].timetable);
                 break;
             }
         }
@@ -182,10 +184,10 @@ async fn get_timetable(state: Arc<RwLock<SurverState>>, file_index: usize) -> Re
     Ok(compressed)
 }
 
-fn get_status(state: Arc<RwLock<SurverState>>) -> Result<Vec<u8>> {
+fn get_status(state: &Arc<RwLock<SurverState>>) -> Result<Vec<u8>> {
     let state_guard = state.read().expect("State lock poisoned in get_status");
     let mut file_infos = Vec::new();
-    for file_info in state_guard.file_infos.iter() {
+    for file_info in &state_guard.file_infos {
         file_infos.push(SurverFileInfo {
             bytes: file_info.body_len + file_info.header_len,
             bytes_loaded: file_info.body_progress.load(Ordering::SeqCst) + file_info.header_len,
@@ -206,13 +208,13 @@ fn get_status(state: Arc<RwLock<SurverState>>) -> Result<Vec<u8>> {
 }
 
 async fn get_signals(
-    state: Arc<RwLock<SurverState>>,
+    state: &Arc<RwLock<SurverState>>,
     file_index: usize,
     txs: &[Sender<LoaderMessage>],
     id_strings: &[&str],
 ) -> Result<Vec<u8>> {
     let mut ids = Vec::with_capacity(id_strings.len());
-    for id in id_strings.iter() {
+    for id in id_strings {
         let index = id.parse::<u64>()? as usize;
         let signal_ref = SignalRef::from_index(index)
             .ok_or_else(|| anyhow!("Invalid signal index: {}", index))?;
@@ -283,7 +285,7 @@ impl DefaultHeader for hyper::http::response::Builder {
 }
 
 async fn handle_cmd(
-    state: Arc<RwLock<SurverState>>,
+    state: &Arc<RwLock<SurverState>>,
     txs: &[Sender<LoaderMessage>],
     cmd: &str,
     file_index: Option<usize>,
@@ -325,16 +327,13 @@ async fn handle_cmd(
         (Some(file_index), "reload", []) => {
             let mut state_guard = state.write().expect("State lock poisoned in reload");
             // Check file existence, size, and mtime
-            let meta = match fs::metadata(state_guard.file_infos[file_index].filename.clone()) {
-                Ok(m) => m,
-                Err(_) => {
-                    drop(state_guard);
-                    return Ok(Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .header(CONTENT_TYPE, JSON_MIME)
-                        .default_header()
-                        .body(Full::from(b"error: file not found".to_vec()))?);
-                }
+            let Ok(meta) = fs::metadata(state_guard.file_infos[file_index].filename.clone()) else {
+                drop(state_guard);
+                return Ok(Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .header(CONTENT_TYPE, JSON_MIME)
+                    .default_header()
+                    .body(Full::from(b"error: file not found".to_vec()))?);
             };
             let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
             // Should probably look at file lengths as well for extra safety, but they are not updated correctly at the moment
@@ -431,10 +430,10 @@ async fn handle(
     };
     // check command
     let response = if let Some(cmd) = path_parts.get(cmd_idx) {
-        handle_cmd(state, &txs, cmd, file_index, &path_parts[cmd_idx + 1..]).await?
+        handle_cmd(&state, &txs, cmd, file_index, &path_parts[cmd_idx + 1..]).await?
     } else {
         // valid token, but no command => return info
-        let body = Full::from(get_info_page(shared, state));
+        let body = Full::from(get_info_page(&shared, &state));
         Response::builder()
             .status(StatusCode::OK)
             .header(CONTENT_TYPE, HTML_MIME)
@@ -510,7 +509,7 @@ pub async fn server_main(
         txs.push(tx.clone());
         // start work thread
         let state_2 = state.clone();
-        std::thread::spawn(move || loader(state_2, header_result.body, file_index, rx));
+        std::thread::spawn(move || loader(&state_2, header_result.body, file_index, &rx));
     }
     let ip_addr: std::net::IpAddr = bind_address
         .parse()
@@ -573,10 +572,10 @@ pub async fn server_main(
 
 /// Thread that loads the body and signals.
 fn loader(
-    state: Arc<RwLock<SurverState>>,
+    state: &Arc<RwLock<SurverState>>,
     mut body_cont: viewers::ReadBodyContinuation<std::io::BufReader<std::fs::File>>,
     file_index: usize,
-    rx: std::sync::mpsc::Receiver<LoaderMessage>,
+    rx: &std::sync::mpsc::Receiver<LoaderMessage>,
 ) -> Result<()> {
     loop {
         // load the body of the file
@@ -592,7 +591,7 @@ fn loader(
             Some(file_info.body_progress.clone()),
         )
         .map_err(|e| anyhow!("{e:?}"))
-        .with_context(|| format!("Failed to parse body of wave file: {}", filename))?;
+        .with_context(|| format!("Failed to parse body of wave file: {filename}"))?;
         drop(state_guard);
         info!(
             "Loaded body of {} in {:?}",
@@ -638,7 +637,7 @@ fn loader(
                             .filter(|id| {
                                 !state_guard.file_infos[file_index].signals.contains_key(id)
                             })
-                            .cloned()
+                            .copied()
                             .collect::<Vec<_>>()
                     };
 

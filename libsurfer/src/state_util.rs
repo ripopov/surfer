@@ -13,10 +13,10 @@ use crate::{
 
 impl SystemState {
     #[inline]
-    pub fn get_item_text_color(&self, item: &DisplayedItem) -> &Color32 {
+    pub fn get_item_text_color(&self, item: &DisplayedItem) -> Color32 {
         item.color()
             .and_then(|color| self.user.config.theme.get_color(color))
-            .unwrap_or(&self.user.config.theme.primary_ui_color.foreground)
+            .unwrap_or(self.user.config.theme.primary_ui_color.foreground)
     }
 
     #[inline]

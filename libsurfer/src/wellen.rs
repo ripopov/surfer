@@ -73,6 +73,7 @@ pub enum LoadSignalPayload {
 }
 
 impl LoadSignalsCmd {
+    #[must_use]
     pub fn destruct(self) -> (Vec<SignalRef>, u64, LoadSignalPayload) {
         (self.signals, self.from_unique_id, self.payload)
     }
@@ -86,6 +87,7 @@ pub struct LoadSignalsResult {
 }
 
 impl LoadSignalsResult {
+    #[must_use]
     pub fn local(
         source: SignalSource,
         signals: Vec<(SignalRef, Signal)>,
@@ -99,6 +101,7 @@ impl LoadSignalsResult {
         }
     }
 
+    #[must_use]
     pub fn remote(server: String, signals: Vec<(SignalRef, Signal)>, from_unique_id: u64) -> Self {
         Self {
             source: None,
@@ -108,15 +111,18 @@ impl LoadSignalsResult {
         }
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.signals.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.signals.is_empty()
     }
 }
 
+#[must_use]
 pub fn convert_format(format: FileFormat) -> crate::WaveFormat {
     match format {
         FileFormat::Vcd => crate::WaveFormat::Vcd,
@@ -149,6 +155,7 @@ impl WellenContainer {
         }
     }
 
+    #[must_use]
     pub fn body_loaded(&self) -> bool {
         self.body_loaded
     }
@@ -185,6 +192,7 @@ impl WellenContainer {
         Ok(self.load_signals(&[]))
     }
 
+    #[must_use]
     pub fn metadata(&self) -> MetaData {
         let timescale = self
             .hierarchy
@@ -201,14 +209,17 @@ impl WellenContainer {
         }
     }
 
+    #[must_use]
     pub fn max_timestamp(&self) -> Option<BigUint> {
         self.time_table.last().map(|t| BigUint::from(*t))
     }
 
+    #[must_use]
     pub fn is_fully_loaded(&self) -> bool {
         (self.source.is_some() || self.server.is_some()) && self.signals_to_be_loaded.is_empty()
     }
 
+    #[must_use]
     pub fn variable_names(&self) -> Vec<String> {
         self.vars.clone()
     }
@@ -227,6 +238,7 @@ impl WellenContainer {
         }
     }
 
+    #[must_use]
     pub fn variables(&self, include_parameters: bool) -> Vec<VariableRef> {
         let h = &self.hierarchy;
         if include_parameters {
@@ -256,12 +268,11 @@ impl WellenContainer {
                 })
                 .collect::<Vec<_>>()
         } else {
-            let scope = match self.lookup_scope(scope_ref) {
-                Some(id) => &h[id],
-                None => {
-                    warn!("Found no scope '{scope_ref}'. Defaulting to no variables");
-                    return vec![];
-                }
+            let scope = if let Some(id) = self.lookup_scope(scope_ref) {
+                &h[id]
+            } else {
+                warn!("Found no scope '{scope_ref}'. Defaulting to no variables");
+                return vec![];
             };
             scope
                 .vars(h)
@@ -292,12 +303,11 @@ impl WellenContainer {
                 })
                 .collect::<Vec<_>>()
         } else {
-            let scope = match self.lookup_scope(scope_ref) {
-                Some(id) => &h[id],
-                None => {
-                    warn!("Found no scope '{scope_ref}'. Defaulting to no variables");
-                    return vec![];
-                }
+            let scope = if let Some(id) = self.lookup_scope(scope_ref) {
+                &h[id]
+            } else {
+                warn!("Found no scope '{scope_ref}'. Defaulting to no variables");
+                return vec![];
             };
             scope
                 .vars(h)
@@ -319,17 +329,17 @@ impl WellenContainer {
         if scope_ref.has_empty_strs() {
             h.vars().next().is_none()
         } else {
-            let scope = match self.lookup_scope(scope_ref) {
-                Some(id) => &h[id],
-                None => {
-                    warn!("Found no scope '{scope_ref}'. Defaulting to no variables");
-                    return true;
-                }
+            let scope = if let Some(id) = self.lookup_scope(scope_ref) {
+                &h[id]
+            } else {
+                warn!("Found no scope '{scope_ref}'. Defaulting to no variables");
+                return true;
             };
             scope.vars(h).next().is_none()
         }
     }
 
+    #[must_use]
     pub fn update_variable_ref(&self, variable: &VariableRef) -> Option<VariableRef> {
         // IMPORTANT: lookup by name!
         let h = &self.hierarchy;
@@ -357,6 +367,7 @@ impl WellenContainer {
         self.get_var_ref(r).map(|r| &h[r])
     }
 
+    #[must_use]
     pub fn get_enum_map(&self, v: &Var) -> HashMap<String, String> {
         match v.enum_type(&self.hierarchy) {
             None => HashMap::new(),
@@ -373,9 +384,8 @@ impl WellenContainer {
             VarId::Wellen(id) => Ok(id),
             VarId::None => {
                 let h = &self.hierarchy;
-                let var = match h.lookup_var(r.path.strs(), &r.name) {
-                    None => bail!("Failed to find variable: {r:?}"),
-                    Some(id) => id,
+                let Some(var) = h.lookup_var(r.path.strs(), &r.name) else {
+                    bail!("Failed to find variable: {r:?}")
                 };
                 Ok(var)
             }
@@ -401,7 +411,7 @@ impl WellenContainer {
         let params = h
             .iter_vars()
             .filter(|r| r.var_type() == VarType::Parameter)
-            .map(|r| r.signal_ref())
+            .map(wellen::Var::signal_ref)
             .collect::<Vec<_>>();
         Ok(self.load_signals(&params))
     }
@@ -430,7 +440,7 @@ impl WellenContainer {
         let filtered_ids = ids
             .iter()
             .filter(|id| !self.signals.contains_key(id) && !self.signals_to_be_loaded.contains(id))
-            .cloned()
+            .copied()
             .collect::<Vec<_>>();
 
         // add signals to signals that need to be loaded
@@ -447,7 +457,7 @@ impl WellenContainer {
         // we remove the server name in order to ensure that we do not load the same signal twice
         if let Some(server) = std::mem::take(&mut self.server) {
             // load remote signals
-            let mut signals = Vec::from_iter(self.signals_to_be_loaded.drain());
+            let mut signals = self.signals_to_be_loaded.drain().collect::<Vec<_>>();
             signals.sort(); // for some determinism!
             let cmd = LoadSignalsCmd {
                 signals,
@@ -457,7 +467,7 @@ impl WellenContainer {
             Some(cmd)
         } else if let Some(source) = std::mem::take(&mut self.source) {
             // if we have a source available, let's load all signals!
-            let mut signals = Vec::from_iter(self.signals_to_be_loaded.drain());
+            let mut signals = self.signals_to_be_loaded.drain().collect::<Vec<_>>();
             signals.sort(); // for some determinism!
             let cmd = LoadSignalsCmd {
                 signals,
@@ -493,12 +503,9 @@ impl WellenContainer {
         let var_ref = self.get_var_ref(variable)?;
         // map variable to variable ref
         let signal_ref = h[var_ref].signal_ref();
-        let sig = match self.signals.get(&signal_ref) {
-            Some(sig) => sig,
-            None => {
-                // if the signal has not been loaded yet, we return an empty result
-                return Ok(None);
-            }
+        let Some(sig) = self.signals.get(&signal_ref) else {
+            // if the signal has not been loaded yet, we return an empty result
+            return Ok(None);
         };
         let time_table = &self.time_table;
 
@@ -535,10 +542,12 @@ impl WellenContainer {
         Ok(Some(result))
     }
 
+    #[must_use]
     pub fn scope_names(&self) -> Vec<String> {
         self.scopes.clone()
     }
 
+    #[must_use]
     pub fn root_scopes(&self) -> Vec<ScopeRef> {
         let h = &self.hierarchy;
         h.scopes()
@@ -558,10 +567,12 @@ impl WellenContainer {
             .collect::<Vec<_>>())
     }
 
+    #[must_use]
     pub fn scope_exists(&self, scope: &ScopeRef) -> bool {
         scope.has_empty_strs() | self.has_scope(scope)
     }
 
+    #[must_use]
     pub fn get_scope_tooltip_data(&self, scope: &ScopeRef) -> String {
         let mut out = String::new();
         if let Some(scope_ref) = self.lookup_scope(scope) {
@@ -606,7 +617,9 @@ impl WellenContainer {
             var: variable.clone(),
             num_bits: var.length(),
             variable_type: Some(VariableType::from_wellen_type(var.var_type())),
-            variable_type_name: var.vhdl_type_name(&self.hierarchy).map(|s| s.to_string()),
+            variable_type_name: var
+                .vhdl_type_name(&self.hierarchy)
+                .map(std::string::ToString::to_string),
             index: var.index().map(VariableIndex::from_wellen_type),
             direction: Some(VariableDirection::from_wellen_direction(var.direction())),
             enum_map: self.get_enum_map(var),
@@ -626,13 +639,14 @@ impl WellenContainer {
         ))
     }
 
-    /// Get the SignalRef for a variable (canonical signal identity for cache keys)
+    /// Get the `SignalRef` for a variable (canonical signal identity for cache keys)
     pub fn signal_ref(&self, variable: &VariableRef) -> Result<SignalRef> {
         let var_ref = self.get_var_ref(variable)?;
         Ok(self.hierarchy[var_ref].signal_ref())
     }
 
     /// Check if a signal is already loaded (data available)
+    #[must_use]
     pub fn is_signal_loaded(&self, signal_ref: SignalRef) -> bool {
         self.signals.contains_key(&signal_ref)
     }
@@ -645,12 +659,14 @@ pub struct WellenSignalAccessor {
 }
 
 impl WellenSignalAccessor {
-    /// Create a new WellenSignalAccessor from Arc pointers
+    /// Create a new `WellenSignalAccessor` from Arc pointers
+    #[must_use]
     pub fn new(signal: Arc<Signal>, time_table: Arc<TimeTable>) -> Self {
         Self { signal, time_table }
     }
 
-    /// Iterator over signal changes as (time_u64, value) pairs
+    /// Iterator over signal changes as (`time_u64`, value) pairs
+    #[must_use]
     pub fn iter_changes(
         &self,
     ) -> Box<dyn Iterator<Item = (u64, surfer_translation_types::VariableValue)> + '_> {
