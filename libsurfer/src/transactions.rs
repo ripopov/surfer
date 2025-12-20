@@ -161,9 +161,7 @@ pub fn calculate_rows_of_stream(
         let start_time = transaction.get_start_time();
         let end_time = transaction.get_end_time();
 
-        while start_time > last_times_on_row[curr_row].0
-            && start_time < last_times_on_row[curr_row].1
-        {
+        while last_times_on_row[curr_row].1 > start_time {
             curr_row += 1;
             if last_times_on_row.len() <= curr_row {
                 last_times_on_row.push((BigUint::ZERO, BigUint::ZERO));
