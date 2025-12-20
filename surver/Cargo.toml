@@ -7,7 +7,7 @@ categories.workspace = true
 rust-version = "1.90"
 description = "Server for the Surfer waveform viewer"
 repository.workspace = true
-build = "../build.rs"
+build = "build.rs"
 
 [dependencies]
 bincode.workspace = true
