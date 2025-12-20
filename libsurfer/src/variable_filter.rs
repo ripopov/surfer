@@ -314,7 +314,7 @@ impl SystemState {
     fn add_filtered_variables(&mut self, msgs: &mut Vec<Message>, full_path: bool) {
         if let Some(waves) = self.user.waves.as_ref() {
             if full_path {
-                let variables = waves.inner.as_waves().unwrap().variables(false);
+                let variables = waves.inner.as_waves().unwrap().variables();
                 msgs.push(Message::AddVariables(
                     self.filtered_variables(&variables, false),
                 ));

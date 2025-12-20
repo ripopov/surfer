@@ -33,6 +33,7 @@ pub struct WellenContainer {
     server: Option<String>,
     scopes: Vec<String>,
     vars: Vec<String>,
+    varrefs: Vec<VariableRef>,
     signals: HashMap<SignalRef, Arc<Signal>>,
     /// keeps track of signals that need to be loaded once the body of the waveform file has been loaded
     signals_to_be_loaded: HashSet<SignalRef>,
@@ -138,6 +139,20 @@ impl WellenContainer {
         let h = &hierarchy;
         let scopes = h.iter_scopes().map(|r| r.full_name(h)).collect::<Vec<_>>();
         let vars: Vec<String> = h.iter_vars().map(|r| r.full_name(h)).collect::<Vec<_>>();
+        let varrefs = vars
+            .iter()
+            .enumerate()
+            .filter_map(|(n, name)| {
+                let r = VarRef::from_index(n).unwrap();
+                if h[r].var_type() == VarType::Parameter {
+                    return None;
+                }
+                Some(VariableRef::from_hierarchy_string_with_id(
+                    name,
+                    VarId::Wellen(r),
+                ))
+            })
+            .collect::<Vec<_>>();
 
         let unique_id = UNIQUE_ID_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
@@ -146,6 +161,7 @@ impl WellenContainer {
             server,
             scopes,
             vars,
+            varrefs,
             signals: HashMap::new(),
             signals_to_be_loaded: HashSet::new(),
             time_table: Arc::new(vec![]),
@@ -239,18 +255,8 @@ impl WellenContainer {
     }
 
     #[must_use]
-    pub fn variables(&self, include_parameters: bool) -> Vec<VariableRef> {
-        let h = &self.hierarchy;
-        if include_parameters {
-            h.iter_vars()
-                .map(|r| VariableRef::from_hierarchy_string(&r.full_name(h)))
-                .collect::<Vec<_>>()
-        } else {
-            h.iter_vars()
-                .filter(|id| id.var_type() != VarType::Parameter)
-                .map(|r| VariableRef::from_hierarchy_string(&r.full_name(h)))
-                .collect::<Vec<_>>()
-        }
+    pub fn variables(&self) -> Vec<VariableRef> {
+        self.varrefs.clone()
     }
 
     pub fn variables_in_scope(&self, scope_ref: &ScopeRef) -> Vec<VariableRef> {
