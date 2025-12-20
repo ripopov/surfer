@@ -337,7 +337,7 @@ impl SystemState {
                         });
                         self.send_response(WcpResponse::ack);
                     }
-                    WcpCommand::shutdowmn => {
+                    WcpCommand::shutdown => {
                         warn!("WCP Shutdown message should not reach this place")
                     }
                 };

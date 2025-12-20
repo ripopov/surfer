@@ -204,7 +204,7 @@ pub enum WcpCommand {
     zoom_to_fit { viewport_idx: usize },
     /// Shut down the WCP server.
     // FIXME: What does this mean? Does it kill the server, the current connection or surfer itself?
-    shutdowmn,
+    shutdown,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -245,8 +245,8 @@ where
             )
         })
     } else {
-        Err(de::Error::custom(
-            "Error durian deserialization of timestamp value {num}",
-        ))
+        Err(de::Error::custom(format!(
+            "Error during deserialization of timestamp value {num}"
+        )))
     }
 }

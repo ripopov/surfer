@@ -225,7 +225,7 @@ impl WcpServer {
                         None => continue,
                     };
 
-                    if let WcpCSMessage::command(WcpCommand::shutdowmn) = msg {
+                    if let WcpCSMessage::command(WcpCommand::shutdown) = msg {
                         return Ok(());
                     }
 
