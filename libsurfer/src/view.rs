@@ -42,7 +42,7 @@ use crate::help::{
 use crate::time::time_string;
 use crate::transaction_container::TransactionStreamRef;
 use crate::translation::TranslationResultExt;
-use crate::util::uint_idx_to_alpha_idx;
+use crate::util::get_alpha_focus_id;
 use crate::wave_container::{FieldRef, FieldRefExt, VariableRef, WaveContainer};
 use crate::{
     Message, MoveDir, SystemState, command_prompt::show_command_prompt, hierarchy::HierarchyStyle,
@@ -593,6 +593,9 @@ impl SystemState {
     }
 
     fn draw_item_focus_list(&self, ui: &mut Ui) {
+        let Some(waves) = self.user.waves.as_ref() else {
+            return;
+        };
         let alignment = self.get_name_alignment();
         ui.with_layout(
             Layout::top_down(alignment).with_cross_justify(false),
@@ -600,22 +603,14 @@ impl SystemState {
                 if self.show_default_timeline() {
                     ui.add_space(ui.text_style_height(&TextStyle::Body) + 2.0);
                 }
-                for (vidx, _) in self
-                    .user
-                    .waves
-                    .as_ref()
-                    .unwrap()
-                    .items_tree
-                    .iter_visible()
-                    .enumerate()
-                {
+                for (vidx, _) in waves.items_tree.iter_visible().enumerate() {
                     let vidx = VisibleItemIndex(vidx);
                     ui.scope(|ui| {
                         ui.style_mut().visuals.selection.bg_fill =
                             self.user.config.theme.accent_warn.background;
                         ui.style_mut().visuals.override_text_color =
                             Some(self.user.config.theme.accent_warn.foreground);
-                        let _ = ui.selectable_label(true, self.get_alpha_focus_id(vidx));
+                        let _ = ui.selectable_label(true, get_alpha_focus_id(vidx, waves));
                     });
                 }
             },
@@ -1296,18 +1291,6 @@ impl SystemState {
             }
         }
         label.rect
-    }
-
-    fn get_alpha_focus_id(&self, vidx: VisibleItemIndex) -> RichText {
-        let alpha_id = uint_idx_to_alpha_idx(
-            vidx,
-            self.user
-                .waves
-                .as_ref()
-                .map_or(0, |waves| waves.displayed_items.len()),
-        );
-
-        RichText::new(alpha_id).monospace()
     }
 
     fn item_is_focused(&self, vidx: VisibleItemIndex) -> bool {

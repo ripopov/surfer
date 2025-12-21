@@ -1,6 +1,7 @@
 //! Utility functions.
-use crate::displayed_item_tree::VisibleItemIndex;
+use crate::{displayed_item_tree::VisibleItemIndex, wave_data::WaveData};
 use camino::Utf8PathBuf;
+use egui::RichText;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
@@ -65,6 +66,12 @@ pub fn alpha_idx_to_uint_idx(idx: &str) -> Option<VisibleItemIndex> {
     usize::from_str_radix(&mapped, 16)
         .ok()
         .map(VisibleItemIndex)
+}
+
+pub fn get_alpha_focus_id(vidx: VisibleItemIndex, waves: &WaveData) -> RichText {
+    let alpha_id = uint_idx_to_alpha_idx(vidx, waves.displayed_items.len());
+
+    RichText::new(alpha_id).monospace()
 }
 
 /// This function searches upward from `start` for directories or files matching `item`. It returns
