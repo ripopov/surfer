@@ -68,17 +68,20 @@ pub enum WaveSource {
 
 /// The most general translator trait.
 pub trait Translator<VarId, ScopeId, Message>: Send + Sync {
+    /// Name of the translator to be shown in the UI
     fn name(&self) -> String;
 
     /// Notify the translator that the wave source has changed to the specified source
     fn set_wave_source(&self, _wave_source: Option<WaveSource>) {}
 
+    /// Translate the specified variable value into a human-readable form
     fn translate(
         &self,
         variable: &VariableMeta<VarId, ScopeId>,
         value: &VariableValue,
     ) -> Result<TranslationResult>;
 
+    /// Return information about the structure of a variable, see [`VariableInfo`].
     fn variable_info(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<VariableInfo>;
 
     /// Return [`TranslationPreference`] based on if the translator can handle this variable.
@@ -89,9 +92,9 @@ pub trait Translator<VarId, ScopeId, Message>: Send + Sync {
     /// Long running translators should run the reloading in the background using `perform_work`
     fn reload(&self, _sender: Sender<Message>) {}
 
-    /// Returns a `VariableNameInfo` about the specified variable which will be applied globally.
+    /// Returns a [`VariableNameInfo`] about the specified variable which will be applied globally.
     /// Most translators should simply return `None` here, see the
-    /// documentation `VariableNameInfo` for exceptions to this rule.
+    /// documentation [`VariableNameInfo`] for exceptions to this rule.
     fn variable_name_info(
         &self,
         variable: &VariableMeta<VarId, ScopeId>,
@@ -106,14 +109,25 @@ pub trait Translator<VarId, ScopeId, Message>: Send + Sync {
 
 /// A translator that only produces non-hierarchical values
 pub trait BasicTranslator<VarId, ScopeId>: Send + Sync {
+    /// Name of the translator to be shown in the UI
     fn name(&self) -> String;
 
+    /// Translate the specified variable value into a human-readable form.
+    ///
+    /// If the translator require [`VariableMeta`] information to perform the translation,
+    /// use the more general [`Translator`] instead.
     fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind);
 
+    /// Return [`TranslationPreference`] based on if the translator can handle this variable.
+    ///
+    /// If this is not implemented, it will default to accepting all bit-vector types.
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         translates_all_bit_types(variable)
     }
 
+    /// Return information about the structure of a variable, see [`VariableInfo`].
+    ///
+    /// If this is not implemented, it will default to [`VariableInfo::Bits`].
     fn variable_info(&self, _variable: &VariableMeta<VarId, ScopeId>) -> Result<VariableInfo> {
         Ok(VariableInfo::Bits)
     }
@@ -158,6 +172,7 @@ impl VariableValue {
     }
 }
 
+/// A helper function for translators that translates all bit vector types.
 pub fn translates_all_bit_types<VarId, ScopeId>(
     variable: &VariableMeta<VarId, ScopeId>,
 ) -> Result<TranslationPreference> {

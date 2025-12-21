@@ -35,6 +35,7 @@ pub struct PluginConfig(pub HashMap<String, String>);
 
 /// Turn vector variable string into name and corresponding color if it
 /// includes values other than 0 and 1. If only 0 and 1, return None.
+/// Related to [`kind_for_binary_representation`], which returns only the kind.
 #[must_use]
 pub fn check_vector_variable(s: &str) -> Option<(String, ValueKind)> {
     if s.contains('x') {
@@ -56,7 +57,9 @@ pub fn check_vector_variable(s: &str) -> Option<(String, ValueKind)> {
     }
 }
 
-/// Return kind for a binary representation
+/// Return kind for a binary representation.
+/// Related to [`check_vector_variable`], which returns the same kinds, but also a string.
+/// For strings containing only 0 and 1, this function returns `ValueKind::Normal`.
 #[must_use]
 pub fn kind_for_binary_representation(s: &str) -> ValueKind {
     if s.contains('x') {
@@ -74,7 +77,13 @@ pub fn kind_for_binary_representation(s: &str) -> ValueKind {
     }
 }
 
-/// VCD bit extension
+/// VCD bit extension.
+/// This function extends the given string `val` to match `num_bits` by adding
+/// leading characters according to VCD rules:
+/// - '0' and '1' extend with '0'
+/// - 'x' extends with 'x'
+/// - 'z' extends with 'z'
+/// - other leading characters result in no extension
 #[must_use]
 pub fn extend_string(val: &str, num_bits: u64) -> String {
     if num_bits > val.len() as u64 {
@@ -95,6 +104,9 @@ pub fn extend_string(val: &str, num_bits: u64) -> String {
 }
 
 #[derive(Debug, PartialEq, Clone, Display, Serialize, Deserialize)]
+/// The value of a variable in the waveform as obtained from the waveform source.
+///
+/// Represented either as an unsigned integer ([`BigUint`]) or as a raw [`String`] with one character per bit.
 pub enum VariableValue {
     #[display("{_0}")]
     BigUint(BigUint),
@@ -133,6 +145,7 @@ impl VariableValue {
 }
 
 #[derive(Clone, PartialEq, Copy, Debug, Serialize, Deserialize)]
+/// The kind of a translated value, used to determine how to color it in the UI.
 pub enum ValueKind {
     Normal,
     Undef,
@@ -149,11 +162,14 @@ pub enum ValueKind {
 #[derive(PartialEq, Deserialize, Serialize, Debug)]
 pub enum TranslationPreference {
     /// This translator prefers translating the variable, so it will be selected
-    /// as the default translator for the variable
+    /// as the default translator for the variable.
     Prefer,
     /// This translator is able to translate the variable, but will not be
-    /// selected by default, the user has to select it
+    /// selected by default, the user has to select it.
     Yes,
+    /// This translator is not suitable to translate the variable,
+    /// but can be selected by the user in the "Not recommended" menu.
+    /// No guarantees are made about the correctness of the translation.
     No,
 }
 
@@ -162,19 +178,26 @@ pub enum TranslationPreference {
 #[cfg_attr(feature = "wasm_plugins", encoding(Json))]
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub enum VariableInfo {
+    /// A compound variable with subfields.
     Compound {
         subfields: Vec<(String, VariableInfo)>,
     },
+    /// A flat bit-vector variable.
     Bits,
+    /// A single-bit variable.
     Bool,
+    /// A clock variable.
     Clock,
     // NOTE: only used for state saving where translators will clear this out with the actual value
     #[default]
+    /// A string variable.
     String,
+    /// A real-number variable.
     Real,
 }
 
 #[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+/// The type of variable based on information from the waveform source.
 pub enum VariableType {
     // VCD-specific types
     #[display("event")]
@@ -277,15 +300,22 @@ pub enum VariableDirection {
 #[cfg_attr(feature = "wasm_plugins", derive(FromBytes, ToBytes))]
 #[cfg_attr(feature = "wasm_plugins", encoding(Json))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
+/// Additional information about a variable in the waveform.
 pub struct VariableMeta<VarId, ScopeId> {
+    /// Reference to the variable.
     pub var: VariableRef<VarId, ScopeId>,
+    /// Number of bits for the variable, if applicable.
     pub num_bits: Option<u32>,
     /// Type of the variable in the HDL (on a best effort basis).
     pub variable_type: Option<VariableType>,
-    /// Type name of variable, if available
+    /// Type name of variable, if available.
     pub variable_type_name: Option<String>,
+    /// Index information for the variable, if available.
     pub index: Option<VariableIndex>,
+    /// Direction of the variable, if available.
     pub direction: Option<VariableDirection>,
+    /// For enum variables, either an enumerated type in VHDL or an enum in SystemVerilog,
+    /// a mapping from enum option names to their string representations.
     pub enum_map: HashMap<String, String>,
     /// Indicates how the variable is stored. A variable of "type" boolean for example
     /// could be stored as a String or as a `BitVector`.
@@ -293,6 +323,7 @@ pub struct VariableMeta<VarId, ScopeId> {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+/// Variable values can be encoded in different ways in the waveform source.
 pub enum VariableEncoding {
     String,
     Real,
