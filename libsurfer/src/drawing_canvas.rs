@@ -179,7 +179,7 @@ fn variable_draw_commands(
     };
 
     let displayed_field_ref: DisplayedFieldRef = display_id.into();
-    let translator = waves.variable_translator(&displayed_field_ref, translators);
+    let translator = waves.variable_translator_with_meta(&displayed_field_ref, translators, &meta);
     let info = translator.variable_info(&meta).unwrap();
 
     let is_analog_mode = displayed_variable.analog.is_some();

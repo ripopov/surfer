@@ -1473,14 +1473,17 @@ impl SystemState {
         };
 
         let variable = &displayed_variable.variable_ref;
-        let translator =
-            waves.variable_translator(&displayed_field_ref.without_field(), &self.translators);
         let meta = waves
             .inner
             .as_waves()
             .unwrap()
             .variable_meta(variable)
             .ok()?;
+        let translator = waves.variable_translator_with_meta(
+            &displayed_field_ref.without_field(),
+            &self.translators,
+            &meta,
+        );
 
         let wave_container = waves.inner.as_waves().unwrap();
         let query_result = wave_container

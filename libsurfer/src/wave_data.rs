@@ -138,22 +138,19 @@ pub fn variable_translator<'a, F>(
 where
     F: FnOnce() -> Result<VariableMeta>,
 {
-    let translator_name = translator
-        .cloned()
-        .or_else(|| {
-            Some(if field.is_empty() {
-                meta()
-                    .as_ref()
-                    .map(|meta| select_preferred_translator(meta, translators).clone())
-                    .unwrap_or_else(|e| {
-                        warn!("{e:#?}");
-                        translators.default.clone()
-                    })
-            } else {
-                translators.default.clone()
-            })
-        })
-        .unwrap();
+    let translator_name = translator.cloned().unwrap_or_else(|| {
+        if field.is_empty() {
+            meta().as_ref().map_or_else(
+                |e| {
+                    warn!("{e:#?}");
+                    translators.default.clone()
+                },
+                |meta| select_preferred_translator(meta, translators).clone(),
+            )
+        } else {
+            translators.default.clone()
+        }
+    });
 
     (translators.get_translator(&translator_name)) as _
 }
@@ -363,10 +360,10 @@ impl WaveData {
     #[must_use]
     pub fn select_preferred_translator(
         &self,
-        var: VariableMeta,
+        var: &VariableMeta,
         translators: &TranslatorList,
     ) -> String {
-        select_preferred_translator(&var, translators)
+        select_preferred_translator(var, translators)
     }
 
     #[must_use]
@@ -391,6 +388,27 @@ impl WaveData {
                     .unwrap()
                     .variable_meta(&displayed_variable.variable_ref)
             },
+        )
+    }
+
+    #[must_use]
+    pub fn variable_translator_with_meta<'a>(
+        &'a self,
+        field: &DisplayedFieldRef,
+        translators: &'a TranslatorList,
+        meta: &VariableMeta,
+    ) -> &'a DynTranslator {
+        let Some(DisplayedItem::Variable(displayed_variable)) =
+            self.displayed_items.get(&field.item)
+        else {
+            panic!("asking for translator for a non DisplayItem::Variable item")
+        };
+
+        variable_translator(
+            displayed_variable.get_format(&field.field),
+            &field.field,
+            translators,
+            || Ok(meta.clone()),
         )
     }
 
