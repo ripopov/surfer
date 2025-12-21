@@ -195,15 +195,15 @@ impl VariableFilter {
         if full_path {
             variables
                 .iter()
-                .filter(|&vr| name_filter(&vr.full_path().join(".")))
                 .filter(|&vr| self.kind_filter(vr, wave_container_opt))
+                .filter(|&vr| name_filter(&vr.full_path().join(".")))
                 .cloned()
                 .collect_vec()
         } else {
             variables
                 .iter()
-                .filter(|&vr| name_filter(&vr.name))
                 .filter(|&vr| self.kind_filter(vr, wave_container_opt))
+                .filter(|&vr| name_filter(&vr.name))
                 .cloned()
                 .collect_vec()
         }
