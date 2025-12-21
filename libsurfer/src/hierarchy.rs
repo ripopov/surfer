@@ -25,7 +25,6 @@ use itertools::Itertools;
 use num::BigUint;
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
-use surfer_translation_types::VariableType;
 use tracing::warn;
 #[derive(Clone, Copy, Debug, Deserialize, Display, FromStr, PartialEq, Eq, Serialize, Sequence)]
 pub enum HierarchyStyle {
@@ -562,6 +561,8 @@ impl SystemState {
                 .size()
                 .x
         });
+        // The button padding is added by egui on selectable labels
+        let available_space = ui.available_width() - ui.spacing().button_padding.x * 2.;
 
         // Draw variables
         for (variable, meta, name_info) in variable_infos {
@@ -585,10 +586,7 @@ impl SystemState {
                 .flatten()
                 .unwrap_or_default();
             // Get value in case of parameter
-            let value = if meta
-                .as_ref()
-                .is_some_and(|meta| meta.variable_type == Some(VariableType::VCDParameter))
-            {
+            let value = if meta.as_ref().is_some_and(|meta| meta.is_parameter()) {
                 let res = wave_container.query_variable(variable, &BigUint::ZERO).ok();
                 res.and_then(|o| o.and_then(|q| q.current.map(|v| format!(": {}", v.1))))
                     .unwrap_or_else(|| ": Undefined".to_string())
@@ -607,9 +605,6 @@ impl SystemState {
                         let value_size = value.chars().count();
                         let used_space =
                             (direction_size + index_size + value_size) as f32 * char_width_mono;
-                        // The button padding is added by egui on selectable labels
-                        let available_space =
-                            ui.available_width() - ui.spacing().button_padding.x * 2.;
                         let space_for_name = available_space - used_space;
 
                         let text_format = TextFormat {

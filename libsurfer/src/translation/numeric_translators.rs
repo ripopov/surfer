@@ -7,39 +7,10 @@ use num::{BigUint, One};
 use softposit::{P8E0, P16E1, P32E2, Q8E0, Q16E1};
 use surfer_translation_types::{
     BasicTranslator, TranslationResult, Translator, ValueKind, ValueRepr, VariableInfo,
-    VariableMeta, VariableType, VariableValue, translates_all_bit_types,
+    VariableMeta, VariableValue, translates_all_bit_types,
 };
 
 use super::{TranslationPreference, check_single_wordlength};
-
-/// Types that should default to signed integer conversion
-pub const INTEGER_TYPES: &[Option<VariableType>] = &[
-    Some(VariableType::VCDInteger),
-    Some(VariableType::Int),
-    Some(VariableType::ShortInt),
-    Some(VariableType::LongInt),
-];
-
-/// Type names that should default to signed integer conversion
-pub static SIGNED_INTEGER_TYPE_NAMES: &[&str] = &["unresolved_signed", "signed"];
-
-/// Type names that should default to signed fixed-point conversion
-pub static SIGNED_FIXEDPOINT_TYPE_NAMES: &[&str] = &["unresolved_sfixed", "sfixed"];
-
-/// Type names that should default to unsigned integer conversion
-pub static UNSIGNED_INTEGER_TYPE_NAMES: &[&str] = &["unresolved_unsigned", "unsigned"];
-
-/// Type names that should default to unsigned fixed-point conversion
-pub static UNSIGNED_FIXEDPOINT_TYPE_NAMES: &[&str] = &["unresolved_ufixed", "ufixed"];
-
-fn match_variable_type_name(
-    variable_type_name: &Option<String>,
-    candidates: &'static [&'static str],
-) -> bool {
-    variable_type_name
-        .as_ref()
-        .is_some_and(|type_name| candidates.iter().any(|c| type_name.eq_ignore_ascii_case(c)))
-}
 
 #[inline]
 fn shortest_float_representation<T: std::fmt::LowerExp + std::fmt::Display>(v: T) -> String {
@@ -73,7 +44,7 @@ impl BasicTranslator<VarId, ScopeId> for UnsignedTranslator {
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        if match_variable_type_name(&variable.variable_type_name, UNSIGNED_INTEGER_TYPE_NAMES) {
+        if variable.has_unsigned_integer_type_name() {
             Ok(TranslationPreference::Prefer)
         } else {
             translates_all_bit_types(variable)
@@ -93,9 +64,7 @@ impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        if INTEGER_TYPES.contains(&variable.variable_type)
-            | match_variable_type_name(&variable.variable_type_name, SIGNED_INTEGER_TYPE_NAMES)
-        {
+        if variable.is_integer_type() || variable.has_signed_integer_type_name() {
             Ok(TranslationPreference::Prefer)
         } else {
             translates_all_bit_types(variable)
@@ -467,7 +436,7 @@ impl Translator<VarId, ScopeId, Message> for UnsignedFixedPointTranslator {
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        if match_variable_type_name(&variable.variable_type_name, UNSIGNED_FIXEDPOINT_TYPE_NAMES) {
+        if variable.has_unsigned_fixedpoint_type_name() {
             Ok(TranslationPreference::Prefer)
         } else {
             translates_all_bit_types(variable)
@@ -507,7 +476,7 @@ impl Translator<VarId, ScopeId, Message> for SignedFixedPointTranslator {
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        if match_variable_type_name(&variable.variable_type_name, SIGNED_FIXEDPOINT_TYPE_NAMES) {
+        if variable.has_signed_fixedpoint_type_name() {
             Ok(TranslationPreference::Prefer)
         } else {
             translates_all_bit_types(variable)

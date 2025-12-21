@@ -1130,15 +1130,6 @@ impl SystemState {
             }
         };
 
-        let monospace_font = ui.style().text_styles.get(&TextStyle::Monospace).unwrap();
-        let monospace_width = {
-            ui.fonts_mut(|fonts| {
-                fonts
-                    .layout_no_wrap(" ".to_string(), monospace_font.clone(), Color32::BLACK)
-                    .size()
-                    .x
-            })
-        };
         let available_space = ui.available_width();
 
         let mut layout_job = LayoutJob::default();
@@ -1151,6 +1142,20 @@ impl SystemState {
                     let name_info = self.get_variable_name_info(wave_container, &var.variable_ref);
 
                     if let Some(true_name) = name_info.and_then(|info| info.true_name) {
+                        let monospace_font =
+                            ui.style().text_styles.get(&TextStyle::Monospace).unwrap();
+                        let monospace_width = {
+                            ui.fonts_mut(|fonts| {
+                                fonts
+                                    .layout_no_wrap(
+                                        " ".to_string(),
+                                        monospace_font.clone(),
+                                        Color32::BLACK,
+                                    )
+                                    .size()
+                                    .x
+                            })
+                        };
                         draw_true_name(
                             &true_name,
                             &mut layout_job,

@@ -4,7 +4,7 @@ use eyre::WrapErr;
 use futures::executor::block_on;
 use itertools::Itertools;
 use std::sync::atomic::Ordering;
-use surfer_translation_types::{TranslationPreference, Translator, VariableType};
+use surfer_translation_types::{TranslationPreference, Translator};
 
 use crate::config::{PrimaryMouseDrag, TransitionValue};
 use crate::displayed_item_tree::VisibleItemIndex;
@@ -568,9 +568,7 @@ impl SystemState {
         if let Some(path) = path {
             let wave_container = waves.inner.as_waves().unwrap();
             let meta = wave_container.variable_meta(&path.root).ok();
-            let is_parameter = meta
-                .as_ref()
-                .is_some_and(|meta| meta.variable_type == Some(VariableType::VCDParameter));
+            let is_parameter = meta.as_ref().is_some_and(|meta| meta.is_parameter());
             if !is_parameter && ui.button("Expand scope").clicked() {
                 let scope_path = path.root.path.clone();
                 let scope_type = ScopeType::WaveScope(scope_path.clone());

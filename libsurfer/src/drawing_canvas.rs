@@ -12,8 +12,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::f32::consts::PI;
 use surfer_translation_types::{
-    SubFieldFlatTranslationResult, TranslatedValue, ValueKind, VariableInfo, VariableType,
-    VariableValue,
+    SubFieldFlatTranslationResult, TranslatedValue, ValueKind, VariableInfo, VariableValue,
 };
 use tracing::{error, warn};
 
@@ -1007,9 +1006,8 @@ impl SystemState {
                                     .inner
                                     .as_waves()
                                     .and_then(|w| w.variable_meta(&variable.variable_ref).ok())
-                                    .and_then(|meta| meta.variable_type)
-                                    .and_then(|var_type| {
-                                        (var_type == VariableType::VCDParameter)
+                                    .and_then(|meta| {
+                                        meta.is_parameter()
                                             .then_some(self.user.config.theme.variable_parameter)
                                     })
                                     .unwrap_or(self.user.config.theme.variable_default)
