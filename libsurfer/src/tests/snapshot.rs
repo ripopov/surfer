@@ -899,6 +899,16 @@ snapshot_ui_with_file_and_msgs! {command_prompt_prev_command, "examples/counter.
 //     Message::SelectNextCommand
 // ]}
 
+snapshot_ui_with_file_and_msgs! {command_prompt_focus, "examples/counter.vcd", [
+    Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
+    Message::ShowCommandPrompt("item_focus ".to_string(), None)
+]}
+
+snapshot_ui_with_file_and_msgs! {command_prompt_focus_item_selected, "examples/counter.vcd", [
+    Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
+    Message::ShowCommandPrompt("item_focus b".to_string(), None)
+]}
+
 snapshot_ui_with_file_and_msgs!(
     command_prompt_scroll_bounds_prev,
     "examples/counter.vcd",
