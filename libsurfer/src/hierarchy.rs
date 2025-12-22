@@ -435,7 +435,7 @@ impl SystemState {
                                 ui.with_layout(
                                     Layout::top_down(Align::LEFT).with_cross_justify(true),
                                     |ui| {
-                                        ui.label("Parameters");
+                                        ui.add(egui::Button::selectable(false, "Parameters"));
                                     },
                                 );
                             })
