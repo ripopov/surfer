@@ -51,7 +51,7 @@ fn translate_with_basic(
     variable: &VariableMeta,
     value: &VariableValue,
 ) -> Result<TranslationResult> {
-    let (val, kind) = t.basic_translate(u64::from(variable.num_bits.unwrap_or(0)), value);
+    let (val, kind) = t.basic_translate(variable.num_bits.unwrap_or(0), value);
     Ok(TranslationResult {
         val: ValueRepr::String(val),
         kind,
@@ -239,7 +239,7 @@ fn find_user_decoders_at_path(path: &Path) -> Vec<Arc<DynBasicTranslator>> {
                         let translator = InstructionTranslator {
                             name,
                             decoder,
-                            num_bits: width.unsigned_abs(),
+                            num_bits: width.unsigned_abs() as u32,
                         };
                         tracing::info!(
                             "Loaded {}-bit instruction decoder: {} ",

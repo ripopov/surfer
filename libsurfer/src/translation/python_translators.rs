@@ -63,7 +63,7 @@ impl BasicTranslator<VarId, ScopeId> for PythonTranslator {
         name
     }
 
-    fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    fn basic_translate(&self, num_bits: u32, value: &VariableValue) -> (String, ValueKind) {
         let result = Python::attach(|py| -> pyo3::PyResult<_> {
             let ret = self
                 .module

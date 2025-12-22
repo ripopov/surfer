@@ -29,7 +29,7 @@ impl TranslationResult {
 pub enum ValueRepr {
     Bit(char),
     /// The value is `.0` raw bits, and can be translated by further translators
-    Bits(u64, String),
+    Bits(u32, String),
     /// The value is exactly the specified string
     String(String),
     /// Represent the value as (f1, f2, f3...)

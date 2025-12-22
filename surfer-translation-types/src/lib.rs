@@ -85,9 +85,9 @@ pub fn kind_for_binary_representation(s: &str) -> ValueKind {
 /// - 'z' extends with 'z'
 /// - other leading characters result in no extension
 #[must_use]
-pub fn extend_string(val: &str, num_bits: u64) -> String {
-    if num_bits > val.len() as u64 {
-        let extra_count = num_bits - val.len() as u64;
+pub fn extend_string(val: &str, num_bits: u32) -> String {
+    if num_bits as usize > val.len() {
+        let extra_count = num_bits as usize - val.len();
         let extra_value = match val.chars().next() {
             Some('0' | '1') => "0",
             Some('x') => "x",
@@ -97,7 +97,7 @@ pub fn extend_string(val: &str, num_bits: u64) -> String {
             // We may have to add extensions for std_logic values though if simulators save without extension
             _ => "",
         };
-        extra_value.repeat(extra_count as usize)
+        extra_value.repeat(extra_count)
     } else {
         String::new()
     }

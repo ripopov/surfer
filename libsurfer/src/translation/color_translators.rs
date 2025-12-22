@@ -15,7 +15,7 @@ impl BasicTranslator<VarId, ScopeId> for RGBTranslator {
         String::from("RGB")
     }
 
-    fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    fn basic_translate(&self, num_bits: u32, value: &VariableValue) -> (String, ValueKind) {
         match value {
             VariableValue::BigUint(v) => {
                 let nibble_length = num_bits.div_ceil(3);
@@ -64,7 +64,7 @@ impl BasicTranslator<VarId, ScopeId> for YCbCrTranslator {
         String::from("YCbCr")
     }
 
-    fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    fn basic_translate(&self, num_bits: u32, value: &VariableValue) -> (String, ValueKind) {
         match value {
             VariableValue::BigUint(v) => {
                 let nibble_length = num_bits.div_ceil(3);
@@ -114,7 +114,7 @@ impl BasicTranslator<VarId, ScopeId> for GrayScaleTranslator {
         String::from("Grayscale")
     }
 
-    fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind) {
+    fn basic_translate(&self, num_bits: u32, value: &VariableValue) -> (String, ValueKind) {
         match value {
             VariableValue::BigUint(v) => {
                 let g = if num_bits >= 8 {
@@ -155,7 +155,7 @@ mod test {
     use super::*;
     use num::BigUint;
 
-    fn translate_rgb(num_bits: u64, value: u32) -> (String, ValueKind) {
+    fn translate_rgb(num_bits: u32, value: u32) -> (String, ValueKind) {
         let translator = RGBTranslator {};
         let biguint_value = VariableValue::BigUint(BigUint::from(value));
         translator.basic_translate(num_bits, &biguint_value)
@@ -330,7 +330,7 @@ mod test {
     }
 
     // === Grayscale Translator Tests ===
-    fn translate_gray(num_bits: u64, value: u32) -> (String, ValueKind) {
+    fn translate_gray(num_bits: u32, value: u32) -> (String, ValueKind) {
         let translator = GrayScaleTranslator {};
         let biguint_value = VariableValue::BigUint(BigUint::from(value));
         translator.basic_translate(num_bits, &biguint_value)
@@ -491,7 +491,7 @@ mod test {
     }
 
     // === YCbCr Translator Tests ===
-    fn translate_ycbcr(num_bits: u64, y: u8, cb: u8, cr: u8) -> (String, ValueKind) {
+    fn translate_ycbcr(num_bits: u32, y: u8, cb: u8, cr: u8) -> (String, ValueKind) {
         let translator = YCbCrTranslator {};
         let nibble_length = num_bits.div_ceil(3) as u32;
         let packed: u32 = (u32::from(y) << (2 * nibble_length))

@@ -116,7 +116,7 @@ pub trait BasicTranslator<VarId, ScopeId>: Send + Sync {
     ///
     /// If the translator require [`VariableMeta`] information to perform the translation,
     /// use the more general [`Translator`] instead.
-    fn basic_translate(&self, num_bits: u64, value: &VariableValue) -> (String, ValueKind);
+    fn basic_translate(&self, num_bits: u32, value: &VariableValue) -> (String, ValueKind);
 
     /// Return [`TranslationPreference`] based on if the translator can handle this variable.
     ///
