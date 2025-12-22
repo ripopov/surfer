@@ -386,8 +386,14 @@ impl SystemState {
         if child_scopes.is_empty() && no_variables_in_scope && !self.show_empty_scopes() {
             return;
         }
+
         if child_scopes.is_empty() && (!draw_variables || no_variables_in_scope) {
-            self.add_scope_selectable_label(msgs, wave, scope, ui, false);
+            // Indent our label by both icon width and icon spacing to
+            // match the other headers that actually have an icon.
+            ui.horizontal(|ui| {
+                ui.add_space(ui.spacing().icon_width + ui.spacing().icon_spacing);
+                self.add_scope_selectable_label(msgs, wave, scope, ui, false);
+            });
         } else {
             let should_open_header = self.should_open_header(scope);
             let mut collapsing_header =
@@ -422,7 +428,7 @@ impl SystemState {
                         if !parameters.is_empty() {
                             egui::collapsing_header::CollapsingState::load_with_default_open(
                                 ui.ctx(),
-                                egui::Id::new(&parameters),
+                                egui::Id::new(&scope).with("__surfer_parameters"),
                                 false,
                             )
                             .show_header(ui, |ui| {
