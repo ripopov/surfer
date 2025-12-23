@@ -1345,13 +1345,12 @@ impl SystemState {
         // Draws the relations of the focused transaction
         if let Some(focused_pos) = focused_transaction_start {
             let path_stroke = PathStroke::from(&ctx.theme.relation_arrow.style);
-            let head_stroke = Stroke::from(&ctx.theme.relation_arrow.style);
             for start_pos in inc_relation_starts {
-                self.draw_arrow(start_pos, focused_pos, ctx, &path_stroke, head_stroke);
+                self.draw_arrow(start_pos, focused_pos, ctx, &path_stroke);
             }
 
             for end_pos in out_relation_starts {
-                self.draw_arrow(focused_pos, end_pos, ctx, &path_stroke, head_stroke);
+                self.draw_arrow(focused_pos, end_pos, ctx, &path_stroke);
             }
         }
     }
@@ -1569,14 +1568,7 @@ impl SystemState {
     }
 
     /// Draws a curvy arrow from `start` to `end`.
-    fn draw_arrow(
-        &self,
-        start: Pos2,
-        end: Pos2,
-        ctx: &DrawingContext,
-        path_stroke: &PathStroke,
-        head_stroke: Stroke,
-    ) {
+    fn draw_arrow(&self, start: Pos2, end: Pos2, ctx: &DrawingContext, stroke: &PathStroke) {
         let x_diff = (end.x - start.x).max(100.);
         let scaled_x_diff = 0.4 * x_diff;
 
@@ -1593,10 +1585,10 @@ impl SystemState {
             points: [start, anchor1, anchor2, end],
             closed: false,
             fill: Default::default(),
-            stroke: path_stroke.clone(),
+            stroke: stroke.clone(),
         }));
 
-        self.draw_arrowheads(anchor2, end, ctx, head_stroke);
+        self.draw_arrowheads(anchor2, end, ctx, stroke);
     }
 
     /// Draws arrowheads for the vector going from `vec_start` to `vec_tip`.
@@ -1606,7 +1598,7 @@ impl SystemState {
         vec_start: Pos2,
         vec_tip: Pos2,
         ctx: &DrawingContext,
-        stroke: Stroke,
+        stroke: &PathStroke,
     ) {
         let head_length = ctx.theme.relation_arrow.head_length;
 
@@ -1629,14 +1621,13 @@ impl SystemState {
         let arrowhead_right_x = vec_tip.x + vec_angled_y;
         let arrowhead_right_y = vec_tip.y - vec_angled_x;
 
-        ctx.painter.add(Shape::line_segment(
-            [vec_tip, Pos2::new(arrowhead_left_x, arrowhead_left_y)],
-            stroke,
-        ));
-
-        ctx.painter.add(Shape::line_segment(
-            [vec_tip, Pos2::new(arrowhead_right_x, arrowhead_right_y)],
-            stroke,
+        ctx.painter.add(PathShape::line(
+            vec![
+                Pos2::new(arrowhead_right_x, arrowhead_right_y),
+                vec_tip,
+                Pos2::new(arrowhead_left_x, arrowhead_left_y),
+            ],
+            stroke.clone(),
         ));
     }
 
