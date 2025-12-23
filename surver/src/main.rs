@@ -81,7 +81,7 @@ fn main() -> Result<()> {
     let bind_addr = args.bind_address.unwrap_or_else(|| "127.0.0.1".to_string());
     let port = args.port.unwrap_or(8911);
 
-    runtime.block_on(surver::server_main(
+    runtime.block_on(surver::surver_main(
         port,
         bind_addr,
         args.token,

@@ -46,7 +46,7 @@ reported that most likely are caused by the gui framework used (as in, Surfer ca
 These are the suggested solutions if it does not work for you:
 
 1. There is a script, `surfer.sh` in the repository, that can be used to start the Windows version from WSL, avoiding the second caveat mentioned below. Read the instructions in the script. This is the preferred way as the Windows version is faster.
-2. Start Surfer in (experimental) server mode, see below, in WSL and open the Windows version using the URL provided from running the previous command.
+2. Start the Surfer server `surver`, see below, in WSL and open the Windows version using the URL provided from running the previous command.
 3. Start Surfer with the environment variable `WAYLAND_DISPLAY` cleared. For example, `WAYLAND_DISPLAY= surfer`.
 4. Compile Surfer with a change in `Cargo.toml` as below (replace the line defining `eframe` version, using the current version if the line below has an older version).  Installing `libgtk-3-dev` and/or `zenity` may be required if errors remain (although most likely it is a dependency of that package that is really required).
 
@@ -62,21 +62,21 @@ These are the suggested solutions if it does not work for you:
 Many aspects of Surfer can be configured.
 To learn more about configuration, have a look at our [wiki](https://gitlab.com/surfer-project/surfer/-/wikis/Configuration).
 
-## Server Mode
+## Server Mode (Surver)
 
-It is possible to start Surfer in server mode on one computer and open the waveform viewer on another computer to avoid copying the waveform files. There is also a stand-alone version of the server: Surver. Run
-
-```bash
-surfer server --file waveform.vcd/fst/ghw
-```
-
-or, after installing `surver` with `cargo install --path surver`,
+It is possible to run Surfer in client-server mode, where the server, `surver` is started on one computer with one or more waveform files and the waveform viewer is opened on another computer. This avoids having to copy the waveform files. To do this, run
 
 ```bash
 surver waveform.vcd/fst/ghw
 ```
 
-on the computer where the waveform is located and follow the instructions.
+and follow the instructions.
+
+It is also possible to start Surfer in server mode, although there are plans to drop this at some stage and only support `surver`
+
+```bash
+surfer server --file waveform.vcd/fst/ghw
+```
 
 ## Development Information
 

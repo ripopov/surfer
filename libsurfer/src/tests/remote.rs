@@ -22,7 +22,7 @@ fn start_server(bind_address: &str, port: u16, token: &str, filenames: &[String]
             .enable_all()
             .build()
             .unwrap();
-        let _res = runtime.block_on(surver::server_main(
+        let _res = runtime.block_on(surver::surver_main(
             port,
             bind_address.to_string(),
             token,

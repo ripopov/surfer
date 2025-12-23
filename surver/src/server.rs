@@ -449,7 +449,7 @@ const RAND_TOKEN_LEN: usize = 24;
 
 pub type ServerStartedFlag = Arc<std::sync::atomic::AtomicBool>;
 
-pub async fn server_main(
+pub async fn surver_main(
     port: u16,
     bind_address: String,
     token: Option<String>,

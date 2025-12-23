@@ -552,7 +552,7 @@ impl SystemState {
                     }
                 }
             }
-            Message::SetServerFileWindowVisible(visibility) => {
+            Message::SetSurverFileWindowVisible(visibility) => {
                 self.user.show_server_file_window = visibility;
             }
             Message::LoadAndSetSurverFileIndex(file_index, load_options) => {
@@ -1120,7 +1120,7 @@ impl SystemState {
                 self.add_batch_commands(read_command_bytes(bytes));
             }
             Message::SetupCxxrtl(kind) => self.connect_to_cxxrtl(kind, false),
-            Message::SurferServerStatus(_start, server, status) => {
+            Message::SetSurverStatus(_start, server, status) => {
                 self.user.surver_file_infos = Some(status.file_infos.clone());
                 info!(
                     "Received surfer server status from {server}. {} files available.",

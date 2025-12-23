@@ -59,7 +59,7 @@ impl SystemState {
 
                 // Handle keyboard navigation
                 if ui.input(|i| i.key_pressed(Key::Escape)) {
-                    msgs.push(Message::SetServerFileWindowVisible(false));
+                    msgs.push(Message::SetSurverFileWindowVisible(false));
                     return;
                 }
 
@@ -70,7 +70,7 @@ impl SystemState {
                 ui.separator();
                 ui.horizontal(|ui| {
                     if ui.button("Cancel").clicked() {
-                        msgs.push(Message::SetServerFileWindowVisible(false));
+                        msgs.push(Message::SetSurverFileWindowVisible(false));
                     }
 
                     // Disable Select button when nothing is selected
@@ -84,7 +84,7 @@ impl SystemState {
 
         // Handle file loading
         if should_load && let Some(file_idx) = selected_file_idx {
-            msgs.push(Message::SetServerFileWindowVisible(false));
+            msgs.push(Message::SetSurverFileWindowVisible(false));
             msgs.push(Message::LoadAndSetSurverFileIndex(
                 Some(file_idx),
                 LoadOptions::Clear,
@@ -92,7 +92,7 @@ impl SystemState {
         }
 
         if !open {
-            msgs.push(Message::SetServerFileWindowVisible(false));
+            msgs.push(Message::SetSurverFileWindowVisible(false));
         }
     }
 }

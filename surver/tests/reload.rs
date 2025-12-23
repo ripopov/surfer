@@ -44,7 +44,7 @@ async fn server_reload_with_overwrite() {
 
     // Start server on the temp path
     let handle = tokio::spawn(async move {
-        if let Err(err) = surver::server_main(
+        if let Err(err) = surver::surver_main(
             port,
             "127.0.0.1".to_string(),
             Some(token_clone),

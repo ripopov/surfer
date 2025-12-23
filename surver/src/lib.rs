@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 mod server;
 #[cfg(not(target_arch = "wasm32"))]
-pub use server::server_main;
+pub use server::surver_main;
 
 pub const HTTP_SERVER_KEY: &str = "Server";
 pub const HTTP_SERVER_VALUE_SURFER: &str = "Surfer";

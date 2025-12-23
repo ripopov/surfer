@@ -31,7 +31,7 @@ async fn server_end_to_end_basic() {
     // Start server in the background
     let token_clone = token.clone();
     let handle = tokio::spawn(async move {
-        if let Err(err) = surver::server_main(
+        if let Err(err) = surver::surver_main(
             port,
             "127.0.0.1".to_string(),
             Some(token_clone),
@@ -162,7 +162,7 @@ async fn server_loads_multiple_files() {
     // Start server with multiple files
     let token_clone = token.clone();
     let handle = tokio::spawn(async move {
-        if let Err(err) = surver::server_main(
+        if let Err(err) = surver::surver_main(
             port,
             "127.0.0.1".to_string(),
             Some(token_clone),

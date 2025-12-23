@@ -143,7 +143,7 @@ impl SystemState {
                     msgs,
                     icons::FILE_LIST_FILL,
                     "Select Surver file",
-                    Message::SetServerFileWindowVisible(true),
+                    Message::SetSurverFileWindowVisible(true),
                     true,
                 );
             }

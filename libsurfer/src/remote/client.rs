@@ -313,7 +313,7 @@ pub fn get_server_status(sender: Sender<Message>, server: String, delay_ms: u64)
             .with_context(|| format!("Failed to retrieve status from remote server {server}"));
 
         let msg = match res {
-            Ok(status) => Message::SurferServerStatus(start, server, status),
+            Ok(status) => Message::SetSurverStatus(start, server, status),
             Err(e) => Message::Error(e),
         };
         if let Err(e) = sender.send(msg) {
@@ -337,7 +337,7 @@ pub fn server_reload(
         let msg = match res {
             Ok(status) => {
                 request_hierarchy = true;
-                Message::SurferServerStatus(start, server.clone(), status)
+                Message::SetSurverStatus(start, server.clone(), status)
             }
             Err(crate::remote::ReloadError::FileUnchanged) => Message::StopProgressTracker,
             Err(e) => {
