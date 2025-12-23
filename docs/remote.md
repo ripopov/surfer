@@ -1,10 +1,14 @@
 # Remote file access
 
-It is possible to start Surfer in server mode on a different computer and then connect to that computer to avoid downloading/copying large waveform files.
+It is possible to run a remote Surfer server, called Surver, on a different computer and then connect to that computer to avoid downloading/copying large waveform files. Only the requested information will be transferred.
+
+<mark>Note that this is done using plain http, so absolutely no security is provided for the access or transmission, apart from having to provide the correct token, which is also transmitted using plain http.</mark>
 
 ## Surver
 
-There is a stand-alone binary, *Surver*, that can be compiled, resulting in a much smaller binary and more likely to succeed on systems where Surfer may be hard to install due to GUI dependencies not being installed etc. There is basically no point in running `surfer server`, as `surver` will not have any drawbacks.
+There is a stand-alone binary, *Surver*, that can be compiled, resulting in a much smaller binary and more likely to succeed on systems where Surfer may be hard to install due to GUI dependencies not being installed etc.
+
+<mark>There is basically no point in running `surfer server`, as running `surver` does not have any drawbacks. Most likely, support for running Surfer in server mode will be removed and only Surver can be used.</mark>
 
 ## Using remote mode
 
@@ -40,12 +44,13 @@ leading to
 ``` text
 Server for the Surfer waveform viewer
 
-Usage: surver.exe [OPTIONS] <WAVE_FILE>
+Usage: surver [OPTIONS] <WAVE_FILES|--file <FILE>>
 
 Arguments:
-  <WAVE_FILE>  Waveform file in VCD, FST, or GHW format
+  [WAVE_FILES]...  Waveform files in VCD, FST, or GHW format
 
 Options:
+      --file <FILE>                  File with one wave form file name per line
       --port <PORT>                  Port on which server will listen
       --bind-address <BIND_ADDRESS>  IP address to bind the server to
       --token <TOKEN>                Token used by the client to authenticate to the server
