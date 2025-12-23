@@ -301,13 +301,7 @@ impl SystemState {
             });
 
             ui.menu_button("Hierarchy", |ui| {
-                for style in enum_iterator::all::<HierarchyStyle>() {
-                    ui.radio(self.hierarchy_style() == style, style.to_string())
-                        .clicked()
-                        .then(|| {
-                            msgs.push(Message::SetHierarchyStyle(style));
-                        });
-                }
+                self.hierarchy_menu(msgs, ui);
             });
 
             ui.menu_button("Parameter display location", |ui| {
@@ -430,6 +424,16 @@ impl SystemState {
             ui.separator();
             b("About", Message::SetAboutVisible(true)).add_closing_menu(msgs, ui);
         });
+    }
+
+    pub fn hierarchy_menu(&self, msgs: &mut Vec<Message>, ui: &mut Ui) {
+        for style in enum_iterator::all::<HierarchyStyle>() {
+            ui.radio(self.hierarchy_style() == style, style.to_string())
+                .clicked()
+                .then(|| {
+                    msgs.push(Message::SetHierarchyStyle(style));
+                });
+        }
     }
 
     pub fn item_context_menu(

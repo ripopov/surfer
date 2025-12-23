@@ -54,7 +54,8 @@ impl SystemState {
             .max_height(total_space - 64.0)
             .frame(Frame::new().inner_margin(Margin::same(5)))
             .show_inside(ui, |ui| {
-                ui.heading("Scopes");
+                ui.heading("Scopes")
+                    .context_menu(|ui| self.hierarchy_menu(msgs, ui));
                 ui.add_space(3.0);
 
                 ScrollArea::both()
@@ -71,7 +72,8 @@ impl SystemState {
             .frame(Frame::new().inner_margin(Margin::same(5)))
             .show_inside(ui, |ui| {
                 ui.with_layout(Layout::left_to_right(Align::TOP), |ui| {
-                    ui.heading("Variables");
+                    ui.heading("Variables")
+                        .context_menu(|ui| self.hierarchy_menu(msgs, ui));
                     ui.add_space(3.0);
                     self.draw_variable_filter_edit(ui, msgs, false);
                 });
@@ -178,7 +180,8 @@ impl SystemState {
             |ui| {
                 Frame::new().inner_margin(Margin::same(5)).show(ui, |ui| {
                     ui.with_layout(Layout::left_to_right(Align::TOP), |ui| {
-                        ui.heading("Hierarchy");
+                        ui.heading("Hierarchy")
+                            .context_menu(|ui| self.hierarchy_menu(msgs, ui));
                         ui.add_space(3.0);
                         self.draw_variable_filter_edit(ui, msgs, false);
                     });
@@ -205,7 +208,8 @@ impl SystemState {
             |ui| {
                 Frame::new().inner_margin(Margin::same(5)).show(ui, |ui| {
                     ui.with_layout(Layout::left_to_right(Align::TOP), |ui| {
-                        ui.heading("Variables");
+                        ui.heading("Variables")
+                            .context_menu(|ui| self.hierarchy_menu(msgs, ui));
                         ui.add_space(3.0);
                         self.draw_variable_filter_edit(ui, msgs, true);
                     });
