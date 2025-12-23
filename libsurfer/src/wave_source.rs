@@ -347,7 +347,12 @@ impl SystemState {
         }
     }
 
-    pub fn load_wave_from_url(&mut self, url: String, load_options: LoadOptions) {
+    pub fn load_wave_from_url(
+        &mut self,
+        url: String,
+        load_options: LoadOptions,
+        force_switch: bool,
+    ) {
         match url_to_wavesource(&url) {
             // We want to support opening cxxrtl urls using open url and friends,
             // so we'll special case
@@ -397,12 +402,31 @@ impl SystemState {
                             LoadOptions::KeepAvailable | LoadOptions::KeepAll => {
                                 // Request a reload (will also get status and request hierarchy if needed)
                                 if let Some(file_index) = file_index {
-                                    info!("Reloahding from surfer server at: {url}");
-                                    server_reload(sender.clone(), url, load_options, file_index);
+                                    if force_switch {
+                                        get_hierarchy_from_server(
+                                            sender.clone(),
+                                            url,
+                                            load_options,
+                                            file_index,
+                                        );
+                                    } else {
+                                        info!("Reloading from surver instance at: {url}");
+                                        server_reload(
+                                            sender.clone(),
+                                            url,
+                                            load_options,
+                                            file_index,
+                                        );
+                                    }
                                 } else {
-                                    warn!(
-                                        "Cannot reload from surfer server without a selected file index"
-                                    );
+                                    if force_switch {
+                                        // We started Surfer with a Surver URL as argument, so request status
+                                        get_server_status(sender.clone(), url.clone(), 0);
+                                    } else {
+                                        warn!(
+                                            "Cannot reload from surver instance without a selected file index"
+                                        );
+                                    }
                                 }
                             }
                         }

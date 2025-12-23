@@ -555,15 +555,31 @@ impl SystemState {
             Message::SetSurverFileWindowVisible(visibility) => {
                 self.user.show_server_file_window = visibility;
             }
-            Message::LoadAndSetSurverFileIndex(file_index, load_options) => {
+            Message::LoadSurverFileByIndex(file_index, load_options) => {
                 // Disable file window in case executing from command/test
                 self.user.show_server_file_window = false;
-                if self.user.selected_server_file_index != file_index {
-                    self.user.selected_server_file_index = file_index;
-                    *self.surver_selected_file.borrow_mut() = file_index;
-                    if let Some(url) = self.user.surver_url.as_ref() {
-                        self.load_wave_from_url(url.to_string(), load_options);
-                    }
+                let force_switch = self.user.selected_server_file_index != file_index;
+                self.user.selected_server_file_index = file_index;
+                *self.surver_selected_file.borrow_mut() = file_index;
+                if let Some(url) = self.user.surver_url.as_ref() {
+                    self.load_wave_from_url(url.to_string(), load_options, force_switch);
+                }
+            }
+            Message::LoadSurverFileByName(file_name, load_options) => {
+                // Disable file window in case executing from command/test
+                self.user.show_server_file_window = false;
+                let file_index = self
+                    .user
+                    .surver_file_infos
+                    .as_ref()?
+                    .iter()
+                    .position(|fi| fi.filename == file_name);
+                let force_switch = self.user.selected_server_file_index != file_index;
+
+                self.user.selected_server_file_index = file_index;
+                *self.surver_selected_file.borrow_mut() = file_index;
+                if let Some(url) = self.user.surver_url.as_ref() {
+                    self.load_wave_from_url(url.to_string(), load_options, force_switch);
                 }
             }
             Message::RemoveItemByIndex(vidx) => {
@@ -1080,7 +1096,8 @@ impl SystemState {
             Message::LoadWaveformFileFromUrl(url, load_options) => {
                 self.user.selected_server_file_index = None;
                 *self.surver_selected_file.borrow_mut() = None;
-                self.load_wave_from_url(url, load_options);
+                // If we provide URL at command line and it is a Surver URL, we want to force a switch
+                self.load_wave_from_url(url, load_options, true);
             }
             Message::LoadFromData(data, load_options) => {
                 self.user.selected_server_file_index = None;
@@ -1140,7 +1157,7 @@ impl SystemState {
                             "Only one file available on server {}, loading it automatically",
                             server
                         );
-                        self.load_wave_from_url(server.clone(), LoadOptions::Clear);
+                        self.load_wave_from_url(server.clone(), LoadOptions::Clear, false);
                     } else {
                         // if no file is selected, show the server file selection window
                         self.user.show_server_file_window = true;
@@ -1420,7 +1437,7 @@ impl SystemState {
                             .and_then(|filename| self.load_from_file(filename, options).ok());
                     }
                     WaveSource::Url(url) => {
-                        self.load_wave_from_url(url.clone(), options);
+                        self.load_wave_from_url(url.clone(), options, false);
                     }
                 }
 

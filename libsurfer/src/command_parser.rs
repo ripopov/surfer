@@ -94,6 +94,16 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
         Some(v) => v.inner.variable_names(),
         None => vec![],
     };
+    let surver_file_names = state
+        .user
+        .surver_file_infos
+        .as_ref()
+        .map_or(vec![], |file_infos| {
+            file_infos
+                .iter()
+                .map(|info| info.filename.clone())
+                .collect()
+        });
     let displayed_items = match &state.user.waves {
         Some(v) => v
             .items_tree
@@ -227,7 +237,7 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
     let _ = wcp_start_or_stop;
 
     let keep_during_reload = state.user.config.behavior.keep_during_reload;
-    let commands = if state.user.waves.is_some() {
+    let mut commands = if state.user.waves.is_some() {
         vec![
             "load_file",
             "load_url",
@@ -342,6 +352,11 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
             "exit",
         ]
     };
+    if !surver_file_names.is_empty() {
+        commands.push("surver_select_file");
+        commands.push("surver_switch_file");
+    }
+
     let mut theme_names = state.user.config.theme.theme_names.clone();
     let state_file = state.user.state_file.clone();
     let show_hierarchy = state.show_hierarchy();
@@ -505,6 +520,24 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                     keep_during_reload,
                 ))),
                 "remove_unavailable" => Some(Command::Terminal(Message::RemovePlaceholders)),
+                "surver_select_file" => single_word(
+                    surver_file_names.clone(),
+                    Box::new(|word| {
+                        Some(Command::Terminal(Message::LoadSurverFileByName(
+                            word.to_string(),
+                            LoadOptions::Clear,
+                        )))
+                    }),
+                ),
+                "surver_switch_file" => single_word(
+                    surver_file_names.clone(),
+                    Box::new(|word| {
+                        Some(Command::Terminal(Message::LoadSurverFileByName(
+                            word.to_string(),
+                            LoadOptions::KeepAll,
+                        )))
+                    }),
+                ),
                 // Variable commands
                 "variable_add" | "generator_add" => {
                     if is_transaction_container {

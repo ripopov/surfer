@@ -19,7 +19,7 @@ use crate::{
     translation::{TranslatorList, all_translators},
     variable_filter::VariableFilter,
     wave_container::{ScopeRef, VariableRef},
-    wave_source::LoadProgress,
+    wave_source::{LoadOptions, LoadProgress},
 };
 
 #[cfg(feature = "performance_plot")]
@@ -74,6 +74,7 @@ pub struct SystemState {
     pub(crate) command_prompt_text: RefCell<String>,
     pub(crate) last_canvas_rect: RefCell<Option<Rect>>,
     pub(crate) surver_selected_file: RefCell<Option<usize>>,
+    pub(crate) surver_load_options: RefCell<LoadOptions>,
 
     /// These items should be expanded into subfields in the next frame. Cleared after each
     /// frame
@@ -204,6 +205,7 @@ impl SystemState {
             char_to_add_to_prompt: RefCell::new(None),
             scope_ref_to_expand: RefCell::new(None),
             surver_selected_file: RefCell::new(None),
+            surver_load_options: RefCell::new(LoadOptions::Clear),
             expand_parameter_section: false,
 
             url_callback: None,

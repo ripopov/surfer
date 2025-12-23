@@ -49,9 +49,15 @@ impl SystemState {
     fn draw_statusbar_left(&self, ui: &mut Ui, waves: Option<&WaveData>) {
         if let Some(waves) = waves {
             ui.label(waves.source.to_string());
+            if let Some(idx) = self.user.selected_server_file_index {
+                self.user.surver_file_infos.as_ref().map(|infos| {
+                    infos.get(idx).map_or((), |file| {
+                        ui.label(format!(" | {}", file.filename));
+                    })
+                });
+            }
             if let Some(datetime) = waves.inner.metadata().date {
-                ui.add_space(STATUS_SPACING);
-                ui.label(format!("Generated: {datetime}"));
+                ui.label(format!(" | generated: {datetime}"));
             }
         }
 

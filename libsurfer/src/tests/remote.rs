@@ -120,7 +120,7 @@ snapshot_ui_remote!(
     multiple_files_open_second,
     ["examples/counter.vcd", "examples/counter2.vcd"],
     [
-        Message::LoadAndSetSurverFileIndex(Some(1), LoadOptions::Clear),
+        Message::LoadSurverFileByIndex(Some(1), LoadOptions::Clear),
         Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
         Message::AddScope(ScopeRef::from_strs(&["tb", "dut"]), false),
         Message::SetToolbarVisible(true),
