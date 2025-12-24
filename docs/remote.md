@@ -2,13 +2,17 @@
 
 It is possible to run a remote Surfer server, called Surver, on a different computer and then connect to that computer to avoid downloading/copying large waveform files. Only the requested information will be transferred.
 
-<mark>Note that this is done using plain http, so absolutely no security is provided for the access or transmission, apart from having to provide the correct token, which is also transmitted using plain http.</mark>
+The recommended way is to use an ssh tunnel to secure the connection. It is described how to set this up when you start Surver.
+
+> [!WARNING]
+> If an ssh tunnel is not used, this is done using plain http, so absolutely no security is provided for the access or transmission, apart from having to provide the correct token, which is also transmitted using plain http.
 
 ## Surver
 
 There is a stand-alone binary, *Surver*, that can be compiled, resulting in a much smaller binary and more likely to succeed on systems where Surfer may be hard to install due to GUI dependencies not being installed etc.
 
-<mark>There is basically no point in running `surfer server`, as running `surver` does not have any drawbacks. Most likely, support for running Surfer in server mode will be removed and only Surver can be used.</mark>
+> [!tip]
+> There is basically no point in running `surfer server`, as running `surver` does not have any drawbacks. Most likely, support for running Surfer in server mode will be removed and only Surver can be used.</mark>
 
 ## Using remote mode
 
@@ -65,3 +69,6 @@ surfer server --help
 ```
 
 which will print a similar set of options.
+
+> [!caution]
+> Using `--bind-address` and accessing the connection directly is not secure. This should only be done in a local network.

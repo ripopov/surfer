@@ -432,7 +432,7 @@ impl SystemState {
                         if !parameters.is_empty() {
                             egui::collapsing_header::CollapsingState::load_with_default_open(
                                 ui.ctx(),
-                                egui::Id::new(&scope).with("__surfer_parameters"),
+                                egui::Id::new(scope).with("__surfer_parameters"),
                                 false,
                             )
                             .show_header(ui, |ui| {

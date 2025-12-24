@@ -43,7 +43,7 @@ impl BasicTranslator<VarId, ScopeId> for InstructionTranslator {
     }
 
     fn translates(&self, variable: &VariableMeta) -> Result<TranslationPreference> {
-        check_single_wordlength(variable.num_bits, self.num_bits as u32)
+        check_single_wordlength(variable.num_bits, self.num_bits)
     }
 }
 

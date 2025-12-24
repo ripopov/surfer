@@ -418,15 +418,13 @@ impl SystemState {
                                             file_index,
                                         );
                                     }
+                                } else if force_switch {
+                                    // We started Surfer with a Surver URL as argument, so request status
+                                    get_server_status(sender.clone(), url.clone(), 0);
                                 } else {
-                                    if force_switch {
-                                        // We started Surfer with a Surver URL as argument, so request status
-                                        get_server_status(sender.clone(), url.clone(), 0);
-                                    } else {
-                                        warn!(
-                                            "Cannot reload from surver instance without a selected file index"
-                                        );
-                                    }
+                                    warn!(
+                                        "Cannot reload from surver instance without a selected file index"
+                                    );
                                 }
                             }
                         }

@@ -46,13 +46,13 @@ impl SystemState {
     fn draw_statusbar_left(&self, ui: &mut Ui, waves: Option<&WaveData>) {
         if let Some(waves) = waves {
             ui.label(waves.source.to_string());
-            if let Some(idx) = self.user.selected_server_file_index {
-                self.user.surver_file_infos.as_ref().map(|infos| {
-                    infos.get(idx).map_or((), |file| {
-                        ui.separator();
-                        ui.label(&file.filename);
-                    })
-                });
+            if let Some(idx) = self.user.selected_server_file_index
+                && let Some(infos) = self.user.surver_file_infos.as_ref()
+            {
+                infos.get(idx).map_or((), |file| {
+                    ui.separator();
+                    ui.label(&file.filename);
+                })
             }
             if let Some(datetime) = waves.inner.metadata().date {
                 ui.separator();
