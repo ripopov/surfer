@@ -94,7 +94,7 @@ tokio = { workspace = true, features = ["sync"] }
 wasm-bindgen = "0.2.91"
 wasm-bindgen-futures.workspace = true
 web-sys = { version = "= 0.3.83", features = ["Location", "UrlSearchParams"] }
-tracing-wasm.workspace = true
+wasm-tracing.workspace = true
 
 [dev-dependencies]
 egui_skia_renderer = { git = "https://gitlab.com/oscargus/egui_skia_renderer.git", rev = "279dfddcc8f4982309935d368827019e9736dc89" }

@@ -305,12 +305,16 @@ mod main_impl {
 mod main_impl {
     use eframe::wasm_bindgen::JsCast;
     use eframe::web_sys;
+    use libsurfer::logs;
     use libsurfer::wasm_api::WebHandle;
 
     // Calling main is not the intended way to start surfer, instead, it should be
     // started by `wasm_api::WebHandle`
     pub(crate) fn main() -> eyre::Result<()> {
         simple_eyre::install()?;
+
+        logs::start_logging()?;
+
         let document = web_sys::window()
             .expect("No window")
             .document()

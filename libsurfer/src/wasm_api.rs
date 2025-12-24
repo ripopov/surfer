@@ -69,8 +69,6 @@ impl WebHandle {
     #[allow(clippy::new_without_default)]
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        tracing_wasm::set_as_global_default();
-
         wasm_panic::set_once();
 
         Self {

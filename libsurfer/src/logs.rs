@@ -158,3 +158,21 @@ pub fn start_logging() -> Result<()> {
 
     Ok(())
 }
+
+/// Starts the logging and error handling. Can be used by unittests to get more insights.
+#[cfg(target_arch = "wasm32")]
+pub fn start_logging() -> Result<()> {
+    use tracing_subscriber::{Registry, fmt, layer::SubscriberExt};
+    use wasm_tracing::WasmLayer;
+
+    let filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    let subscriber = Registry::default()
+        .with(fmt::layer().without_time().with_filter(filter.clone()))
+        .with(WasmLayer::default())
+        .with(EguiLogger {}.with_filter(filter));
+
+    tracing::subscriber::set_global_default(subscriber).expect("unable to set global subscriber");
+
+    Ok(())
+}
