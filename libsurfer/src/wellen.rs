@@ -727,7 +727,7 @@ fn convert_variable_value(value: wellen::SignalValue) -> VariableValue {
             )
         }
         wellen::SignalValue::String(value) => VariableValue::String(value.to_string()),
-        wellen::SignalValue::Real(value) => VariableValue::String(format!("{value}")),
+        wellen::SignalValue::Real(value) => VariableValue::BigUint(BigUint::from(value.to_bits())),
         wellen::SignalValue::Event => VariableValue::String("Event".to_string()),
     }
 }

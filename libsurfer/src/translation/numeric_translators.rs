@@ -6,8 +6,9 @@ use half::{bf16, f16};
 use num::{BigUint, One};
 use softposit::{P8E0, P16E1, P32E2, Q8E0, Q16E1};
 use surfer_translation_types::{
-    BasicTranslator, TranslationResult, Translator, ValueKind, ValueRepr, VariableInfo,
-    VariableMeta, VariableValue, translates_all_bit_types,
+    BasicTranslator, TranslationResult, Translator, ValueKind, ValueRepr, VariableEncoding,
+    VariableInfo, VariableMeta, VariableValue, biguint_to_f64, parse_value_to_numeric,
+    translates_all_bit_types,
 };
 
 use super::{TranslationPreference, check_single_wordlength};
@@ -23,11 +24,11 @@ fn shortest_float_representation<T: std::fmt::LowerExp + std::fmt::Display>(v: T
 /// `biguint_translator`. If `value` contains other values such as X, Z etc. the result
 /// is the corresponding `ValueKind`
 fn translate_numeric(
-    biguint_translator: impl Fn(BigUint) -> String,
+    biguint_translator: impl Fn(&BigUint) -> String,
     value: &VariableValue,
 ) -> (String, ValueKind) {
-    match value.clone().parse_biguint() {
-        Ok(v) => (biguint_translator(v), ValueKind::Normal),
+    match value.parse_biguint() {
+        Ok(v) => (biguint_translator(&v), ValueKind::Normal),
         Err((v, k)) => (v, k),
     }
 }
@@ -41,6 +42,10 @@ impl BasicTranslator<VarId, ScopeId> for UnsignedTranslator {
 
     fn basic_translate(&self, _: u32, v: &VariableValue) -> (String, ValueKind) {
         translate_numeric(|v| v.to_string(), v)
+    }
+
+    fn basic_translate_numeric(&self, _num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, biguint_to_f64))
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -60,7 +65,19 @@ impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
     }
 
     fn basic_translate(&self, num_bits: u32, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(|val| compute_signed_value(&val, num_bits), v)
+        translate_numeric(|val| compute_signed_value(val, num_bits), v)
+    }
+
+    fn basic_translate_numeric(&self, num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| {
+            let signweight = BigUint::one() << (num_bits - 1);
+            if v < &signweight {
+                biguint_to_f64(v)
+            } else {
+                let v2 = (&signweight << 1) - v;
+                -biguint_to_f64(&v2)
+            }
+        }))
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -101,6 +118,12 @@ impl BasicTranslator<VarId, ScopeId> for SinglePrecisionTranslator {
         )
     }
 
+    fn basic_translate_numeric(&self, _num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| {
+            f64::from(f32::from_bits(v.iter_u32_digits().next().unwrap_or(0)))
+        }))
+    }
+
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 32)
     }
@@ -122,8 +145,17 @@ impl BasicTranslator<VarId, ScopeId> for DoublePrecisionTranslator {
             v,
         )
     }
+    fn basic_translate_numeric(&self, _num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| {
+            f64::from_bits(v.iter_u64_digits().next().unwrap_or(0))
+        }))
+    }
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        check_single_wordlength(variable.num_bits, 64)
+        if variable.encoding == VariableEncoding::Real {
+            Ok(TranslationPreference::Prefer)
+        } else {
+            check_single_wordlength(variable.num_bits, 64)
+        }
     }
 }
 
@@ -172,6 +204,13 @@ impl BasicTranslator<VarId, ScopeId> for HalfPrecisionTranslator {
             v,
         )
     }
+    fn basic_translate_numeric(&self, _num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| {
+            f64::from(f16::from_bits(
+                v.iter_u32_digits().next().unwrap_or(0) as u16
+            ))
+        }))
+    }
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 16)
     }
@@ -192,6 +231,13 @@ impl BasicTranslator<VarId, ScopeId> for BFloat16Translator {
             },
             v,
         )
+    }
+    fn basic_translate_numeric(&self, _num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| {
+            f64::from(bf16::from_bits(
+                v.iter_u32_digits().next().unwrap_or(0) as u16
+            ))
+        }))
     }
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 16)
@@ -215,6 +261,12 @@ impl BasicTranslator<VarId, ScopeId> for Posit32Translator {
             },
             v,
         )
+    }
+
+    fn basic_translate_numeric(&self, _num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| {
+            P32E2::from_bits(v.iter_u32_digits().next().unwrap_or(0)).into()
+        }))
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -241,6 +293,12 @@ impl BasicTranslator<VarId, ScopeId> for Posit16Translator {
         )
     }
 
+    fn basic_translate_numeric(&self, _num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| {
+            P16E1::from_bits(v.iter_u32_digits().next().unwrap_or(0) as u16).into()
+        }))
+    }
+
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 16)
     }
@@ -263,6 +321,12 @@ impl BasicTranslator<VarId, ScopeId> for Posit8Translator {
             },
             v,
         )
+    }
+
+    fn basic_translate_numeric(&self, _num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| {
+            P8E0::from_bits(v.iter_u32_digits().next().unwrap_or(0) as u8).into()
+        }))
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -289,6 +353,13 @@ impl BasicTranslator<VarId, ScopeId> for PositQuire8Translator {
         )
     }
 
+    fn basic_translate_numeric(&self, _num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| {
+            let q = Q8E0::from_bits(v.iter_u32_digits().next().unwrap_or(0));
+            P8E0::from(q).into()
+        }))
+    }
+
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 32)
     }
@@ -306,16 +377,22 @@ impl BasicTranslator<VarId, ScopeId> for PositQuire16Translator {
             |v| {
                 let mut digits = v.iter_u64_digits();
                 let lsb = digits.next().unwrap_or(0);
-                let msb = if digits.len() > 0 {
-                    digits.next().unwrap_or(0)
-                } else {
-                    0
-                };
+                let msb = digits.next().unwrap_or(0);
                 let val = u128::from(lsb) | (u128::from(msb) << 64);
-                format!("{p}", p = Q16E1::from_bits(val))
+                format!("{}", Q16E1::from_bits(val))
             },
             v,
         )
+    }
+
+    fn basic_translate_numeric(&self, _num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| {
+            let mut digits = v.iter_u64_digits();
+            let lsb = digits.next().unwrap_or(0);
+            let msb = digits.next().unwrap_or(0);
+            let val = u128::from(lsb) | (u128::from(msb) << 64);
+            P16E1::from(Q16E1::from_bits(val)).into()
+        }))
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -323,29 +400,61 @@ impl BasicTranslator<VarId, ScopeId> for PositQuire16Translator {
     }
 }
 
+/// Format an f64 value as a string for FP8 display.
+///
+/// Handles special cases: NaN, infinity (with sign), and signed zero.
+/// Normal values use the shortest representation (decimal or scientific).
+fn format_fp8_value(v: f64) -> String {
+    if v.is_nan() {
+        "NaN".to_string()
+    } else if v.is_infinite() {
+        if v.is_sign_negative() {
+            "-∞".to_string()
+        } else {
+            "∞".to_string()
+        }
+    } else if v == 0.0 {
+        if v.is_sign_negative() {
+            "-0".to_string()
+        } else {
+            "0".to_string()
+        }
+    } else {
+        shortest_float_representation(v as f32)
+    }
+}
+
+/// Decode u8 as 8-bit float with five exponent bits and two mantissa bits, returning f64.
 #[allow(clippy::excessive_precision)]
-/// Decode u8 as 8-bit float with five exponent bits and two mantissa bits
-fn decode_e5m2(v: u8) -> String {
+fn decode_e5m2_f64(v: u8) -> f64 {
     let mant = v & 3;
     let exp = (v >> 2) & 31;
-    let sign: i8 = 1 - ((v >> 6) & 2) as i8; // 1 - 2*signbit
+    let sign: f64 = if (v >> 7) != 0 { -1.0 } else { 1.0 };
     match (exp, mant) {
-        (31, 0) => "∞".to_string(),
-        (31, ..) => "NaN".to_string(),
-        (0, 0) => {
-            if sign == -1 {
-                "-0".to_string()
-            } else {
-                "0".to_string()
-            }
-        }
-        (0, ..) => shortest_float_representation(
-            f32::from(sign * mant as i8) * 0.0000152587890625f32, // 0.0000152587890625 = 2^-16
-        ),
-        _ => shortest_float_representation(
-            f32::from(sign * (4 + mant as i8)) * 2.0f32.powi(i32::from(exp) - 17), // 17 = 15 (bias) + 2 (mantissa bits)
-        ),
+        (31, 0) => sign * f64::INFINITY,
+        (31, ..) => f64::NAN,
+        (0, 0) => sign * 0.0,
+        (0, ..) => sign * f64::from(mant) * 0.0000152587890625f64, // 2^-16
+        _ => sign * f64::from(4 + mant) * 2.0f64.powi(i32::from(exp) - 17),
     }
+}
+
+/// Decode u8 as 8-bit float with four exponent bits and three mantissa bits, returning f64.
+fn decode_e4m3_f64(v: u8) -> f64 {
+    let mant = v & 7;
+    let exp = (v >> 3) & 15;
+    let sign: f64 = if (v >> 7) != 0 { -1.0 } else { 1.0 };
+    match (exp, mant) {
+        (15, 7) => f64::NAN,
+        (0, 0) => sign * 0.0,
+        (0, ..) => sign * f64::from(mant) * 0.001953125f64, // 2^-9
+        _ => sign * f64::from(8 + mant) * 2.0f64.powi(i32::from(exp) - 10),
+    }
+}
+
+/// Decode u8 as 8-bit float with five exponent bits and two mantissa bits.
+fn decode_e5m2(v: u8) -> String {
+    format_fp8_value(decode_e5m2_f64(v))
 }
 
 pub struct E5M2Translator {}
@@ -362,30 +471,20 @@ impl BasicTranslator<VarId, ScopeId> for E5M2Translator {
         )
     }
 
+    fn basic_translate_numeric(&self, _num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| {
+            decode_e5m2_f64(v.iter_u32_digits().next().unwrap_or(0) as u8)
+        }))
+    }
+
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 8)
     }
 }
 
-/// Decode u8 as 8-bit float with four exponent bits and three mantissa bits
+/// Decode u8 as 8-bit float with four exponent bits and three mantissa bits.
 fn decode_e4m3(v: u8) -> String {
-    let mant = v & 7;
-    let exp = (v >> 3) & 15;
-    let sign: i8 = 1 - ((v >> 6) & 2) as i8; // 1 - 2*signbit
-    match (exp, mant) {
-        (15, 7) => "NaN".to_string(),
-        (0, 0) => {
-            if sign == -1 {
-                "-0".to_string()
-            } else {
-                "0".to_string()
-            }
-        }
-        (0, ..) => shortest_float_representation(f32::from(sign * mant as i8) * 0.001953125f32), // 0.001953125 = 2^-9
-        _ => shortest_float_representation(
-            f32::from(sign * (8 + mant) as i8) * 2.0f32.powi(i32::from(exp) - 10), // 10 = 7 (bias) + 3 (mantissa bits)
-        ),
-    }
+    format_fp8_value(decode_e4m3_f64(v))
 }
 
 pub struct E4M3Translator {}
@@ -400,6 +499,12 @@ impl BasicTranslator<VarId, ScopeId> for E4M3Translator {
             |v| decode_e4m3(v.iter_u32_digits().next().unwrap_or(0) as u8),
             v,
         )
+    }
+
+    fn basic_translate_numeric(&self, _num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| {
+            decode_e4m3_f64(v.iter_u32_digits().next().unwrap_or(0) as u8)
+        }))
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -420,7 +525,7 @@ impl Translator<VarId, ScopeId, Message> for UnsignedFixedPointTranslator {
         value: &VariableValue,
     ) -> Result<TranslationResult> {
         let (string, value_kind) = if let Some(idx) = &variable.index {
-            translate_numeric(|v| big_uint_to_ufixed(&v, -idx.lsb), value)
+            translate_numeric(|v| big_uint_to_ufixed(v, -idx.lsb), value)
         } else {
             translate_numeric(|v| v.to_string(), value)
         };
@@ -458,7 +563,7 @@ impl Translator<VarId, ScopeId, Message> for SignedFixedPointTranslator {
     ) -> Result<TranslationResult> {
         let (string, value_kind) = if let Some(idx) = &variable.index {
             translate_numeric(
-                |v| big_uint_to_sfixed(&v, u64::from(variable.num_bits.unwrap_or(0)), -idx.lsb),
+                |v| big_uint_to_sfixed(v, u64::from(variable.num_bits.unwrap_or(0)), -idx.lsb),
                 value,
             )
         } else {
@@ -631,7 +736,7 @@ mod test {
             E5M2Translator {}
                 .basic_translate(8, &VariableValue::BigUint(BigUint::from(0b11111100u8)))
                 .0,
-            "∞"
+            "-∞"
         );
     }
 

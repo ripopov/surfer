@@ -7,9 +7,12 @@ use num::BigUint;
 use serde::{Deserialize, Serialize};
 use std::sync::mpsc::Sender;
 
+use std::borrow::Cow;
+
 use crate::result::TranslationResult;
 use crate::{
-    TranslationPreference, ValueKind, VariableEncoding, VariableInfo, VariableMeta, VariableValue,
+    NAN_HIGHIMP, NAN_UNDEF, TranslationPreference, ValueKind, ValueRepr, VariableEncoding,
+    VariableInfo, VariableMeta, VariableValue, parse_numeric_string,
 };
 
 #[cfg_attr(feature = "wasm_plugins", derive(FromBytes, ToBytes))]
@@ -87,6 +90,37 @@ pub trait Translator<VarId, ScopeId, Message>: Send + Sync {
     /// Return [`TranslationPreference`] based on if the translator can handle this variable.
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference>;
 
+    /// Translate a variable value to a numeric f64 for analog rendering.
+    ///
+    /// Returns [`NAN_UNDEF`] for undefined values and [`NAN_HIGHIMP`] for high-impedance.
+    /// The default implementation calls [`Self::translate`] and parses the result.
+    /// Translators that produce numeric output should override this for
+    /// efficient analog signal rendering without string round-trip.
+    fn translate_numeric(
+        &self,
+        variable: &VariableMeta<VarId, ScopeId>,
+        value: &VariableValue,
+    ) -> Option<f64> {
+        let translation = self.translate(variable, value).ok()?;
+
+        // Check ValueKind first - if it's HighImp or Undef, return appropriate NaN
+        if matches!(translation.kind, ValueKind::HighImp) {
+            return Some(NAN_HIGHIMP);
+        }
+        if matches!(translation.kind, ValueKind::Undef) {
+            return Some(NAN_UNDEF);
+        }
+
+        // Try to parse as numeric value
+        let value_str: Cow<str> = match &translation.val {
+            ValueRepr::Bit(c) => Cow::Owned(c.to_string()),
+            ValueRepr::Bits(_, s) => Cow::Borrowed(s),
+            ValueRepr::String(s) => Cow::Borrowed(s),
+            _ => return None,
+        };
+        parse_numeric_string(&value_str, &self.name())
+    }
+
     /// By default translators are stateless, but if they need to reload, they can
     /// do by defining this method.
     /// Long running translators should run the reloading in the background using `perform_work`
@@ -117,6 +151,25 @@ pub trait BasicTranslator<VarId, ScopeId>: Send + Sync {
     /// If the translator require [`VariableMeta`] information to perform the translation,
     /// use the more general [`Translator`] instead.
     fn basic_translate(&self, num_bits: u32, value: &VariableValue) -> (String, ValueKind);
+
+    /// Translate a variable value to a numeric f64 for analog rendering.
+    ///
+    /// Returns [`NAN_UNDEF`] for undefined values and [`NAN_HIGHIMP`] for high-impedance.
+    /// The default implementation calls [`Self::basic_translate`] and parses the result.
+    /// Translators that produce numeric output should override this for
+    /// efficient analog signal rendering without string round-trip.
+    fn basic_translate_numeric(&self, num_bits: u32, value: &VariableValue) -> Option<f64> {
+        let (val, kind) = self.basic_translate(num_bits, value);
+
+        // Check ValueKind first - if it's HighImp or Undef, return appropriate NaN
+        match kind {
+            ValueKind::HighImp => return Some(NAN_HIGHIMP),
+            ValueKind::Undef => return Some(NAN_UNDEF),
+            _ => {}
+        }
+
+        parse_numeric_string(&val, &self.name())
+    }
 
     /// Return [`TranslationPreference`] based on if the translator can handle this variable.
     ///
@@ -161,12 +214,15 @@ fn map_vector_variable(s: &str) -> NumberParseResult {
 }
 
 impl VariableValue {
-    pub fn parse_biguint(self) -> Result<BigUint, (String, ValueKind)> {
+    /// Parse into a [`BigUint`], returning an error with `ValueKind` for X/Z values.
+    ///
+    /// Returns `Cow::Borrowed` for `BigUint` values and `Cow::Owned` for parsed strings.
+    pub fn parse_biguint(&self) -> Result<Cow<'_, BigUint>, (String, ValueKind)> {
         match self {
-            VariableValue::BigUint(v) => Ok(v),
-            VariableValue::String(s) => match map_vector_variable(&s) {
+            VariableValue::BigUint(v) => Ok(Cow::Borrowed(v)),
+            VariableValue::String(s) => match map_vector_variable(s) {
                 NumberParseResult::Unparsable(v, k) => Err((v, k)),
-                NumberParseResult::Numerical(v) => Ok(v),
+                NumberParseResult::Numerical(v) => Ok(Cow::Owned(v)),
             },
         }
     }

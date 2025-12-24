@@ -147,6 +147,19 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
             AnyTranslator::Python(_) => None,
         }
     }
+
+    fn translate_numeric(&self, variable: &VariableMeta, value: &VariableValue) -> Option<f64> {
+        match self {
+            AnyTranslator::Full(t) => t.translate_numeric(variable, value),
+            AnyTranslator::Basic(t) => {
+                t.basic_translate_numeric(variable.num_bits.unwrap_or(0), value)
+            }
+            #[cfg(feature = "python")]
+            AnyTranslator::Python(t) => {
+                t.basic_translate_numeric(variable.num_bits.unwrap_or(0), value)
+            }
+        }
+    }
 }
 
 /// Look inside the config directory and inside "$(cwd)/.surfer" for user-defined decoders
@@ -690,10 +703,7 @@ impl Translator<VarId, ScopeId, Message> for StringTranslator {
     }
 
     fn translates(&self, variable: &VariableMeta) -> Result<TranslationPreference> {
-        // f64 (i.e. "real") values are treated as strings for now
-        if variable.encoding == VariableEncoding::String
-            || variable.encoding == VariableEncoding::Real
-        {
+        if variable.encoding == VariableEncoding::String {
             Ok(TranslationPreference::Prefer)
         } else {
             Ok(TranslationPreference::No)

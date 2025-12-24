@@ -13,7 +13,7 @@ use derive_more::Display;
 use ecolor::Color32;
 #[cfg(feature = "wasm_plugins")]
 use extism_convert::{FromBytes, Json, ToBytes};
-use num::BigUint;
+use num::{BigUint, ToPrimitive};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -34,6 +34,77 @@ pub use crate::variable_ref::VariableRef;
 #[cfg_attr(feature = "wasm_plugins", encoding(Json))]
 #[derive(Deserialize, Serialize)]
 pub struct PluginConfig(pub HashMap<String, String>);
+
+/// Quiet NaN representing undefined (X) values in analog signals.
+pub const NAN_UNDEF: f64 = f64::from_bits(0x7FF8_0000_0000_0000_u64);
+
+/// Quiet NaN representing high-impedance (Z) values in analog signals.
+pub const NAN_HIGHIMP: f64 = f64::from_bits(0x7FF8_0000_0000_0001_u64);
+
+/// Check NaN payload to determine if it represents `HighImp`.
+#[must_use]
+pub fn is_nan_highimp(value: f64) -> bool {
+    value.to_bits() == NAN_HIGHIMP.to_bits()
+}
+
+/// Convert [`BigUint`] to f64 efficiently.
+///
+/// For values that fit in u64, uses direct conversion.
+/// For larger values, falls back to `ToPrimitive::to_f64()`.
+#[must_use]
+pub fn biguint_to_f64(v: &BigUint) -> f64 {
+    v.to_u64()
+        .map(|x| x as f64)
+        .or_else(|| v.to_f64())
+        .unwrap_or(f64::INFINITY)
+}
+
+/// Parse a translated string value into a numeric f64.
+///
+/// Uses the translator name to determine parsing strategy:
+/// - Names containing "hex" parse as hexadecimal
+/// - Names containing "bin" parse as binary
+/// - Otherwise tries decimal, with hex fallback
+///
+/// Returns `None` if the string cannot be parsed as a number.
+#[must_use]
+pub fn parse_numeric_string(s: &str, translator_name: &str) -> Option<f64> {
+    let s = s.trim();
+    let translator_lower = translator_name.to_lowercase();
+
+    if translator_lower.contains("hex") {
+        let hex_str = s
+            .strip_prefix("0x")
+            .or_else(|| s.strip_prefix("0X"))
+            .unwrap_or(s);
+        BigUint::parse_bytes(hex_str.as_bytes(), 16).map(|v| biguint_to_f64(&v))
+    } else if translator_lower.contains("bin") {
+        let bin_str = s
+            .strip_prefix("0b")
+            .or_else(|| s.strip_prefix("0B"))
+            .unwrap_or(s);
+        BigUint::parse_bytes(bin_str.as_bytes(), 2).map(|v| biguint_to_f64(&v))
+    } else {
+        if let Ok(v) = s.parse::<f64>() {
+            return Some(v);
+        }
+        // Fallback: try parsing as hex for non-decimal strings
+        BigUint::parse_bytes(s.as_bytes(), 16).map(|v| biguint_to_f64(&v))
+    }
+}
+
+/// Parse [`VariableValue`] to f64 using a conversion function.
+///
+/// Handles X/Z values by returning [`NAN_UNDEF`]/[`NAN_HIGHIMP`].
+/// For valid numeric values, applies the provided conversion function.
+#[must_use]
+pub fn parse_value_to_numeric(value: &VariableValue, to_f64: impl FnOnce(&BigUint) -> f64) -> f64 {
+    match value.parse_biguint() {
+        Ok(v) => to_f64(&v),
+        Err((_, ValueKind::HighImp)) => NAN_HIGHIMP,
+        Err((_, _)) => NAN_UNDEF,
+    }
+}
 
 /// Turn vector variable string into name and corresponding color if it
 /// includes values other than 0 and 1. If only 0 and 1, return None.
@@ -314,7 +385,7 @@ pub enum VariableEncoding {
 
 #[cfg(test)]
 mod tests {
-    use super::{ValueKind, check_vector_variable, extend_string};
+    use super::{ValueKind, check_vector_variable, extend_string, parse_numeric_string};
 
     #[test]
     fn binary_only_returns_none() {
@@ -432,5 +503,88 @@ mod tests {
 
         // Empty input yields empty extension as there is no leading char to guide
         assert_eq!(extend_string("", 5), "");
+    }
+
+    // ---------------- parse_numeric_string tests ----------------
+
+    #[test]
+    fn parse_numeric_string_hex() {
+        assert_eq!(parse_numeric_string("f9", "Hex"), Some(249.0));
+        assert_eq!(parse_numeric_string("ca", "Hexadecimal"), Some(202.0));
+        assert_eq!(parse_numeric_string("80", "Hex"), Some(128.0));
+        assert_eq!(parse_numeric_string("10", "Hex"), Some(16.0));
+        assert_eq!(parse_numeric_string("0x10", "Hex"), Some(16.0));
+        assert_eq!(parse_numeric_string("0xFF", "Hexadecimal"), Some(255.0));
+    }
+
+    #[test]
+    fn parse_numeric_string_decimal() {
+        assert_eq!(parse_numeric_string("123", "Unsigned"), Some(123.0));
+        assert_eq!(parse_numeric_string("123.45", "Float"), Some(123.45));
+        assert_eq!(parse_numeric_string("80", "Unsigned"), Some(80.0));
+        assert_eq!(parse_numeric_string("10", "Signed"), Some(10.0));
+        assert_eq!(parse_numeric_string("1.5e3", "Float"), Some(1500.0));
+        assert_eq!(parse_numeric_string("-3.14e-2", "Float"), Some(-0.0314));
+    }
+
+    #[test]
+    fn parse_numeric_string_binary() {
+        assert_eq!(parse_numeric_string("1010", "Binary"), Some(10.0));
+        assert_eq!(parse_numeric_string("0b1010", "Binary"), Some(10.0));
+        assert_eq!(parse_numeric_string("11111111", "Bin"), Some(255.0));
+    }
+
+    #[test]
+    fn parse_numeric_string_fallback_to_hex() {
+        // Fallback to hex for non-decimal strings
+        assert_eq!(parse_numeric_string("f9", "Unsigned"), Some(249.0));
+        assert_eq!(parse_numeric_string("ca", "Signed"), Some(202.0));
+    }
+
+    #[test]
+    fn parse_numeric_string_invalid() {
+        assert_eq!(parse_numeric_string("xyz", "Hex"), None);
+        assert_eq!(parse_numeric_string("invalid", "Unsigned"), None);
+        assert_eq!(parse_numeric_string("12", "Binary"), None);
+    }
+
+    #[test]
+    fn parse_numeric_string_large_values() {
+        // 128-bit max value in hex: 2^128 - 1 = 340282366920938463463374607431768211455
+        let hex_128bit = "ffffffffffffffffffffffffffffffff";
+        assert_eq!(
+            parse_numeric_string(hex_128bit, "Hexadecimal"),
+            Some(3.402823669209385e38)
+        );
+
+        // 256-bit max value in hex: 2^256 - 1
+        let hex_256bit = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+        assert_eq!(
+            parse_numeric_string(hex_256bit, "Hex"),
+            Some(1.157920892373162e77)
+        );
+
+        // Large binary value (128 bits): same as hex_128bit
+        let bin_128bit = "1111111111111111111111111111111111111111111111111111111111111111\
+                          1111111111111111111111111111111111111111111111111111111111111111";
+        assert_eq!(
+            parse_numeric_string(bin_128bit, "Binary"),
+            Some(3.402823669209385e38)
+        );
+
+        // 64-bit max value in hex: 2^64 - 1 = 18446744073709551615
+        let hex_64bit = "ffffffffffffffff";
+        assert_eq!(
+            parse_numeric_string(hex_64bit, "Hexadecimal"),
+            Some(1.8446744073709552e19)
+        );
+
+        // Hex and Unsigned should produce same result for same numeric value
+        // 128-bit value as decimal string (from Unsigned translator)
+        let decimal_128bit = "340282366920938463463374607431768211455";
+        assert_eq!(
+            parse_numeric_string(decimal_128bit, "Unsigned"),
+            Some(3.402823669209385e38)
+        );
     }
 }

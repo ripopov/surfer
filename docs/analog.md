@@ -56,11 +56,7 @@ Non-numeric values are rendered as highlighted regions rather than plotted point
 
 - To improve performance, analog rendering is built on top of a cache that stores pre-computed signal ranges and min/max values.
 - After the cache is built, analog rendering is effectively as fast as digital rendering; frames reuse cached data and pay only the per-frame draw cost.
-- Cache construction is the expensive step. Profiling shows the time is dominated by parsing numeric strings produced by translators.
-- Real-valued signals currently incur a double conversion (f64 → string → f64) in the value pipeline:
-  `wellen::SignalValue::Real(value) => VariableValue::String(format!("{value}"))`
-  This adds overhead and could be optimized by threading `f64` values through without formatting.
-  - This is a subject for future optimizations: Translators should be refactored to provide a fast binary to numeric conversion.
+- Translators implement `translate_numeric()` which returns f64 directly, avoiding string parsing overhead.
 
 ---
 

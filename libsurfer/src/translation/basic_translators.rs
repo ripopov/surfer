@@ -6,7 +6,7 @@ use itertools::Itertools;
 use num::{One, Zero};
 use surfer_translation_types::{
     BasicTranslator, VariableValue, check_vector_variable, extend_string,
-    kind_for_binary_representation,
+    kind_for_binary_representation, parse_value_to_numeric,
 };
 
 /// Splits a string into groups of `n` characters.
@@ -307,6 +307,10 @@ impl BasicTranslator<VarId, ScopeId> for NumberOfOnesTranslator {
             ),
         }
     }
+
+    fn basic_translate_numeric(&self, _num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| v.count_ones() as f64))
+    }
 }
 
 pub struct TrailingOnesTranslator {}
@@ -328,6 +332,10 @@ impl BasicTranslator<VarId, ScopeId> for TrailingOnesTranslator {
                 kind_for_binary_representation(s),
             ),
         }
+    }
+
+    fn basic_translate_numeric(&self, _num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| v.trailing_ones() as f64))
     }
 }
 
@@ -357,6 +365,12 @@ impl BasicTranslator<VarId, ScopeId> for TrailingZerosTranslator {
             ),
         }
     }
+
+    fn basic_translate_numeric(&self, num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| {
+            v.trailing_zeros().unwrap_or(u64::from(num_bits)) as f64
+        }))
+    }
 }
 
 pub struct LeadingOnesTranslator {}
@@ -381,6 +395,12 @@ impl BasicTranslator<VarId, ScopeId> for LeadingOnesTranslator {
                 kind_for_binary_representation(s),
             ),
         }
+    }
+
+    fn basic_translate_numeric(&self, num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| {
+            leading_ones(v, u64::from(num_bits)) as f64
+        }))
     }
 }
 
@@ -407,6 +427,23 @@ impl BasicTranslator<VarId, ScopeId> for LeadingZerosTranslator {
             ),
         }
     }
+
+    fn basic_translate_numeric(&self, num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| {
+            u64::from(num_bits).saturating_sub(v.bits()) as f64
+        }))
+    }
+}
+
+/// Counts leading ones in a BigUint value with a given bit width.
+/// Returns 0 if the value has leading zeros (i.e., `v.bits() < num_bits`).
+fn leading_ones(v: &num::BigUint, num_bits: u64) -> u64 {
+    if v.bits() < num_bits {
+        0
+    } else {
+        let mask = (num::BigUint::one() << num_bits) - 1u32;
+        num_bits.saturating_sub((mask ^ v).bits())
+    }
 }
 
 pub struct IdenticalMSBsTranslator {}
@@ -430,6 +467,15 @@ impl BasicTranslator<VarId, ScopeId> for IdenticalMSBsTranslator {
                 (count.to_string(), kind_for_binary_representation(s))
             }
         }
+    }
+
+    fn basic_translate_numeric(&self, num_bits: u32, value: &VariableValue) -> Option<f64> {
+        Some(parse_value_to_numeric(value, |v| {
+            let num_bits = u64::from(num_bits);
+            let lz = num_bits.saturating_sub(v.bits());
+            let lo = leading_ones(v, num_bits);
+            lz.max(lo) as f64
+        }))
     }
 }
 
