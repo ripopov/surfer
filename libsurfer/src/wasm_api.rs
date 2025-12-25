@@ -28,7 +28,6 @@ use crate::graphics::GrPoint;
 use crate::graphics::Graphic;
 use crate::graphics::GraphicId;
 use crate::graphics::GraphicsY;
-use crate::logs;
 use crate::setup_custom_font;
 use crate::wasm_panic;
 use crate::wave_container::VariableRefExt;

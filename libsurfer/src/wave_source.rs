@@ -9,7 +9,6 @@ use crate::async_util::{perform_async_work, perform_work};
 use crate::cxxrtl_container::CxxrtlContainer;
 use crate::file_dialog::OpenMode;
 use crate::remote::{get_hierarchy_from_server, get_server_status, server_reload};
-use crate::spawn;
 use crate::util::get_multi_extension;
 use camino::{Utf8Path, Utf8PathBuf};
 use eyre::Report;
@@ -366,7 +365,8 @@ impl SystemState {
                 let sender = self.channels.msg_sender.clone();
                 let url_ = url.clone();
                 let file_index = self.user.selected_server_file_index;
-                let task = async move {
+                info!("Loading wave from url: {url}");
+                perform_async_work(async move {
                     let maybe_response = reqwest::get(&url)
                         .map(|e| e.with_context(|| format!("Failed fetch download {url}")))
                         .await;
@@ -444,8 +444,7 @@ impl SystemState {
                     if let Err(e) = sender.send(msg) {
                         error!("Failed to send message: {e}");
                     }
-                };
-                spawn!(task);
+                });
 
                 self.progress_tracker =
                     Some(LoadProgress::new(LoadProgressStatus::Downloading(url_)));
@@ -700,7 +699,7 @@ impl SystemState {
                 });
             }
             LoadSignalPayload::Remote(server) => {
-                let task = async move {
+                perform_async_work(async move {
                     let res =
                         crate::remote::get_signals(server.clone(), &signals, max_url_length, 0)
                             .await
@@ -719,8 +718,7 @@ impl SystemState {
                     if let Err(e) = sender.send(msg) {
                         error!("Failed to send message: {e}");
                     }
-                };
-                spawn!(task);
+                });
             }
         }
 

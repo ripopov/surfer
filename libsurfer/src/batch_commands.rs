@@ -5,10 +5,10 @@ use tracing::{error, info, trace};
 
 use crate::{
     SystemState,
+    async_util::perform_async_work,
     command_parser::get_parser,
     fzcmd::parse_command,
     message::Message,
-    spawn,
     wave_source::{LoadProgress, LoadProgressStatus},
 };
 
@@ -132,7 +132,7 @@ impl SystemState {
     pub fn load_commands_from_url(&mut self, url: String) {
         let sender = self.channels.msg_sender.clone();
         let url_ = url.clone();
-        let task = async move {
+        perform_async_work(async move {
             let maybe_response = reqwest::get(&url)
                 .map(|e| e.with_context(|| format!("Failed fetch download {url}")))
                 .await;
@@ -159,8 +159,7 @@ impl SystemState {
             if let Err(e) = sender.send(msg) {
                 error!("Failed to send message: {e}");
             }
-        };
-        spawn!(task);
+        });
 
         self.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::Downloading(url_)));
     }
