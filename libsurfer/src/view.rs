@@ -1199,32 +1199,78 @@ impl SystemState {
                 WidgetText::LayoutJob(layout_job.into()),
             )
             .interact(Sense::drag());
-        item_label.context_menu(|ui| {
-            self.item_context_menu(field, msgs, ui, vidx);
-        });
 
-        if item_label.clicked() {
-            let focused = self.user.waves.as_ref().and_then(|w| w.focused_item);
-            let was_focused = focused == Some(vidx);
-            if was_focused {
-                msgs.push(Message::UnfocusItem);
-            } else {
-                let modifiers = ctx.input(|i| i.modifiers);
-                if modifiers.ctrl {
-                    msgs.push(Message::ToggleItemSelected(Some(vidx)));
-                } else if modifiers.shift {
+        // click can select and deselect, depending on previous selection state & modifiers
+        // with the rules:
+        // - a primary click on the single selected item will deselect it (so that there is a
+        //   way to deselect and get rid of the selection highlight)
+        // - a primary/secondary click otherwise will select just the clicked item
+        // - a secondary click on the selection will not change the selection
+        // - a click with shift added will select all items between focused and clicked
+        // - a click with control added will toggle the selection of the item
+        // - shift + control does not have special meaning
+        //
+        // We do not implement more complex behavior like the selection toggling
+        // that the windows explorer had in the past (with combined ctrl+shift)
+        if item_label.clicked() || item_label.secondary_clicked() {
+            let focused_item = self.user.waves.as_ref().and_then(|w| w.focused_item);
+            let is_focused = focused_item == Some(vidx);
+            let is_selected = self.item_is_selected(displayed_id);
+            let single_selected = self
+                .user
+                .waves
+                .as_ref()
+                .and_then(|w| {
+                    // FIXME check if this is fast
+                    let it = w.items_tree.iter_visible_selected();
+                    Some(it.count() == 1)
+                })
+                .unwrap();
+
+            let modifiers = ctx.input(|i| i.modifiers);
+            tracing::trace!(focused_item=?focused_item, is_focused=?is_focused, is_selected=?is_selected, single_selected=?single_selected, modifiers=?modifiers);
+
+            // allow us to deselect, but only do so if this is the only selected item
+            if item_label.clicked() && is_selected && single_selected {
+                msgs.push(Message::Batch(vec![
+                    Message::ItemSelectionClear,
+                    Message::UnfocusItem,
+                ]));
+                return item_label;
+            }
+
+            match (item_label.clicked(), modifiers.command, modifiers.shift) {
+                (false, false, false) if is_selected => {}
+                (_, false, false) => {
                     msgs.push(Message::Batch(vec![
                         Message::ItemSelectionClear,
-                        Message::ItemSelectRange(vidx),
-                    ]));
-                } else {
-                    msgs.push(Message::Batch(vec![
-                        Message::ItemSelectionClear,
+                        Message::SetItemSelected(vidx, true),
                         Message::FocusItem(vidx),
                     ]));
                 }
+                (_, _, true) => msgs.push(Message::Batch(vec![
+                    Message::ItemSelectRange(vidx),
+                    Message::FocusItem(vidx),
+                ])),
+                (_, true, false) => {
+                    if !is_selected {
+                        msgs.push(Message::Batch(vec![
+                            Message::SetItemSelected(vidx, true),
+                            Message::FocusItem(vidx),
+                        ]));
+                    } else if item_label.clicked() {
+                        msgs.push(Message::Batch(vec![
+                            Message::SetItemSelected(vidx, false),
+                            Message::UnfocusItem,
+                        ]))
+                    }
+                }
             }
         }
+
+        item_label.context_menu(|ui| {
+            self.item_context_menu(field, msgs, ui, vidx);
+        });
 
         item_label
     }

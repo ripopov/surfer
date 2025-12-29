@@ -278,6 +278,11 @@ struct CanvasState {
 
 impl SystemState {
     pub fn update(&mut self, message: Message) -> Option<()> {
+        if tracing::enabled!(tracing::Level::TRACE)
+            && !matches!(message, Message::CommandPromptUpdate { .. })
+        {
+            tracing::trace!("{message:?}");
+        }
         match message {
             Message::SetActiveScope(scope) => {
                 let waves = self.user.waves.as_mut()?;
