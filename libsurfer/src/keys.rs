@@ -83,6 +83,9 @@ impl SystemState {
                     (Key::B, true, false, false) => {
                         msgs.push(Message::SetSidePanelVisible(!self.show_hierarchy()));
                     }
+                    (Key::D, true, false, false) => {
+                        msgs.push(Message::AddDivider(None, None));
+                    }
                     (Key::E, true, false, false) => msgs.push(Message::GoToEnd { viewport_idx: 0 }),
                     (Key::F, true, false, false) => {
                         msgs.push(Message::ShowCommandPrompt("item_focus ".to_string(), None));
