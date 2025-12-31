@@ -252,7 +252,7 @@ impl SystemState {
                             Some((
                                 marker.idx,
                                 waves.numbered_marker_time(marker.idx),
-                                marker.marker_text(&text_color),
+                                marker.marker_text(text_color),
                             ))
                         }
                         _ => None,

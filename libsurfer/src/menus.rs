@@ -772,7 +772,7 @@ impl SystemState {
                     if self
                         .user
                         .blacklisted_translators
-                        .contains(&(path.root.clone(), translator_name.to_string()))
+                        .contains(&(path.root.clone(), (*translator_name).to_string()))
                     {
                         false
                     } else {
@@ -792,7 +792,7 @@ impl SystemState {
                             Err(e) => {
                                 msgs.push(Message::BlacklistTranslator(
                                     path.root.clone(),
-                                    translator_name.to_string(),
+                                    (*translator_name).to_string(),
                                 ));
                                 msgs.push(Message::Error(e));
                                 false

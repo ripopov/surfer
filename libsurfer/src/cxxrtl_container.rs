@@ -461,7 +461,7 @@ impl CxxrtlContainer {
                                     .map(std::string::ToString::to_string)
                                     .collect::<Vec<_>>(),
                             ),
-                            name: sp.last().unwrap().to_string(),
+                            name: (*sp.last().unwrap()).to_string(),
                             id: VarId::None,
                         },
                         v,

@@ -916,7 +916,7 @@ impl WaveData {
                         r.is_some_and(|r| {
                             r.current.is_some_and(|v| match v.1 {
                                 VariableValue::BigUint(v) => v.is_zero(),
-                                _ => false,
+                                VariableValue::String(_) => false,
                             })
                         })
                     }) {

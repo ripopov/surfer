@@ -244,7 +244,7 @@ mod main_impl {
 
         let location = info.location().unwrap();
         let msg = if let Some(msg) = info.payload().downcast_ref::<&str>() {
-            msg.to_string()
+            (*msg).to_string()
         } else if let Some(msg) = info.payload().downcast_ref::<String>() {
             msg.clone()
         } else {
@@ -264,10 +264,10 @@ mod main_impl {
             location.line(),
             location.column(),
         );
-        eprintln!("  {}", msg);
+        eprintln!("  {msg}");
         eprintln!();
         eprintln!("backtrace:");
-        eprintln!("{}", backtrace);
+        eprintln!("{backtrace}");
     }
 
     #[cfg(test)]

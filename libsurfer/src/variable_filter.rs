@@ -123,7 +123,7 @@ impl VariableFilter {
                 VariableNameFilterType::Regex => filter_str.clone(),
                 VariableNameFilterType::Start => format!("^{}", escape(&filter_str)),
                 VariableNameFilterType::Contain => escape(&filter_str),
-                _ => unreachable!(),
+                VariableNameFilterType::Fuzzy => unreachable!(),
             };
             let rebuild = (cache.regex_pattern.as_ref() != Some(&pat))
                 || cache.regex_case_insensitive != case_insensitive

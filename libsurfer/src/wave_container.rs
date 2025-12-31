@@ -187,10 +187,7 @@ impl VariableRefExt for VariableRef {
     fn from_strs(s: &[&str]) -> Self {
         Self {
             path: ScopeRef::from_strs(&s[..(s.len() - 1)]),
-            name: s
-                .last()
-                .expect("from_strs called with an empty string")
-                .to_string(),
+            name: (*s.last().expect("from_strs called with an empty string")).to_string(),
             id: VarId::default(),
         }
     }

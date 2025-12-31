@@ -272,19 +272,19 @@ pub struct DisplayedMarker {
 
 impl DisplayedMarker {
     #[must_use]
-    pub fn marker_text(&self, color: &Color32) -> WidgetText {
+    pub fn marker_text(&self, color: Color32) -> WidgetText {
         let style = Style::default();
         let mut layout_job = LayoutJob::default();
         self.rich_text(color, &style, &mut layout_job);
         WidgetText::LayoutJob(layout_job.into())
     }
 
-    pub fn rich_text(&self, color: &Color32, style: &Style, layout_job: &mut LayoutJob) {
+    pub fn rich_text(&self, color: Color32, style: &Style, layout_job: &mut LayoutJob) {
         RichText::new(format!("{idx}: ", idx = self.idx))
-            .color(*color)
+            .color(color)
             .append_to(layout_job, style, FontSelection::Default, Align::Center);
         RichText::new(self.marker_name())
-            .color(*color)
+            .color(color)
             .italics()
             .append_to(layout_job, style, FontSelection::Default, Align::Center);
     }
@@ -457,7 +457,7 @@ impl DisplayedItem {
     /// Widget displayed in variable list for the wave form, may include additional info compared to `name()`
     pub fn add_to_layout_job(
         &self,
-        color: &Color32,
+        color: Color32,
         style: &Style,
         layout_job: &mut LayoutJob,
         field: Option<&FieldRef>,
@@ -475,17 +475,19 @@ impl DisplayedItem {
                     self.name()
                 };
                 RichText::new(name)
-                    .color(*color)
+                    .color(color)
                     .line_height(Some(
                         config.layout.waveforms_line_height * self.height_scaling_factor(),
                     ))
                     .append_to(layout_job, style, FontSelection::Default, Align::Center);
             }
             DisplayedItem::TimeLine(_) | DisplayedItem::Divider(_) => {
-                RichText::new(self.name())
-                    .color(*color)
-                    .italics()
-                    .append_to(layout_job, style, FontSelection::Default, Align::Center);
+                RichText::new(self.name()).color(color).italics().append_to(
+                    layout_job,
+                    style,
+                    FontSelection::Default,
+                    Align::Center,
+                );
             }
             DisplayedItem::Marker(marker) => {
                 marker.rich_text(color, style, layout_job);
@@ -496,18 +498,18 @@ impl DisplayedItem {
                     .as_ref()
                     .unwrap_or(&placeholder.display_name);
                 RichText::new("Not available: ".to_owned() + s)
-                    .color(*color)
+                    .color(color)
                     .italics()
                     .append_to(layout_job, style, FontSelection::Default, Align::Center);
             }
             DisplayedItem::Stream(stream) => {
                 RichText::new(format!("{}{}", self.name(), "\n".repeat(stream.rows - 1)))
-                    .color(*color)
+                    .color(color)
                     .line_height(Some(config.layout.transactions_line_height))
                     .append_to(layout_job, style, FontSelection::Default, Align::Center);
             }
             DisplayedItem::Group(group) => {
-                group.rich_text(*color, style, layout_job);
+                group.rich_text(color, style, layout_job);
             }
         }
     }

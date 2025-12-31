@@ -1,5 +1,5 @@
 use crate::{
-    config::TransitionValue,
+    config::{ThemeColorPair, TransitionValue},
     dialog::{draw_open_sibling_state_file_dialog, draw_reload_waveform_dialog},
     displayed_item::DisplayedVariable,
     fzcmd::expand_command,
@@ -1099,28 +1099,27 @@ impl SystemState {
         ui: &mut Ui,
         ctx: &egui::Context,
     ) -> egui::Response {
-        let text_color = {
-            let style = ui.style_mut();
+        let color_pair = {
             if self.item_is_focused(vidx) {
-                style.visuals.selection.bg_fill = self.user.config.theme.accent_info.background;
-                self.user.config.theme.accent_info.foreground
+                &self.user.config.theme.accent_info
             } else if self.item_is_selected(displayed_id) {
-                style.visuals.selection.bg_fill =
-                    self.user.config.theme.selected_elements_colors.background;
-                self.user.config.theme.selected_elements_colors.foreground
+                &self.user.config.theme.selected_elements_colors
             } else if matches!(
                 displayed_item,
                 DisplayedItem::Variable(_) | DisplayedItem::Placeholder(_)
             ) {
-                style.visuals.selection.bg_fill =
-                    self.user.config.theme.primary_ui_color.background;
-                self.user.config.theme.primary_ui_color.foreground
+                &self.user.config.theme.primary_ui_color
             } else {
-                style.visuals.selection.bg_fill =
-                    self.user.config.theme.primary_ui_color.background;
-                self.get_item_text_color(displayed_item)
+                &ThemeColorPair {
+                    background: self.user.config.theme.primary_ui_color.background,
+                    foreground: self.get_item_text_color(displayed_item),
+                }
             }
         };
+        {
+            let style = ui.style_mut();
+            style.visuals.selection.bg_fill = color_pair.background;
+        }
 
         let mut layout_job = LayoutJob::default();
         match displayed_item {
@@ -1152,13 +1151,13 @@ impl SystemState {
                             &true_name,
                             &mut layout_job,
                             monospace_font.clone(),
-                            text_color,
+                            color_pair.foreground,
                             monospace_width,
                             available_width,
                         );
                     } else {
                         displayed_item.add_to_layout_job(
-                            &text_color,
+                            color_pair.foreground,
                             ui.style(),
                             &mut layout_job,
                             Some(field),
@@ -1167,7 +1166,7 @@ impl SystemState {
                     }
                 } else {
                     RichText::new(field.field.last().unwrap().clone())
-                        .color(text_color)
+                        .color(color_pair.foreground)
                         .line_height(Some(self.user.config.layout.waveforms_line_height))
                         .append_to(
                             &mut layout_job,
@@ -1178,7 +1177,7 @@ impl SystemState {
                 }
             }
             _ => displayed_item.add_to_layout_job(
-                &text_color,
+                color_pair.foreground,
                 ui.style(),
                 &mut layout_job,
                 field,
@@ -1356,7 +1355,6 @@ impl SystemState {
                 .sorted_by_key(|o| o.top() as i32)
                 .enumerate()
             {
-                let vidx = drawing_info.vidx();
                 let next_y = ui.cursor().top();
                 // In order to align the text in this view with the variable tree,
                 // we need to keep track of how far away from the expected offset we are,
@@ -1404,7 +1402,7 @@ impl SystemState {
                                     )),
                                     msgs,
                                     ui,
-                                    vidx,
+                                    drawing_info.vidx,
                                 );
                             });
                         }
@@ -1423,7 +1421,7 @@ impl SystemState {
                                 self.user.config.theme.get_best_text_color(backgroundcolor),
                             ))
                             .context_menu(|ui| {
-                                self.item_context_menu(None, msgs, ui, vidx);
+                                self.item_context_menu(None, msgs, ui, drawing_info.vidx());
                             });
                         } else {
                             ui.label("");

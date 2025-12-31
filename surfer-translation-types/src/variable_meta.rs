@@ -59,22 +59,31 @@ impl<VarId, ScopeId> VariableMeta<VarId, ScopeId> {
 
     /// Check if the variable type name indicates signed integer type
     pub fn has_signed_integer_type_name(&self) -> bool {
-        match_variable_type_name(&self.variable_type_name, SIGNED_INTEGER_TYPE_NAMES)
+        match_variable_type_name(self.variable_type_name.as_ref(), SIGNED_INTEGER_TYPE_NAMES)
     }
 
     /// Check if the variable type name indicates signed fixed-point type
     pub fn has_signed_fixedpoint_type_name(&self) -> bool {
-        match_variable_type_name(&self.variable_type_name, SIGNED_FIXEDPOINT_TYPE_NAMES)
+        match_variable_type_name(
+            self.variable_type_name.as_ref(),
+            SIGNED_FIXEDPOINT_TYPE_NAMES,
+        )
     }
 
     /// Check if the variable type name indicates unsigned integer type
     pub fn has_unsigned_integer_type_name(&self) -> bool {
-        match_variable_type_name(&self.variable_type_name, UNSIGNED_INTEGER_TYPE_NAMES)
+        match_variable_type_name(
+            self.variable_type_name.as_ref(),
+            UNSIGNED_INTEGER_TYPE_NAMES,
+        )
     }
 
     /// Check if the variable type name indicates unsigned fixed-point type
     pub fn has_unsigned_fixedpoint_type_name(&self) -> bool {
-        match_variable_type_name(&self.variable_type_name, UNSIGNED_FIXEDPOINT_TYPE_NAMES)
+        match_variable_type_name(
+            self.variable_type_name.as_ref(),
+            UNSIGNED_FIXEDPOINT_TYPE_NAMES,
+        )
     }
 }
 
@@ -99,11 +108,10 @@ impl<VarId1, ScopeId1> VariableMeta<VarId1, ScopeId1> {
 
 /// Helper to case insensitive match of variable type names against a list of candidates
 fn match_variable_type_name(
-    variable_type_name: &Option<String>,
+    variable_type_name: Option<&String>,
     candidates: &'static [&'static str],
 ) -> bool {
     variable_type_name
-        .as_ref()
         .is_some_and(|type_name| candidates.iter().any(|c| type_name.eq_ignore_ascii_case(c)))
 }
 

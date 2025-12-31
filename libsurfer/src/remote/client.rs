@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::mpsc::Sender;
@@ -210,7 +211,7 @@ pub async fn get_signals(
 fn format_signal_url(base_url: &str, signals: &[wellen::SignalRef]) -> String {
     let mut url = base_url.to_string();
     for signal in signals.iter() {
-        url.push_str(&format!("/{}", signal.index()));
+        write!(url, "/{}", signal.index()).unwrap();
     }
     url
 }
