@@ -800,11 +800,7 @@ impl SystemState {
     }
 
     fn get_name_alignment(&self) -> Align {
-        if self
-            .user
-            .align_names_right
-            .unwrap_or_else(|| self.user.config.layout.align_names_right())
-        {
+        if self.align_names_right() {
             Align::RIGHT
         } else {
             Align::LEFT
@@ -1126,8 +1122,6 @@ impl SystemState {
             }
         };
 
-        let available_space = ui.available_width();
-
         let mut layout_job = LayoutJob::default();
         match displayed_item {
             DisplayedItem::Variable(var) if field.is_some() => {
@@ -1152,13 +1146,15 @@ impl SystemState {
                                     .x
                             })
                         };
+                        let available_width = ui.available_width();
+
                         draw_true_name(
                             &true_name,
                             &mut layout_job,
                             monospace_font.clone(),
                             text_color,
                             monospace_width,
-                            available_space,
+                            available_width,
                         );
                     } else {
                         displayed_item.add_to_layout_job(
@@ -1370,7 +1366,7 @@ impl SystemState {
                 }
 
                 let backgroundcolor =
-                    self.get_background_color(waves, drawing_info, vidx, item_count);
+                    self.get_background_color(waves, drawing_info.vidx(), item_count);
                 self.draw_background(
                     drawing_info,
                     y_zero,
@@ -1585,7 +1581,6 @@ impl SystemState {
     pub fn get_background_color(
         &self,
         waves: &WaveData,
-        drawing_info: &ItemDrawingInfo,
         vidx: VisibleItemIndex,
         item_count: usize,
     ) -> Color32 {
@@ -1597,13 +1592,7 @@ impl SystemState {
         }
         waves
             .displayed_items
-            .get(
-                &waves
-                    .items_tree
-                    .get_visible(drawing_info.vidx())
-                    .unwrap()
-                    .item_ref,
-            )
+            .get(&waves.items_tree.get_visible(vidx).unwrap().item_ref)
             .and_then(super::displayed_item::DisplayedItem::background_color)
             .and_then(|color| self.user.config.theme.get_color(color))
             .unwrap_or_else(|| self.get_default_alternating_background_color(item_count))

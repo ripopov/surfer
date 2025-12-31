@@ -203,4 +203,11 @@ impl SystemState {
             .transition_value
             .unwrap_or_else(|| self.user.config.layout.transition_value())
     }
+
+    #[inline]
+    pub fn align_names_right(&self) -> bool {
+        self.user
+            .align_names_right
+            .unwrap_or_else(|| self.user.config.layout.align_names_right())
+    }
 }
