@@ -103,40 +103,19 @@ impl SystemState {
                         let parameters = wave_container.parameters_in_scope(scope);
                         if !parameters.is_empty() {
                             ScrollArea::both()
-                            .auto_shrink([false; 2])
-                            .id_salt("variables")
-                            .show(ui, |ui| {
-                                egui::collapsing_header::CollapsingState::load_with_default_open(
-                                    ui.ctx(),
-                                    egui::Id::new(&parameters),
-                                    self.expand_parameter_section,
-                                )
-                                .show_header(ui, |ui| {
-                                    ui.with_layout(
-                                        Layout::top_down(Align::LEFT).with_cross_justify(true),
-                                        |ui| {
-                                            ui.label("Parameters");
-                                        },
-                                    );
-                                })
-                                .body(|ui| {
-                                    self.filter_and_draw_variable_list(
+                                .auto_shrink([false; 2])
+                                .id_salt("variables")
+                                .show(ui, |ui| {
+                                    self.draw_parameters(msgs, wave_container, &parameters, ui);
+                                    self.draw_variable_list(
                                         msgs,
                                         wave_container,
                                         ui,
-                                        &parameters,
+                                        &variables,
                                         None,
+                                        false,
                                     );
                                 });
-                                self.draw_variable_list(
-                                    msgs,
-                                    wave_container,
-                                    ui,
-                                    &variables,
-                                    None,
-                                    false,
-                                );
-                            });
                             return; // Early exit
                         }
                     }
@@ -168,6 +147,31 @@ impl SystemState {
                 }
             }
         }
+    }
+
+    fn draw_parameters(
+        &self,
+        msgs: &mut Vec<Message>,
+        wave_container: &WaveContainer,
+        parameters: &[VariableRef],
+        ui: &mut Ui,
+    ) {
+        egui::collapsing_header::CollapsingState::load_with_default_open(
+            ui.ctx(),
+            egui::Id::new(parameters),
+            self.expand_parameter_section,
+        )
+        .show_header(ui, |ui| {
+            ui.with_layout(
+                Layout::top_down(Align::LEFT).with_cross_justify(true),
+                |ui| {
+                    ui.label("Parameters");
+                },
+            );
+        })
+        .body(|ui| {
+            self.filter_and_draw_variable_list(msgs, wave_container, ui, parameters, None);
+        });
     }
 
     /// Scopes and variables in a joint tree.
@@ -425,33 +429,16 @@ impl SystemState {
                     );
                 })
                 .body(|ui| {
-                    if draw_variables
+                    if (draw_variables
+                        && !(matches!(
+                            self.parameter_display_location(),
+                            ParameterDisplayLocation::Tooltips | ParameterDisplayLocation::None
+                        )))
                         || self.parameter_display_location() == ParameterDisplayLocation::Scopes
                     {
                         let parameters = wave_container.parameters_in_scope(scope);
                         if !parameters.is_empty() {
-                            egui::collapsing_header::CollapsingState::load_with_default_open(
-                                ui.ctx(),
-                                egui::Id::new(scope).with("__surfer_parameters"),
-                                false,
-                            )
-                            .show_header(ui, |ui| {
-                                ui.with_layout(
-                                    Layout::top_down(Align::LEFT).with_cross_justify(true),
-                                    |ui| {
-                                        ui.add(egui::Button::selectable(false, "Parameters"));
-                                    },
-                                );
-                            })
-                            .body(|ui| {
-                                self.filter_and_draw_variable_list(
-                                    msgs,
-                                    wave_container,
-                                    ui,
-                                    &parameters,
-                                    None,
-                                );
-                            });
+                            self.draw_parameters(msgs, wave_container, &parameters, ui);
                         }
                     }
                     self.draw_root_scope_view(msgs, wave, scope, draw_variables, ui);
