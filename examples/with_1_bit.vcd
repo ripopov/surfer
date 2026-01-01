@@ -2,20 +2,20 @@ $version Generated manually $end
 $timescale 1s $end
 
  $scope module logic $end
-  $var wire  8 # data [7:0] $end
+  $var wire  1 # data $end
   $var wire  1 $ data_valid $end
  $upscope $end
 $enddefinitions $end
 
 
 #0
-b00000011 #
+b1 #
 1$
 #10
-b11000011 #
+b0 #
 #20
 0$
 #30
-b00111100 #
+b1 #
 1$
 #40
