@@ -16,4 +16,5 @@ accepted = [
     "CC0-1.0",
     "Ubuntu-font-1.0",
     "CDLA-Permissive-2.0",
+    "OpenSSL"
 ]

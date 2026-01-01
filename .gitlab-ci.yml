@@ -360,7 +360,7 @@ windows_build:
     needs: [test-windows]
     script:
         - apt-get update -y
-        - apt-get install -y mingw-w64 zip
+        - apt-get install -y mingw-w64 zip cmake
         - git fetch --tags
         - rustc -V
         - cargo -V
