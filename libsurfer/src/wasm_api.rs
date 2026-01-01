@@ -2,10 +2,9 @@
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use futures::executor::block_on;
-use lazy_static::lazy_static;
 use num::BigInt;
 use tokio::sync::Mutex;
 use tracing::{error, warn};
@@ -33,14 +32,18 @@ use crate::wasm_panic;
 use crate::wave_container::VariableRefExt;
 use crate::wave_source::CxxrtlKind;
 
-lazy_static! {
-    pub(crate) static ref MESSAGE_QUEUE: Mutex<Vec<Message>> = Mutex::new(vec![]);
-    static ref QUERY_QUEUE: tokio::sync::Mutex<VecDeque<Callback>> =
-        tokio::sync::Mutex::new(VecDeque::new());
-    // TODO: Let's make these take CXXRTL messages instead of strings
-    pub(crate) static ref CXXRTL_SC_HANDLER: IngressHandler<String> = IngressHandler::new();
-    pub(crate) static ref CXXRTL_CS_HANDLER: GlobalChannelTx<String> = GlobalChannelTx::new();
-}
+pub(crate) static MESSAGE_QUEUE: LazyLock<Mutex<Vec<Message>>> =
+    LazyLock::new(|| Mutex::new(vec![]));
+
+static QUERY_QUEUE: LazyLock<tokio::sync::Mutex<VecDeque<Callback>>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(VecDeque::new()));
+
+// TODO: Let's make these take CXXRTL messages instead of strings
+pub(crate) static CXXRTL_SC_HANDLER: LazyLock<IngressHandler<String>> =
+    LazyLock::new(IngressHandler::new);
+
+pub(crate) static CXXRTL_CS_HANDLER: LazyLock<GlobalChannelTx<String>> =
+    LazyLock::new(GlobalChannelTx::new);
 
 struct Callback {
     function: Box<dyn FnOnce(&SystemState) + Send + Sync>,

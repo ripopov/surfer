@@ -71,7 +71,7 @@ use crate::remote::get_time_table_from_server;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, LazyLock, RwLock};
 
 use batch_commands::read_command_bytes;
 use batch_commands::read_command_file;
@@ -87,7 +87,6 @@ use eyre::Result;
 use ftr_parser::types::Transaction;
 use futures::executor::block_on;
 use itertools::Itertools;
-use lazy_static::lazy_static;
 use message::MessageTarget;
 use num::BigInt;
 use serde::Deserialize;
@@ -130,15 +129,16 @@ use crate::wellen::{HeaderResult, convert_format};
 /// things until program exit
 pub(crate) static OUTSTANDING_TRANSACTIONS: AtomicUsize = AtomicUsize::new(0);
 
-lazy_static! {
-    pub static ref EGUI_CONTEXT: RwLock<Option<Arc<egui::Context>>> = RwLock::new(None);
-}
+pub static EGUI_CONTEXT: LazyLock<RwLock<Option<Arc<egui::Context>>>> =
+    LazyLock::new(|| RwLock::new(None));
 
 #[cfg(target_arch = "wasm32")]
-lazy_static! {
-    pub(crate) static ref WCP_CS_HANDLER: IngressHandler<WcpCSMessage> = IngressHandler::new();
-    pub(crate) static ref WCP_SC_HANDLER: GlobalChannelTx<WcpSCMessage> = GlobalChannelTx::new();
-}
+pub(crate) static WCP_CS_HANDLER: LazyLock<IngressHandler<WcpCSMessage>> =
+    LazyLock::new(IngressHandler::new);
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) static WCP_SC_HANDLER: LazyLock<GlobalChannelTx<WcpSCMessage>> =
+    LazyLock::new(GlobalChannelTx::new);
 
 #[derive(Default)]
 pub struct StartupParams {

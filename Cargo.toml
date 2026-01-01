@@ -63,7 +63,6 @@ half = "2.5"
 image = { version = "0.25", default-features = false, features = ["png"] }
 instruction-decoder = { path = "instruction-decoder" }
 itertools = "0.14.0"
-lazy_static = "1.5.0"
 leb128 = "0.2.5"
 local-impl = "0.1.2"
 lz4_flex = "0.12"

@@ -817,7 +817,7 @@ fn hex_string_to_color32(mut str: String) -> Result<Color32> {
             .with_context(|| format!("'{str}' is not a valid RGB hex color"))?;
         Ok(Color32::from_rgb(r, g, b))
     } else {
-        eyre::Result::Err(Report::msg(format!("'{str}' is not a valid RGB hex color")))
+        Result::Err(Report::msg(format!("'{str}' is not a valid RGB hex color")))
     }
 }
 

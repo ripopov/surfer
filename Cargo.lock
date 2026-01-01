@@ -3010,7 +3010,6 @@ dependencies = [
  "image-compare",
  "instruction-decoder",
  "itertools 0.14.0",
- "lazy_static",
  "leb128",
  "local-impl",
  "lz4_flex 0.12.0",
