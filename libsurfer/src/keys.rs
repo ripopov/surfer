@@ -336,21 +336,7 @@ impl SystemState {
                         msgs.push(Message::InvalidateCount);
                     }
                     (Key::Delete | Key::X, true, false, false) => {
-                        if let Some(waves) = &self.user.waves {
-                            let mut remove_ids = waves
-                                .items_tree
-                                .iter_visible_selected()
-                                .map(|i| i.item_ref)
-                                .collect::<Vec<_>>();
-                            if let Some(node) = waves
-                                .focused_item
-                                .and_then(|focus| waves.items_tree.get_visible(focus))
-                            {
-                                remove_ids.push(node.item_ref);
-                            }
-
-                            msgs.push(Message::RemoveItems(remove_ids));
-                        }
+                        msgs.push(Message::RemoveVisibleItems(MessageTarget::CurrentSelection));
                     }
                     _ => {}
                 },

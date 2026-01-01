@@ -587,26 +587,48 @@ impl SystemState {
                     self.load_wave_from_url(url.to_string(), load_options, force_switch);
                 }
             }
-            Message::RemoveItemByIndex(vidx) => {
-                let waves = self.user.waves.as_ref();
-                let item_ref = waves
-                    .and_then(|waves| waves.items_tree.get_visible(vidx))
-                    .map(|node| node.item_ref);
-                let undo_msg = item_ref
-                    .and_then(|item_ref| {
-                        waves.and_then(|waves| waves.displayed_items.get(&item_ref))
-                    })
-                    .map(displayed_item::DisplayedItem::name)
-                    .map_or("Remove one item".to_string(), |name| {
-                        format!("Remove item {name}")
-                    });
-                self.save_current_canvas(undo_msg);
-                if let Some(waves) = self.user.waves.as_mut()
-                    && let Some(item_ref) = item_ref
-                {
-                    waves.remove_displayed_item(item_ref);
+            Message::RemoveVisibleItems(target) => match target {
+                MessageTarget::Explicit(vidx) => {
+                    let waves = self.user.waves.as_ref();
+                    let item_ref = waves
+                        .and_then(|waves| waves.items_tree.get_visible(vidx))
+                        .map(|node| node.item_ref);
+                    let undo_msg = item_ref
+                        .and_then(|item_ref| {
+                            waves.and_then(|waves| waves.displayed_items.get(&item_ref))
+                        })
+                        .map(displayed_item::DisplayedItem::name)
+                        .map_or("Remove one item".to_string(), |name| {
+                            format!("Remove item {name}")
+                        });
+                    self.save_current_canvas(undo_msg);
+
+                    if let Some(waves) = self.user.waves.as_mut()
+                        && let Some(item_ref) = item_ref
+                    {
+                        waves.remove_displayed_item(item_ref);
+                    }
                 }
-            }
+                MessageTarget::CurrentSelection => {
+                    self.save_current_canvas("Remove selected items".to_owned());
+                    let waves = self.user.waves.as_mut()?;
+
+                    let mut remove_ids: Vec<_> = waves
+                        .items_tree
+                        .iter_visible_selected()
+                        .map(|node| node.item_ref)
+                        .collect();
+                    if let Some(node) = waves
+                        .focused_item
+                        .and_then(|focus| waves.items_tree.get_visible(focus))
+                    {
+                        remove_ids.push(node.item_ref);
+                    }
+                    for &item_ref in remove_ids.iter() {
+                        waves.remove_displayed_item(item_ref);
+                    }
+                }
+            },
             Message::RemoveItems(items) => {
                 let undo_msg = self
                     .user
@@ -868,6 +890,27 @@ impl SystemState {
                     .displayed_items
                     .entry(node.item_ref)
                     .and_modify(|item| item.set_name(name));
+            }
+            Message::ItemNameReset(target) => {
+                self.save_current_canvas("Resetting item name(s)".to_owned());
+                let waves = self.user.waves.as_mut()?;
+                match target {
+                    MessageTarget::Explicit(vidx) => {
+                        let node = waves.items_tree.get_visible(vidx)?;
+                        waves
+                            .displayed_items
+                            .entry(node.item_ref)
+                            .and_modify(|item| item.set_name(None));
+                    }
+                    MessageTarget::CurrentSelection => {
+                        for node in waves.items_tree.iter_visible_selected() {
+                            waves
+                                .displayed_items
+                                .entry(node.item_ref)
+                                .and_modify(|item| item.set_name(None));
+                        }
+                    }
+                }
             }
             Message::ItemBackgroundColorChange(vidx, color_name) => {
                 self.save_current_canvas(format!(
@@ -1566,25 +1609,39 @@ impl SystemState {
                     );
                 }
             }
-            Message::ChangeVariableNameType(vidx, name_type) => {
+            Message::ChangeVariableNameType(target, name_type) => {
                 let waves = self.user.waves.as_mut()?;
-                // checks if vidx is Some then use that, else try focused variable
-                let vidx = match vidx {
-                    MessageTarget::Explicit(vidx) => vidx,
-                    MessageTarget::CurrentSelection => waves.focused_item?,
-                };
-                let item_ref = waves
-                    .items_tree
-                    .get_visible(vidx)
-                    .map(|node| node.item_ref)?;
-
                 let mut recompute_names = false;
-                waves.displayed_items.entry(item_ref).and_modify(|item| {
-                    if let DisplayedItem::Variable(variable) = item {
-                        variable.display_name_type = name_type;
-                        recompute_names = true;
+                let mut change_type = |item_ref: DisplayedItemRef| {
+                    waves.displayed_items.entry(item_ref).and_modify(|item| {
+                        if let DisplayedItem::Variable(variable) = item {
+                            variable.display_name_type = name_type;
+                            recompute_names = true;
+                        }
+                    });
+                };
+
+                match target {
+                    MessageTarget::Explicit(vidx) => {
+                        if let Some(item_ref) =
+                            waves.items_tree.get_visible(vidx).map(|node| node.item_ref)
+                        {
+                            change_type(item_ref);
+                        }
                     }
-                });
+                    MessageTarget::CurrentSelection => {
+                        waves
+                            .items_tree
+                            .iter_visible_selected()
+                            .for_each(|node| change_type(node.item_ref));
+                        waves
+                            .focused_item
+                            .and_then(|vidx| waves.items_tree.get_visible(vidx))
+                            .map(|node| node.item_ref)
+                            .map(|item_ref| change_type(item_ref));
+                    }
+                }
+
                 if recompute_names {
                     waves.compute_variable_display_names();
                 }

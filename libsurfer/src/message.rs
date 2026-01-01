@@ -86,7 +86,7 @@ pub enum Message {
     AddAllFromStreamScope(String),
     /// Reset the repeat command counter.
     InvalidateCount,
-    RemoveItemByIndex(VisibleItemIndex),
+    RemoveVisibleItems(MessageTarget<VisibleItemIndex>),
     RemoveItems(Vec<DisplayedItemRef>),
     /// Focus a wave/item.
     FocusItem(VisibleItemIndex),
@@ -111,6 +111,7 @@ pub enum Message {
     /// Change background color of waves/items. If first argument is None, change for selected items. If second argument is None, change to default value.
     ItemBackgroundColorChange(MessageTarget<VisibleItemIndex>, Option<String>),
     ItemNameChange(Option<VisibleItemIndex>, Option<String>),
+    ItemNameReset(MessageTarget<VisibleItemIndex>),
     /// Change scaling factor/height of waves/items. If first argument is None, change for selected items.
     ItemHeightScalingFactorChange(MessageTarget<VisibleItemIndex>, f32),
     /// Change variable name type of waves/items. If first argument is None, change for selected items.

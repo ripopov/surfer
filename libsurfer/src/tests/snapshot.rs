@@ -787,8 +787,8 @@ snapshot_ui_with_file_and_msgs! {goto_markers, "examples/counter.vcd", [
 snapshot_ui_with_file_and_msgs! {delete_markers_via_item, "examples/counter.vcd", [
     Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.dut.counter")]),
     Message::AddMarker{time: 200.into(), name: None, move_focus: true},
-    Message::RemoveItemByIndex(VisibleItemIndex(1)),
-    Message::RemoveItemByIndex(VisibleItemIndex(1)),
+    Message::RemoveVisibleItems(MessageTarget::Explicit(VisibleItemIndex(1))),
+    Message::RemoveVisibleItems(MessageTarget::Explicit(VisibleItemIndex(1))),
 ]}
 
 snapshot_ui_with_file_and_msgs! {
@@ -981,25 +981,25 @@ snapshot_ui_with_file_and_msgs! {height_scaling, "examples/counter.vcd", [
 
 snapshot_ui_with_file_and_msgs! {remove_item, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
-    Message::RemoveItemByIndex(VisibleItemIndex(1))
+    Message::RemoveVisibleItems(MessageTarget::Explicit(VisibleItemIndex(1))),
 ]}
 
 snapshot_ui_with_file_and_msgs! {remove_item_with_focus, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::FocusItem(VisibleItemIndex(1)),
-    Message::RemoveItemByIndex(VisibleItemIndex(1))
+    Message::RemoveVisibleItems(MessageTarget::Explicit(VisibleItemIndex(1))),
 ]}
 
 snapshot_ui_with_file_and_msgs! {remove_item_before_focus, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::FocusItem(VisibleItemIndex(3)),
-    Message::RemoveItemByIndex(VisibleItemIndex(1))
+    Message::RemoveVisibleItems(MessageTarget::Explicit(VisibleItemIndex(1))),
 ]}
 
 snapshot_ui_with_file_and_msgs! {remove_item_after_focus, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
     Message::FocusItem(VisibleItemIndex(1)),
-    Message::RemoveItemByIndex(VisibleItemIndex(2))
+    Message::RemoveVisibleItems(MessageTarget::Explicit(VisibleItemIndex(2))),
 ]}
 
 snapshot_ui_with_file_and_msgs! {canvas_scroll, "examples/counter.vcd", [

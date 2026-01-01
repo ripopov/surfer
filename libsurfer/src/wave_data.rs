@@ -484,6 +484,7 @@ impl WaveData {
         (res, indices)
     }
 
+    /// Remove a single item, it's legal to call this function with an invalid ID
     pub fn remove_displayed_item(&mut self, id: DisplayedItemRef) {
         let Some(idx) = self
             .items_tree
