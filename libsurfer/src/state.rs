@@ -338,6 +338,7 @@ impl SystemState {
         self.user.waves = Some(new_transaction_streams);
     }
 
+    #[cfg(test)]
     pub(crate) fn handle_async_messages(&mut self) {
         let mut msgs = vec![];
         loop {
@@ -353,6 +354,19 @@ impl SystemState {
 
         while let Some(msg) = msgs.pop() {
             self.update(msg);
+        }
+    }
+
+    pub(crate) fn push_async_messages(&mut self, msgs: &mut Vec<Message>) {
+        loop {
+            match self.channels.msg_receiver.try_recv() {
+                Ok(msg) => msgs.push(msg),
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    trace!("Message sender disconnected");
+                    break;
+                }
+            }
         }
     }
 

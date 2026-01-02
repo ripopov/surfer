@@ -624,9 +624,7 @@ impl WellenContainer {
             var: variable.clone(),
             num_bits: var.length(),
             variable_type: Some(VariableType::from_wellen_type(var.var_type())),
-            variable_type_name: var
-                .vhdl_type_name(&self.hierarchy)
-                .map(std::string::ToString::to_string),
+            variable_type_name: var.vhdl_type_name(&self.hierarchy).map(ToString::to_string),
             index: var.index().map(VariableIndex::from_wellen_type),
             direction: Some(VariableDirection::from_wellen_direction(var.direction())),
             enum_map: self.get_enum_map(var),

@@ -707,7 +707,7 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                 "preference_set_clock_highlight" => single_word(
                     ["Line", "Cycle", "None"]
                         .iter()
-                        .map(std::string::ToString::to_string)
+                        .map(ToString::to_string)
                         .collect_vec(),
                     Box::new(|word| {
                         Some(Command::Terminal(Message::SetClockHighlightType(

@@ -15,10 +15,14 @@ use crate::{
 impl SystemState {
     /// After user messages are addressed, we try to execute batch commands as they are ready to run
     pub(crate) fn handle_batch_commands(&mut self) {
+        let mut should_exit = false;
         // we only execute commands while we aren't waiting for background operations to complete
         while self.can_start_batch_command() {
             if let Some(cmd) = self.batch_messages.pop_front() {
-                info!("Applying startup command: {cmd:?}");
+                if matches!(cmd, Message::Exit) {
+                    should_exit = true;
+                }
+                info!("Applying batch command: {cmd:?}");
                 self.update(cmd);
             } else {
                 break; // no more messages
@@ -31,6 +35,14 @@ impl SystemState {
             && self.can_start_batch_command()
         {
             self.batch_messages_completed = true;
+
+            if should_exit {
+                info!("Exiting due to batch command");
+                let sender = self.channels.msg_sender.clone();
+                if let Err(e) = sender.send(Message::Exit) {
+                    error!("Failed to send exit message: {e}");
+                }
+            }
         }
     }
 
@@ -91,7 +103,7 @@ impl SystemState {
             .filter(|(_no, line)| !line.is_empty())
             .flat_map(|(no, line)| {
                 line.split(';')
-                    .map(|cmd| (no, cmd.to_string()))
+                    .map(|cmd| (no, cmd.trim().to_string()))
                     .collect::<Vec<_>>()
             })
             .filter_map(|(no, command)| {
@@ -170,12 +182,7 @@ pub fn read_command_file(cmd_file: &Utf8PathBuf) -> Vec<String> {
     std::fs::read_to_string(cmd_file)
         .map_err(|e| error!("Failed to read commands from {cmd_file}. {e:#?}"))
         .ok()
-        .map(|file_content| {
-            file_content
-                .lines()
-                .map(std::string::ToString::to_string)
-                .collect()
-        })
+        .map(|file_content| file_content.lines().map(str::to_string).collect())
         .unwrap_or_default()
 }
 
@@ -184,11 +191,6 @@ pub fn read_command_bytes(bytes: Vec<u8>) -> Vec<String> {
     String::from_utf8(bytes)
         .map_err(|e| error!("Failed to read commands from file. {e:#?}"))
         .ok()
-        .map(|file_content| {
-            file_content
-                .lines()
-                .map(std::string::ToString::to_string)
-                .collect()
-        })
+        .map(|file_content| file_content.lines().map(str::to_string).collect())
         .unwrap_or_default()
 }

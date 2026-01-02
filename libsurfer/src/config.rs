@@ -822,10 +822,7 @@ fn hex_string_to_color32(mut str: String) -> Result<Color32> {
 }
 
 fn all_theme_names() -> Vec<String> {
-    BUILTIN_THEMES
-        .keys()
-        .map(std::string::ToString::to_string)
-        .collect()
+    BUILTIN_THEMES.keys().map(ToString::to_string).collect()
 }
 
 fn deserialize_hex_color<'de, D>(deserializer: D) -> Result<Color32, D::Error>

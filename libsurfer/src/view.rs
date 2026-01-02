@@ -203,6 +203,12 @@ impl eframe::App for SystemState {
         self.timing.borrow_mut().end("draw");
 
         #[cfg(feature = "performance_plot")]
+        self.timing.borrow_mut().start("push_async_messages");
+        self.push_async_messages(&mut msgs);
+        #[cfg(feature = "performance_plot")]
+        self.timing.borrow_mut().end("push_async_messages");
+
+        #[cfg(feature = "performance_plot")]
         self.timing.borrow_mut().start("update");
         let ui_zoom_factor = self.ui_zoom_factor();
         if ctx.zoom_factor() != ui_zoom_factor {
@@ -224,12 +230,6 @@ impl eframe::App for SystemState {
         }
         #[cfg(feature = "performance_plot")]
         self.timing.borrow_mut().end("update");
-
-        #[cfg(feature = "performance_plot")]
-        self.timing.borrow_mut().start("handle_async_messages");
-        self.handle_async_messages();
-        #[cfg(feature = "performance_plot")]
-        self.timing.borrow_mut().end("handle_async_messages");
 
         self.handle_batch_commands();
         #[cfg(target_arch = "wasm32")]

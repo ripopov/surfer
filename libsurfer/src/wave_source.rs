@@ -101,7 +101,7 @@ impl WaveSource {
             WaveSource::File(file) => Ws::File(file.to_string()),
             WaveSource::Data => Ws::Data,
             WaveSource::DragAndDrop(file) => {
-                Ws::DragAndDrop(file.as_ref().map(std::string::ToString::to_string))
+                Ws::DragAndDrop(file.as_ref().map(ToString::to_string))
             }
             WaveSource::Url(u) => Ws::Url(u.clone()),
             WaveSource::Cxxrtl(_) => Ws::Cxxrtl,
