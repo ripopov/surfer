@@ -26,6 +26,7 @@ use egui::{
     CornerRadius, Stroke, Visuals,
     style::{Selection, WidgetVisuals, Widgets},
 };
+use eyre::{Context, Result};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use surfer_translation_types::Translator;
@@ -137,6 +138,80 @@ pub struct UserState {
 impl std::fmt::Debug for UserState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "SharedState {{ <snipped> }}")
+    }
+}
+
+impl UserState {
+    pub fn new(force_default_config: bool) -> Result<UserState> {
+        let config = SurferConfig::new(force_default_config)
+            .with_context(|| "Failed to load config file")?;
+        Ok(UserState {
+            config,
+            ..Default::default()
+        })
+    }
+}
+
+impl Default for UserState {
+    fn default() -> Self {
+        Self {
+            config: SurferConfig::default(),
+            show_hierarchy: None,
+            show_menu: None,
+            show_ticks: None,
+            show_toolbar: None,
+            show_tooltip: None,
+            show_scope_tooltip: None,
+            show_default_timeline: None,
+            show_overview: None,
+            show_statusbar: None,
+            align_names_right: None,
+            show_variable_indices: None,
+            show_variable_direction: None,
+            show_empty_scopes: None,
+            show_parameters_in_scopes: None,
+            parameter_display_location: None,
+            highlight_focused: None,
+            fill_high_values: None,
+            primary_button_drag_behavior: None,
+            arrow_key_bindings: None,
+            clock_highlight_type: None,
+            hierarchy_style: None,
+            autoload_sibling_state_files: None,
+            autoreload_files: None,
+            waves: None,
+            drag_started: false,
+            drag_source_idx: None,
+            drag_target_idx: None,
+            previous_waves: None,
+            count: None,
+            blacklisted_translators: HashSet::new(),
+            show_about: false,
+            show_keys: false,
+            show_gestures: false,
+            show_quick_start: false,
+            show_license: false,
+            show_performance: false,
+            show_logs: false,
+            show_cursor_window: false,
+            wanted_timeunit: TimeUnit::None,
+            time_string_format: None,
+            show_url_entry: false,
+            show_reload_suggestion: None,
+            show_open_sibling_state_file_suggestion: None,
+            variable_name_filter_focused: false,
+            variable_filter: VariableFilter::new(),
+            sidepanel_width: None,
+            ui_zoom_factor: None,
+            state_file: None,
+            animation_enabled: None,
+            use_dinotrace_style: None,
+            selected_server_file_index: None,
+            show_server_file_window: false,
+            surver_file_infos: None,
+            surver_url: None,
+            transition_value: None,
+        }
     }
 }
 
