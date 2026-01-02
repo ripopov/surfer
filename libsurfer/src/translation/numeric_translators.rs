@@ -1,14 +1,14 @@
 use crate::message::Message;
 use crate::translation::fixed_point::{big_uint_to_sfixed, big_uint_to_ufixed};
+use crate::variable_meta::VariableMetaExt;
 use crate::wave_container::{ScopeId, VarId};
 use eyre::Result;
 use half::{bf16, f16};
 use num::{BigUint, One};
 use softposit::{P8E0, P16E1, P32E2, Q8E0, Q16E1};
 use surfer_translation_types::{
-    BasicTranslator, TranslationResult, Translator, ValueKind, ValueRepr, VariableEncoding,
-    VariableInfo, VariableMeta, VariableValue, biguint_to_f64, parse_value_to_numeric,
-    translates_all_bit_types,
+    BasicTranslator, TranslationResult, Translator, ValueKind, ValueRepr, VariableInfo,
+    VariableMeta, VariableValue, biguint_to_f64, parse_value_to_numeric, translates_all_bit_types,
 };
 
 use super::{TranslationPreference, check_single_wordlength};
@@ -151,7 +151,7 @@ impl BasicTranslator<VarId, ScopeId> for DoublePrecisionTranslator {
         }))
     }
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
-        if variable.encoding == VariableEncoding::Real {
+        if variable.is_real() {
             Ok(TranslationPreference::Prefer)
         } else {
             check_single_wordlength(variable.num_bits, 64)

@@ -26,12 +26,12 @@ pub struct VariableMeta<VarId, ScopeId> {
     /// a mapping from enum option names to their string representations.
     pub enum_map: HashMap<String, String>,
     /// Indicates how the variable is stored. A variable of "type" boolean for example
-    /// could be stored as a String or as a `BitVector`.
+    /// could be stored as a `String` or as a `BitVector`.
     pub encoding: VariableEncoding,
 }
 
 impl<VarId, ScopeId> VariableMeta<VarId, ScopeId> {
-    /// Parameter
+    /// Variable is a parameter
     pub fn is_parameter(&self) -> bool {
         matches!(
             self.variable_type,
@@ -39,9 +39,14 @@ impl<VarId, ScopeId> VariableMeta<VarId, ScopeId> {
         )
     }
 
-    /// Parameter
+    /// Variable corresponds to events
     pub fn is_event(&self) -> bool {
-        matches!(self.variable_type, Some(VariableType::VCDEvent))
+        matches!(self.encoding, VariableEncoding::Event)
+    }
+
+    /// Variable has real encoding
+    pub fn is_real(&self) -> bool {
+        matches!(self.encoding, VariableEncoding::Real)
     }
 
     /// Types that should default to signed integer conversion
@@ -54,35 +59,6 @@ impl<VarId, ScopeId> VariableMeta<VarId, ScopeId> {
                     | VariableType::ShortInt
                     | VariableType::LongInt
             )
-        )
-    }
-
-    /// Check if the variable type name indicates signed integer type
-    pub fn has_signed_integer_type_name(&self) -> bool {
-        match_variable_type_name(self.variable_type_name.as_ref(), SIGNED_INTEGER_TYPE_NAMES)
-    }
-
-    /// Check if the variable type name indicates signed fixed-point type
-    pub fn has_signed_fixedpoint_type_name(&self) -> bool {
-        match_variable_type_name(
-            self.variable_type_name.as_ref(),
-            SIGNED_FIXEDPOINT_TYPE_NAMES,
-        )
-    }
-
-    /// Check if the variable type name indicates unsigned integer type
-    pub fn has_unsigned_integer_type_name(&self) -> bool {
-        match_variable_type_name(
-            self.variable_type_name.as_ref(),
-            UNSIGNED_INTEGER_TYPE_NAMES,
-        )
-    }
-
-    /// Check if the variable type name indicates unsigned fixed-point type
-    pub fn has_unsigned_fixedpoint_type_name(&self) -> bool {
-        match_variable_type_name(
-            self.variable_type_name.as_ref(),
-            UNSIGNED_FIXEDPOINT_TYPE_NAMES,
         )
     }
 }
@@ -105,28 +81,3 @@ impl<VarId1, ScopeId1> VariableMeta<VarId1, ScopeId1> {
         }
     }
 }
-
-/// Helper to case insensitive match of variable type names against a list of candidates
-fn match_variable_type_name(
-    variable_type_name: Option<&String>,
-    candidates: &'static [&'static str],
-) -> bool {
-    variable_type_name
-        .is_some_and(|type_name| candidates.iter().any(|c| type_name.eq_ignore_ascii_case(c)))
-}
-
-/// Type names that should default to signed integer conversion
-/// - `ieee.numeric_std.signed`
-static SIGNED_INTEGER_TYPE_NAMES: &[&str] = &["unresolved_signed", "signed"];
-
-/// Type names that should default to signed fixed-point conversion
-/// - `ieee.fixed_pkg.sfixed`
-static SIGNED_FIXEDPOINT_TYPE_NAMES: &[&str] = &["unresolved_sfixed", "sfixed"];
-
-/// Type names that should default to unsigned integer conversion
-/// - `ieee.numeric_std.unsigned`
-static UNSIGNED_INTEGER_TYPE_NAMES: &[&str] = &["unresolved_unsigned", "unsigned"];
-
-/// Type names that should default to unsigned fixed-point conversion
-/// - `ieee.fixed_pkg.ufixed`
-static UNSIGNED_FIXEDPOINT_TYPE_NAMES: &[&str] = &["unresolved_ufixed", "ufixed"];

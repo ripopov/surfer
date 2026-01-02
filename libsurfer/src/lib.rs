@@ -50,6 +50,7 @@ pub mod util;
 pub mod variable_direction;
 pub mod variable_filter;
 mod variable_index;
+pub mod variable_meta;
 pub mod variable_name_type;
 pub mod variable_type;
 pub mod view;
