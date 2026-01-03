@@ -52,7 +52,6 @@ pub mod variable_filter;
 mod variable_index;
 pub mod variable_meta;
 pub mod variable_name_type;
-pub mod variable_type;
 pub mod view;
 pub mod viewport;
 #[cfg(target_arch = "wasm32")]

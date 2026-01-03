@@ -17,7 +17,6 @@ use wellen::{
 use crate::time::{TimeScale, TimeUnit};
 use crate::variable_direction::VariableDirectionExt;
 use crate::variable_index::VariableIndexExt;
-use crate::variable_type::VariableTypeExt;
 use crate::wave_container::{
     MetaData, QueryResult, ScopeId, ScopeRef, ScopeRefExt, VarId, VariableMeta, VariableRef,
     VariableRefExt,
@@ -738,7 +737,7 @@ fn convert_variable_value(value: wellen::SignalValue) -> VariableValue {
 
 #[local_impl::local_impl]
 impl FromVarType for VariableType {
-    fn from(signaltype: VarType) -> Self {
+    fn from_wellen_type(signaltype: VarType) -> Self {
         match signaltype {
             VarType::Reg => VariableType::VCDReg,
             VarType::Wire => VariableType::VCDWire,
