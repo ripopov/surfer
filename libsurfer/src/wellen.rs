@@ -144,7 +144,7 @@ impl WellenContainer {
             .enumerate()
             .filter_map(|(n, name)| {
                 let r = VarRef::from_index(n).unwrap();
-                if h[r].var_type() == VarType::Parameter {
+                if h[r].var_type().is_parameter() {
                     return None;
                 }
                 Some(VariableRef::from_hierarchy_string_with_id(
@@ -264,7 +264,7 @@ impl WellenContainer {
         // special case of an empty scope means that we want to variables that are part of the toplevel
         if scope_ref.has_empty_strs() {
             h.vars()
-                .filter(|id| h[*id].var_type() != VarType::Parameter)
+                .filter(|id| !h[*id].var_type().is_parameter())
                 .map(|id| {
                     VariableRef::new_with_id(
                         scope_ref.clone(),
@@ -282,7 +282,7 @@ impl WellenContainer {
             };
             scope
                 .vars(h)
-                .filter(|id| h[*id].var_type() != VarType::Parameter)
+                .filter(|id| !h[*id].var_type().is_parameter())
                 .map(|id| {
                     VariableRef::new_with_id(
                         scope_ref.clone(),
@@ -299,7 +299,7 @@ impl WellenContainer {
         // special case of an empty scope means that we want to variables that are part of the toplevel
         if scope_ref.strs().is_empty() {
             h.vars()
-                .filter(|id| h[*id].var_type() == VarType::Parameter)
+                .filter(|id| h[*id].var_type().is_parameter())
                 .map(|id| {
                     VariableRef::new_with_id(
                         scope_ref.clone(),
@@ -317,7 +317,7 @@ impl WellenContainer {
             };
             scope
                 .vars(h)
-                .filter(|id| h[*id].var_type() == VarType::Parameter)
+                .filter(|id| h[*id].var_type().is_parameter())
                 .map(|id| {
                     VariableRef::new_with_id(
                         scope_ref.clone(),
@@ -416,7 +416,7 @@ impl WellenContainer {
         let h = &self.hierarchy;
         let params = h
             .iter_vars()
-            .filter(|r| r.var_type() == VarType::Parameter)
+            .filter(|r| r.var_type().is_parameter())
             .map(wellen::Var::signal_ref)
             .collect::<Vec<_>>();
         Ok(self.load_signals(&params))
@@ -777,6 +777,13 @@ impl FromVarType for VariableType {
             VarType::StdULogicVector => VariableType::StdULogicVector,
             VarType::RealParameter => VariableType::RealParameter,
         }
+    }
+}
+
+#[local_impl::local_impl]
+impl VarTypeExt for VarType {
+    fn is_parameter(&self) -> bool {
+        matches!(self, VarType::Parameter | VarType::RealParameter)
     }
 }
 
