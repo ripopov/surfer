@@ -68,6 +68,7 @@ use crate::config::AutoLoad;
 use crate::displayed_item_tree::ItemIndex;
 use crate::displayed_item_tree::TargetPosition;
 use crate::remote::get_time_table_from_server;
+use crate::variable_name_type::VariableNameType;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -314,7 +315,7 @@ impl SystemState {
                     self.save_current_canvas(undo_msg);
                     if let Some(waves) = self.user.waves.as_mut() {
                         if let (Some(cmd), _) =
-                            waves.add_variables(&self.translators, vars, None, true, false)
+                            waves.add_variables(&self.translators, vars, None, true, false, None)
                         {
                             self.load_variables(cmd);
                         }
@@ -342,7 +343,7 @@ impl SystemState {
 
                 // TODO add parameter to add_variables, insert to (self.drag_target_idx, self.drag_source_idx)
                 if let (Some(cmd), _) =
-                    waves.add_variables(&self.translators, vars, None, true, false)
+                    waves.add_variables(&self.translators, vars, None, true, false, None)
                 {
                     self.load_variables(cmd);
                 }
@@ -355,7 +356,7 @@ impl SystemState {
                 let passed_or_focused = waves.insert_position(waves.focused_item);
                 let target = passed_or_focused.unwrap_or_else(|| waves.end_insert_position());
 
-                self.add_scope_as_group(&scope, target, recursive);
+                self.add_scope_as_group(&scope, target, recursive, None);
                 self.invalidate_draw_commands();
 
                 self.user.waves.as_mut()?.compute_variable_display_names();
@@ -1799,7 +1800,7 @@ impl SystemState {
                 let target = self.user.drag_target_idx.take();
 
                 if let (Some(cmd), _) =
-                    waves.add_variables(&self.translators, variables, target, true, false)
+                    waves.add_variables(&self.translators, variables, target, true, false, None)
                 {
                     self.load_variables(cmd);
                 }
@@ -2294,6 +2295,7 @@ impl SystemState {
         scope: &ScopeRef,
         pos: TargetPosition,
         recursive: bool,
+        variable_name_type: Option<VariableNameType>,
     ) -> TargetPosition {
         let Some(waves) = self.user.waves.as_mut() else {
             return pos;
@@ -2309,6 +2311,11 @@ impl SystemState {
             .cloned()
             .collect_vec();
         let child_scopes = container.child_scopes(scope);
+        let variable_name_type = variable_name_type.or_else(|| {
+            container
+                .scope_is_variable(scope)
+                .then_some(VariableNameType::Local)
+        });
 
         waves.add_group(scope.name(), Some(pos));
         let into_group_pos = TargetPosition {
@@ -2322,6 +2329,7 @@ impl SystemState {
             Some(into_group_pos),
             false,
             false,
+            variable_name_type,
         );
         let mut into_group_pos = TargetPosition {
             before: ItemIndex(into_group_pos.before.0 + variable_refs.len()),
@@ -2334,7 +2342,8 @@ impl SystemState {
 
         if recursive {
             for child in child_scopes.unwrap_or(vec![]) {
-                into_group_pos = self.add_scope_as_group(&child, into_group_pos, recursive);
+                into_group_pos =
+                    self.add_scope_as_group(&child, into_group_pos, recursive, variable_name_type);
                 into_group_pos.level = pos.level + 1;
             }
         }

@@ -419,6 +419,7 @@ impl WaveData {
         target_position: Option<TargetPosition>,
         update_display_names: bool,
         ignore_failures: bool,
+        variable_name_type: Option<VariableNameType>,
     ) -> (Option<LoadSignalsCmd>, Vec<DisplayedItemRef>) {
         let mut indices = vec![];
         // load variables from waveform
@@ -463,7 +464,7 @@ impl WaveData {
                 color: None,
                 background_color: None,
                 display_name: variable.name.clone(),
-                display_name_type: self.default_variable_name_type,
+                display_name_type: variable_name_type.unwrap_or(self.default_variable_name_type),
                 manual_name: None,
                 format: None,
                 field_formats: vec![],

@@ -534,6 +534,16 @@ impl WaveContainer {
         }
     }
 
+    #[must_use]
+    /// True if scope is a compound variable
+    pub fn scope_is_variable(&self, scope: &ScopeRef) -> bool {
+        match self {
+            WaveContainer::Wellen(f) => f.scope_is_variable(scope),
+            WaveContainer::Empty => false,
+            WaveContainer::Cxxrtl(_) => false, // TODO: Check if scope is variable
+        }
+    }
+
     /// Returns a human readable string with information about a scope.
     /// The scope name itself should not be included, since it will be prepended automatically.
     #[must_use]

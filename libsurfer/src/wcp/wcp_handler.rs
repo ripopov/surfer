@@ -134,6 +134,7 @@ impl SystemState {
                                 None,
                                 true,
                                 false,
+                                None,
                             );
                             if let Some(cmd) = cmd {
                                 self.load_variables(cmd);
@@ -163,6 +164,7 @@ impl SystemState {
                                 None,
                                 true,
                                 false,
+                                None,
                             );
                             if let Some(cmd) = cmd {
                                 self.load_variables(cmd);
@@ -190,8 +192,14 @@ impl SystemState {
                         }
 
                         if let Some(waves) = self.user.waves.as_mut() {
-                            let (cmd, ids) =
-                                waves.add_variables(&self.translators, variables, None, true, true);
+                            let (cmd, ids) = waves.add_variables(
+                                &self.translators,
+                                variables,
+                                None,
+                                true,
+                                true,
+                                None,
+                            );
                             if let Some(cmd) = cmd {
                                 self.load_variables(cmd);
                             }

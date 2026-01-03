@@ -465,15 +465,10 @@ impl DisplayedItem {
     ) {
         match self {
             DisplayedItem::Variable(_) => {
-                let name = if let Some(field) = field {
-                    if let Some(last) = field.field.last() {
-                        last.clone()
-                    } else {
-                        self.name()
-                    }
-                } else {
-                    self.name()
-                };
+                let name = field
+                    .and_then(|f| f.field.last())
+                    .cloned()
+                    .unwrap_or_else(|| self.name());
                 RichText::new(name)
                     .color(color)
                     .line_height(Some(

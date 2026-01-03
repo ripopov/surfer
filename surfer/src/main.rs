@@ -84,11 +84,10 @@ mod main_impl {
 
     #[allow(dead_code)] // NOTE: Only used in desktop version
     fn startup_params_from_args(args: Args) -> StartupParams {
-        let startup_commands = if let Some(cmd_file) = args.command_file() {
-            read_command_file(cmd_file)
-        } else {
-            vec![]
-        };
+        let startup_commands = args
+            .command_file()
+            .map(read_command_file)
+            .unwrap_or_default();
         StartupParams {
             waves: args.wave_file.map(|s| string_to_wavesource(&s)),
             wcp_initiate: args.wcp_initiate,
