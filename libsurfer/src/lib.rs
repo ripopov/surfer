@@ -1078,7 +1078,7 @@ impl SystemState {
                     })
                     .collect_vec();
 
-                transactions.sort();
+                transactions.sort_unstable();
                 let tx = if let Some(focused_tx) = &waves.focused_transaction.0 {
                     let next_id = transactions
                         .iter()

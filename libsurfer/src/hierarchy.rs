@@ -583,7 +583,10 @@ impl SystemState {
                 .flatten()
                 .unwrap_or_default();
             // Get value in case of parameter
-            let value = if meta.as_ref().is_some_and(|meta| meta.is_parameter()) {
+            let value = if meta
+                .as_ref()
+                .is_some_and(surfer_translation_types::VariableMeta::is_parameter)
+            {
                 let res = wave_container.query_variable(variable, &BigUint::ZERO).ok();
                 res.and_then(|o| o.and_then(|q| q.current.map(|v| format!(": {}", v.1))))
                     .unwrap_or_else(|| ": Undefined".to_string())

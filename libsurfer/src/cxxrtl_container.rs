@@ -100,7 +100,7 @@ where
         }
         match self {
             CachedData::Uncached { prev } => {
-                let result = prev.as_ref().cloned();
+                let result = prev.clone();
                 *self = CachedData::Waiting { prev: prev.clone() };
                 result
             }

@@ -120,6 +120,7 @@ pub struct DigitalDrawingCommands {
 }
 
 impl DigitalDrawingCommands {
+    #[must_use]
     pub fn new_from_variable_info(info: &VariableInfo) -> Self {
         DigitalDrawingCommands {
             drawing_type: DigitalDrawingType::from(info),
@@ -1064,7 +1065,7 @@ impl SystemState {
                                         }
                                     }
                                     DigitalDrawingType::Event => {
-                                        for event in digital_commands.values.iter() {
+                                        for event in &digital_commands.values {
                                             self.draw_event(
                                                 event,
                                                 color,
@@ -1227,7 +1228,7 @@ impl SystemState {
                                 let min = (ctx.to_screen)(min.x, y_offset + min.y);
                                 let max = (ctx.to_screen)(max.x, y_offset + max.y);
 
-                                let start = Pos2::new(min.x, (min.y + max.y) / 2.);
+                                let start = Pos2::new(min.x, f32::midpoint(min.y, max.y));
 
                                 let is_transaction_focused = waves
                                     .focused_transaction

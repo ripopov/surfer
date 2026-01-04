@@ -435,7 +435,7 @@ impl BasicTranslator<VarId, ScopeId> for LeadingZerosTranslator {
     }
 }
 
-/// Counts leading ones in a BigUint value with a given bit width.
+/// Counts leading ones in a `BigUint` value with a given bit width.
 /// Returns 0 if the value has leading zeros (i.e., `v.bits() < num_bits`).
 fn leading_ones(v: &num::BigUint, num_bits: u64) -> u64 {
     if v.bits() < num_bits {

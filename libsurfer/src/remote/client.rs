@@ -173,7 +173,7 @@ pub async fn get_signals(
     let mut current_batch = Vec::new();
     let mut current_url_len = base_len;
 
-    for signal in signals.iter() {
+    for signal in signals {
         // Each signal adds: "/" + digits
         let signal_len = signal_url_len(signal.index());
 
@@ -210,7 +210,7 @@ pub async fn get_signals(
 #[inline]
 fn format_signal_url(base_url: &str, signals: &[wellen::SignalRef]) -> String {
     let mut url = base_url.to_string();
-    for signal in signals.iter() {
+    for signal in signals {
         write!(url, "/{}", signal.index()).unwrap();
     }
     url
@@ -278,7 +278,7 @@ pub fn get_hierarchy_from_server(
         if let Err(e) = sender.send(msg) {
             error!("Failed to send message: {e}");
         }
-    })
+    });
 }
 
 pub fn get_time_table_from_server(sender: Sender<Message>, server: String, file_index: usize) {
@@ -298,7 +298,7 @@ pub fn get_time_table_from_server(sender: Sender<Message>, server: String, file_
         if let Err(e) = sender.send(msg) {
             error!("Failed to send message: {e}");
         }
-    })
+    });
 }
 
 pub fn get_server_status(sender: Sender<Message>, server: String, delay_ms: u64) {
@@ -317,7 +317,7 @@ pub fn get_server_status(sender: Sender<Message>, server: String, delay_ms: u64)
         if let Err(e) = sender.send(msg) {
             error!("Failed to send message: {e}");
         }
-    })
+    });
 }
 
 pub fn server_reload(
@@ -348,7 +348,7 @@ pub fn server_reload(
         if request_hierarchy {
             get_hierarchy_from_server(sender, server, load_options, file_index);
         }
-    })
+    });
 }
 
 mod tests {

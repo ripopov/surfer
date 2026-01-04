@@ -876,7 +876,7 @@ fn draw_amplitude_labels(render_ctx: &RenderContext, frame_width: f32, ctx: &mut
         let label_x = frame_width - galley.size().x - 5.0;
         let label_pos = render_ctx.to_screen(
             label_x,
-            (render_ctx.min_val + render_ctx.max_val) / 2.0,
+            f64::midpoint(render_ctx.min_val, render_ctx.max_val),
             ctx,
         );
 

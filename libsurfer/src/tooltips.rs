@@ -49,7 +49,7 @@ pub fn scope_tooltip_text(wave: &WaveData, scope: &ScopeRef, include_parameters:
     let mut parts = vec![format!("{scope}")];
     if let Some(wave_container) = &wave.inner.as_waves() {
         if include_parameters && let Some(waves) = &wave.inner.as_waves() {
-            for param in waves.parameters_in_scope(scope).iter() {
+            for param in &waves.parameters_in_scope(scope) {
                 let value = wave_container
                     .query_variable(param, &BigUint::ZERO)
                     .ok()

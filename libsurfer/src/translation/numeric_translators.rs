@@ -41,7 +41,7 @@ impl BasicTranslator<VarId, ScopeId> for UnsignedTranslator {
     }
 
     fn basic_translate(&self, _: u32, v: &VariableValue) -> (String, ValueKind) {
-        translate_numeric(|v| v.to_string(), v)
+        translate_numeric(std::string::ToString::to_string, v)
     }
 
     fn basic_translate_numeric(&self, _num_bits: u32, value: &VariableValue) -> Option<f64> {
@@ -527,7 +527,7 @@ impl Translator<VarId, ScopeId, Message> for UnsignedFixedPointTranslator {
         let (string, value_kind) = if let Some(idx) = &variable.index {
             translate_numeric(|v| big_uint_to_ufixed(v, -idx.lsb), value)
         } else {
-            translate_numeric(|v| v.to_string(), value)
+            translate_numeric(std::string::ToString::to_string, value)
         };
         Ok(TranslationResult {
             kind: value_kind,
@@ -567,7 +567,7 @@ impl Translator<VarId, ScopeId, Message> for SignedFixedPointTranslator {
                 value,
             )
         } else {
-            translate_numeric(|v| v.to_string(), value)
+            translate_numeric(std::string::ToString::to_string, value)
         };
         Ok(TranslationResult {
             kind: value_kind,

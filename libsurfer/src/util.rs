@@ -68,6 +68,7 @@ pub fn alpha_idx_to_uint_idx(idx: &str) -> Option<VisibleItemIndex> {
         .map(VisibleItemIndex)
 }
 
+#[must_use]
 pub fn get_alpha_focus_id(vidx: VisibleItemIndex, waves: &WaveData) -> RichText {
     let alpha_id = uint_idx_to_alpha_idx(vidx, waves.displayed_items.len());
 

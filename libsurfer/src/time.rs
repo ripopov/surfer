@@ -546,7 +546,7 @@ pub fn get_ticks(
     );
 
     let mut ticks: Vec<(String, f32)> = [].to_vec();
-    for step in TICK_STEPS.iter() {
+    for step in &TICK_STEPS {
         let scaled_step = scale * step;
         let rounded_min_label_time =
             (viewport.curr_left.absolute(num_timestamps).inner() / scaled_step).floor()

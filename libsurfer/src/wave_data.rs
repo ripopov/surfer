@@ -238,7 +238,7 @@ impl WaveData {
     ///
     /// Used after loading new waves, signals or switching a bunch of translators
     fn update_metadata(&mut self, translators: &TranslatorList) {
-        for (_vidx, di) in self.displayed_items.iter_mut() {
+        for di in self.displayed_items.values_mut() {
             let DisplayedItem::Variable(displayed_variable) = di else {
                 continue;
             };
@@ -292,7 +292,7 @@ impl WaveData {
                 .to_bigint()
                 .unwrap();
             if new_num_timestamps != old_num_timestamps {
-                for viewport in self.viewports.iter_mut() {
+                for viewport in &mut self.viewports {
                     *viewport = viewport.clip_to(&old_num_timestamps, &new_num_timestamps);
                 }
             }

@@ -48,11 +48,10 @@ impl SystemState {
             ui.label(waves.source.to_string());
             if let Some(idx) = self.user.selected_server_file_index
                 && let Some(infos) = self.user.surver_file_infos.as_ref()
+                && let Some(file) = infos.get(idx)
             {
-                infos.get(idx).map_or((), |file| {
-                    ui.separator();
-                    ui.label(&file.filename);
-                })
+                ui.separator();
+                ui.label(&file.filename);
             }
             if let Some(datetime) = waves.inner.metadata().date {
                 ui.separator();

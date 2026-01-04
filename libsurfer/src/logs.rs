@@ -34,7 +34,7 @@ struct EguiLogger {}
 
 struct FieldVisitor<'a>(&'a mut BTreeMap<String, String>);
 
-impl<'a> Visit for FieldVisitor<'a> {
+impl Visit for FieldVisitor<'_> {
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
         self.0
             .insert(field.name().to_string(), format!("{value:?}"));
