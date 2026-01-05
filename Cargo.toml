@@ -4,6 +4,7 @@ resolver = "2"
 members = [
     "surfer",
     "surfer-translation-types",
+    "surfer-wcp",
     "surver",
     "translator-docs",
     "wasm_example_translator",

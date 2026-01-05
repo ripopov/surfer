@@ -2,8 +2,6 @@ use num::{BigInt, FromPrimitive};
 use serde::{Deserialize, Deserializer, Serialize, de};
 use serde_json::Number;
 
-use crate::displayed_item;
-
 /// A reference to a currently displayed item. From the protocol perspective,
 /// This can be any integer or a string and what it is is decided by the server,
 /// in this case surfer.
@@ -13,29 +11,8 @@ use crate::displayed_item;
 #[serde(transparent)]
 pub struct DisplayedItemRef(pub usize);
 
-impl From<&displayed_item::DisplayedItemRef> for crate::DisplayedItemRef {
-    fn from(value: &displayed_item::DisplayedItemRef) -> Self {
-        crate::DisplayedItemRef(value.0)
-    }
-}
-
-impl From<&DisplayedItemRef> for crate::DisplayedItemRef {
+impl From<&DisplayedItemRef> for DisplayedItemRef {
     fn from(value: &DisplayedItemRef) -> Self {
-        crate::DisplayedItemRef(value.0)
-    }
-}
-impl From<DisplayedItemRef> for crate::DisplayedItemRef {
-    fn from(value: DisplayedItemRef) -> Self {
-        crate::DisplayedItemRef(value.0)
-    }
-}
-impl From<&crate::DisplayedItemRef> for DisplayedItemRef {
-    fn from(value: &crate::DisplayedItemRef) -> Self {
-        DisplayedItemRef(value.0)
-    }
-}
-impl From<crate::DisplayedItemRef> for DisplayedItemRef {
-    fn from(value: crate::DisplayedItemRef) -> Self {
         DisplayedItemRef(value.0)
     }
 }

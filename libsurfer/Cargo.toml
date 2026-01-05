@@ -64,6 +64,7 @@ web-time.workspace = true
 wellen.workspace = true
 leb128.workspace = true
 tokio-stream = "0.1.17"
+surfer-wcp = { path = "../surfer-wcp" }
 
 [features]
 default = ["performance_plot"]

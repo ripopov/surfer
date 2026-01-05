@@ -21,7 +21,7 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info, warn};
 
-use super::{proto::WcpCSMessage, proto::WcpCommand, proto::WcpSCMessage};
+use surfer_wcp::{WcpCSMessage, WcpCommand, WcpSCMessage};
 
 struct WcpCSReader<'a> {
     reader: BufReader<ReadHalf<'a>>,

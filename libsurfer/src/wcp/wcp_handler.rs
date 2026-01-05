@@ -13,7 +13,7 @@ use std::sync::atomic::Ordering;
 use surfer_translation_types::ScopeRef;
 use tracing::{trace, warn};
 
-use super::proto::{ItemInfo, MarkerInfo, WcpCSMessage, WcpCommand, WcpResponse, WcpSCMessage};
+use surfer_wcp::{ItemInfo, MarkerInfo, WcpCSMessage, WcpCommand, WcpResponse, WcpSCMessage};
 
 impl SystemState {
     pub fn handle_wcp_commands(&mut self) {
@@ -52,7 +52,7 @@ impl SystemState {
                 match command {
                     WcpCommand::get_item_list => {
                         if let Some(waves) = &self.user.waves {
-                            let ids: Vec<crate::wcp::proto::DisplayedItemRef> = self
+                            let ids: Vec<surfer_wcp::DisplayedItemRef> = self
                                 .get_displayed_items(waves)
                                 .iter()
                                 .map(std::convert::Into::into)

@@ -3,10 +3,10 @@ use std::path::PathBuf;
 use crate::SystemState;
 use crate::message::Message;
 use crate::tests::snapshot::render_and_compare;
-use crate::wcp::proto::{
-    self, MarkerInfo, WcpCSMessage, WcpCommand, WcpEvent, WcpResponse, WcpSCMessage,
-};
 use itertools::Itertools;
+use surfer_wcp::{
+    MarkerInfo, WcpCSMessage, WcpCommand, WcpEvent, WcpResponse, WcpSCMessage, proto,
+};
 
 use eyre::Result;
 use eyre::bail;

@@ -13,7 +13,6 @@ use crate::message::MessageTarget;
 use crate::wave_container::{FieldRef, VariableRefExt};
 use crate::wave_data::ScopeType;
 use crate::wave_source::LoadOptions;
-use crate::wcp::{proto::WcpEvent, proto::WcpSCMessage};
 use crate::{
     SystemState,
     clock_highlighting::clock_highlight_type_menu,
@@ -24,6 +23,7 @@ use crate::{
     time::{timeformat_menu, timeunit_menu},
     variable_name_type::VariableNameType,
 };
+use surfer_wcp::{WcpEvent, WcpSCMessage};
 
 // Button builder. Short name because we use it a ton
 struct ButtonBuilder {
