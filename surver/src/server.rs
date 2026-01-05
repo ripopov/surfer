@@ -530,9 +530,11 @@ pub async fn surver_main(
     // print out status
     info!("Starting server on {addr}. To use:");
     info!("1. Setup an ssh tunnel: -L {port}:localhost:{port}");
-    let hostname = whoami::fallible::hostname();
-    if let Ok(hostname) = hostname.as_ref() {
-        let username = whoami::username();
+    let hostname = whoami::hostname();
+    if let Ok(hostname) = hostname.as_ref()
+        && hostname != "localhost"
+        && let Ok(username) = whoami::username()
+    {
         info!(
             "   The correct command may be: ssh -L {port}:localhost:{port} {username}@{hostname} "
         );

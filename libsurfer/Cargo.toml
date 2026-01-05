@@ -18,7 +18,7 @@ bincode.workspace = true
 bytes.workspace = true
 bytesize.workspace = true
 camino.workspace = true
-chrono = { workspace = true, default-features =  false }
+chrono = { workspace = true, default-features = false }
 eyre.workspace = true
 config.workspace = true
 derive_more.workspace = true
@@ -63,8 +63,8 @@ tracing-subscriber.workspace = true
 web-time.workspace = true
 wellen.workspace = true
 leb128.workspace = true
-tokio-stream = "0.1.17"
 surfer-wcp = { path = "../surfer-wcp" }
+tokio-stream.workspace = true
 
 [features]
 default = ["performance_plot"]
@@ -79,33 +79,33 @@ wasm_plugins = [
 ]
 
 [target.'cfg(all(not(windows), not(target_arch = "wasm32")))'.dependencies]
-notify = "8.0"
+notify.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-directories = "6.0"
+directories.workspace = true
 futures = { workspace = true, features = ["executor"] }
 tokio = { workspace = true, features = ["macros"] }
-extism = { version = "1.13", default-features = false, optional = true }
-extism-manifest = { version = "1.13", optional = true }
+extism = { workspace = true, optional = true }
+extism-manifest = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 futures.workspace = true
 tokio = { workspace = true, features = ["sync"] }
-wasm-bindgen = "0.2.91"
+wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
-web-sys = { version = "= 0.3.83", features = ["Location", "UrlSearchParams"] }
+web-sys.workspace = true
 wasm-tracing.workspace = true
 
 [dev-dependencies]
 egui_skia_renderer = { git = "https://gitlab.com/oscargus/egui_skia_renderer.git", rev = "279dfddcc8f4982309935d368827019e9736dc89" }
 image.workspace = true
-image-compare = "0.5"
-port_check = "0.3"
-project-root = "0.2.2"
-test-log = "0.2.15"
+image-compare.workspace = true
+port_check.workspace = true
+project-root.workspace = true
+test-log.workspace = true
 
 [target.'cfg(not(target_os = "unknown"))'.dev-dependencies]
-tempfile = "3.20.0"
+tempfile.workspace = true
 
 [build-dependencies]
 vergen-gitcl = { workspace = true, features = ["build"] }
