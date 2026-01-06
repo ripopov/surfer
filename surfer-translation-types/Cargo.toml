@@ -6,15 +6,15 @@ edition.workspace = true
 repository.workspace = true
 categories.workspace = true
 
-[dependencies]
-eyre.workspace = true
-derive_more.workspace = true
-ecolor.workspace = true
-extism-convert = { workspace = true, optional = true }
-num.workspace = true
-pyo3 = { workspace = true, optional = true }
-serde.workspace = true
-
 [features]
 default = ["wasm_plugins"]
 wasm_plugins = ["dep:extism-convert"]
+
+[dependencies]
+derive_more.workspace = true
+ecolor.workspace = true
+extism-convert = { workspace = true, optional = true }
+eyre.workspace = true
+num.workspace = true
+pyo3 = { workspace = true, optional = true }
+serde.workspace = true

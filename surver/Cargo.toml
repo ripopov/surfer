@@ -9,11 +9,19 @@ description = "Server for the Surfer waveform viewer"
 repository.workspace = true
 build = "build.rs"
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+fastrand.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["http1", "server"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+tokio = { workspace = true, features = ["net"] }
+whoami.workspace = true
+
 [dependencies]
 bincode.workspace = true
 bytesize.workspace = true
-clap.workspace = true
 chrono = { workspace = true, features = ["alloc"] }
+clap.workspace = true
 eyre.workspace = true
 leb128.workspace = true
 lz4_flex.workspace = true
@@ -27,15 +35,7 @@ wellen.workspace = true
 [build-dependencies]
 vergen-gitcl = { workspace = true, features = ["build"] }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-fastrand.workspace = true
-http-body-util.workspace = true
-hyper = { workspace = true, features = ["http1", "server"] }
-hyper-util = { workspace = true, features = ["tokio"] }
-tokio = {workspace = true, features = ["net"]}
-whoami.workspace = true
-
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt", "time", "macros", "rt-multi-thread"] }
-reqwest.workspace = true
 filetime.workspace = true
+reqwest.workspace = true
+tokio = { workspace = true, features = ["rt", "time", "macros", "rt-multi-thread"] }

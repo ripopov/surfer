@@ -8,24 +8,6 @@ rust-version.workspace = true
 repository.workspace = true
 build = "build.rs"
 
-[dependencies]
-clap.workspace = true
-camino.workspace = true
-eyre.workspace = true
-eframe.workspace = true
-egui.workspace = true
-emath.workspace = true
-image.workspace = true
-libsurfer = { path = "../libsurfer", default-features = false }
-tokio = { workspace = true, features = ["rt", "time", "macros"] }
-ron.workspace = true
-simple-eyre.workspace = true
-surver.workspace = true
-tracing.workspace = true
-
-[build-dependencies]
-vergen-gitcl = { workspace = true, features = ["build"] }
-
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen-futures.workspace = true
 
@@ -36,3 +18,21 @@ f128 = ["libsurfer/f128"]
 performance_plot = ["libsurfer/performance_plot"]
 python = ["libsurfer/python"]
 wasm_plugins = ["libsurfer/wasm_plugins"]
+
+[dependencies]
+camino.workspace = true
+clap.workspace = true
+eframe.workspace = true
+egui.workspace = true
+emath.workspace = true
+eyre.workspace = true
+image.workspace = true
+libsurfer = { path = "../libsurfer", default-features = false }
+ron.workspace = true
+simple-eyre.workspace = true
+surver.workspace = true
+tokio = { workspace = true, features = ["rt", "time", "macros"] }
+tracing.workspace = true
+
+[build-dependencies]
+vergen-gitcl = { workspace = true, features = ["build"] }

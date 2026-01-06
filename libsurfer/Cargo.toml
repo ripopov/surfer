@@ -9,8 +9,41 @@ build = "build.rs"
 description = "Waveform viewer for VCD, FST, and GHW"
 repository.workspace = true
 
+[target.'cfg(all(not(windows), not(target_arch = "wasm32")))'.dependencies]
+notify.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+directories.workspace = true
+extism = { workspace = true, optional = true }
+extism-manifest = { workspace = true, optional = true }
+futures = { workspace = true, features = ["executor"] }
+tokio = { workspace = true, features = ["macros"] }
+
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+futures.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+wasm-tracing.workspace = true
+web-sys.workspace = true
+
+[features]
+default = ["performance_plot"]
+accesskit = ["eframe/accesskit", "eframe/web_screen_reader"]
+f128 = ["dep:f128"]
+performance_plot = ["dep:egui_plot"]
+python = ["pyo3", "surfer-translation-types/pyo3"]
+wasm_plugins = [
+    "dep:extism",
+    "dep:extism-manifest",
+    "surfer-translation-types/wasm_plugins",
+]
+
+[target.'cfg(not(target_os = "unknown"))'.dev-dependencies]
+tempfile.workspace = true
 
 [dependencies]
 base64.workspace = true
@@ -19,18 +52,18 @@ bytes.workspace = true
 bytesize.workspace = true
 camino.workspace = true
 chrono = { workspace = true, default-features = false }
-eyre.workspace = true
 config.workspace = true
 derive_more.workspace = true
 ecolor.workspace = true
 eframe.workspace = true
 egui.workspace = true
+egui-remixicon.workspace = true
 egui_extras.workspace = true
 egui_plot = { workspace = true, optional = true }
-egui-remixicon.workspace = true
 emath.workspace = true
 enum-iterator.workspace = true
 epaint.workspace = true
+eyre.workspace = true
 f128 = { path = "../f128", optional = true }
 ftr_parser.workspace = true
 futures-core.workspace = true
@@ -39,6 +72,7 @@ fuzzy-matcher.workspace = true
 half.workspace = true
 instruction-decoder.workspace = true
 itertools.workspace = true
+leb128.workspace = true
 local-impl.workspace = true
 lz4_flex.workspace = true
 num.workspace = true
@@ -54,47 +88,19 @@ serde.workspace = true
 serde_json.workspace = true
 softposit.workspace = true
 surfer-translation-types = { path = "../surfer-translation-types", default-features = false }
+surfer-wcp = { path = "../surfer-wcp" }
 surver.workspace = true
 sys-locale.workspace = true
 thiserror.workspace = true
+tokio-stream.workspace = true
 toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 web-time.workspace = true
 wellen.workspace = true
-leb128.workspace = true
-surfer-wcp = { path = "../surfer-wcp" }
-tokio-stream.workspace = true
 
-[features]
-default = ["performance_plot"]
-accesskit = ["eframe/accesskit", "eframe/web_screen_reader"]
-f128 = ["dep:f128"]
-performance_plot = ["dep:egui_plot"]
-python = ["pyo3", "surfer-translation-types/pyo3"]
-wasm_plugins = [
-    "dep:extism",
-    "dep:extism-manifest",
-    "surfer-translation-types/wasm_plugins",
-]
-
-[target.'cfg(all(not(windows), not(target_arch = "wasm32")))'.dependencies]
-notify.workspace = true
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-directories.workspace = true
-futures = { workspace = true, features = ["executor"] }
-tokio = { workspace = true, features = ["macros"] }
-extism = { workspace = true, optional = true }
-extism-manifest = { workspace = true, optional = true }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-futures.workspace = true
-tokio = { workspace = true, features = ["sync"] }
-wasm-bindgen.workspace = true
-wasm-bindgen-futures.workspace = true
-web-sys.workspace = true
-wasm-tracing.workspace = true
+[build-dependencies]
+vergen-gitcl = { workspace = true, features = ["build"] }
 
 [dev-dependencies]
 egui_skia_renderer = { git = "https://gitlab.com/oscargus/egui_skia_renderer.git", rev = "279dfddcc8f4982309935d368827019e9736dc89" }
@@ -103,9 +109,3 @@ image-compare.workspace = true
 port_check.workspace = true
 project-root.workspace = true
 test-log.workspace = true
-
-[target.'cfg(not(target_os = "unknown"))'.dev-dependencies]
-tempfile.workspace = true
-
-[build-dependencies]
-vergen-gitcl = { workspace = true, features = ["build"] }

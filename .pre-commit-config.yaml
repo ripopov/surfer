@@ -19,6 +19,7 @@ repos:
     rev: v2.0.2
     hooks:
       - id: cargo-sort
+        args: ["-w"]
   - repo: https://github.com/doublify/pre-commit-rust
     rev: v1.0
     hooks:
@@ -36,7 +37,7 @@ repos:
              "-W", "clippy::suspicious",
              ]
   - repo: https://github.com/shssoichiro/oxipng
-    rev: v9.1.5
+    rev: v10.0.0
     hooks:
     - id: oxipng
 exclude: $(f128|instruction-decoder)
