@@ -19,9 +19,6 @@ extism-manifest = { workspace = true, optional = true }
 futures = { workspace = true, features = ["executor"] }
 tokio = { workspace = true, features = ["macros"] }
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 futures.workspace = true
 tokio = { workspace = true, features = ["sync"] }
@@ -29,6 +26,12 @@ wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 wasm-tracing.workspace = true
 web-sys.workspace = true
+
+[target.'cfg(not(target_os = "unknown"))'.dev-dependencies]
+tempfile.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["performance_plot"]
@@ -41,9 +44,6 @@ wasm_plugins = [
     "dep:extism-manifest",
     "surfer-translation-types/wasm_plugins",
 ]
-
-[target.'cfg(not(target_os = "unknown"))'.dev-dependencies]
-tempfile.workspace = true
 
 [dependencies]
 base64.workspace = true
