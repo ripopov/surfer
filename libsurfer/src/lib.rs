@@ -1700,6 +1700,7 @@ impl SystemState {
                 self.invalidate_draw_commands();
             }
             Message::SaveStateFile(path) => self.save_state_file(path),
+            Message::LoadStateFromData(bytes) => self.load_state_from_bytes(bytes),
             Message::LoadStateFile(path) => self.load_state_file(path),
             Message::LoadState(state, path) => self.load_state(state, path),
             Message::SetStateFile(path) => {

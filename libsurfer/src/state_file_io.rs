@@ -151,12 +151,60 @@ impl SystemState {
         );
     }
 
-    fn encode_state(&self) -> Option<String> {
+    pub fn encode_state(&self) -> Option<String> {
         let opt = ron::Options::default();
 
         opt.to_string_pretty(&self.user, ron::ser::PrettyConfig::default())
             .context("Failed to encode state")
             .map_err(|e| tracing::error!("Failed to encode state. {e:#?}"))
             .ok()
+    }
+
+    pub fn load_state_from_bytes(&mut self, bytes: Vec<u8>) {
+        match ron::de::from_bytes(&bytes).context("Failed loading state from bytes") {
+            Ok(s) => {
+                let sender = self.channels.msg_sender.clone();
+                if let Err(e) = sender.send(Message::LoadState(s, None)) {
+                    error!("Failed to send message: {e}");
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to load state: {e:#?}");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::StartupParams;
+
+    #[test]
+    fn test_encode_state() {
+        let state = SystemState::new_default_config()
+            .unwrap()
+            .with_params(StartupParams::default());
+        let encoded = state.encode_state();
+        assert!(encoded.is_some());
+        let encoded = encoded.unwrap();
+        assert!(encoded.contains("show_about"));
+    }
+
+    #[test]
+    fn test_load_state_from_bytes() {
+        let mut state = SystemState::new_default_config()
+            .unwrap()
+            .with_params(StartupParams::default());
+        let encoded = state.encode_state().unwrap();
+        let bytes = encoded.as_bytes().to_vec();
+
+        state.load_state_from_bytes(bytes);
+
+        let msg = state.channels.msg_receiver.try_recv().unwrap();
+        match msg {
+            Message::LoadState(..) => {}
+            _ => panic!("Expected LoadState message, got {:?}", msg),
+        }
     }
 }
