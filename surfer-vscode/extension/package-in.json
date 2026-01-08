@@ -68,7 +68,7 @@
   "readme": "./README.md",
   "repository": {
     "type": "git",
-    "url": "https://gitlab.com/surfer-project/surfer-vscode.git"
+    "url": "https://gitlab.com/surfer-project/surfer.git"
   },
   "scripts": {
     "compile": "tsc -p ./",
