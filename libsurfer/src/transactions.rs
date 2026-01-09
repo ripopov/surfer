@@ -206,9 +206,9 @@ pub fn draw_transaction_root(msgs: &mut Vec<Message>, streams: &WaveData, ui: &m
                     TRANSACTION_ROOT_NAME,
                 );
                 if response.clicked() {
-                    msgs.push(Message::SetActiveScope(ScopeType::StreamScope(
+                    msgs.push(Message::SetActiveScope(Some(ScopeType::StreamScope(
                         StreamScopeRef::Root,
-                    )));
+                    ))));
                 }
             },
         );
@@ -225,12 +225,12 @@ pub fn draw_transaction_root(msgs: &mut Vec<Message>, streams: &WaveData, ui: &m
                 });
                 let response = ui.selectable_label(selected, &stream.name);
                 if response.clicked() {
-                    msgs.push(Message::SetActiveScope(ScopeType::StreamScope(
+                    msgs.push(Message::SetActiveScope(Some(ScopeType::StreamScope(
                         StreamScopeRef::Stream(TransactionStreamRef::new_stream(
                             *id,
                             stream.name.clone(),
                         )),
-                    )));
+                    ))));
                 }
             }
         }

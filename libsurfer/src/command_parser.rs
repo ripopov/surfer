@@ -262,8 +262,10 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
             "scope_add_as_group",
             "scope_add_as_group_recursive",
             "scope_select",
+            "scope_select_root",
             "stream_add",
             "stream_select",
+            "stream_select_root",
             "divider_add",
             "config_reload",
             "theme_select",
@@ -502,19 +504,22 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                                 } else {
                                     ScopeType::StreamScope(StreamScopeRef::Empty(word.to_string()))
                                 };
-                                Some(Command::Terminal(Message::SetActiveScope(scope)))
+                                Some(Command::Terminal(Message::SetActiveScope(Some(scope))))
                             }),
                         )
                     } else {
                         single_word(
                             scopes.clone(),
                             Box::new(|word| {
-                                Some(Command::Terminal(Message::SetActiveScope(
+                                Some(Command::Terminal(Message::SetActiveScope(Some(
                                     ScopeType::WaveScope(ScopeRef::from_hierarchy_string(word)),
-                                )))
+                                ))))
                             }),
                         )
                     }
+                }
+                "scope_select_root" | "stream_select_root" => {
+                    Some(Command::Terminal(Message::SetActiveScope(None)))
                 }
                 "reload" => Some(Command::Terminal(Message::ReloadWaveform(
                     keep_during_reload,

@@ -14,7 +14,7 @@ use crate::async_util::AsyncJob;
 use crate::config::{PrimaryMouseDrag, TransitionValue};
 use crate::displayed_item_tree::{ItemIndex, VisibleItemIndex};
 use crate::graphics::{Graphic, GraphicId};
-use crate::hierarchy::ParameterDisplayLocation;
+use crate::hierarchy::{ParameterDisplayLocation, ScopeExpandType};
 use crate::state::UserState;
 use crate::transaction_container::{
     StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
@@ -70,9 +70,9 @@ impl<T: Copy> Copy for MessageTarget<T> {}
 #[derive(Debug, Deserialize)]
 /// The design of Surfer relies on sending messages to trigger actions.
 pub enum Message {
-    /// Set active scope
-    SetActiveScope(ScopeType),
-    ExpandScope(ScopeRef),
+    /// Set active scope, None corresponds to the top-level scope.
+    SetActiveScope(Option<ScopeType>),
+    ExpandScope(ScopeExpandType),
     /// Add one or more variables to wave view.
     AddVariables(Vec<VariableRef>),
     /// Add scope to wave view. If second argument is true, add subscopes recursively.

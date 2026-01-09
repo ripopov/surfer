@@ -8,7 +8,7 @@ use surfer_translation_types::{TranslationPreference, Translator};
 
 use crate::config::{PrimaryMouseDrag, TransitionValue};
 use crate::displayed_item_tree::VisibleItemIndex;
-use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation};
+use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation, ScopeExpandType};
 use crate::message::MessageTarget;
 use crate::wave_container::{FieldRef, VariableRefExt};
 use crate::wave_data::ScopeType;
@@ -561,8 +561,10 @@ impl SystemState {
             if !is_parameter && ui.button("Expand scope").clicked() {
                 let scope_path = path.root.path.clone();
                 let scope_type = ScopeType::WaveScope(scope_path.clone());
-                msgs.push(Message::SetActiveScope(scope_type));
-                msgs.push(Message::ExpandScope(scope_path));
+                msgs.push(Message::SetActiveScope(Some(scope_type)));
+                msgs.push(Message::ExpandScope(ScopeExpandType::ExpandSpecific(
+                    scope_path,
+                )));
             }
 
             if let DisplayedItem::Variable(variable) = clicked_item

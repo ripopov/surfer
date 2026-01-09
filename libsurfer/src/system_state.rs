@@ -12,10 +12,11 @@ use surfer_translation_types::translator::VariableNameInfo;
 use crate::{
     CachedDrawData, CanvasState, Channels, WcpClientCapabilities, command_prompt,
     displayed_item::DisplayedItemRef,
+    hierarchy::ScopeExpandType,
     message::Message,
     state::UserState,
     translation::{TranslatorList, all_translators},
-    wave_container::{ScopeRef, VariableRef},
+    wave_container::VariableRef,
     wave_source::{LoadOptions, LoadProgress},
 };
 
@@ -80,7 +81,7 @@ pub struct SystemState {
     /// presentations at them moment.
     pub(crate) char_to_add_to_prompt: RefCell<Option<char>>,
     // This item works with the expand scope feature to determine what hierarchys to open
-    pub scope_ref_to_expand: RefCell<Option<ScopeRef>>,
+    pub scope_ref_to_expand: RefCell<Option<ScopeExpandType>>,
 
     // Benchmarking stuff
     /// Invalidate draw commands every frame to make performance comparison easier
