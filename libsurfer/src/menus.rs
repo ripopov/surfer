@@ -391,6 +391,12 @@ impl SystemState {
                     msgs.push(Message::SetShowEmptyScopes(!self.show_empty_scopes()));
                 });
 
+            ui.radio(self.show_hierarchy_icons(), "Show hierarchy icons")
+                .clicked()
+                .then(|| {
+                    msgs.push(Message::SetShowHierarchyIcons(!self.show_hierarchy_icons()));
+                });
+
             ui.radio(self.highlight_focused(), "Highlight focused")
                 .clicked()
                 .then(|| msgs.push(Message::SetHighlightFocused(!self.highlight_focused())));

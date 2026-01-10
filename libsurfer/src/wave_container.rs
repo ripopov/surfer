@@ -556,6 +556,16 @@ impl WaveContainer {
         }
     }
 
+    /// Returns the scope type for a given scope.
+    /// Returns `None` for backends that don't support scope types
+    #[must_use]
+    pub fn get_scope_type(&self, scope: &ScopeRef) -> Option<wellen::ScopeType> {
+        match self {
+            WaveContainer::Wellen(f) => f.get_scope_type(scope),
+            WaveContainer::Empty | WaveContainer::Cxxrtl(_) => None,
+        }
+    }
+
     /// Returns the simulation status for this wave source if it exists. Wave sources which have no
     /// simulation status should return None here, otherwise buttons for controlling simulation
     /// will be shown

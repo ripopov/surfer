@@ -53,6 +53,7 @@ pub struct UserState {
     pub(crate) show_variable_indices: Option<bool>,
     pub(crate) show_variable_direction: Option<bool>,
     pub(crate) show_empty_scopes: Option<bool>,
+    pub(crate) show_hierarchy_icons: Option<bool>,
     pub(crate) show_parameters_in_scopes: Option<bool>,
     #[serde(default)]
     pub(crate) parameter_display_location: Option<ParameterDisplayLocation>,
@@ -169,6 +170,7 @@ impl Default for UserState {
             show_variable_indices: None,
             show_variable_direction: None,
             show_empty_scopes: None,
+            show_hierarchy_icons: None,
             show_parameters_in_scopes: None,
             parameter_display_location: None,
             highlight_focused: None,

@@ -37,3 +37,37 @@ Additionally, configurations can be loaded using the Menubar option `View/Theme`
 
 For a list of all possible style options, please look at the [default theme](https://gitlab.com/surfer-project/surfer/-/blob/main/default_theme.toml?ref_type=heads).
 For example of existing themes [look here](https://gitlab.com/surfer-project/surfer/-/tree/main/themes?ref_type=heads).
+
+### Customizing Icons
+
+Themes can customize the icons displayed in the hierarchy view for scopes and variables. Icons are specified using Unicode code points from the [Remix Icon](https://remixicon.com/) font.
+To find the Unicode code point for an icon, search the [egui-remixicon source](https://github.com/get200/egui-remixicon).
+
+
+#### Scope Icons
+
+Scope icons appear next to hierarchy items like modules, functions, and packages. Add a `[scope_icons]` section to your theme file:
+
+```toml
+[scope_icons]
+module = "\ued52"        # FOLDER_2_LINE
+function = "\ued9e"      # FUNCTION_LINE
+package = "\ued88"       # FOLDER_ZIP_LINE
+#...
+```
+
+This is useful for adapting icons to HDL languages other than Verilog/VHDL. For example, if your simulator maps a language-specific construct to one of the existing scope types,
+you can customize its icon to better represent its meaning in your workflow.
+
+#### Variable Icons
+
+Variable icons appear next to signals in the hierarchy. Add a `[variable_icons]` section to your theme file:
+
+```toml
+[variable_icons]
+wire = "\uf035"          # PULSE_LINE
+bus = "\uebad"           # CODE_S_SLASH_LINE
+string = "\uf201"        # TEXT
+event = "\ueea8"         # LIGHTBULB_FLASH_LINE
+other = "\uedfc"         # HASHTAG
+```

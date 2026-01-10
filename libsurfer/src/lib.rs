@@ -1413,6 +1413,7 @@ impl SystemState {
             }
             Message::SetToolbarVisible(v) => self.user.show_toolbar = Some(v),
             Message::SetShowEmptyScopes(v) => self.user.show_empty_scopes = Some(v),
+            Message::SetShowHierarchyIcons(v) => self.user.show_hierarchy_icons = Some(v),
             Message::SetParameterDisplayLocation(location) => {
                 self.user.parameter_display_location = Some(location);
             }

@@ -20,7 +20,9 @@ use std::sync::LazyLock;
 use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation};
 use crate::mousegestures::GestureZones;
 use crate::time::TimeFormat;
+use crate::wave_container::VariableMeta;
 use crate::{clock_highlighting::ClockHighlightType, variable_name_type::VariableNameType};
+use surfer_translation_types::VariableEncoding;
 
 macro_rules! theme {
     ($name:expr) => {
@@ -189,6 +191,8 @@ pub struct SurferLayout {
     show_default_timeline: bool,
     /// Flag to show/hide empty scopes
     show_empty_scopes: bool,
+    /// Flag to show/hide scope and variable type icons in the hierarchy
+    show_hierarchy_icons: bool,
     /// Where to show parameters in the hierarchy
     parameter_display_location: ParameterDisplayLocation,
     /// Initial window height
@@ -291,6 +295,10 @@ impl SurferLayout {
     #[must_use]
     pub fn show_empty_scopes(&self) -> bool {
         self.show_empty_scopes
+    }
+    #[must_use]
+    pub fn show_hierarchy_icons(&self) -> bool {
+        self.show_hierarchy_icons
     }
     #[must_use]
     pub fn parameter_display_location(&self) -> ParameterDisplayLocation {
@@ -520,6 +528,173 @@ pub struct SurferTheme {
     /// List of theme names
     #[serde(default = "Vec::new")]
     pub theme_names: Vec<String>,
+
+    /// Icons for scope types in the hierarchy view
+    #[serde(default)]
+    pub scope_icons: ScopeIcons,
+
+    /// Icons for variable types in the hierarchy view
+    #[serde(default)]
+    pub variable_icons: VariableIcons,
+}
+
+/// Icons for different scope types in the hierarchy view.
+/// Each field maps to a wellen::ScopeType and contains a Remix icon string.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct ScopeIcons {
+    // Verilog/SystemVerilog scope types
+    pub module: String,
+    pub task: String,
+    pub function: String,
+    pub begin: String,
+    pub fork: String,
+    pub generate: String,
+    #[serde(rename = "struct")]
+    pub struct_: String,
+    pub union: String,
+    pub class: String,
+    pub interface: String,
+    pub package: String,
+    pub program: String,
+    // VHDL scope types
+    pub vhdl_architecture: String,
+    pub vhdl_procedure: String,
+    pub vhdl_function: String,
+    pub vhdl_record: String,
+    pub vhdl_process: String,
+    pub vhdl_block: String,
+    pub vhdl_for_generate: String,
+    pub vhdl_if_generate: String,
+    pub vhdl_generate: String,
+    pub vhdl_package: String,
+    // GHW and other types
+    pub ghw_generic: String,
+    pub vhdl_array: String,
+    pub unknown: String,
+}
+
+impl Default for ScopeIcons {
+    fn default() -> Self {
+        use egui_remixicon::icons;
+        Self {
+            // Verilog/SystemVerilog scope types
+            module: icons::CPU_LINE.to_string(),
+            task: icons::TASK_LINE.to_string(),
+            function: icons::BRACES_LINE.to_string(),
+            begin: icons::CODE_BOX_LINE.to_string(),
+            fork: icons::GIT_BRANCH_LINE.to_string(),
+            generate: icons::REPEAT_LINE.to_string(),
+            struct_: icons::TABLE_LINE.to_string(),
+            union: icons::MERGE_CELLS_HORIZONTAL.to_string(),
+            class: icons::TABLE_LINE.to_string(),
+            interface: icons::PLUG_LINE.to_string(),
+            package: icons::BOX_3_LINE.to_string(),
+            program: icons::FILE_CODE_LINE.to_string(),
+            // VHDL scope types
+            vhdl_architecture: icons::CPU_LINE.to_string(),
+            vhdl_procedure: icons::TERMINAL_LINE.to_string(),
+            vhdl_function: icons::BRACES_LINE.to_string(),
+            vhdl_record: icons::TABLE_LINE.to_string(),
+            vhdl_process: icons::FLASHLIGHT_LINE.to_string(),
+            vhdl_block: icons::CODE_BLOCK.to_string(),
+            vhdl_for_generate: icons::REPEAT_LINE.to_string(),
+            vhdl_if_generate: icons::QUESTION_LINE.to_string(),
+            vhdl_generate: icons::REPEAT_LINE.to_string(),
+            vhdl_package: icons::BOX_3_LINE.to_string(),
+            ghw_generic: icons::SETTINGS_3_LINE.to_string(),
+            vhdl_array: icons::BRACKETS_LINE.to_string(),
+            unknown: icons::QUESTION_LINE.to_string(),
+        }
+    }
+}
+
+impl ScopeIcons {
+    /// Returns the icon for a given scope type.
+    /// If `scope_type` is `None`, returns the default module icon.
+    #[must_use]
+    pub fn get_icon(&self, scope_type: Option<wellen::ScopeType>) -> &str {
+        use wellen::ScopeType;
+        match scope_type {
+            None => &self.module, // Default to module for backends that don't support scope types
+            Some(st) => match st {
+                ScopeType::Module => &self.module,
+                ScopeType::Task => &self.task,
+                ScopeType::Function => &self.function,
+                ScopeType::Begin => &self.begin,
+                ScopeType::Fork => &self.fork,
+                ScopeType::Generate => &self.generate,
+                ScopeType::Struct => &self.struct_,
+                ScopeType::Union => &self.union,
+                ScopeType::Class => &self.class,
+                ScopeType::Interface => &self.interface,
+                ScopeType::Package => &self.package,
+                ScopeType::Program => &self.program,
+                ScopeType::VhdlArchitecture => &self.vhdl_architecture,
+                ScopeType::VhdlProcedure => &self.vhdl_procedure,
+                ScopeType::VhdlFunction => &self.vhdl_function,
+                ScopeType::VhdlRecord => &self.vhdl_record,
+                ScopeType::VhdlProcess => &self.vhdl_process,
+                ScopeType::VhdlBlock => &self.vhdl_block,
+                ScopeType::VhdlForGenerate => &self.vhdl_for_generate,
+                ScopeType::VhdlIfGenerate => &self.vhdl_if_generate,
+                ScopeType::VhdlGenerate => &self.vhdl_generate,
+                ScopeType::VhdlPackage => &self.vhdl_package,
+                ScopeType::GhwGeneric => &self.ghw_generic,
+                ScopeType::VhdlArray => &self.vhdl_array,
+                ScopeType::Unknown => &self.unknown,
+                _ => &self.unknown,
+            },
+        }
+    }
+}
+
+/// Icons for different variable types in the hierarchy view.
+/// Each field contains a Remix icon string.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct VariableIcons {
+    /// 1-bit wire signals
+    pub wire: String,
+    /// Multi-bit bus signals
+    pub bus: String,
+    /// String variables
+    pub string: String,
+    /// Event variables
+    pub event: String,
+    /// Other types (integers, floats, enums)
+    pub other: String,
+}
+
+impl Default for VariableIcons {
+    fn default() -> Self {
+        use egui_remixicon::icons;
+        Self {
+            wire: icons::GIT_COMMIT_LINE.to_string(),
+            bus: icons::BRACKETS_LINE.to_string(),
+            string: icons::TEXT.to_string(),
+            event: icons::ARROW_UP_LONG_LINE.to_string(),
+            other: icons::NUMBERS_LINE.to_string(),
+        }
+    }
+}
+
+impl VariableIcons {
+    #[must_use]
+    pub fn get_icon(&self, meta: Option<&VariableMeta>) -> &str {
+        let Some(meta) = meta else { return &self.other };
+
+        match meta.encoding {
+            VariableEncoding::String => &self.string,
+            VariableEncoding::Event => &self.event,
+            VariableEncoding::Real => &self.other,
+            VariableEncoding::BitVector => match meta.num_bits {
+                Some(1) => &self.wire,
+                Some(n) if n > 1 => &self.bus,
+                _ => &self.other,
+            },
+        }
+    }
 }
 
 fn get_luminance(color: Color32) -> f32 {

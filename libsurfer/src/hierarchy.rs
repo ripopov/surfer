@@ -107,6 +107,49 @@ impl SystemState {
         *self.scope_ref_to_expand.borrow_mut() = None;
     }
 
+    fn draw_variable_list_header(&self, ui: &mut Ui) {
+        let show_icons = self.show_hierarchy_icons();
+        let show_direction = self.show_variable_direction();
+
+        // Only show header if icons or direction are enabled
+        if !show_icons && !show_direction {
+            return;
+        }
+
+        ui.with_layout(
+            Layout::top_down(Align::LEFT).with_cross_justify(true),
+            |ui| {
+                let monospace_font = ui
+                    .style()
+                    .text_styles
+                    .get(&TextStyle::Monospace)
+                    .cloned()
+                    .unwrap();
+
+                let text_format = TextFormat {
+                    font_id: monospace_font,
+                    color: self.user.config.theme.foreground,
+                    ..Default::default()
+                };
+
+                let mut label = LayoutJob::default();
+                // Type column - "T " to match "icon " (only if shown)
+                if show_icons {
+                    label.append("T ", 0.0, text_format.clone());
+                }
+                // Direction column - "D " to match "icon " (only if shown)
+                if show_direction {
+                    label.append("D ", 0.0, text_format.clone());
+                }
+                // Name column
+                label.append("Name", 0.0, text_format);
+
+                ui.add(egui::Button::selectable(false, label));
+            },
+        );
+        ui.separator();
+    }
+
     fn draw_variables(&mut self, msgs: &mut Vec<Message>, ui: &mut Ui) {
         if let Some(waves) = &self.user.waves {
             let empty_scope = if waves.inner.is_waves() {
@@ -122,6 +165,8 @@ impl SystemState {
                     };
                     let variables =
                         self.filtered_variables(&wave_container.variables_in_scope(scope), false);
+                    // Draw header before scroll area
+                    self.draw_variable_list_header(ui);
                     // Parameters shown in variable list
                     if self.parameter_display_location() == ParameterDisplayLocation::Variables {
                         let parameters = wave_container.parameters_in_scope(scope);
@@ -329,7 +374,16 @@ impl SystemState {
     ) {
         let name = scope.name();
         let is_selected = wave.active_scope == Some(ScopeType::WaveScope(scope.clone()));
-        let mut response = ui.add(egui::Button::selectable(is_selected, name));
+        let mut response = if self.show_hierarchy_icons() {
+            let scope_type = wave
+                .inner
+                .as_waves()
+                .and_then(|wc| wc.get_scope_type(scope));
+            let icon = self.user.config.theme.scope_icons.get_icon(scope_type);
+            ui.add(egui::Button::selectable(is_selected, (icon, name)))
+        } else {
+            ui.add(egui::Button::selectable(is_selected, name))
+        };
         let _ = response.interact(egui::Sense::click_and_drag());
         response.drag_started().then(|| {
             msgs.push(Message::VariableDragStarted(VisibleItemIndex(
@@ -602,6 +656,20 @@ impl SystemState {
                 })
                 .unwrap_or_default();
 
+            // Get type icon
+            let type_icon = if self.show_hierarchy_icons() {
+                format!(
+                    "{} ",
+                    self.user
+                        .config
+                        .theme
+                        .variable_icons
+                        .get_icon(meta.as_ref())
+                )
+            } else {
+                String::new()
+            };
+
             // Get direction icon
             let direction = self
                 .show_variable_direction()
@@ -626,11 +694,13 @@ impl SystemState {
                     let mut label = LayoutJob::default();
 
                     if let Some(name) = name_info.and_then(|info| info.true_name) {
+                        let type_icon_size = type_icon.chars().count();
                         let direction_size = direction.chars().count();
                         let index_size = index.chars().count();
                         let value_size = value.chars().count();
-                        let used_space =
-                            (direction_size + index_size + value_size) as f32 * char_width_mono;
+                        let used_space = (type_icon_size + direction_size + index_size + value_size)
+                            as f32
+                            * char_width_mono;
                         let space_for_name = available_space - used_space;
 
                         let text_format = TextFormat {
@@ -639,6 +709,7 @@ impl SystemState {
                             ..Default::default()
                         };
 
+                        label.append(&type_icon, 0.0, text_format.clone());
                         label.append(&direction, 0.0, text_format.clone());
 
                         draw_true_name(
@@ -663,6 +734,7 @@ impl SystemState {
                         } else {
                             variable.name.clone()
                         };
+                        label.append(&type_icon, 0.0, text_format.clone());
                         label.append(&direction, 0.0, text_format.clone());
                         label.append(&name, 0.0, text_format.clone());
                         label.append(&index, 0.0, text_format.clone());

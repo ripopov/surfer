@@ -254,6 +254,12 @@ impl WellenContainer {
     }
 
     #[must_use]
+    pub fn get_scope_type(&self, scope: &ScopeRef) -> Option<ScopeType> {
+        self.lookup_scope(scope)
+            .map(|scope_ref| self.hierarchy[scope_ref].scope_type())
+    }
+
+    #[must_use]
     pub fn variables(&self) -> Vec<VariableRef> {
         self.varrefs.clone()
     }

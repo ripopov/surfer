@@ -255,6 +255,7 @@ pub enum Message {
     SetShowIndices(bool),
     SetShowVariableDirection(bool),
     SetShowEmptyScopes(bool),
+    SetShowHierarchyIcons(bool),
     SetParameterDisplayLocation(ParameterDisplayLocation),
     SetSidePanelVisible(bool),
     ToggleItemSelected(Option<VisibleItemIndex>),

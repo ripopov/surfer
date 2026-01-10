@@ -1512,9 +1512,9 @@ dependencies = [
 
 [[package]]
 name = "egui-remixicon"
-version = "0.29.1"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a463c133d92f2ea65465464437aeb3ebd134a5e583379c5f73121727dd0e2d6"
+checksum = "4f3ed143945f925e2d5460346fb76dd055ab08cb98680d16f8b9ac81f383e3a9"
 
 [[package]]
 name = "egui-wgpu"

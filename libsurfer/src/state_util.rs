@@ -105,6 +105,13 @@ impl SystemState {
     }
 
     #[inline]
+    pub fn show_hierarchy_icons(&self) -> bool {
+        self.user
+            .show_hierarchy_icons
+            .unwrap_or_else(|| self.user.config.layout.show_hierarchy_icons())
+    }
+
+    #[inline]
     pub fn show_default_timeline(&self) -> bool {
         self.user
             .show_default_timeline
