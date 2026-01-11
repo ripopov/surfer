@@ -1644,7 +1644,7 @@ impl SystemState {
                             .focused_item
                             .and_then(|vidx| waves.items_tree.get_visible(vidx))
                             .map(|node| node.item_ref)
-                            .map(|item_ref| change_type(item_ref));
+                            .map(change_type);
                     }
                 }
 

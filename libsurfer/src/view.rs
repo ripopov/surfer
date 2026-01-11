@@ -1220,10 +1220,10 @@ impl SystemState {
                 .user
                 .waves
                 .as_ref()
-                .and_then(|w| {
+                .map(|w| {
                     // FIXME check if this is fast
                     let it = w.items_tree.iter_visible_selected();
-                    Some(it.count() == 1)
+                    it.count() == 1
                 })
                 .unwrap();
 

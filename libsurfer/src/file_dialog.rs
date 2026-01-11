@@ -186,7 +186,7 @@ impl SystemState {
     }
 }
 
-#[cfg[not(target_os = "macos")]]
+#[cfg(not(target_os = "macos"))]
 fn create_file_dialog(filter: (String, Vec<String>), title: &'static str) -> AsyncFileDialog {
     AsyncFileDialog::new()
         .set_title(title)
@@ -194,7 +194,7 @@ fn create_file_dialog(filter: (String, Vec<String>), title: &'static str) -> Asy
         .add_filter("All files", &["*"])
 }
 
-#[cfg[target_os = "macos"]]
+#[cfg(target_os = "macos")]
 fn create_file_dialog(filter: (String, Vec<String>), title: &'static str) -> AsyncFileDialog {
     AsyncFileDialog::new()
         .set_title(title)
