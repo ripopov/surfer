@@ -1715,6 +1715,20 @@ snapshot_ui_with_file_and_msgs! {fst_scope_and_variable_icons, "examples/fst_typ
     Message::ExpandScope(ScopeExpandType::ExpandSpecific(ScopeRef::from_strs(&["top"]))),
 ]}
 
+snapshot_ui_with_file_and_msgs! {vcd_scope_and_variable_icons, "examples/vcd_extensions.vcd", [
+    Message::SetSidePanelVisible(true),
+    Message::SetShowHierarchyIcons(true),
+    Message::SetHierarchyStyle(HierarchyStyle::Separate),
+    Message::ExpandScope(ScopeExpandType::ExpandSpecific(ScopeRef::from_strs(&["main"]))),
+    Message::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["main"])))),
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("main.EVENT_IN"),
+        VariableRef::from_hierarchy_string("main.INT32_OUT"),
+        VariableRef::from_hierarchy_string("main.REAL_BUF"),
+        VariableRef::from_hierarchy_string("main.WIRE_var"),
+    ]),
+]}
+
 snapshot_ui_with_file_and_msgs! {aliasing_works_on_random_3_16, "examples/random_3_16_true.vcd", [
     Message::AddVariables(vec![VariableRef::from_hierarchy_string("TOP.LEB128Compressor_3_16.adaptedCounterFlagBits")]),
 ]}
