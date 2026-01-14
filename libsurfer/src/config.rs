@@ -538,6 +538,94 @@ pub struct SurferTheme {
     pub variable_icons: VariableIcons,
 }
 
+/// Colors for different scope type icons in the hierarchy view.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct ScopeIconColors {
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub module: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub task: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub function: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub begin: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub fork: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub generate: Color32,
+    #[serde(rename = "struct", deserialize_with = "deserialize_hex_color")]
+    pub struct_: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub union: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub class: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub interface: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub package: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub program: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub vhdl_architecture: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub vhdl_procedure: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub vhdl_function: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub vhdl_record: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub vhdl_process: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub vhdl_block: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub vhdl_for_generate: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub vhdl_if_generate: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub vhdl_generate: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub vhdl_package: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub ghw_generic: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub vhdl_array: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub unknown: Color32,
+}
+
+impl Default for ScopeIconColors {
+    fn default() -> Self {
+        Self {
+            module: Color32::from_rgb(0x4F, 0xC3, 0xF7), // Light Blue
+            task: Color32::from_rgb(0xFF, 0xB7, 0x4D),   // Orange
+            function: Color32::from_rgb(0xBA, 0x68, 0xC8), // Purple
+            begin: Color32::from_rgb(0x81, 0xC7, 0x84),  // Green
+            fork: Color32::from_rgb(0xFF, 0x80, 0x80),   // Red
+            generate: Color32::from_rgb(0x64, 0xB5, 0xF6), // Blue
+            struct_: Color32::from_rgb(0x4D, 0xD0, 0xE1), // Cyan
+            union: Color32::from_rgb(0x4D, 0xD0, 0xE1),  // Cyan
+            class: Color32::from_rgb(0xF0, 0x62, 0x92),  // Pink
+            interface: Color32::from_rgb(0xAE, 0xD5, 0x81), // Light Green
+            package: Color32::from_rgb(0xFF, 0xD5, 0x4F), // Yellow
+            program: Color32::from_rgb(0xA1, 0x88, 0x7F), // Brown
+            vhdl_architecture: Color32::from_rgb(0x4F, 0xC3, 0xF7), // Light Blue (like module)
+            vhdl_procedure: Color32::from_rgb(0xFF, 0xB7, 0x4D), // Orange (like task)
+            vhdl_function: Color32::from_rgb(0xBA, 0x68, 0xC8), // Purple (like function)
+            vhdl_record: Color32::from_rgb(0x4D, 0xD0, 0xE1), // Cyan (like struct)
+            vhdl_process: Color32::from_rgb(0x81, 0xC7, 0x84), // Green (like begin)
+            vhdl_block: Color32::from_rgb(0x90, 0xA4, 0xAE), // Blue Grey
+            vhdl_for_generate: Color32::from_rgb(0x64, 0xB5, 0xF6), // Blue (like generate)
+            vhdl_if_generate: Color32::from_rgb(0x64, 0xB5, 0xF6), // Blue (like generate)
+            vhdl_generate: Color32::from_rgb(0x64, 0xB5, 0xF6), // Blue (like generate)
+            vhdl_package: Color32::from_rgb(0xFF, 0xD5, 0x4F), // Yellow (like package)
+            ghw_generic: Color32::from_rgb(0xB0, 0xBE, 0xC5), // Blue Grey Light
+            vhdl_array: Color32::from_rgb(0xCE, 0x93, 0xD8), // Light Purple
+            unknown: Color32::from_rgb(0x9E, 0x9E, 0x9E), // Grey
+        }
+    }
+}
+
 /// Icons for different scope types in the hierarchy view.
 /// Each field maps to a wellen::ScopeType and contains a Remix icon string.
 #[derive(Clone, Debug, Deserialize)]
@@ -568,10 +656,12 @@ pub struct ScopeIcons {
     pub vhdl_if_generate: String,
     pub vhdl_generate: String,
     pub vhdl_package: String,
-    // GHW and other types
     pub ghw_generic: String,
     pub vhdl_array: String,
     pub unknown: String,
+    /// Colors for scope icons
+    #[serde(default)]
+    pub colors: ScopeIconColors,
 }
 
 impl Default for ScopeIcons {
@@ -605,46 +695,85 @@ impl Default for ScopeIcons {
             ghw_generic: icons::SETTINGS_3_LINE.to_string(),
             vhdl_array: icons::BRACKETS_LINE.to_string(),
             unknown: icons::QUESTION_LINE.to_string(),
+            colors: ScopeIconColors::default(),
         }
     }
 }
 
 impl ScopeIcons {
-    /// Returns the icon for a given scope type.
-    /// If `scope_type` is `None`, returns the default module icon.
+    /// Returns the icon and color for a given scope type.
+    /// If `scope_type` is `None`, returns the default module icon and color.
     #[must_use]
-    pub fn get_icon(&self, scope_type: Option<wellen::ScopeType>) -> &str {
+    pub fn get_icon(&self, scope_type: Option<wellen::ScopeType>) -> (&str, Color32) {
         use wellen::ScopeType;
         match scope_type {
-            None => &self.module, // Default to module for backends that don't support scope types
+            None => (&self.module, self.colors.module),
             Some(st) => match st {
-                ScopeType::Module => &self.module,
-                ScopeType::Task => &self.task,
-                ScopeType::Function => &self.function,
-                ScopeType::Begin => &self.begin,
-                ScopeType::Fork => &self.fork,
-                ScopeType::Generate => &self.generate,
-                ScopeType::Struct => &self.struct_,
-                ScopeType::Union => &self.union,
-                ScopeType::Class => &self.class,
-                ScopeType::Interface => &self.interface,
-                ScopeType::Package => &self.package,
-                ScopeType::Program => &self.program,
-                ScopeType::VhdlArchitecture => &self.vhdl_architecture,
-                ScopeType::VhdlProcedure => &self.vhdl_procedure,
-                ScopeType::VhdlFunction => &self.vhdl_function,
-                ScopeType::VhdlRecord => &self.vhdl_record,
-                ScopeType::VhdlProcess => &self.vhdl_process,
-                ScopeType::VhdlBlock => &self.vhdl_block,
-                ScopeType::VhdlForGenerate => &self.vhdl_for_generate,
-                ScopeType::VhdlIfGenerate => &self.vhdl_if_generate,
-                ScopeType::VhdlGenerate => &self.vhdl_generate,
-                ScopeType::VhdlPackage => &self.vhdl_package,
-                ScopeType::GhwGeneric => &self.ghw_generic,
-                ScopeType::VhdlArray => &self.vhdl_array,
-                ScopeType::Unknown => &self.unknown,
-                _ => &self.unknown,
+                ScopeType::Module => (&self.module, self.colors.module),
+                ScopeType::Task => (&self.task, self.colors.task),
+                ScopeType::Function => (&self.function, self.colors.function),
+                ScopeType::Begin => (&self.begin, self.colors.begin),
+                ScopeType::Fork => (&self.fork, self.colors.fork),
+                ScopeType::Generate => (&self.generate, self.colors.generate),
+                ScopeType::Struct => (&self.struct_, self.colors.struct_),
+                ScopeType::Union => (&self.union, self.colors.union),
+                ScopeType::Class => (&self.class, self.colors.class),
+                ScopeType::Interface => (&self.interface, self.colors.interface),
+                ScopeType::Package => (&self.package, self.colors.package),
+                ScopeType::Program => (&self.program, self.colors.program),
+                ScopeType::VhdlArchitecture => {
+                    (&self.vhdl_architecture, self.colors.vhdl_architecture)
+                }
+                ScopeType::VhdlProcedure => (&self.vhdl_procedure, self.colors.vhdl_procedure),
+                ScopeType::VhdlFunction => (&self.vhdl_function, self.colors.vhdl_function),
+                ScopeType::VhdlRecord => (&self.vhdl_record, self.colors.vhdl_record),
+                ScopeType::VhdlProcess => (&self.vhdl_process, self.colors.vhdl_process),
+                ScopeType::VhdlBlock => (&self.vhdl_block, self.colors.vhdl_block),
+                ScopeType::VhdlForGenerate => {
+                    (&self.vhdl_for_generate, self.colors.vhdl_for_generate)
+                }
+                ScopeType::VhdlIfGenerate => (&self.vhdl_if_generate, self.colors.vhdl_if_generate),
+                ScopeType::VhdlGenerate => (&self.vhdl_generate, self.colors.vhdl_generate),
+                ScopeType::VhdlPackage => (&self.vhdl_package, self.colors.vhdl_package),
+                ScopeType::GhwGeneric => (&self.ghw_generic, self.colors.ghw_generic),
+                ScopeType::VhdlArray => (&self.vhdl_array, self.colors.vhdl_array),
+                ScopeType::Unknown => (&self.unknown, self.colors.unknown),
+                _ => (&self.unknown, self.colors.unknown),
             },
+        }
+    }
+}
+
+/// Colors for different variable type icons in the hierarchy view.
+/// Each field contains a Color32 value for the corresponding variable type.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct VariableIconColors {
+    /// Color for 1-bit wire signals
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub wire: Color32,
+    /// Color for multi-bit bus signals
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub bus: Color32,
+    /// Color for string variables
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub string: Color32,
+    /// Color for event variables
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub event: Color32,
+    /// Color for other types (integers, floats, enums)
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub other: Color32,
+}
+
+impl Default for VariableIconColors {
+    fn default() -> Self {
+        Self {
+            wire: Color32::from_rgb(0x81, 0xC7, 0x84),   // Green
+            bus: Color32::from_rgb(0x64, 0xB5, 0xF6),    // Blue
+            string: Color32::from_rgb(0xFF, 0xB7, 0x4D), // Orange
+            event: Color32::from_rgb(0xF0, 0x62, 0x92),  // Pink
+            other: Color32::from_rgb(0xBA, 0x68, 0xC8),  // Purple
         }
     }
 }
@@ -664,6 +793,9 @@ pub struct VariableIcons {
     pub event: String,
     /// Other types (integers, floats, enums)
     pub other: String,
+    /// Colors for variable icons
+    #[serde(default)]
+    pub colors: VariableIconColors,
 }
 
 impl Default for VariableIcons {
@@ -675,23 +807,28 @@ impl Default for VariableIcons {
             string: icons::TEXT.to_string(),
             event: icons::ARROW_UP_LONG_LINE.to_string(),
             other: icons::NUMBERS_LINE.to_string(),
+            colors: VariableIconColors::default(),
         }
     }
 }
 
 impl VariableIcons {
+    /// Returns the icon and color for a given variable meta.
+    /// If `meta` is `None`, returns the default "other" icon and color.
     #[must_use]
-    pub fn get_icon(&self, meta: Option<&VariableMeta>) -> &str {
-        let Some(meta) = meta else { return &self.other };
+    pub fn get_icon(&self, meta: Option<&VariableMeta>) -> (&str, Color32) {
+        let Some(meta) = meta else {
+            return (&self.other, self.colors.other);
+        };
 
         match meta.encoding {
-            VariableEncoding::String => &self.string,
-            VariableEncoding::Event => &self.event,
-            VariableEncoding::Real => &self.other,
+            VariableEncoding::String => (&self.string, self.colors.string),
+            VariableEncoding::Event => (&self.event, self.colors.event),
+            VariableEncoding::Real => (&self.other, self.colors.other),
             VariableEncoding::BitVector => match meta.num_bits {
-                Some(1) => &self.wire,
-                Some(n) if n > 1 => &self.bus,
-                _ => &self.other,
+                Some(1) => (&self.wire, self.colors.wire),
+                Some(n) if n > 1 => (&self.bus, self.colors.bus),
+                _ => (&self.other, self.colors.other),
             },
         }
     }

@@ -1716,6 +1716,7 @@ snapshot_ui_with_file_and_msgs! {fst_scope_and_variable_icons, "examples/fst_typ
 ]}
 
 snapshot_ui_with_file_and_msgs! {vcd_scope_and_variable_icons, "examples/vcd_extensions.vcd", [
+    Message::SelectTheme(Some("light+".to_string())),
     Message::SetSidePanelVisible(true),
     Message::SetShowHierarchyIcons(true),
     Message::SetHierarchyStyle(HierarchyStyle::Separate),

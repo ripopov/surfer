@@ -51,6 +51,42 @@ indigo = "4a3a8a"
 maroon = "731c52"
 pink = "7b435c"
 
+# Scope icon colors - high contrast darker colors
+[scope_icons.colors]
+module = "0031a9"
+task = "8a290f"
+function = "721045"
+begin = "006800"
+fork = "a60000"
+generate = "0031a9"
+struct = "005e8b"
+union = "005e8b"
+class = "731c52"
+interface = "56692d"
+package = "80601f"
+program = "6f5500"
+vhdl_architecture = "0031a9"
+vhdl_procedure = "8a290f"
+vhdl_function = "721045"
+vhdl_record = "005e8b"
+vhdl_process = "006800"
+vhdl_block = "2f3f83"
+vhdl_for_generate = "0031a9"
+vhdl_if_generate = "0031a9"
+vhdl_generate = "0031a9"
+vhdl_package = "80601f"
+ghw_generic = "2f3f83"
+vhdl_array = "4a3a8a"
+unknown = "303030"
+
+# Variable icon colors - high contrast darker colors
+[variable_icons.colors]
+wire = "006800"
+bus = "0031a9"
+string = "8a290f"
+event = "731c52"
+other = "721045"
+
 [ticks]
 style = { color="9f9f9f", width=2 }
 density = 1

@@ -379,8 +379,30 @@ impl SystemState {
                 .inner
                 .as_waves()
                 .and_then(|wc| wc.get_scope_type(scope));
-            let icon = self.user.config.theme.scope_icons.get_icon(scope_type);
-            ui.add(egui::Button::selectable(is_selected, (icon, name)))
+            let (icon, icon_color) = self.user.config.theme.scope_icons.get_icon(scope_type);
+
+            let body_font = ui
+                .style()
+                .text_styles
+                .get(&TextStyle::Body)
+                .cloned()
+                .unwrap_or_default();
+            let icon_format = TextFormat {
+                font_id: body_font.clone(),
+                color: icon_color,
+                ..Default::default()
+            };
+            let name_format = TextFormat {
+                font_id: body_font,
+                color: self.user.config.theme.foreground,
+                ..Default::default()
+            };
+            let mut label = LayoutJob::default();
+            label.append(icon, 0.0, icon_format);
+            label.append(" ", 0.0, name_format.clone());
+            label.append(&name, 0.0, name_format);
+
+            ui.add(egui::Button::selectable(is_selected, label))
         } else {
             ui.add(egui::Button::selectable(is_selected, name))
         };
@@ -656,18 +678,17 @@ impl SystemState {
                 })
                 .unwrap_or_default();
 
-            // Get type icon
-            let type_icon = if self.show_hierarchy_icons() {
-                format!(
-                    "{} ",
-                    self.user
-                        .config
-                        .theme
-                        .variable_icons
-                        .get_icon(meta.as_ref())
-                )
+            // Get type icon with color
+            let (type_icon, icon_color) = if self.show_hierarchy_icons() {
+                let (icon, color) = self
+                    .user
+                    .config
+                    .theme
+                    .variable_icons
+                    .get_icon(meta.as_ref());
+                (format!("{} ", icon), color)
             } else {
-                String::new()
+                (String::new(), self.user.config.theme.foreground)
             };
 
             // Get direction icon
@@ -692,8 +713,25 @@ impl SystemState {
                 Layout::top_down(Align::LEFT).with_cross_justify(true),
                 |ui| {
                     let mut label = LayoutJob::default();
+                    let true_name = name_info.and_then(|info| info.true_name);
 
-                    if let Some(name) = name_info.and_then(|info| info.true_name) {
+                    let font = if true_name.is_some() {
+                        monospace_font.clone()
+                    } else {
+                        body_font.clone()
+                    };
+                    let icon_format = TextFormat {
+                        font_id: font.clone(),
+                        color: icon_color,
+                        ..Default::default()
+                    };
+                    let text_format = TextFormat {
+                        font_id: font,
+                        color: self.user.config.theme.foreground,
+                        ..Default::default()
+                    };
+
+                    if let Some(name) = true_name {
                         let type_icon_size = type_icon.chars().count();
                         let direction_size = direction.chars().count();
                         let index_size = index.chars().count();
@@ -703,13 +741,7 @@ impl SystemState {
                             * char_width_mono;
                         let space_for_name = available_space - used_space;
 
-                        let text_format = TextFormat {
-                            font_id: monospace_font.clone(),
-                            color: self.user.config.theme.foreground,
-                            ..Default::default()
-                        };
-
-                        label.append(&type_icon, 0.0, text_format.clone());
+                        label.append(&type_icon, 0.0, icon_format);
                         label.append(&direction, 0.0, text_format.clone());
 
                         draw_true_name(
@@ -722,23 +754,18 @@ impl SystemState {
                         );
 
                         label.append(&index, 0.0, text_format.clone());
-                        label.append(&value, 0.0, text_format.clone());
+                        label.append(&value, 0.0, text_format);
                     } else {
-                        let text_format = TextFormat {
-                            font_id: body_font.clone(),
-                            color: self.user.config.theme.foreground,
-                            ..Default::default()
-                        };
                         let name = if display_full_path {
                             variable.full_path().join(".")
                         } else {
                             variable.name.clone()
                         };
-                        label.append(&type_icon, 0.0, text_format.clone());
+                        label.append(&type_icon, 0.0, icon_format);
                         label.append(&direction, 0.0, text_format.clone());
                         label.append(&name, 0.0, text_format.clone());
                         label.append(&index, 0.0, text_format.clone());
-                        label.append(&value, 0.0, text_format.clone());
+                        label.append(&value, 0.0, text_format);
                     }
 
                     let mut response = ui.add(egui::Button::selectable(false, label));

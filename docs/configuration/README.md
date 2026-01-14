@@ -71,3 +71,25 @@ string = "\uf201"        # TEXT
 event = "\ueea8"         # LIGHTBULB_FLASH_LINE
 other = "\uedfc"         # HASHTAG
 ```
+
+#### Icon Colors
+
+Icons can be colored using 6-digit hex RGB values (without `#`). Add `[scope_icons.colors]` or `[variable_icons.colors]` sections:
+
+```toml
+[scope_icons.colors]
+module = "4FC3F7"        # Light Blue
+function = "BA68C8"      # Purple
+package = "FFD54F"       # Yellow
+# ... other scope types: task, begin, fork, generate, struct, union,
+# class, interface, program, vhdl_*, ghw_generic, unknown
+
+[variable_icons.colors]
+wire = "81C784"          # Green (1-bit)
+bus = "64B5F6"           # Blue (multi-bit)
+string = "FFB74D"        # Orange
+event = "F06292"         # Pink
+other = "BA68C8"         # Purple
+```
+
+Light themes include darker colors for better contrast. Only specify colors you want to override.

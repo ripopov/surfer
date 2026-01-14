@@ -32,6 +32,42 @@ Orange = "ce9178"
 Gray = "808080"
 Violet = "646695"
 
+# Scope icon colors - darker colors for light background
+[scope_icons.colors]
+module = "0277BD"
+task = "E65100"
+function = "7B1FA2"
+begin = "2E7D32"
+fork = "C62828"
+generate = "1565C0"
+struct = "00838F"
+union = "00838F"
+class = "AD1457"
+interface = "558B2F"
+package = "F9A825"
+program = "5D4037"
+vhdl_architecture = "0277BD"
+vhdl_procedure = "E65100"
+vhdl_function = "7B1FA2"
+vhdl_record = "00838F"
+vhdl_process = "2E7D32"
+vhdl_block = "546E7A"
+vhdl_for_generate = "1565C0"
+vhdl_if_generate = "1565C0"
+vhdl_generate = "1565C0"
+vhdl_package = "F9A825"
+ghw_generic = "607D8B"
+vhdl_array = "6A1B9A"
+unknown = "616161"
+
+# Variable icon colors - darker colors for light background
+[variable_icons.colors]
+wire = "2E7D32"
+bus = "1565C0"
+string = "E65100"
+event = "AD1457"
+other = "7B1FA2"
+
 [ticks]
 style = { color="c9c9c9", width=2 }
 density = 1
