@@ -21,6 +21,7 @@ use crate::{
     message::Message,
     mousegestures::AnnotationKind,
     state::UserState,
+    table::{TableCacheEntry, TableCacheKey, TableRuntimeState, TableTileId},
     time::TimeInputState,
     translation::{TranslatorList, all_translators},
     wave_container::{ScopeRef, VariableRef},
@@ -140,6 +141,9 @@ pub struct SystemState {
 
     pub(crate) url_callback: Option<Box<dyn Fn(String) -> Message + Send + 'static>>,
 
+    pub(crate) table_runtime: HashMap<TableTileId, TableRuntimeState>,
+    pub(crate) table_inflight: HashMap<TableCacheKey, Arc<TableCacheEntry>>,
+
     // Only used for testing
     pub(crate) expand_parameter_section: bool,
 
@@ -218,6 +222,8 @@ impl SystemState {
 
             url_callback: None,
             continuous_redraw: false,
+            table_runtime: HashMap::new(),
+            table_inflight: HashMap::new(),
             #[cfg(feature = "performance_plot")]
             rendering_cpu_times: VecDeque::new(),
             #[cfg(feature = "performance_plot")]
@@ -234,6 +240,11 @@ impl SystemState {
         };
 
         Ok(result)
+    }
+
+    /// Returns true if no table caches are currently being built
+    pub fn table_caches_ready(&self) -> bool {
+        self.table_inflight.is_empty()
     }
 }
 

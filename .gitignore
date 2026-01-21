@@ -11,7 +11,7 @@ snapshots/*.diff.png
 *~
 \#*\#
 .\#*
-
+TEMP
 examples/save_and_load.ron
 examples/save_and_start_with_state.ron
 
