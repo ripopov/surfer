@@ -62,6 +62,7 @@ egui.workspace = true
 egui-remixicon.workspace = true
 egui_extras.workspace = true
 egui_plot = { workspace = true, optional = true }
+egui_tiles.workspace = true
 emath.workspace = true
 enum-iterator.workspace = true
 epaint.workspace = true
@@ -77,6 +78,7 @@ itertools.workspace = true
 leb128.workspace = true
 local-impl.workspace = true
 lz4_flex.workspace = true
+memory-stats.workspace = true
 num.workspace = true
 numeric-sort.workspace = true
 pure-rust-locales.workspace = true

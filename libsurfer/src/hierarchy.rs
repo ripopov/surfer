@@ -459,6 +459,9 @@ impl SystemState {
             if ui.button("Add scope recursively").clicked() {
                 msgs.push(Message::AddScope(scope.clone(), true));
             }
+            if ui.button("Add events recursively").clicked() {
+                msgs.push(Message::AddScopeEventsRecursive(scope.clone()));
+            }
             if ui.button("Add scope as group").clicked() {
                 msgs.push(Message::AddScopeAsGroup(scope.clone(), false));
             }

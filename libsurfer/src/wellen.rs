@@ -765,6 +765,21 @@ impl WellenSignalAccessor {
                 }),
         )
     }
+
+    /// Query the signal value at or before the given time.
+    ///
+    /// Returns `None` if there is no transition at or before `time_u64`.
+    #[must_use]
+    pub fn query_at_time(&self, time_u64: u64) -> Option<surfer_translation_types::VariableValue> {
+        let time_table = &self.time_table;
+        if time_table.is_empty() || time_table[0] > time_u64 {
+            return None;
+        }
+        let idx = binary_search(time_table, time_u64) as TimeTableIdx;
+        let offset = self.signal.get_offset(idx)?;
+        let value = self.signal.get_value_at(&offset, offset.elements - 1);
+        Some(convert_variable_value(value))
+    }
 }
 
 fn scope_type_to_string(tpe: ScopeType) -> &'static str {

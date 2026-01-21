@@ -97,14 +97,17 @@ pub(crate) fn render_and_compare_inner(
             ctx.set_visuals(state.get_visuals());
             setup_custom_font(ctx);
             let msgs = state.draw(ctx, Some(size));
-            // Process only BuildAnalogCache messages as other messages can be fuzzy (command matcher)
+            // Process cache build messages (analog and table)
             for msg in msgs {
-                if matches!(msg, Message::BuildAnalogCache { .. }) {
+                if matches!(
+                    msg,
+                    Message::BuildAnalogCache { .. } | Message::BuildTableCache { .. }
+                ) {
                     state.update(msg);
                 }
             }
-            // Wait for analog cache builds to complete
-            while !state.analog_caches_ready() {
+            // Wait for analog and table cache builds to complete
+            while !state.analog_caches_ready() || !state.table_caches_ready() {
                 std::thread::sleep(std::time::Duration::from_millis(1));
                 state.handle_async_messages();
             }
@@ -1667,6 +1670,193 @@ snapshot_ui_with_file_and_msgs! {remove_viewport_works, "examples/counter.vcd", 
     Message::AddTimeLine(None), Message::RemoveViewport
 ]}
 
+snapshot_ui_with_file_and_msgs! {tiles_vertical_horizontal_layout, "examples/counter.vcd", [
+    Message::SetDefaultTimeline(false),
+    Message::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"])))),
+    Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.clk")]),
+    Message::AddTile,
+    Message::AddTile,
+    Message::AddTile,
+]}
+
+// Test that loading a new waveform (not reload) resets the tile tree to single waveform
+snapshot_ui!(tiles_reset_on_new_waveform, || {
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/counter.vcd")
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    // Add tiles to create a multi-tile layout
+    state.update(Message::AddTile);
+    state.update(Message::AddTile);
+    state.update(Message::AddTile);
+
+    // Verify we have multiple tiles
+    assert!(
+        !state.user.tile_tree.is_single_waveform(),
+        "Expected multiple tiles"
+    );
+
+    // Load a different waveform with Clear option (new load, not reload)
+    state.update(Message::LoadFile(
+        get_project_root()
+            .unwrap()
+            .join("examples/with_8_bit.vcd")
+            .try_into()
+            .unwrap(),
+        LoadOptions::Clear,
+    ));
+
+    // Wait for the new waveform body to be loaded
+    handle_messages_until(
+        &mut state,
+        |msg| matches!(&msg, Message::WaveBodyLoaded(..)),
+        10,
+    );
+
+    // Verify tile tree was reset to single waveform
+    assert!(
+        state.user.tile_tree.is_single_waveform(),
+        "Expected tile tree to be reset to single waveform after loading new file"
+    );
+
+    // Add a variable to show something in the waveform
+    state.update(Message::SetActiveScope(Some(ScopeType::WaveScope(
+        ScopeRef::from_strs(&["logic"]),
+    ))));
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("logic.data"),
+    ]));
+
+    handle_messages_until(
+        &mut state,
+        |msg| matches!(&msg, Message::SignalsLoaded(..)),
+        10,
+    );
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::CloseOpenSiblingStateFileDialog {
+        load_state: false,
+        do_not_show_again: true,
+    });
+    state.update(Message::ZoomToFit { viewport_idx: 0 });
+
+    state
+});
+
+// Test that tile state can be saved and restored from state file
+snapshot_ui!(tiles_restored_from_state_file, || {
+    let save_file = env::temp_dir().join(format!("tiles_state.{STATE_FILE_EXTENSION}"));
+
+    // First: create state with tiles and save it
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/counter.vcd")
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    // Add tiles to create a multi-tile layout
+    state.update(Message::AddTile);
+    state.update(Message::AddTile);
+    state.update(Message::AddTile);
+
+    // Add a variable so there's something visible
+    state.update(Message::SetActiveScope(Some(ScopeType::WaveScope(
+        ScopeRef::from_strs(&["tb"]),
+    ))));
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+
+    handle_messages_until(
+        &mut state,
+        |msg| matches!(&msg, Message::SignalsLoaded(..)),
+        10,
+    );
+
+    // Verify we have multiple tiles before saving
+    assert!(
+        !state.user.tile_tree.is_single_waveform(),
+        "Expected multiple tiles before saving"
+    );
+
+    // Save state to file
+    state.update(Message::SaveStateFile(Some(save_file.clone())));
+
+    handle_messages_until(
+        &mut state,
+        |msg| matches!(&msg, Message::AsyncDone(AsyncJob::SaveState)),
+        10,
+    );
+
+    // Second: create fresh state and restore from file
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/counter.vcd")
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    // Load state file (this should restore tile layout)
+    state.update(Message::LoadStateFile(Some(save_file.clone())));
+
+    handle_messages_until(
+        &mut state,
+        |msg| matches!(&msg, Message::SignalsLoaded(..)),
+        10,
+    );
+
+    // Verify tiles were restored
+    assert!(
+        !state.user.tile_tree.is_single_waveform(),
+        "Expected multiple tiles after restoring from state file"
+    );
+
+    std::fs::remove_file(save_file).unwrap();
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::CloseOpenSiblingStateFileDialog {
+        load_state: false,
+        do_not_show_again: true,
+    });
+    state.update(Message::ZoomToFit { viewport_idx: 0 });
+
+    state
+});
+
 snapshot_ui_with_file_and_msgs! {hierarchy_tree, "examples/counter.vcd", [
     Message::SetSidePanelVisible(true),
     Message::SetHierarchyStyle(HierarchyStyle::Tree),
@@ -1842,6 +2032,10 @@ snapshot_ui_with_file_and_msgs! {dinotrace_works, "examples/counter.vcd", [
 
 snapshot_ui_with_file_and_msgs! {draw_events, "examples/events.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["logic"]), false),
+]}
+
+snapshot_ui_with_file_and_msgs! {add_scope_events_recursive_nested, "examples/nested_event_scopes.vcd", [
+    Message::AddScopeEventsRecursive(ScopeRef::from_strs(&["top"])),
 ]}
 
 snapshot_ui_with_file_and_msgs! {direction_works, "examples/tb_recv.ghw", [
@@ -3158,5 +3352,925 @@ snapshot_ui_with_file_and_msgs! {analog_waveform_reg1024, "examples/analog.vcd",
         start: BigInt::from(0),
         end: BigInt::from(11000),
         viewport_idx: 0
+    },
+]}
+
+// ========================
+// Table Widget Snapshot Tests (Stage 5)
+// ========================
+
+snapshot_ui!(table_virtual_10_rows_3_cols, || {
+    use crate::table::TableModelSpec;
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    // Add a virtual table tile with 10 rows and 3 columns
+    let spec = TableModelSpec::Virtual {
+        rows: 10,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(table_virtual_1000_rows, || {
+    use crate::table::TableModelSpec;
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    // Add a virtual table tile with 1000 rows (tests virtualization)
+    let spec = TableModelSpec::Virtual {
+        rows: 1000,
+        columns: 5,
+        seed: 123,
+    };
+    state.update(Message::AddTableTile { spec });
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(table_dense_rows, || {
+    use crate::table::{TableModelSpec, TableTileState, TableViewConfig};
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    // Create a table tile with dense_rows enabled
+    let table_id = state.user.tile_tree.next_table_id();
+    let spec = TableModelSpec::Virtual {
+        rows: 15,
+        columns: 4,
+        seed: 42,
+    };
+    let mut config = TableViewConfig::default();
+    config.title = "Dense Table".to_string();
+    config.dense_rows = true;
+
+    state
+        .user
+        .table_tiles
+        .insert(table_id, TableTileState { spec, config });
+    state.user.tile_tree.add_table_tile(table_id);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui_with_file_and_msgs! {table_signal_change_list_counter, "examples/counter.vcd", [
+    Message::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"])))),
+    Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.clk")]),
+    Message::AddTableTile {
+        spec: crate::table::TableModelSpec::SignalChangeList {
+            variable: VariableRef::from_hierarchy_string("tb.clk"),
+            field: vec![],
+        },
+    },
+]}
+
+snapshot_ui!(table_two_tiles, || {
+    use crate::table::{TableModelSpec, TableTileState, TableViewConfig};
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    // First table: normal mode, 8 rows, 3 columns
+    let table_id1 = state.user.tile_tree.next_table_id();
+    let spec1 = TableModelSpec::Virtual {
+        rows: 8,
+        columns: 3,
+        seed: 100,
+    };
+    let mut config1 = TableViewConfig::default();
+    config1.title = "Table A".to_string();
+    state.user.table_tiles.insert(
+        table_id1,
+        TableTileState {
+            spec: spec1,
+            config: config1,
+        },
+    );
+    state.user.tile_tree.add_table_tile(table_id1);
+
+    // Second table: dense mode, 12 rows, 4 columns, different seed
+    let table_id2 = state.user.tile_tree.next_table_id();
+    let spec2 = TableModelSpec::Virtual {
+        rows: 12,
+        columns: 4,
+        seed: 200,
+    };
+    let mut config2 = TableViewConfig::default();
+    config2.title = "Table B".to_string();
+    config2.dense_rows = true;
+    state.user.table_tiles.insert(
+        table_id2,
+        TableTileState {
+            spec: spec2,
+            config: config2,
+        },
+    );
+    state.user.tile_tree.add_table_tile(table_id2);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui_with_file_and_msgs! {table_light_theme_waveform_two_tiles, "examples/counter.vcd", [
+    Message::SelectTheme(Some("light+".to_string())),
+    Message::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"])))),
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]),
+    Message::AddTableTile {
+        spec: crate::table::TableModelSpec::SignalChangeList {
+            variable: VariableRef::from_hierarchy_string("tb.clk"),
+            field: vec![],
+        },
+    },
+    Message::AddTableTile {
+        spec: crate::table::TableModelSpec::SignalChangeList {
+            variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+            field: vec![],
+        },
+    },
+]}
+
+snapshot_ui!(table_pinned_filters_two_chips, || {
+    use crate::table::{
+        TableColumnKey, TableModelSpec, TableSearchMode, TableSearchSpec, TableTileState,
+        TableViewConfig,
+    };
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    let table_id = state.user.tile_tree.next_table_id();
+    let spec = TableModelSpec::Virtual {
+        rows: 24,
+        columns: 3,
+        seed: 42,
+    };
+    let mut config = TableViewConfig::default();
+    config.title = "Pinned Filters".to_string();
+    config.pinned_filters = vec![
+        TableSearchSpec {
+            mode: TableSearchMode::Contains,
+            case_sensitive: false,
+            text: "r1".to_string(),
+            column: Some(TableColumnKey::Str("col_0".to_string())),
+        },
+        TableSearchSpec {
+            mode: TableSearchMode::Contains,
+            case_sensitive: false,
+            text: "c1".to_string(),
+            column: Some(TableColumnKey::Str("col_1".to_string())),
+        },
+    ];
+
+    state
+        .user
+        .table_tiles
+        .insert(table_id, TableTileState { spec, config });
+    state.user.tile_tree.add_table_tile(table_id);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(
+    table_pinned_filters_restored_from_state_after_reload,
+    || {
+        use crate::table::{TableColumnKey, TableModelSpec, TableSearchMode, TableSearchSpec};
+
+        let save_file = env::temp_dir().join(format!(
+            "table_pinned_filters_reload.{STATE_FILE_EXTENSION}"
+        ));
+        if save_file.exists() {
+            std::fs::remove_file(&save_file).unwrap();
+        }
+
+        // Create and persist a state file containing a table with pinned filters.
+        let mut state = SystemState::new_default_config()
+            .unwrap()
+            .with_params(StartupParams {
+                waves: Some(WaveSource::File(
+                    get_project_root()
+                        .unwrap()
+                        .join("examples/counter.vcd")
+                        .try_into()
+                        .unwrap(),
+                )),
+                ..Default::default()
+            });
+        wait_for_waves_fully_loaded(&mut state, 10);
+
+        state.update(Message::AddTableTile {
+            spec: TableModelSpec::Virtual {
+                rows: 24,
+                columns: 3,
+                seed: 42,
+            },
+        });
+        let tile_id = *state.user.table_tiles.keys().next().expect("table tile");
+        state.update(Message::SetTablePinnedFilters {
+            tile_id,
+            filters: vec![
+                TableSearchSpec {
+                    mode: TableSearchMode::Contains,
+                    case_sensitive: false,
+                    text: "r1".to_string(),
+                    column: Some(TableColumnKey::Str("col_0".to_string())),
+                },
+                TableSearchSpec {
+                    mode: TableSearchMode::Contains,
+                    case_sensitive: false,
+                    text: "c1".to_string(),
+                    column: Some(TableColumnKey::Str("col_1".to_string())),
+                },
+            ],
+        });
+
+        state.update(Message::SaveStateFile(Some(save_file.clone())));
+        handle_messages_until(
+            &mut state,
+            |msg| matches!(&msg, Message::AsyncDone(AsyncJob::SaveState)),
+            10,
+        );
+
+        // Simulate loading app with waveform, reloading waveform, and restoring .ron state.
+        let mut state = SystemState::new_default_config()
+            .unwrap()
+            .with_params(StartupParams {
+                waves: Some(WaveSource::File(
+                    get_project_root()
+                        .unwrap()
+                        .join("examples/counter.vcd")
+                        .try_into()
+                        .unwrap(),
+                )),
+                ..Default::default()
+            });
+        wait_for_waves_fully_loaded(&mut state, 10);
+
+        state.update(Message::ReloadWaveform(true));
+        handle_messages_until(
+            &mut state,
+            |msg| matches!(&msg, Message::WaveBodyLoaded(..)),
+            10,
+        );
+        wait_for_waves_fully_loaded(&mut state, 10);
+
+        state.update(Message::LoadStateFile(Some(save_file.clone())));
+        handle_messages_until(&mut state, |msg| matches!(msg, Message::LoadState(..)), 10);
+
+        let restored_tile = state
+            .user
+            .table_tiles
+            .values()
+            .next()
+            .expect("restored table tile");
+        assert_eq!(restored_tile.config.pinned_filters.len(), 2);
+
+        std::fs::remove_file(save_file).unwrap();
+
+        state.update(Message::SetMenuVisible(false));
+        state.update(Message::SetToolbarVisible(false));
+        state.update(Message::SetOverviewVisible(false));
+        state.update(Message::SetSidePanelVisible(false));
+        state.update(Message::CloseOpenSiblingStateFileDialog {
+            load_state: false,
+            do_not_show_again: true,
+        });
+
+        state
+    }
+);
+
+// ========================
+// Table Widget Snapshot Tests (Stage 6 - Sorting)
+// ========================
+
+snapshot_ui!(table_sort_single_column_ascending, || {
+    use crate::table::{
+        TableColumnKey, TableModelSpec, TableSortDirection, TableSortSpec, TableTileState,
+        TableViewConfig,
+    };
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    let table_id = state.user.tile_tree.next_table_id();
+    let spec = TableModelSpec::Virtual {
+        rows: 5,
+        columns: 3,
+        seed: 42,
+    };
+    let mut config = TableViewConfig::default();
+    config.title = "Sorted Ascending".to_string();
+    config.sort = vec![TableSortSpec {
+        key: TableColumnKey::Str("col_0".to_string()),
+        direction: TableSortDirection::Ascending,
+    }];
+    state
+        .user
+        .table_tiles
+        .insert(table_id, TableTileState { spec, config });
+    state.user.tile_tree.add_table_tile(table_id);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(table_sort_single_column_descending, || {
+    use crate::table::{
+        TableColumnKey, TableModelSpec, TableSortDirection, TableSortSpec, TableTileState,
+        TableViewConfig,
+    };
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    let table_id = state.user.tile_tree.next_table_id();
+    let spec = TableModelSpec::Virtual {
+        rows: 5,
+        columns: 3,
+        seed: 42,
+    };
+    let mut config = TableViewConfig::default();
+    config.title = "Sorted Descending".to_string();
+    config.sort = vec![TableSortSpec {
+        key: TableColumnKey::Str("col_1".to_string()),
+        direction: TableSortDirection::Descending,
+    }];
+    state
+        .user
+        .table_tiles
+        .insert(table_id, TableTileState { spec, config });
+    state.user.tile_tree.add_table_tile(table_id);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(table_sort_multi_column, || {
+    use crate::table::{
+        TableColumnKey, TableModelSpec, TableSortDirection, TableSortSpec, TableTileState,
+        TableViewConfig,
+    };
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    let table_id = state.user.tile_tree.next_table_id();
+    let spec = TableModelSpec::Virtual {
+        rows: 5,
+        columns: 3,
+        seed: 42,
+    };
+    let mut config = TableViewConfig::default();
+    config.title = "Multi-Column Sort".to_string();
+    // Multi-column sort: col_0 ascending (primary), col_2 descending (secondary)
+    config.sort = vec![
+        TableSortSpec {
+            key: TableColumnKey::Str("col_0".to_string()),
+            direction: TableSortDirection::Ascending,
+        },
+        TableSortSpec {
+            key: TableColumnKey::Str("col_2".to_string()),
+            direction: TableSortDirection::Descending,
+        },
+    ];
+    state
+        .user
+        .table_tiles
+        .insert(table_id, TableTileState { spec, config });
+    state.user.tile_tree.add_table_tile(table_id);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(table_sort_affects_row_order, || {
+    use crate::table::{
+        TableColumnKey, TableModelSpec, TableSortDirection, TableSortSpec, TableTileState,
+        TableViewConfig,
+    };
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    // Use a small table where sort order is visually verifiable
+    let table_id = state.user.tile_tree.next_table_id();
+    let spec = TableModelSpec::Virtual {
+        rows: 5,
+        columns: 2,
+        seed: 123,
+    };
+    let mut config = TableViewConfig::default();
+    config.title = "Sort Row Order".to_string();
+    // Sort by col_0 descending - rows should be reordered
+    config.sort = vec![TableSortSpec {
+        key: TableColumnKey::Str("col_0".to_string()),
+        direction: TableSortDirection::Descending,
+    }];
+    state
+        .user
+        .table_tiles
+        .insert(table_id, TableTileState { spec, config });
+    state.user.tile_tree.add_table_tile(table_id);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+// ========================
+// Table Widget Snapshot Tests (Stage 9 - Keyboard Navigation)
+// ========================
+
+snapshot_ui!(table_keyboard_focus_indicator, || {
+    use crate::table::{TableModelSpec, TableRowId, TableSelection};
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    let spec = TableModelSpec::Virtual {
+        rows: 10,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    let tile_id = *state.user.table_tiles.keys().next().unwrap();
+
+    // Initialize runtime state
+    state
+        .table_runtime
+        .entry(tile_id)
+        .or_insert_with(Default::default);
+
+    // Select row to show focus state
+    let mut selection = TableSelection::new();
+    selection.rows.insert(TableRowId(3));
+    selection.anchor = Some(TableRowId(3));
+    state.update(Message::SetTableSelection { tile_id, selection });
+
+    // Table should show focus indicator on selected row
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(table_type_search_indicator, || {
+    use crate::table::TableModelSpec;
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    let spec = TableModelSpec::Virtual {
+        rows: 20,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    let tile_id = *state.user.table_tiles.keys().next().unwrap();
+
+    // Initialize runtime state
+    state
+        .table_runtime
+        .entry(tile_id)
+        .or_insert_with(Default::default);
+
+    // Simulate type-to-search active with buffered text
+    let runtime = state.table_runtime.get_mut(&tile_id).unwrap();
+    let now = std::time::Instant::now();
+    runtime.type_search.push_char('r', now);
+    runtime.type_search.push_char('1', now);
+
+    // UI should show search indicator (e.g., "Search: r1")
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(table_select_all_highlight, || {
+    use crate::table::{TableModelSpec, TableRowId, TableSelection, TableSelectionMode};
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    let spec = TableModelSpec::Virtual {
+        rows: 8,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    let tile_id = *state.user.table_tiles.keys().next().unwrap();
+
+    // Set Multi mode
+    state
+        .user
+        .table_tiles
+        .get_mut(&tile_id)
+        .unwrap()
+        .config
+        .selection_mode = TableSelectionMode::Multi;
+
+    // Initialize runtime state
+    state
+        .table_runtime
+        .entry(tile_id)
+        .or_insert_with(Default::default);
+
+    // Select all rows (simulating Ctrl+A result)
+    let mut selection = TableSelection::new();
+    for i in 0..8 {
+        selection.rows.insert(TableRowId(i));
+    }
+    selection.anchor = Some(TableRowId(0));
+    state.update(Message::SetTableSelection { tile_id, selection });
+
+    // All rows should be highlighted
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(table_home_end_selection, || {
+    use crate::table::{TableModelSpec, TableRowId, TableSelection};
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    // Large table to test Home/End
+    let spec = TableModelSpec::Virtual {
+        rows: 50,
+        columns: 2,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    let tile_id = *state.user.table_tiles.keys().next().unwrap();
+
+    // Initialize runtime state
+    state
+        .table_runtime
+        .entry(tile_id)
+        .or_insert_with(Default::default);
+
+    // Select last row (as if End was pressed)
+    let mut selection = TableSelection::new();
+    selection.rows.insert(TableRowId(49));
+    selection.anchor = Some(TableRowId(49));
+    state.update(Message::SetTableSelection { tile_id, selection });
+
+    // View should scroll to show last row selected
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+// ========================
+// Table Widget Snapshot Tests (Stage 12 - TransactionTrace)
+// ========================
+
+snapshot_ui_with_file_and_msgs! {table_transaction_trace_renders_columns, "examples/my_db.ftr", [
+    // Add streams to trigger transaction loading (FTR lazy loads transactions)
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_stream(1, "pipelined_stream".to_string())),
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_stream(2, "addr_stream".to_string())),
+    // Open transaction table for 'read' generator - shows Start/End/Duration/Type columns plus attributes
+    Message::AddTableTile {
+        spec: crate::table::TableModelSpec::TransactionTrace {
+            generator: TransactionStreamRef::new_gen(1, 4, "read".to_string()),
+        },
+    },
+]}
+
+snapshot_ui_with_file_and_msgs! {table_transaction_trace_for_write_generator, "examples/my_db.ftr", [
+    // Add stream to trigger transaction loading
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_stream(1, "pipelined_stream".to_string())),
+    // Open transaction table for the 'write' generator to show different attributes
+    Message::AddTableTile {
+        spec: crate::table::TableModelSpec::TransactionTrace {
+            generator: TransactionStreamRef::new_gen(1, 5, "write".to_string()),
+        },
+    },
+]}
+
+// Stage 12b: Stream-level "Show transactions in table" opens one table per generator
+snapshot_ui_with_file_and_msgs! {table_transaction_trace_stream_opens_all_generators, "examples/my_db.ftr", [
+    // Add stream to trigger transaction loading
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_stream(1, "pipelined_stream".to_string())),
+    // Open transaction tables for both generators in stream 1 (read + write)
+    Message::OpenTransactionTable {
+        generator: TransactionStreamRef::new_gen(1, 4, "read".to_string()),
+    },
+    Message::OpenTransactionTable {
+        generator: TransactionStreamRef::new_gen(1, 5, "write".to_string()),
+    },
+]}
+
+// Test that transaction table layout with streams is correctly restored from a .ron state file
+snapshot_ui!(table_transaction_tables_restored_from_state_file, || {
+    let save_file =
+        env::temp_dir().join(format!("transaction_tables_state.{STATE_FILE_EXTENSION}"));
+
+    // First: create state with transaction tables and save it
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/my_db.ftr")
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::CloseOpenSiblingStateFileDialog {
+        load_state: false,
+        do_not_show_again: true,
+    });
+
+    // Add stream and open transaction tables (same as table_transaction_trace_stream_opens_all_generators)
+    state.update(Message::AddStreamOrGenerator(
+        TransactionStreamRef::new_stream(1, "pipelined_stream".to_string()),
+    ));
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    state.update(Message::OpenTransactionTable {
+        generator: TransactionStreamRef::new_gen(1, 4, "read".to_string()),
+    });
+    state.update(Message::OpenTransactionTable {
+        generator: TransactionStreamRef::new_gen(1, 5, "write".to_string()),
+    });
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    // Save state to file
+    state.update(Message::SaveStateFile(Some(save_file.clone())));
+
+    handle_messages_until(
+        &mut state,
+        |msg| matches!(&msg, Message::AsyncDone(AsyncJob::SaveState)),
+        10,
+    );
+
+    // Second: restore state from file using the same path as the -s CLI flag:
+    // deserialize UserState → set on SystemState → with_params (triggers LoadFile)
+    let state_content = std::fs::read_to_string(&save_file).unwrap();
+    let user_state: UserState = ron::from_str(&state_content).unwrap();
+    let mut state = SystemState::new_default_config().unwrap();
+    state.user = user_state;
+    let mut state = state.with_params(StartupParams {
+        waves: Some(WaveSource::File(
+            get_project_root()
+                .unwrap()
+                .join("examples/my_db.ftr")
+                .try_into()
+                .unwrap(),
+        )),
+        ..Default::default()
+    });
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    std::fs::remove_file(save_file).unwrap();
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::CloseOpenSiblingStateFileDialog {
+        load_state: false,
+        do_not_show_again: true,
+    });
+
+    state
+});
+
+// ========================
+// MultiSignalChangeList Snapshot Tests
+// ========================
+
+// Test 1: Basic multi-signal change list with two signals (clk + counter)
+snapshot_ui_with_file_and_msgs! {table_multi_signal_change_list_basic, "examples/counter.vcd", [
+    Message::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"])))),
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]),
+    Message::AddTableTile {
+        spec: crate::table::TableModelSpec::MultiSignalChangeList {
+            variables: vec![
+                crate::table::MultiSignalEntry {
+                    variable: VariableRef::from_hierarchy_string("tb.clk"),
+                    field: vec![],
+                },
+                crate::table::MultiSignalEntry {
+                    variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                    field: vec![],
+                },
+            ],
+        },
+    },
+]}
+
+// Test 2: Multi-signal change list with three signals and descending time sort
+snapshot_ui_with_file_and_msgs! {table_multi_signal_change_list_three_signals, "examples/counter.vcd", [
+    Message::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"])))),
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+        VariableRef::from_hierarchy_string("tb.reset"),
+    ]),
+    Message::AddTableTile {
+        spec: crate::table::TableModelSpec::MultiSignalChangeList {
+            variables: vec![
+                crate::table::MultiSignalEntry {
+                    variable: VariableRef::from_hierarchy_string("tb.clk"),
+                    field: vec![],
+                },
+                crate::table::MultiSignalEntry {
+                    variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                    field: vec![],
+                },
+                crate::table::MultiSignalEntry {
+                    variable: VariableRef::from_hierarchy_string("tb.reset"),
+                    field: vec![],
+                },
+            ],
+        },
+    },
+]}
+
+// Test 3: Multi-signal change list with dense row mode
+snapshot_ui!(table_multi_signal_change_list_dense, || {
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/counter.vcd")
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::CloseOpenSiblingStateFileDialog {
+        load_state: false,
+        do_not_show_again: true,
+    });
+
+    state.update(Message::SetActiveScope(Some(ScopeType::WaveScope(
+        ScopeRef::from_strs(&["tb"]),
+    ))));
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    state.update(Message::AddTableTile {
+        spec: crate::table::TableModelSpec::MultiSignalChangeList {
+            variables: vec![
+                crate::table::MultiSignalEntry {
+                    variable: VariableRef::from_hierarchy_string("tb.clk"),
+                    field: vec![],
+                },
+                crate::table::MultiSignalEntry {
+                    variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                    field: vec![],
+                },
+            ],
+        },
+    });
+
+    // Enable dense rows on the table tile that was just created
+    for tile_state in state.user.table_tiles.values_mut() {
+        tile_state.config.dense_rows = true;
+        tile_state.config.title = "Dense multi-signal".to_string();
+    }
+
+    state
+});
+
+snapshot_ui_with_file_and_msgs! {signal_analysis_wizard_dialog, "examples/counter.vcd", [
+    Message::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"])))),
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]),
+    Message::SetItemSelected(VisibleItemIndex(0), true),
+    Message::SetItemSelected(VisibleItemIndex(1), true),
+    Message::OpenSignalAnalysisWizard,
+]}
+
+snapshot_ui_with_file_and_msgs! {signal_analysis_results_table, "examples/counter.vcd", [
+    Message::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"])))),
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]),
+    Message::SetMarker {
+        id: 1,
+        time: BigInt::from(5u64),
+    },
+    Message::RunSignalAnalysis {
+        config: crate::table::SignalAnalysisConfig {
+            sampling: crate::table::SignalAnalysisSamplingConfig {
+                signal: VariableRef::from_hierarchy_string("tb.clk"),
+            },
+            signals: vec![crate::table::SignalAnalysisSignal {
+                variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                field: vec![],
+                translator: "Unsigned".to_string(),
+            }],
+            run_revision: 0,
+        },
     },
 ]}

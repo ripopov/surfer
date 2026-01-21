@@ -9,11 +9,13 @@ use crate::{
     clock_highlighting::ClockHighlightType,
     config::{ArrowKeyBindings, AutoLoad, PrimaryMouseDrag, SurferConfig, TransitionValue},
     data_container::DataContainer,
-    dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog},
+    dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog, SignalAnalysisWizardDialog},
     displayed_item_tree::{DisplayedItemTree, VisibleItemIndex},
     hierarchy::{HierarchyStyle, ParameterDisplayLocation},
     message::Message,
     system_state::SystemState,
+    table::{TableTileId, TableTileState},
+    tiles::SurferTileTree,
     time::{TimeStringFormatting, TimeUnit},
     transaction_container::TransactionContainer,
     variable_filter::VariableFilter,
@@ -30,9 +32,15 @@ use epaint::{CornerRadius, Stroke};
 use eyre::{Context, Result};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use surfer_translation_types::Translator;
+use surfer_translation_types::{Translator, VariableType};
 use surver::SurverFileInfo;
 use tracing::{error, info, trace, warn};
+
+#[derive(Clone, Copy)]
+enum ScopeVariableSelection {
+    All,
+    VcdEventOnly,
+}
 
 /// The parts of the program state that need to be serialized when loading/saving state
 #[derive(Serialize, Deserialize)]
@@ -105,6 +113,10 @@ pub struct UserState {
     pub(crate) show_reload_suggestion: Option<ReloadWaveformDialog>,
     #[serde(skip, default)]
     pub(crate) show_open_sibling_state_file_suggestion: Option<OpenSiblingStateFileDialog>,
+    #[serde(skip, default)]
+    pub(crate) show_signal_analysis_wizard: Option<SignalAnalysisWizardDialog>,
+    #[serde(skip, default)]
+    pub(crate) signal_analysis_wizard_edit_target: Option<TableTileId>,
     pub(crate) variable_name_filter_focused: bool,
     pub(crate) variable_filter: VariableFilter,
     //Sidepanel width
@@ -125,6 +137,10 @@ pub struct UserState {
     pub(crate) surver_url: Option<String>,
     #[serde(default)]
     pub(crate) transition_value: Option<TransitionValue>,
+    #[serde(default)]
+    pub(crate) tile_tree: SurferTileTree,
+    #[serde(default)]
+    pub(crate) table_tiles: HashMap<TableTileId, TableTileState>,
 
     // Path of last saved-to state file
     // Do not serialize as this causes a few issues and doesn't help:
@@ -203,6 +219,8 @@ impl Default for UserState {
             show_url_entry: false,
             show_reload_suggestion: None,
             show_open_sibling_state_file_suggestion: None,
+            show_signal_analysis_wizard: None,
+            signal_analysis_wizard_edit_target: None,
             variable_name_filter_focused: false,
             variable_filter: VariableFilter::new(),
             sidepanel_width: None,
@@ -215,6 +233,8 @@ impl Default for UserState {
             surver_file_infos: None,
             surver_url: None,
             transition_value: None,
+            tile_tree: SurferTileTree::default(),
+            table_tiles: HashMap::new(),
         }
     }
 }
@@ -262,7 +282,24 @@ impl SystemState {
     }
 
     pub(crate) fn get_scope(&mut self, scope: ScopeRef, recursive: bool) -> Vec<VariableRef> {
-        let Some(waves) = self.user.waves.as_mut() else {
+        self.collect_scope_variables(scope, recursive, ScopeVariableSelection::All)
+    }
+
+    pub(crate) fn get_scope_vcd_events(
+        &mut self,
+        scope: ScopeRef,
+        recursive: bool,
+    ) -> Vec<VariableRef> {
+        self.collect_scope_variables(scope, recursive, ScopeVariableSelection::VcdEventOnly)
+    }
+
+    fn collect_scope_variables(
+        &mut self,
+        scope: ScopeRef,
+        recursive: bool,
+        selection: ScopeVariableSelection,
+    ) -> Vec<VariableRef> {
+        let Some(waves) = self.user.waves.as_ref() else {
             return vec![];
         };
 
@@ -273,12 +310,26 @@ impl SystemState {
             .variables_in_scope(&scope)
             .iter()
             .sorted_by(|a, b| numeric_sort::cmp(&a.name, &b.name))
-            .cloned()
+            .filter_map(|var| match selection {
+                ScopeVariableSelection::All => Some(var.clone()),
+                ScopeVariableSelection::VcdEventOnly => match wave_cont.variable_meta(var) {
+                    Ok(meta) => {
+                        (meta.variable_type == Some(VariableType::VCDEvent)).then_some(var.clone())
+                    }
+                    Err(error) => {
+                        warn!(
+                            "Failed metadata lookup for variable {:?} in scope {scope}: {error:#}",
+                            var
+                        );
+                        None
+                    }
+                },
+            })
             .collect_vec();
 
         if recursive && let Ok(children) = children {
             for child in children {
-                variables.append(&mut self.get_scope(child, true));
+                variables.append(&mut self.collect_scope_variables(child, true, selection));
             }
         }
 
@@ -366,6 +417,7 @@ impl SystemState {
         if !is_reload && let Some(waves) = &mut self.user.waves {
             // Set time unit
             self.user.wanted_timeunit = waves.inner.metadata().timescale.unit;
+            self.user.tile_tree = SurferTileTree::default();
             // Possibly open state file load dialog
             if waves.source.sibling_state_file().is_some() {
                 self.update(Message::SuggestOpenSiblingStateFile);
@@ -378,43 +430,67 @@ impl SystemState {
         filename: WaveSource,
         format: WaveFormat,
         new_ftr: TransactionContainer,
-        _loaded_options: LoadOptions,
+        load_options: LoadOptions,
     ) {
         info!("Transaction streams are loaded.");
 
         let viewport = Viewport::new();
         let viewports = [viewport].to_vec();
 
-        let new_transaction_streams = WaveData {
-            inner: DataContainer::Transactions(new_ftr),
-            source: filename,
-            format,
-            active_scope: None,
-            items_tree: DisplayedItemTree::default(),
-            displayed_items: HashMap::new(),
-            viewports,
-            cursor: None,
-            markers: HashMap::new(),
-            focused_item: None,
-            focused_transaction: (None, None),
-            default_variable_name_type: self.user.config.default_variable_name_type,
-            display_variable_indices: self.show_variable_indices(),
-            scroll_offset: 0.,
-            drawing_infos: vec![],
-            top_item_draw_offset: 0.,
-            total_height: 0.,
-            display_item_ref_counter: 0,
-            old_num_timestamps: None,
-            graphics: HashMap::new(),
-            cache_generation: 0,
-            inflight_caches: HashMap::new(),
-        };
+        let (new_transaction_streams, is_reload) =
+            if load_options != LoadOptions::Clear && self.user.waves.is_some() {
+                let old = self.user.waves.take().unwrap();
+                (
+                    old.update_with_transactions(new_ftr, filename, format, &self.translators),
+                    true,
+                )
+            } else if let Some(old) = self.user.previous_waves.take() {
+                (
+                    old.update_with_transactions(new_ftr, filename, format, &self.translators),
+                    true,
+                )
+            } else {
+                (
+                    WaveData {
+                        inner: DataContainer::Transactions(new_ftr),
+                        source: filename,
+                        format,
+                        active_scope: None,
+                        items_tree: DisplayedItemTree::default(),
+                        displayed_items: HashMap::new(),
+                        viewports,
+                        cursor: None,
+                        markers: HashMap::new(),
+                        focused_item: None,
+                        focused_transaction: (None, None),
+                        default_variable_name_type: self.user.config.default_variable_name_type,
+                        display_variable_indices: self.show_variable_indices(),
+                        scroll_offset: 0.,
+                        drawing_infos: vec![],
+                        top_item_draw_offset: 0.,
+                        total_height: 0.,
+                        display_item_ref_counter: 0,
+                        old_num_timestamps: None,
+                        graphics: HashMap::new(),
+                        cache_generation: 0,
+                        inflight_caches: HashMap::new(),
+                    },
+                    false,
+                )
+            };
 
         self.invalidate_draw_commands();
 
         self.user.config.theme.alt_frequency = 0;
         self.user.wanted_timeunit = new_transaction_streams.inner.metadata().timescale.unit;
         self.user.waves = Some(new_transaction_streams);
+
+        if !is_reload && let Some(waves) = &mut self.user.waves {
+            self.user.tile_tree = SurferTileTree::default();
+            if waves.source.sibling_state_file().is_some() {
+                self.update(Message::SuggestOpenSiblingStateFile);
+            }
+        }
     }
 
     #[cfg(test)]

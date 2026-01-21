@@ -1,4 +1,4 @@
-use egui::{Context, Layout, RichText, TextWrapMode, Ui};
+use egui::{Layout, RichText, TextWrapMode, Ui};
 use egui_extras::{Column, TableBody, TableBuilder};
 use emath::Align;
 use ftr_parser::types::Transaction;
@@ -48,7 +48,7 @@ const STREAM_NOT_FOUND_LABEL: &str = "Stream not found";
 impl SystemState {
     pub fn draw_transaction_detail_panel(
         &self,
-        ctx: &Context,
+        parent_ui: &mut Ui,
         max_width: f32,
         msgs: &mut Vec<Message>,
     ) {
@@ -68,10 +68,10 @@ impl SystemState {
             return;
         };
 
-        egui::SidePanel::right("Transaction Details")
+        egui::SidePanel::right(parent_ui.id().with("Transaction Details"))
             .default_width(330.)
             .width_range(10.0..=max_width)
-            .show(ctx, |ui| {
+            .show_inside(parent_ui, |ui| {
                 ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                 self.handle_pointer_in_ui(ui, msgs);
                 draw_focused_transaction_details(ui, transactions, focused_transaction);
@@ -377,7 +377,8 @@ fn draw_transaction_stream_variables(
             ui.with_layout(
                 Layout::top_down(Align::LEFT).with_cross_justify(true),
                 |ui| {
-                    if ui.selectable_label(false, &generator.name).clicked() {
+                    let response = ui.selectable_label(false, &generator.name);
+                    if response.clicked() {
                         msgs.push(Message::AddStreamOrGenerator(
                             TransactionStreamRef::new_gen(
                                 stream_ref.stream_id,
@@ -386,6 +387,28 @@ fn draw_transaction_stream_variables(
                             ),
                         ));
                     }
+                    // Context menu for generator
+                    response.context_menu(|ui| {
+                        if ui.button("Show transactions in table").clicked() {
+                            let gen_ref = TransactionStreamRef::new_gen(
+                                stream_ref.stream_id,
+                                gen_id,
+                                generator.name.clone(),
+                            );
+                            msgs.push(Message::OpenTransactionTable { generator: gen_ref });
+                            ui.close();
+                        }
+                        if ui.button("Add to waveform view").clicked() {
+                            msgs.push(Message::AddStreamOrGenerator(
+                                TransactionStreamRef::new_gen(
+                                    stream_ref.stream_id,
+                                    gen_id,
+                                    generator.name.clone(),
+                                ),
+                            ));
+                            ui.close();
+                        }
+                    });
                 },
             );
         }
@@ -417,6 +440,24 @@ fn draw_transaction_root_variables(
                         TransactionStreamRef::new_stream(stream.id, stream.name.clone()),
                     ));
                 }
+                response.context_menu(|ui| {
+                    if ui.button("Add to waveform view").clicked() {
+                        msgs.push(Message::AddStreamOrGenerator(
+                            TransactionStreamRef::new_stream(stream.id, stream.name.clone()),
+                        ));
+                        ui.close();
+                    }
+                    let stream_ref =
+                        TransactionStreamRef::new_stream(stream.id, stream.name.clone());
+                    let generators =
+                        inner.generators_in_stream(&StreamScopeRef::Stream(stream_ref));
+                    if !generators.is_empty() && ui.button("Show transactions in table").clicked() {
+                        for gen_ref in generators {
+                            msgs.push(Message::OpenTransactionTable { generator: gen_ref });
+                        }
+                        ui.close();
+                    }
+                });
             },
         );
     }

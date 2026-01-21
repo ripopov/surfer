@@ -51,6 +51,7 @@ egui = { version = "0.33", default-features = false, features = ["serde"] }
 egui-remixicon = { version = "0.33.1", default-features = false }
 egui_extras = { version = "0.33", default-features = false }
 egui_plot = "0.34"
+egui_tiles = { version = "0.14.1", features = ["serde"] }
 emath = "0.33"
 enum-iterator = "2.1"
 epaint = "0.33"
@@ -77,6 +78,7 @@ itertools = "0.14.0"
 leb128 = "0.2.5"
 local-impl = "0.1.2"
 lz4_flex = "0.12"
+memory-stats = "1"
 notify = "8.0"
 num = { version = "0.4", features = ["serde"] }
 numeric-sort = "0.1.4"
@@ -102,7 +104,7 @@ sys-locale = "0.3.2"
 tempfile = "3.20.0"
 test-log = "0.2.15"
 thiserror = "2"
-tokio = { version = "1.43", features = ["rt", "time", "macros"] }
+tokio = { version = "1.43", features = ["rt", "rt-multi-thread", "time", "macros"] }
 tokio-stream = "0.1.17"
 toml = { version = "0.9.8", default-features = false, features = ["parse"] }
 tracing = "0.1.43"

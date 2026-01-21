@@ -1,0 +1,296 @@
+(
+    show_hierarchy: None,
+    show_menu: None,
+    show_ticks: None,
+    show_toolbar: None,
+    show_tooltip: None,
+    show_scope_tooltip: None,
+    show_default_timeline: None,
+    show_overview: None,
+    show_statusbar: None,
+    align_names_right: None,
+    show_variable_indices: None,
+    show_variable_direction: None,
+    show_empty_scopes: None,
+    show_hierarchy_icons: None,
+    show_parameters_in_scopes: None,
+    parameter_display_location: None,
+    highlight_focused: None,
+    fill_high_values: None,
+    primary_button_drag_behavior: None,
+    arrow_key_bindings: None,
+    clock_highlight_type: None,
+    hierarchy_style: None,
+    autoload_sibling_state_files: None,
+    autoreload_files: None,
+    waves: Some((
+        source: File("/Users/ripopov/work/rust/surfer/examples/my_db.ftr"),
+        format: Ftr,
+        active_scope: Some(StreamScope(Root)),
+        items_tree: (
+            items: [
+                (
+                    item_ref: (1),
+                    level: 0,
+                    unfolded: true,
+                    selected: false,
+                ),
+                (
+                    item_ref: (2),
+                    level: 0,
+                    unfolded: true,
+                    selected: true,
+                ),
+                (
+                    item_ref: (3),
+                    level: 0,
+                    unfolded: true,
+                    selected: false,
+                ),
+            ],
+        ),
+        displayed_items: {
+            (3): Stream((
+                transaction_stream_ref: (
+                    stream_id: 1,
+                    gen_id: None,
+                    name: "tr.pipelined_stream",
+                ),
+                color: None,
+                background_color: None,
+                display_name: "tr.pipelined_stream",
+                manual_name: None,
+                rows: 2,
+            )),
+            (1): Stream((
+                transaction_stream_ref: (
+                    stream_id: 3,
+                    gen_id: None,
+                    name: "tr.data_stream",
+                ),
+                color: None,
+                background_color: None,
+                display_name: "tr.data_stream",
+                manual_name: None,
+                rows: 1,
+            )),
+            (2): Stream((
+                transaction_stream_ref: (
+                    stream_id: 2,
+                    gen_id: None,
+                    name: "tr.addr_stream",
+                ),
+                color: None,
+                background_color: None,
+                display_name: "tr.addr_stream",
+                manual_name: None,
+                rows: 1,
+            )),
+        },
+        display_item_ref_counter: 3,
+        viewports: [
+            (
+                curr_left: (0.0),
+                curr_right: (1.0),
+                target_left: (0.0),
+                target_right: (1.0),
+                move_start_left: (0.0),
+                move_start_right: (1.0),
+                move_duration: None,
+                move_strategy: Instant,
+            ),
+        ],
+        cursor: None,
+        markers: {},
+        focused_item: Some((1)),
+        focused_transaction: (None, None),
+        default_variable_name_type: Unique,
+        scroll_offset: 0.0,
+        display_variable_indices: true,
+        graphics: {},
+    )),
+    drag_started: false,
+    drag_source_idx: None,
+    drag_target_idx: None,
+    previous_waves: None,
+    count: None,
+    blacklisted_translators: [],
+    show_about: false,
+    show_keys: false,
+    show_gestures: false,
+    show_quick_start: false,
+    show_license: false,
+    show_performance: false,
+    show_logs: false,
+    show_cursor_window: false,
+    wanted_timeunit: NanoSeconds,
+    time_string_format: None,
+    show_url_entry: false,
+    variable_name_filter_focused: false,
+    variable_filter: (
+        name_filter_type: Contain,
+        name_filter_str: "",
+        name_filter_case_insensitive: true,
+        include_inputs: true,
+        include_outputs: true,
+        include_inouts: true,
+        include_others: true,
+        group_by_direction: false,
+    ),
+    sidepanel_width: Some(300.0),
+    ui_zoom_factor: None,
+    animation_enabled: None,
+    use_dinotrace_style: None,
+    transition_value: None,
+    tile_tree: (
+        tree: (
+            id: (9838371568133842598),
+            root: Some((4)),
+            tiles: (
+                next_tile_id: 11,
+                tiles: {
+                    (9): Container(Tabs((
+                        children: [
+                            (10),
+                        ],
+                        active: Some((10)),
+                    ))),
+                    (7): Pane(Table((1))),
+                    (4): Container(Linear((
+                        children: [
+                            (2),
+                            (6),
+                        ],
+                        dir: Vertical,
+                        shares: (
+                            shares: {},
+                        ),
+                    ))),
+                    (1): Pane(Waveform),
+                    (3): Container(Tabs((
+                        children: [
+                            (7),
+                        ],
+                        active: Some((7)),
+                    ))),
+                    (2): Container(Tabs((
+                        children: [
+                            (1),
+                        ],
+                        active: Some((1)),
+                    ))),
+                    (8): Pane(Table((2))),
+                    (6): Container(Linear((
+                        children: [
+                            (3),
+                            (5),
+                            (9),
+                        ],
+                        dir: Horizontal,
+                        shares: (
+                            shares: {},
+                        ),
+                    ))),
+                    (10): Pane(Table((3))),
+                    (5): Container(Tabs((
+                        children: [
+                            (8),
+                        ],
+                        active: Some((8)),
+                    ))),
+                },
+                invisible: [],
+            ),
+            height: None,
+            width: None,
+        ),
+        next_tile_id: 1,
+        next_table_tile_id: 4,
+    ),
+    table_tiles: {
+        (2): (
+            spec: TransactionTrace(
+                generator: (
+                    stream_id: 1,
+                    gen_id: Some(4),
+                    name: "read",
+                ),
+            ),
+            config: (
+                title: "Transactions: read",
+                columns: [],
+                sort: [
+                    (
+                        key: "start",
+                        direction: Ascending,
+                    ),
+                ],
+                display_filter: (
+                    mode: Contains,
+                    case_sensitive: false,
+                    text: "",
+                ),
+                selection_mode: Single,
+                dense_rows: false,
+                sticky_header: true,
+                activate_on_select: true,
+            ),
+        ),
+        (3): (
+            spec: TransactionTrace(
+                generator: (
+                    stream_id: 2,
+                    gen_id: Some(6),
+                    name: "addr",
+                ),
+            ),
+            config: (
+                title: "Transactions: addr",
+                columns: [],
+                sort: [
+                    (
+                        key: "start",
+                        direction: Ascending,
+                    ),
+                ],
+                display_filter: (
+                    mode: Contains,
+                    case_sensitive: false,
+                    text: "",
+                ),
+                selection_mode: Single,
+                dense_rows: false,
+                sticky_header: true,
+                activate_on_select: true,
+            ),
+        ),
+        (1): (
+            spec: TransactionTrace(
+                generator: (
+                    stream_id: 1,
+                    gen_id: Some(5),
+                    name: "write",
+                ),
+            ),
+            config: (
+                title: "Transactions: write",
+                columns: [],
+                sort: [
+                    (
+                        key: "start",
+                        direction: Ascending,
+                    ),
+                ],
+                display_filter: (
+                    mode: Contains,
+                    case_sensitive: false,
+                    text: "",
+                ),
+                selection_mode: Single,
+                dense_rows: false,
+                sticky_header: true,
+                activate_on_select: true,
+            ),
+        ),
+    },
+)

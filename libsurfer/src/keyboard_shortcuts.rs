@@ -22,6 +22,7 @@ pub enum ShortcutAction {
     GoToTop,
     GoToBottom,
     ItemFocus,
+    TableView,
     GroupNew,
     SelectAll,
     SelectToggle,
@@ -75,6 +76,8 @@ pub struct SurferShortcuts {
     pub group_new: Vec<KeyboardShortcut>,
     #[serde(with = "keyboard_shortcuts_serde")]
     pub item_focus: Vec<KeyboardShortcut>,
+    #[serde(with = "keyboard_shortcuts_serde")]
+    pub table_view: Vec<KeyboardShortcut>,
     #[serde(with = "keyboard_shortcuts_serde")]
     pub select_all: Vec<KeyboardShortcut>,
     #[serde(with = "keyboard_shortcuts_serde")]
@@ -191,6 +194,10 @@ impl SurferShortcuts {
                 priority: modifier_priority(&self.item_focus),
             },
             DispatchEntry {
+                action: ShortcutAction::TableView,
+                priority: modifier_priority(&self.table_view),
+            },
+            DispatchEntry {
                 action: ShortcutAction::SelectAll,
                 priority: modifier_priority(&self.select_all),
             },
@@ -271,6 +278,7 @@ impl SurferShortcuts {
             ShortcutAction::GoToTop => &self.goto_top,
             ShortcutAction::GoToBottom => &self.goto_bottom,
             ShortcutAction::ItemFocus => &self.item_focus,
+            ShortcutAction::TableView => &self.table_view,
             ShortcutAction::GroupNew => &self.group_new,
             ShortcutAction::SelectAll => &self.select_all,
             ShortcutAction::SelectToggle => &self.select_toggle,
@@ -341,6 +349,11 @@ impl SurferShortcuts {
             }
             ShortcutAction::ItemFocus => {
                 msgs.push(Message::ShowCommandPrompt("item_focus ".to_string(), None));
+            }
+            ShortcutAction::TableView => {
+                msgs.push(Message::OpenSignalChangeList {
+                    target: MessageTarget::CurrentSelection,
+                });
             }
             ShortcutAction::SelectAll => {
                 msgs.push(Message::ItemSelectAll);

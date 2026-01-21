@@ -24,7 +24,7 @@ const MAX_MARKER_INDEX: u8 = 254;
 const CURSOR_MARKER_IDX: u8 = 255;
 
 impl WaveData {
-    /// Get the color for a marker by its index, falling back to cursor color if not found
+    /// Get the color for a marker by its index, falling back to marker style or cursor color
     fn get_marker_color(&self, idx: u8, theme: &SurferTheme) -> Color32 {
         self.items_tree
             .iter()
@@ -40,7 +40,7 @@ impl WaveData {
                 }
                 None
             })
-            .unwrap_or(theme.cursor.color)
+            .unwrap_or_else(|| theme.marker_color())
     }
 
     pub fn draw_cursor(&self, theme: &SurferTheme, ctx: &mut DrawingContext, viewport: &Viewport) {
@@ -57,7 +57,10 @@ impl WaveData {
             let color = self.get_marker_color(*idx, theme);
             let stroke = Stroke {
                 color,
-                width: theme.cursor.width,
+                width: theme
+                    .marker
+                    .as_ref()
+                    .map_or(theme.cursor.width, |m| m.width),
             };
             let x = viewport.pixel_from_time(marker, ctx.cfg.canvas_width, &num_timestamps);
             draw_vertical_line(x, ctx, stroke);
@@ -389,11 +392,11 @@ impl SystemState {
     }
 }
 
-/// Get the background color for a marker or cursor, with fallback to theme cursor color
+/// Get the background color for a marker or cursor, with fallback to theme marker color
 fn get_marker_background_color(item: &DisplayedItem, theme: &SurferTheme) -> Color32 {
     item.color()
         .and_then(|color| theme.get_color(color))
-        .unwrap_or(theme.cursor.color)
+        .unwrap_or_else(|| theme.marker_color())
 }
 
 /// Generate the message for a marker click based on its index
