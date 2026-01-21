@@ -1,0 +1,40 @@
+$date
+    Thu Jan 01 00:00:00 1970
+$end
+$version
+    Surfer nested events test
+$end
+$timescale 1ps $end
+$scope module top $end
+$var event 1 ! TOP_EVENT $end
+$var wire 1 " TOP_WIRE $end
+$scope module child $end
+$var event 1 # CHILD_EVENT $end
+$var wire 1 $ CHILD_WIRE $end
+$scope module grandchild $end
+$var event 1 % GRANDCHILD_EVENT $end
+$var wire 1 & GRANDCHILD_WIRE $end
+$upscope $end
+$upscope $end
+$scope module child_no_events $end
+$var wire 1 ' CHILD_NO_EVENT_WIRE $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+#0
+0"
+0$
+0&
+0'
+#10
+1!
+#20
+1#
+#30
+1%
+#40
+1!
+#50
+1#
+#60
+1%

@@ -954,11 +954,7 @@ impl SystemState {
             );
         }
 
-        waves.draw_markers(
-            &self.user.config.theme,
-            &mut ctx,
-            &waves.viewports[viewport_idx],
-        );
+        waves.draw_markers(&self.user.config.theme, &mut ctx, viewport);
 
         self.draw_marker_boxes(waves, &mut ctx, viewport, y_zero);
 
@@ -975,7 +971,7 @@ impl SystemState {
                 CornerRadius::ZERO,
                 self.user.config.theme.canvas_colors.background,
             );
-            self.draw_default_timeline(waves, &ctx, viewport_idx);
+            self.draw_default_timeline(waves, &ctx, viewport_idx, frame_width, &cfg);
         }
 
         let time_formatter = TimeFormatter::new(
