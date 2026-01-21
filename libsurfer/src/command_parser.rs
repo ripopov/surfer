@@ -8,7 +8,7 @@ use crate::displayed_item_tree::{Node, VisibleItemIndex};
 use crate::fzcmd::{Command, ParamGreed};
 use crate::hierarchy::HierarchyStyle;
 use crate::message::MessageTarget;
-use crate::transaction_container::StreamScopeRef;
+use crate::transaction_container::{StreamScopeRef, TransactionStreamRef};
 use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, VariableRefExt};
 use crate::wave_data::ScopeType;
 use crate::wave_source::LoadOptions;
@@ -249,6 +249,8 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
             "variable_add",
             "generator_add",
             "item_focus",
+            "table_view",
+            "transaction_table",
             "item_set_color",
             "item_set_background_color",
             "item_set_format",
@@ -312,6 +314,7 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
             "show_marker_window",
             "viewport_add",
             "viewport_remove",
+            "tile_add",
             "transition_next",
             "transition_previous",
             "transaction_next",
@@ -348,6 +351,7 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
             "show_logs",
             #[cfg(feature = "performance_plot")]
             "show_performance",
+            "tile_add",
             #[cfg(not(target_arch = "wasm32"))]
             wcp_start_or_stop,
             #[cfg(not(target_arch = "wasm32"))]
@@ -365,6 +369,32 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
     let show_menu = state.show_menu();
     let show_tick_lines = state.show_ticks();
     theme_names.insert(0, "default".to_string());
+
+    // Pre-compute transaction table data for focused transaction (if any)
+    // Returns the generator ref if a transaction is focused
+    let transaction_table_generator: Option<TransactionStreamRef> =
+        state.user.waves.as_ref().and_then(|waves| {
+            let transactions = waves.inner.as_transactions()?;
+            let (Some(tx_ref), _) = &waves.focused_transaction else {
+                return None;
+            };
+            let tx = transactions.get_transaction(tx_ref)?;
+            let gen_id = tx.get_gen_id();
+            let generator = transactions.get_generator(gen_id)?;
+            // Find the stream for this generator
+            let stream_id = transactions
+                .get_streams()
+                .iter()
+                .find(|s| s.generators.contains(&gen_id))
+                .map(|s| s.id)
+                .unwrap_or(0);
+            Some(TransactionStreamRef::new_gen(
+                stream_id,
+                gen_id,
+                generator.name.clone(),
+            ))
+        });
+
     Command::NonTerminal(
         ParamGreed::Word,
         commands.into_iter().map(std::convert::Into::into).collect(),
@@ -663,6 +693,31 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                             .map(|idx| Command::Terminal(Message::FocusItem(idx)))
                     }),
                 ),
+                "table_view" => optional_single_word(
+                    displayed_items.clone(),
+                    Box::new(|word| {
+                        let trimmed = word.trim();
+                        if trimmed.is_empty() {
+                            return Some(Command::Terminal(Message::OpenSignalChangeList {
+                                target: MessageTarget::CurrentSelection,
+                            }));
+                        }
+
+                        let alpha_idx: String = trimmed.chars().take_while(|c| *c != '_').collect();
+                        alpha_idx_to_uint_idx(&alpha_idx).map(|idx| {
+                            Command::Terminal(Message::OpenSignalChangeList {
+                                target: MessageTarget::Explicit(idx),
+                            })
+                        })
+                    }),
+                ),
+                "transaction_table" => {
+                    // Opens a transaction table for the focused transaction's generator
+                    // Requires a transaction to be focused
+                    transaction_table_generator.clone().map(|generator| {
+                        Command::Terminal(Message::OpenTransactionTable { generator })
+                    })
+                }
                 "transition_next" => single_word(
                     displayed_items.clone(),
                     Box::new(|word| {
@@ -870,6 +925,7 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                 ),
                 "viewport_add" => Some(Command::Terminal(Message::AddViewport)),
                 "viewport_remove" => Some(Command::Terminal(Message::RemoveViewport)),
+                "tile_add" => Some(Command::Terminal(Message::AddTile)),
                 "pause_simulation" => Some(Command::Terminal(Message::PauseSimulation)),
                 "unpause_simulation" => Some(Command::Terminal(Message::UnpauseSimulation)),
                 "undo" => Some(Command::Terminal(Message::Undo(1))),

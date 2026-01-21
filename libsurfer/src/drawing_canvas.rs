@@ -844,7 +844,14 @@ impl SystemState {
             let background_color =
                 self.get_background_color(waves, drawing_info.vidx(), item_count);
 
-            self.draw_background(drawing_info, y_zero, &ctx, gap, background_color);
+            self.draw_background(
+                drawing_info,
+                y_zero,
+                &ctx,
+                gap,
+                frame_width,
+                background_color,
+            );
         }
 
         #[cfg(feature = "performance_plot")]
@@ -868,13 +875,13 @@ impl SystemState {
             &self.user.config.theme,
         );
 
-        waves.draw_cursor(
+        waves.draw_markers(
             &self.user.config.theme,
             &mut ctx,
             &waves.viewports[viewport_idx],
         );
 
-        waves.draw_markers(
+        waves.draw_cursor(
             &self.user.config.theme,
             &mut ctx,
             &waves.viewports[viewport_idx],
@@ -895,7 +902,7 @@ impl SystemState {
                 CornerRadius::ZERO,
                 self.user.config.theme.canvas_colors.background,
             );
-            self.draw_default_timeline(waves, &ctx, viewport_idx);
+            self.draw_default_timeline(waves, &ctx, viewport_idx, frame_width, &cfg);
         }
 
         self.draw_mouse_gesture_widget(

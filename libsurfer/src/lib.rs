@@ -39,8 +39,11 @@ pub mod state_file_io;
 pub mod state_util;
 pub mod statusbar;
 pub mod system_state;
+pub mod table;
+mod table_controller;
 #[cfg(test)]
 pub mod tests;
+pub mod tiles;
 pub mod time;
 pub mod toolbar;
 pub mod tooltips;
@@ -62,17 +65,16 @@ pub mod wasm_panic;
 pub mod wave_container;
 pub mod wave_data;
 pub mod wave_source;
+mod waveform_tile;
 pub mod wcp;
 pub mod wellen;
 
-use crate::channels::checked_send;
 use crate::config::AutoLoad;
 use crate::displayed_item_tree::ItemIndex;
 use crate::displayed_item_tree::TargetPosition;
 use crate::remote::get_time_table_from_server;
 use crate::variable_name_type::VariableNameType;
-
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, LazyLock, RwLock};
@@ -107,7 +109,10 @@ use wave_container::ScopeRef;
 #[cfg(all(not(target_arch = "wasm32"), feature = "wasm_plugins"))]
 use crate::async_util::perform_work;
 use crate::config::{SurferConfig, SurferTheme};
-use crate::dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog};
+use crate::dialog::{
+    OpenSiblingStateFileDialog, ReloadWaveformDialog, SignalAnalysisWizardDialog,
+    SignalAnalysisWizardSamplingOption, SignalAnalysisWizardSignal,
+};
 use crate::displayed_item::{
     AnalogVarState, DisplayedFieldRef, DisplayedItem, DisplayedItemRef, FieldFormat,
 };
@@ -338,6 +343,24 @@ impl SystemState {
                 }
 
                 self.invalidate_draw_commands();
+            }
+            Message::AddScopeEventsRecursive(scope) => {
+                let vars = self.get_scope_vcd_events(scope.clone(), true);
+                if vars.is_empty() {
+                    warn!("No event variables found in scope {scope}");
+                } else {
+                    self.save_current_canvas(format!("Add events from scope {}", scope.name()));
+                    let waves = self.user.waves.as_mut()?;
+
+                    // TODO add parameter to add_variables, insert to (self.drag_target_idx, self.drag_source_idx)
+                    if let (Some(cmd), _) =
+                        waves.add_variables(&self.translators, vars, None, true, false, None)
+                    {
+                        self.load_variables(cmd);
+                    }
+
+                    self.invalidate_draw_commands();
+                }
             }
             Message::AddScopeAsGroup(scope, recursive) => {
                 self.save_current_canvas(format!("Add scope {} as group", scope.name()));
@@ -1057,7 +1080,9 @@ impl SystemState {
                 perform_work(
                     move || match PluginTranslator::new(path.into_std_path_buf()) {
                         Ok(t) => {
-                            checked_send(&sender, Message::TranslatorLoaded(Arc::new(t)));
+                            if let Err(e) = sender.send(Message::TranslatorLoaded(Arc::new(t))) {
+                                error!("Failed to send message: {e}");
+                            }
                         }
                         Err(e) => {
                             error!("Failed to load wasm translator {e:#}");
@@ -1900,8 +1925,7 @@ impl SystemState {
                 let waves = self.user.waves.as_mut()?;
                 let item_index = waves.index_for_ref_or_focus(item_ref)?;
 
-                let removed = waves.items_tree.remove_dissolve(item_index);
-                waves.displayed_items.remove(&removed);
+                waves.items_tree.remove_dissolve(item_index);
             }
             Message::GroupFold(item_ref)
             | Message::GroupUnfold(item_ref)
@@ -2085,6 +2109,29 @@ impl SystemState {
                     &self.channels.msg_sender,
                 );
             }
+            message @ (Message::BuildTableCache { .. }
+            | Message::TableCacheBuilt { .. }
+            | Message::AddTableTile { .. }
+            | Message::OpenSignalAnalysisWizard
+            | Message::RunSignalAnalysis { .. }
+            | Message::RefreshSignalAnalysis { .. }
+            | Message::EditSignalAnalysis { .. }
+            | Message::OpenSignalChangeList { .. }
+            | Message::OpenTransactionTable { .. }
+            | Message::RemoveTableTile { .. }
+            | Message::SetTableSort { .. }
+            | Message::SetTableDisplayFilter { .. }
+            | Message::SetTablePinnedFilters { .. }
+            | Message::SetTableSelection { .. }
+            | Message::ClearTableSelection { .. }
+            | Message::TableActivateSelection { .. }
+            | Message::TableCopySelection { .. }
+            | Message::TableSelectAll { .. }
+            | Message::ResizeTableColumn { .. }
+            | Message::ToggleTableColumnVisibility { .. }
+            | Message::SetTableColumnVisibility { .. }) => {
+                self.handle_table_message(message)?;
+            }
             Message::AnalogCacheBuilt { entry, result } => {
                 OUTSTANDING_TRANSACTIONS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 // Remove from in-flight registry (may already be gone if generation changed)
@@ -2114,6 +2161,10 @@ impl SystemState {
                     waves.viewports.pop();
                     self.draw_data.borrow_mut().pop();
                 }
+            }
+            Message::AddTile => {
+                self.user.tile_tree.add_debug_tile();
+                self.invalidate_draw_commands();
             }
             Message::SelectTheme(theme_name) => {
                 let theme = SurferTheme::new(theme_name)
@@ -2236,6 +2287,310 @@ impl SystemState {
             && let Some(ctx) = &self.context
         {
             ctx.copy_text(text);
+        }
+    }
+
+    pub(crate) fn selected_signal_analysis_variables(&self) -> Vec<SignalAnalysisWizardSignal> {
+        let Some(waves) = &self.user.waves else {
+            return Vec::new();
+        };
+
+        let mut seen = HashSet::new();
+        waves
+            .items_tree
+            .iter_visible_selected()
+            .filter_map(|node| {
+                let item = waves.displayed_items.get(&node.item_ref)?;
+                let displayed_variable =
+                    if let displayed_item::DisplayedItem::Variable(variable) = item {
+                        variable
+                    } else {
+                        return None;
+                    };
+
+                if !seen.insert(displayed_variable.variable_ref.clone()) {
+                    return None;
+                }
+
+                let translator = waves.variable_translator(
+                    &DisplayedFieldRef::from(node.item_ref),
+                    &self.translators,
+                );
+
+                Some(SignalAnalysisWizardSignal {
+                    variable: displayed_variable.variable_ref.clone(),
+                    display_name: item.name(),
+                    include: true,
+                    translator: translator.name(),
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn has_signal_analysis_selection(&self) -> bool {
+        !self.selected_signal_analysis_variables().is_empty()
+    }
+
+    fn signal_analysis_sampling_options(&self) -> Vec<SignalAnalysisWizardSamplingOption> {
+        let Some(waves) = &self.user.waves else {
+            return Vec::new();
+        };
+
+        let mut seen = HashSet::new();
+        waves
+            .items_tree
+            .iter_visible()
+            .filter_map(|node| {
+                let item = waves.displayed_items.get(&node.item_ref)?;
+                let displayed_variable =
+                    if let displayed_item::DisplayedItem::Variable(variable) = item {
+                        variable
+                    } else {
+                        return None;
+                    };
+
+                if !seen.insert(displayed_variable.variable_ref.clone()) {
+                    return None;
+                }
+
+                Some(SignalAnalysisWizardSamplingOption {
+                    variable: displayed_variable.variable_ref.clone(),
+                    display_name: item.name(),
+                })
+            })
+            .collect()
+    }
+
+    fn default_signal_analysis_sampling_signal(
+        &self,
+        options: &[SignalAnalysisWizardSamplingOption],
+    ) -> Option<wave_container::VariableRef> {
+        let waves = self.user.waves.as_ref()?;
+        let wave_container = waves.inner.as_waves()?;
+
+        let one_bit = options.iter().find_map(|option| {
+            let resolved = wave_container
+                .update_variable_ref(&option.variable)
+                .unwrap_or_else(|| option.variable.clone());
+            wave_container
+                .variable_meta(&resolved)
+                .ok()
+                .filter(|meta| meta.num_bits == Some(1))
+                .map(|_| option.variable.clone())
+        });
+
+        one_bit.or_else(|| options.first().map(|option| option.variable.clone()))
+    }
+
+    fn build_signal_analysis_wizard_dialog(&self) -> Option<SignalAnalysisWizardDialog> {
+        let signals = self.selected_signal_analysis_variables();
+        if signals.is_empty() {
+            return None;
+        }
+
+        let sampling_options = self.signal_analysis_sampling_options();
+        let sampling_signal = self.default_signal_analysis_sampling_signal(&sampling_options)?;
+        let marker_count = self.user.waves.as_ref()?.markers.len();
+        let translators = self.signal_analysis_wizard_translators();
+
+        Some(SignalAnalysisWizardDialog {
+            sampling_options,
+            sampling_signal,
+            signals,
+            translators,
+            marker_count,
+        })
+    }
+
+    fn build_signal_analysis_wizard_dialog_from_config(
+        &self,
+        config: &table::SignalAnalysisConfig,
+    ) -> Option<SignalAnalysisWizardDialog> {
+        let mut sampling_options = self.signal_analysis_sampling_options();
+        let mut seen = sampling_options
+            .iter()
+            .map(|option| option.variable.clone())
+            .collect::<HashSet<_>>();
+        if seen.insert(config.sampling.signal.clone()) {
+            sampling_options.push(SignalAnalysisWizardSamplingOption {
+                variable: config.sampling.signal.clone(),
+                display_name: config.sampling.signal.full_path_string(),
+            });
+        }
+        for signal in &config.signals {
+            if seen.insert(signal.variable.clone()) {
+                sampling_options.push(SignalAnalysisWizardSamplingOption {
+                    variable: signal.variable.clone(),
+                    display_name: signal.variable.full_path_string(),
+                });
+            }
+        }
+        if sampling_options.is_empty() {
+            return None;
+        }
+
+        let signals = config
+            .signals
+            .iter()
+            .map(|signal| SignalAnalysisWizardSignal {
+                variable: signal.variable.clone(),
+                display_name: signal.variable.full_path_string(),
+                include: true,
+                translator: signal.translator.clone(),
+            })
+            .collect_vec();
+        if signals.is_empty() {
+            return None;
+        }
+
+        Some(SignalAnalysisWizardDialog {
+            sampling_options,
+            sampling_signal: config.sampling.signal.clone(),
+            signals,
+            translators: self.signal_analysis_wizard_translators(),
+            marker_count: self.user.waves.as_ref()?.markers.len(),
+        })
+    }
+
+    fn signal_analysis_wizard_translators(&self) -> Vec<String> {
+        let mut translators = self
+            .translators
+            .all_translator_names()
+            .into_iter()
+            .map(str::to_string)
+            .collect_vec();
+        translators.sort_by(|a, b| numeric_sort::cmp(a, b));
+        translators.dedup();
+        translators
+    }
+
+    fn preload_signal_analysis_variables(&mut self, config: &table::SignalAnalysisConfig) {
+        if let Some(waves) = self.user.waves.as_mut()
+            && let Some(wave_container) = waves.inner.as_waves_mut()
+        {
+            let preload_variables = std::iter::once(config.sampling.signal.clone())
+                .chain(config.signals.iter().map(|signal| signal.variable.clone()))
+                .collect_vec();
+
+            if !preload_variables.is_empty() {
+                match wave_container.load_variables(preload_variables.iter()) {
+                    Ok(Some(cmd)) => self.load_variables(cmd),
+                    Ok(None) => {}
+                    Err(err) => {
+                        warn!("Failed to preflight signal-analysis variable loading: {err:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    fn create_signal_analysis_tile(&mut self, config: table::SignalAnalysisConfig) {
+        let spec = crate::table::TableModelSpec::AnalysisResults {
+            kind: crate::table::AnalysisKind::SignalAnalysisV1,
+            params: crate::table::AnalysisParams::SignalAnalysisV1 { config },
+        };
+        let table_tile_id = self.open_table_tile(spec);
+        self.trigger_table_cache_build(table_tile_id);
+    }
+
+    fn open_table_tile(&mut self, spec: crate::table::TableModelSpec) -> crate::table::TableTileId {
+        let table_tile_id = self.user.tile_tree.next_table_id();
+        let model_ctx = self.table_model_context();
+        let config = spec.default_view_config(&model_ctx);
+        let state = crate::table::TableTileState { spec, config };
+        self.user.table_tiles.insert(table_tile_id, state);
+        self.user.tile_tree.add_table_tile(table_tile_id);
+        self.invalidate_draw_commands();
+        table_tile_id
+    }
+
+    fn trigger_table_cache_build(&mut self, tile_id: crate::table::TableTileId) {
+        let Some(tile_state) = self.user.table_tiles.get(&tile_id) else {
+            return;
+        };
+        let model_ctx = self.table_model_context();
+        let cache_key = crate::table::TableCacheKey {
+            model_key: tile_state.spec.model_key_for_tile(tile_id),
+            display_filter: tile_state.config.display_filter.clone(),
+            pinned_filters: tile_state.config.pinned_filters.clone(),
+            view_sort: tile_state.config.sort.clone(),
+            generation: model_ctx.cache_generation,
+        };
+        self.update(Message::BuildTableCache { tile_id, cache_key });
+    }
+
+    fn ensure_columns_initialized(
+        &mut self,
+        tile_id: crate::table::TableTileId,
+    ) -> Option<&mut crate::table::TableTileState> {
+        let default_columns = self
+            .table_runtime
+            .get(&tile_id)
+            .and_then(|runtime| runtime.model.as_ref())
+            .map(|model| table::column_configs_from_schema(&model.schema()));
+
+        let tile_state = self.user.table_tiles.get_mut(&tile_id)?;
+        if tile_state.config.columns.is_empty()
+            && let Some(columns) = default_columns
+        {
+            tile_state.config.columns = columns;
+        }
+        Some(tile_state)
+    }
+
+    fn apply_table_action(&mut self, action: table::TableAction) {
+        match action {
+            table::TableAction::CursorSet(time) => {
+                self.update(Message::CursorSet(time));
+                self.update(Message::GoToCursorIfNotInView);
+            }
+            table::TableAction::FocusTransaction(tx_ref) => {
+                // Focus the transaction and set cursor to its start time.
+                self.update(Message::FocusTransaction(Some(tx_ref.clone()), None));
+                // Keep cursor in sync with the focused transaction start.
+                if let Some(waves) = &self.user.waves
+                    && let Some(transactions) = waves.inner.as_transactions()
+                    && let Some(tx) = transactions.get_transaction(&tx_ref)
+                {
+                    let start_time = BigInt::from(tx.get_start_time());
+                    self.update(Message::CursorSet(start_time));
+                    self.update(Message::GoToCursorIfNotInView);
+                }
+            }
+            table::TableAction::SelectSignal(_) | table::TableAction::None => {
+                // No action or not yet implemented.
+            }
+        }
+    }
+
+    pub(crate) fn signal_analysis_sampling_mode(
+        &self,
+        signal: &wave_container::VariableRef,
+    ) -> Option<table::SignalAnalysisSamplingMode> {
+        let waves = self.user.waves.as_ref()?;
+        let wave_container = waves.inner.as_waves()?;
+        let resolved = wave_container
+            .update_variable_ref(signal)
+            .unwrap_or_else(|| signal.clone());
+        let meta = wave_container.variable_meta(&resolved).ok()?;
+        Some(table::sources::infer_sampling_mode(&meta))
+    }
+}
+
+impl SystemState {
+    fn table_model_context(&self) -> crate::table::TableModelContext<'_> {
+        let cache_generation = self
+            .user
+            .waves
+            .as_ref()
+            .map_or(0, |waves| waves.cache_generation);
+        crate::table::TableModelContext {
+            waves: self.user.waves.as_ref(),
+            translators: &self.translators,
+            wanted_timeunit: self.user.wanted_timeunit,
+            time_format: self.get_time_format(),
+            theme: &self.user.config.theme,
+            cache_generation,
         }
     }
 }

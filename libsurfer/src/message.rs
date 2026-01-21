@@ -16,6 +16,11 @@ use crate::displayed_item_tree::{ItemIndex, VisibleItemIndex};
 use crate::graphics::{Graphic, GraphicId};
 use crate::hierarchy::{ParameterDisplayLocation, ScopeExpandType};
 use crate::state::UserState;
+use crate::table::{
+    SignalAnalysisConfig, TableCache, TableCacheEntry, TableCacheError, TableCacheKey,
+    TableColumnKey, TableModel, TableModelSpec, TableSearchSpec, TableSelection, TableSortSpec,
+    TableTileId,
+};
 use crate::transaction_container::{
     StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
 };
@@ -77,6 +82,8 @@ pub enum Message {
     AddVariables(Vec<VariableRef>),
     /// Add scope to wave view. If second argument is true, add subscopes recursively.
     AddScope(ScopeRef, bool),
+    /// Add VCD event variables from scope subtree to wave view.
+    AddScopeEventsRecursive(ScopeRef),
     /// Add scope to wave view as a group. If second argument is true, add subscopes recursively.
     AddScopeAsGroup(ScopeRef, bool),
     /// Add a character to the repeat command counter.
@@ -384,11 +391,27 @@ pub enum Message {
         cache_key: AnalogCacheKey,
     },
     #[serde(skip)]
+    BuildTableCache {
+        tile_id: TableTileId,
+        cache_key: TableCacheKey,
+    },
+    #[serde(skip)]
     AnalogCacheBuilt {
         #[debug(skip)]
         entry: Arc<crate::analog_signal_cache::AnalogCacheEntry>,
         #[debug(skip)]
         result: Result<crate::analog_signal_cache::AnalogSignalCache, String>,
+    },
+    #[serde(skip)]
+    TableCacheBuilt {
+        tile_id: TableTileId,
+        revision: u64,
+        #[debug(skip)]
+        entry: Arc<TableCacheEntry>,
+        #[debug(skip)]
+        model: Option<Arc<dyn TableModel>>,
+        #[debug(skip)]
+        result: Result<TableCache, TableCacheError>,
     },
 
     SetViewportStrategy(ViewportStrategy),
@@ -399,6 +422,92 @@ pub enum Message {
     Batch(Vec<Message>),
     AddViewport,
     RemoveViewport,
+    /// Add a new debug tile to the tile tree
+    AddTile,
+    /// Add a new table tile to the tile tree
+    AddTableTile {
+        spec: TableModelSpec,
+    },
+    /// Open the signal-analysis configuration wizard from selected waveform signals.
+    OpenSignalAnalysisWizard,
+    /// Run signal analysis and create a results table tile.
+    RunSignalAnalysis {
+        config: SignalAnalysisConfig,
+    },
+    /// Refresh an existing signal-analysis table tile using the current config.
+    RefreshSignalAnalysis {
+        tile_id: TableTileId,
+    },
+    /// Edit an existing signal-analysis table configuration.
+    EditSignalAnalysis {
+        tile_id: TableTileId,
+    },
+    /// Open a signal change list table for a variable
+    OpenSignalChangeList {
+        target: MessageTarget<VisibleItemIndex>,
+    },
+    /// Open a transaction trace table for a specific generator
+    OpenTransactionTable {
+        generator: TransactionStreamRef,
+    },
+    /// Remove a table tile from the tile tree
+    RemoveTableTile {
+        tile_id: TableTileId,
+    },
+    /// Set the sort specification for a table tile
+    SetTableSort {
+        tile_id: TableTileId,
+        sort: Vec<TableSortSpec>,
+    },
+    /// Set the display filter for a table tile
+    SetTableDisplayFilter {
+        tile_id: TableTileId,
+        filter: TableSearchSpec,
+    },
+    /// Set pinned display filters for a table tile.
+    SetTablePinnedFilters {
+        tile_id: TableTileId,
+        filters: Vec<TableSearchSpec>,
+    },
+    /// Set the selection for a table tile
+    #[serde(skip)]
+    SetTableSelection {
+        tile_id: TableTileId,
+        selection: TableSelection,
+    },
+    /// Clear the selection for a table tile
+    ClearTableSelection {
+        tile_id: TableTileId,
+    },
+    /// Activate the selected row(s) - triggered by Enter key
+    TableActivateSelection {
+        tile_id: TableTileId,
+    },
+    /// Copy selected rows to clipboard
+    TableCopySelection {
+        tile_id: TableTileId,
+        include_header: bool,
+    },
+    /// Select all rows (Multi mode only)
+    TableSelectAll {
+        tile_id: TableTileId,
+    },
+    /// Resize a table column
+    ResizeTableColumn {
+        tile_id: TableTileId,
+        column_key: TableColumnKey,
+        new_width: f32,
+    },
+    /// Toggle column visibility
+    ToggleTableColumnVisibility {
+        tile_id: TableTileId,
+        column_key: TableColumnKey,
+    },
+    /// Set column visibility for multiple columns
+    SetTableColumnVisibility {
+        tile_id: TableTileId,
+        visible_columns: Vec<TableColumnKey>,
+    },
     /// Select Theme
     SelectTheme(Option<String>),
     /// Enable animations

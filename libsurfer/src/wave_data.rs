@@ -14,7 +14,9 @@ use crate::displayed_item::{
 };
 use crate::displayed_item_tree::{DisplayedItemTree, ItemIndex, TargetPosition, VisibleItemIndex};
 use crate::graphics::{Graphic, GraphicId};
-use crate::transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef};
+use crate::transaction_container::{
+    StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
+};
 use crate::transactions::calculate_rows_of_stream;
 use crate::translation::{DynTranslator, TranslatorList, VariableInfoExt};
 use crate::variable_name_type::VariableNameType;
@@ -172,12 +174,11 @@ impl WaveData {
                 false
             }
         });
-        let display_items = Self::update_displayed_items(
+        let display_items = self.update_displayed_items(
             &new_waves,
             &self.displayed_items,
             keep_unavailable,
             translators,
-            &mut self.items_tree,
         );
 
         let old_num_timestamps = self.num_timestamps();
@@ -211,21 +212,95 @@ impl WaveData {
         (new_wavedata, load_commands)
     }
 
+    /// Merge a newly loaded transaction container into a previous WaveData (from a state file),
+    /// preserving displayed items, viewports, cursors, etc.
+    pub fn update_with_transactions(
+        mut self,
+        new_ftr: TransactionContainer,
+        source: WaveSource,
+        format: WaveFormat,
+        translators: &TranslatorList,
+    ) -> WaveData {
+        let mut new_wavedata = WaveData {
+            inner: DataContainer::Transactions(new_ftr),
+            source,
+            format,
+            active_scope: self.active_scope.take(),
+            items_tree: self.items_tree,
+            displayed_items: self.displayed_items.clone(),
+            display_item_ref_counter: self.display_item_ref_counter,
+            viewports: self.viewports,
+            cursor: self.cursor.clone(),
+            markers: self.markers.clone(),
+            focused_item: self.focused_item,
+            focused_transaction: self.focused_transaction,
+            default_variable_name_type: self.default_variable_name_type,
+            display_variable_indices: self.display_variable_indices,
+            scroll_offset: self.scroll_offset,
+            drawing_infos: vec![],
+            top_item_draw_offset: 0.,
+            graphics: HashMap::new(),
+            total_height: 0.,
+            old_num_timestamps: None,
+            cache_generation: 0,
+            inflight_caches: HashMap::new(),
+        };
+
+        // Lazy-load transaction streams referenced by displayed items.
+        if let Some(transactions) = new_wavedata.inner.as_transactions_mut() {
+            Self::load_streams_for_displayed_items(transactions, &new_wavedata.displayed_items);
+        }
+
+        new_wavedata.update_metadata(translators);
+        new_wavedata
+    }
+
+    fn load_streams_for_displayed_items(
+        transactions: &mut TransactionContainer,
+        displayed_items: &HashMap<DisplayedItemRef, DisplayedItem>,
+    ) {
+        let stream_ids: Vec<usize> = displayed_items
+            .values()
+            .filter_map(|item| match item {
+                DisplayedItem::Stream(stream) => Some(stream.transaction_stream_ref.stream_id),
+                _ => None,
+            })
+            .collect();
+
+        for stream_id in stream_ids {
+            let needs_load = transactions
+                .get_stream(stream_id)
+                .is_some_and(|stream| !stream.transactions_loaded);
+            if needs_load {
+                info!("(Stream) Loading transactions into memory!");
+                match transactions.inner.load_stream_into_memory(stream_id) {
+                    Ok(()) => info!("(Stream {stream_id}) Finished loading transactions!"),
+                    Err(e) => {
+                        warn!("Failed to load transactions for stream {stream_id}: {e:?}")
+                    }
+                }
+            }
+        }
+    }
+
     pub fn update_with_items(
         &mut self,
         new_items: &HashMap<DisplayedItemRef, DisplayedItem>,
-        mut items_tree: DisplayedItemTree,
+        items_tree: DisplayedItemTree,
         translators: &TranslatorList,
     ) -> Option<LoadSignalsCmd> {
-        self.displayed_items = Self::update_displayed_items(
-            self.inner.as_waves().unwrap(),
-            new_items,
-            true,
-            translators,
-            &mut items_tree,
-        );
         self.items_tree = items_tree;
-
+        self.displayed_items = if let Some(waves) = self.inner.as_waves() {
+            self.update_displayed_items(waves, new_items, true, translators)
+        } else {
+            // For transaction-only data, keep all items as-is since there's no
+            // WaveContainer to reconcile variable references against.
+            // Ensure lazy-loaded transaction streams are loaded into memory.
+            if let Some(transactions) = self.inner.as_transactions_mut() {
+                Self::load_streams_for_displayed_items(transactions, new_items);
+            }
+            new_items.clone()
+        };
         self.display_item_ref_counter = self
             .displayed_items
             .keys()
@@ -241,15 +316,15 @@ impl WaveData {
     ///
     /// Used after loading new waves, signals or switching a bunch of translators
     fn update_metadata(&mut self, translators: &TranslatorList) {
+        let Some(waves) = self.inner.as_waves() else {
+            return;
+        };
         for di in self.displayed_items.values_mut() {
             let DisplayedItem::Variable(displayed_variable) = di else {
                 continue;
             };
 
-            let meta = self
-                .inner
-                .as_waves()
-                .unwrap()
+            let meta = waves
                 .variable_meta(&displayed_variable.variable_ref.clone())
                 .unwrap();
             let translator =
@@ -271,13 +346,12 @@ impl WaveData {
     ///
     /// This is needed for wave containers that lazy-load signals.
     fn load_waves(&mut self) -> Option<LoadSignalsCmd> {
+        let waves = self.inner.as_waves_mut()?;
         let variables = self.displayed_items.values().filter_map(|item| match item {
             DisplayedItem::Variable(r) => Some(&r.variable_ref),
             _ => None,
         });
-        self.inner
-            .as_waves_mut()
-            .unwrap()
+        waves
             .load_variables(variables)
             .expect("internal error: failed to load variables")
     }
@@ -303,30 +377,30 @@ impl WaveData {
     }
 
     fn update_displayed_items(
+        &self,
         waves: &WaveContainer,
         items: &HashMap<DisplayedItemRef, DisplayedItem>,
         keep_unavailable: bool,
         translators: &TranslatorList,
-        items_tree: &mut DisplayedItemTree,
     ) -> HashMap<DisplayedItemRef, DisplayedItem> {
         items
             .iter()
-            .filter_map(|(&id, i)| {
-                let new = match i {
+            .filter_map(|(id, i)| {
+                match i {
                     // keep without a change
                     DisplayedItem::Divider(_)
                     | DisplayedItem::Marker(_)
                     | DisplayedItem::TimeLine(_)
                     | DisplayedItem::Stream(_)
-                    | DisplayedItem::Group(_) => Some((id, i.clone())),
+                    | DisplayedItem::Group(_) => Some((*id, i.clone())),
                     DisplayedItem::Variable(s) => {
-                        s.update(waves, keep_unavailable).map(|r| (id, r))
+                        s.update(waves, keep_unavailable).map(|r| (*id, r))
                     }
                     DisplayedItem::Placeholder(p) => {
                         match waves.update_variable_ref(&p.variable_ref) {
                             None => {
                                 if keep_unavailable {
-                                    Some((id, DisplayedItem::Placeholder(p.clone())))
+                                    Some((*id, DisplayedItem::Placeholder(p.clone())))
                                 } else {
                                     None
                                 }
@@ -337,7 +411,7 @@ impl WaveData {
                                     .context("When updating")
                                     .map_err(|e| error!("{e:#?}"))
                                 else {
-                                    return Some((id, DisplayedItem::Placeholder(p.clone())));
+                                    return Some((*id, DisplayedItem::Placeholder(p.clone())));
                                 };
                                 let translator = variable_translator(
                                     p.format.as_ref(),
@@ -347,7 +421,7 @@ impl WaveData {
                                 );
                                 let info = translator.variable_info(&meta).unwrap();
                                 Some((
-                                    id,
+                                    *id,
                                     DisplayedItem::Variable(
                                         p.clone().into_variable(info, new_variable_ref),
                                     ),
@@ -355,19 +429,7 @@ impl WaveData {
                             }
                         }
                     }
-                };
-
-                // remove element from item_tree if we are about to remove it from the displayed_items
-                // we only remove variables or placeholders, so we don't have to think about traversing
-                if new.is_none() {
-                    let removed = items_tree.drain_recursive_if(|n| n.item_ref == id);
-                    assert!(
-                        removed.len() <= 1,
-                        "more elements removed then should be possible"
-                    )
                 }
-
-                new
             })
             .collect()
     }
@@ -786,7 +848,7 @@ impl WaveData {
 
     pub fn go_to_cursor_if_not_in_view(&mut self) -> bool {
         if let Some(cursor) = &self.cursor {
-            let num_timestamps = self.safe_num_timestamps();
+            let num_timestamps = self.num_timestamps().unwrap_or_else(BigInt::one);
             self.viewports[0].go_to_cursor_if_not_in_view(cursor, &num_timestamps)
         } else {
             false
@@ -798,7 +860,7 @@ impl WaveData {
         viewport.pixel_from_time(
             self.numbered_marker_time(idx),
             view_width,
-            &self.safe_num_timestamps(),
+            &self.num_timestamps().unwrap_or_else(BigInt::one),
         )
     }
 
@@ -833,21 +895,17 @@ impl WaveData {
 
     /// Find the top-most of the currently visible items.
     #[must_use]
-    /// Returns the index of the item currently at the top of the visible area.
     pub fn get_top_item(&self) -> usize {
-        if self.drawing_infos.is_empty() {
-            return 0;
-        }
-        // drawing_infos contains content-space positions from the last draw.
-        // The visible top is at: first_element_y + scroll_offset
-        let first_element_y = self.drawing_infos.first().unwrap().top();
-        let visible_top = first_element_y + self.scroll_offset;
-
+        let default = if self.drawing_infos.is_empty() {
+            0
+        } else {
+            self.drawing_infos.len() - 1
+        };
         self.drawing_infos
             .iter()
             .enumerate()
-            .find(|(_, di)| di.top() >= visible_top - 1.) // 1px margin for floating-point errors
-            .map_or(self.drawing_infos.len() - 1, |(idx, _)| idx)
+            .find(|(_, di)| di.top() >= self.top_item_draw_offset - 1.) // Subtract a bit of margin to avoid floating-point errors
+            .map_or(default, |(idx, _)| idx)
     }
 
     /// Find the item at a given y-location.
@@ -874,25 +932,14 @@ impl WaveData {
         if self.drawing_infos.is_empty() {
             return;
         }
-        let first_element_y = self.drawing_infos.first().unwrap().top();
-        let last_element_bottom = self.drawing_infos.last().unwrap().bottom();
-        let content_height = last_element_bottom - first_element_y;
-
-        // Don't scroll if all content fits in viewport
-        let max_scroll = content_height - self.total_height;
-        if max_scroll <= 0.0 {
+        // Don't scroll past the last item
+        if idx >= self.drawing_infos.len() {
             return;
         }
-
-        let item_y = self
-            .drawing_infos
-            .get(idx)
-            .unwrap_or_else(|| self.drawing_infos.last().unwrap())
-            .top();
-        let target_scroll = item_y - first_element_y;
-
-        // Clamp scroll to valid range: [0, max_scroll]
-        self.scroll_offset = target_scroll.clamp(0.0, max_scroll);
+        // Set scroll_offset to difference between requested element and first element
+        let first_element_y = self.drawing_infos.first().unwrap().top();
+        let item_y = self.drawing_infos[idx].top();
+        self.scroll_offset = item_y - first_element_y;
     }
 
     /// Set cursor at next (or previous, if `next` is false) transition of `variable`. If `skip_zero` is true,

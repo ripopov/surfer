@@ -11,6 +11,8 @@ use crate::displayed_item_tree::VisibleItemIndex;
 use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation, ScopeExpandType};
 use crate::keyboard_shortcuts::ShortcutAction;
 use crate::message::MessageTarget;
+use crate::table::{MultiSignalEntry, TableModelSpec};
+use crate::transaction_container::StreamScopeRef;
 use crate::wave_container::{FieldRef, VariableRefExt};
 use crate::wave_data::ScopeType;
 use crate::wave_source::LoadOptions;
@@ -584,6 +586,53 @@ impl SystemState {
                 }
             });
 
+            // Count selected variables to decide between single vs multi-signal table.
+            let selected_variables: Vec<MultiSignalEntry> = waves
+                .items_tree
+                .iter_visible_selected()
+                .filter_map(|node| {
+                    let item = waves.displayed_items.get(&node.item_ref)?;
+                    if let DisplayedItem::Variable(var) = item {
+                        Some(MultiSignalEntry {
+                            variable: var.variable_ref.clone(),
+                            field: vec![],
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if selected_variables.len() >= 2 {
+                if ui.button("Multi-signal change list").clicked() {
+                    msgs.push(Message::AddTableTile {
+                        spec: TableModelSpec::MultiSignalChangeList {
+                            variables: selected_variables,
+                        },
+                    });
+                    ui.close();
+                }
+            } else if ui.button("Signal change list").clicked() {
+                let (variable_ref, field) = path
+                    .map(|path| (path.root.clone(), path.field.clone()))
+                    .unwrap_or_else(|| (variable.variable_ref.clone(), Vec::new()));
+
+                msgs.push(Message::AddTableTile {
+                    spec: TableModelSpec::SignalChangeList {
+                        variable: variable_ref,
+                        field,
+                    },
+                });
+                ui.close();
+            }
+
+            if self.has_signal_analysis_selection()
+                && ui.button("Analyze selected signals...").clicked()
+            {
+                msgs.push(Message::OpenSignalAnalysisWizard);
+                ui.close();
+            }
+
             if self.wcp_greeted_signal.load(Ordering::Relaxed) {
                 if self.wcp_client_capabilities.goto_declaration
                     && ui.button("Go to declaration").clicked()
@@ -606,6 +655,28 @@ impl SystemState {
                     self.channels.wcp_s2c_sender.as_ref().map(|ch| {
                         block_on(ch.send(WcpSCMessage::event(WcpEvent::add_loads { variable })))
                     });
+                }
+            }
+        }
+
+        if let DisplayedItem::Stream(stream) = clicked_item {
+            if stream.transaction_stream_ref.gen_id.is_some() {
+                // Single generator — open one table
+                if ui.button("Show transactions in table").clicked() {
+                    msgs.push(Message::OpenTransactionTable {
+                        generator: stream.transaction_stream_ref.clone(),
+                    });
+                    ui.close();
+                }
+            } else if let Some(tc) = waves.inner.as_transactions() {
+                // Stream — open one table per generator
+                let scope = StreamScopeRef::Stream(stream.transaction_stream_ref.clone());
+                let generators = tc.generators_in_stream(&scope);
+                if !generators.is_empty() && ui.button("Show transactions in table").clicked() {
+                    for gen_ref in generators {
+                        msgs.push(Message::OpenTransactionTable { generator: gen_ref });
+                    }
+                    ui.close();
                 }
             }
         }

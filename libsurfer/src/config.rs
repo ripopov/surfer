@@ -39,6 +39,7 @@ static BUILTIN_THEMES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock:
     HashMap::from([
         theme!("dark+"),
         theme!("dark-high-contrast"),
+        theme!("dracula"),
         theme!("ibm"),
         theme!("light+"),
         theme!("light-high-contrast"),
@@ -452,6 +453,10 @@ pub struct SurferTheme {
     ///  Line style for cursor
     pub cursor: SurferLineStyle,
 
+    /// Line style for markers (defaults to cursor style if not specified)
+    #[serde(default)]
+    pub marker: Option<SurferLineStyle>,
+
     /// Line style for mouse gesture lines
     pub gesture: SurferLineStyle,
 
@@ -858,6 +863,15 @@ fn get_luminance(color: Color32) -> f32 {
 }
 
 impl SurferTheme {
+    /// Default marker color, falling back to cursor color if no marker style is set
+    #[must_use]
+    pub fn marker_color(&self) -> Color32 {
+        self.marker
+            .as_ref()
+            .map(|m| m.color)
+            .unwrap_or(self.cursor.color)
+    }
+
     #[must_use]
     pub fn get_color(&self, color: &str) -> Option<Color32> {
         self.colors.get(color).copied()
@@ -1163,6 +1177,30 @@ where
 {
     let buf = String::deserialize(deserializer)?;
     SurferTheme::new(Some(buf)).map_err(de::Error::custom)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dracula_theme_has_thin_lines_and_scope_icons() {
+        let theme_name = "dracula".to_string();
+        let (theme_builder, theme_names) = SurferTheme::generate_defaults(Some(&theme_name));
+        let theme = theme_builder
+            .set_override("theme_names", theme_names)
+            .expect("Failed to set theme names")
+            .build()
+            .expect("Failed to build config")
+            .try_deserialize::<SurferTheme>()
+            .expect("Failed to deserialize Dracula theme");
+
+        assert_eq!(theme.linewidth, 1.0);
+        assert_eq!(theme.cursor.width, 1.0);
+        assert_eq!(theme.ticks.style.width, 1.0);
+        assert_eq!(theme.scope_icons.module, "\u{ebf0}");
+        assert_eq!(theme.scope_icons.unknown, "\u{f092}");
+    }
 }
 
 /// Searches for `.surfer` directories upward from the current location until it reaches root.

@@ -87,10 +87,14 @@ impl SystemState {
         }
     }
 
-    /// Draw right-aligned status bar elements: cursor time, undo info, and count
+    /// Draw right-aligned status bar elements: cursor time, undo info, count, and RAM usage
     fn draw_statusbar_right(&self, ui: &mut Ui, waves: Option<&WaveData>, msgs: &mut Vec<Message>) {
-        if let Some(waves) = waves {
-            ui.with_layout(Layout::right_to_left(Align::RIGHT), |ui| {
+        ui.with_layout(Layout::right_to_left(Align::RIGHT), |ui| {
+            if let Some(usage) = memory_stats::memory_stats() {
+                ui.label(format!("RAM: {}", format_byte_size(usage.physical_mem)));
+                ui.separator();
+            }
+            if let Some(waves) = waves {
                 if let Some(time) = &waves.cursor {
                     ui.label(time_string(
                         time,
@@ -108,7 +112,21 @@ impl SystemState {
                     ui.separator();
                     ui.label(format!("Count: {count}"));
                 }
-            });
-        }
+            }
+        });
+    }
+}
+
+fn format_byte_size(bytes: usize) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let b = bytes as f64;
+    if b < MB {
+        format!("{:.1} KB", b / KB)
+    } else if b < GB {
+        format!("{:.1} MB", b / MB)
+    } else {
+        format!("{:.2} GB", b / GB)
     }
 }
