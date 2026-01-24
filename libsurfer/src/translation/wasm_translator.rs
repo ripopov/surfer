@@ -114,11 +114,11 @@ impl PluginTranslator {
                 file_exists,
             )
             .with_function(
-                "config_dir",
+                "translators_config_dir",
                 [PTR],
                 [PTR],
                 extism::UserData::new(()),
-                config_dir,
+                translators_config_dir,
             )
             .build()
             .map_err(|e| anyhow!("Failed to load plugin from {} {e}", file.to_string_lossy()))?;
@@ -270,7 +270,7 @@ host_fn!(current_dir() -> String {
         .map_err(|e| extism::Error::msg(format!("{e:#}")))
 });
 
-host_fn!(config_dir() -> extism_convert::Json(Option<String>) {
+host_fn!(translators_config_dir() -> extism_convert::Json(Option<String>) {
     Ok(extism_convert::Json(ProjectDirs::from("org", "surfer-project", "surfer")
         .map(|dirs| dirs.config_dir().join("translators"))
         .and_then(|dir| {
