@@ -186,7 +186,7 @@ impl Behavior<SurferPane> for SurferTileBehavior<'_> {
         !self.hide_chrome
     }
 
-    fn on_tab_close(&mut self, tiles: &mut Tiles<SurferPane>, tile_id: TileId) -> bool {
+    fn on_tab_close(&mut self, _tiles: &mut Tiles<SurferPane>, tile_id: TileId) -> bool {
         self.tile_to_remove = Some(tile_id);
         true
     }

@@ -43,6 +43,9 @@ impl SystemState {
         ui: &mut Ui,
         msgs: &mut Vec<Message>,
     ) {
+        // Use tile's max_rect as clip boundary - child UIs from SidePanel/CentralPanel don't inherit clip.
+        let tile_clip = ui.max_rect();
+
         let max_width = ui.available_width();
         let max_height = ui.available_height();
 
@@ -83,6 +86,7 @@ impl SystemState {
                 .default_width(100.)
                 .width_range(100.0..=max_width)
                 .show_inside(ui, |ui| {
+                    ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
                     ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                     self.handle_pointer_in_ui(ui, msgs);
                     if self.show_default_timeline() {
@@ -107,15 +111,17 @@ impl SystemState {
             self.draw_transaction_detail_panel(ui, max_width, msgs);
 
             SidePanel::left(ui.id().with("variable values"))
-                .frame(
-                    egui::Frame::default()
-                        .inner_margin(0)
-                        .outer_margin(0)
-                        .fill(self.user.config.theme.secondary_ui_color.background),
-                )
+                .frame(egui::Frame::default().inner_margin(0).outer_margin(0))
                 .default_width(100.)
                 .width_range(10.0..=max_width)
                 .show_inside(ui, |ui| {
+                    ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
+                    // Draw background manually; Frame::fill draws before we can clamp.
+                    ui.painter().with_clip_rect(ui.clip_rect()).rect_filled(
+                        ui.max_rect(),
+                        0.0,
+                        self.user.config.theme.secondary_ui_color.background,
+                    );
                     ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                     self.handle_pointer_in_ui(ui, msgs);
                     let response = ScrollArea::both()
@@ -145,7 +151,10 @@ impl SystemState {
                             outer_margin: Margin::ZERO,
                             ..Default::default()
                         })
-                        .show_inside(ui, |ui| self.draw_items(ctx, msgs, ui, viewport_idx));
+                        .show_inside(ui, |ui| {
+                            ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
+                            self.draw_items(ctx, msgs, ui, viewport_idx);
+                        });
                 }
                 ui.style_mut().visuals.widgets.noninteractive.bg_stroke = std_stroke;
             }
@@ -157,6 +166,7 @@ impl SystemState {
                     ..Default::default()
                 })
                 .show_inside(ui, |ui| {
+                    ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
                     self.draw_items(ctx, msgs, ui, 0);
                 });
         } else {
