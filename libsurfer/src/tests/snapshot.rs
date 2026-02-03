@@ -3617,3 +3617,167 @@ snapshot_ui!(table_sort_affects_row_order, || {
 
     state
 });
+
+// ========================
+// Table Widget Snapshot Tests (Stage 9 - Keyboard Navigation)
+// ========================
+
+snapshot_ui!(table_keyboard_focus_indicator, || {
+    use crate::table::{TableModelSpec, TableRowId, TableSelection};
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    let spec = TableModelSpec::Virtual {
+        rows: 10,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    let tile_id = *state.user.table_tiles.keys().next().unwrap();
+
+    // Initialize runtime state
+    state
+        .table_runtime
+        .entry(tile_id)
+        .or_insert_with(Default::default);
+
+    // Select row to show focus state
+    let mut selection = TableSelection::new();
+    selection.rows.insert(TableRowId(3));
+    selection.anchor = Some(TableRowId(3));
+    state.update(Message::SetTableSelection { tile_id, selection });
+
+    // Table should show focus indicator on selected row
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(table_type_search_indicator, || {
+    use crate::table::TableModelSpec;
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    let spec = TableModelSpec::Virtual {
+        rows: 20,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    let tile_id = *state.user.table_tiles.keys().next().unwrap();
+
+    // Initialize runtime state
+    state
+        .table_runtime
+        .entry(tile_id)
+        .or_insert_with(Default::default);
+
+    // Simulate type-to-search active with buffered text
+    let runtime = state.table_runtime.get_mut(&tile_id).unwrap();
+    let now = std::time::Instant::now();
+    runtime.type_search.push_char('r', now);
+    runtime.type_search.push_char('1', now);
+
+    // UI should show search indicator (e.g., "Search: r1")
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(table_select_all_highlight, || {
+    use crate::table::{TableModelSpec, TableRowId, TableSelection, TableSelectionMode};
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    let spec = TableModelSpec::Virtual {
+        rows: 8,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    let tile_id = *state.user.table_tiles.keys().next().unwrap();
+
+    // Set Multi mode
+    state
+        .user
+        .table_tiles
+        .get_mut(&tile_id)
+        .unwrap()
+        .config
+        .selection_mode = TableSelectionMode::Multi;
+
+    // Initialize runtime state
+    state
+        .table_runtime
+        .entry(tile_id)
+        .or_insert_with(Default::default);
+
+    // Select all rows (simulating Ctrl+A result)
+    let mut selection = TableSelection::new();
+    for i in 0..8 {
+        selection.rows.insert(TableRowId(i));
+    }
+    selection.anchor = Some(TableRowId(0));
+    state.update(Message::SetTableSelection { tile_id, selection });
+
+    // All rows should be highlighted
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(table_home_end_selection, || {
+    use crate::table::{TableModelSpec, TableRowId, TableSelection};
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    // Large table to test Home/End
+    let spec = TableModelSpec::Virtual {
+        rows: 50,
+        columns: 2,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    let tile_id = *state.user.table_tiles.keys().next().unwrap();
+
+    // Initialize runtime state
+    state
+        .table_runtime
+        .entry(tile_id)
+        .or_insert_with(Default::default);
+
+    // Select last row (as if End was pressed)
+    let mut selection = TableSelection::new();
+    selection.rows.insert(TableRowId(49));
+    selection.anchor = Some(TableRowId(49));
+    state.update(Message::SetTableSelection { tile_id, selection });
+
+    // View should scroll to show last row selected
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});

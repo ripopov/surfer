@@ -98,6 +98,43 @@ pub enum TableCacheError {
     Cancelled,
 }
 
+/// Type-to-search state stored in TableRuntimeState.
+#[derive(Debug, Clone, Default)]
+pub struct TypeSearchState {
+    /// Accumulated keystrokes for type-to-search.
+    pub buffer: String,
+    /// Time of last keystroke (for timeout/reset).
+    pub last_keystroke: Option<std::time::Instant>,
+}
+
+impl TypeSearchState {
+    /// Timeout after which buffer resets (1 second).
+    pub const TIMEOUT_MS: u128 = 1000;
+
+    /// Adds a character to the buffer, resetting if timeout elapsed.
+    pub fn push_char(&mut self, c: char, now: std::time::Instant) -> &str {
+        if self.is_timed_out(now) {
+            self.buffer.clear();
+        }
+        self.buffer.push(c);
+        self.last_keystroke = Some(now);
+        &self.buffer
+    }
+
+    /// Clears the buffer.
+    pub fn clear(&mut self) {
+        self.buffer.clear();
+        self.last_keystroke = None;
+    }
+
+    /// Returns true if buffer should be reset due to timeout.
+    #[must_use]
+    pub fn is_timed_out(&self, now: std::time::Instant) -> bool {
+        self.last_keystroke
+            .is_some_and(|last| now.duration_since(last).as_millis() > Self::TIMEOUT_MS)
+    }
+}
+
 /// Runtime state for a table tile (non-serialized).
 #[derive(Debug, Default)]
 pub struct TableRuntimeState {
@@ -108,6 +145,8 @@ pub struct TableRuntimeState {
     pub selection: super::model::TableSelection,
     /// Vertical scroll offset in pixels.
     pub scroll_offset: f32,
+    /// Type-to-search state for keyboard navigation.
+    pub type_search: TypeSearchState,
 }
 
 struct TableFilter {
@@ -274,4 +313,111 @@ pub fn build_table_cache(
         search_texts: rows.iter().map(|row| row.search_text.clone()).collect(),
         sort_keys: rows.iter().map(|row| row.sort_keys.clone()).collect(),
     })
+}
+
+// ========================
+// Clipboard Formatting Functions
+// ========================
+
+/// Formats selected rows as tab-separated values for clipboard.
+/// Only includes visible columns in their current display order.
+/// Does not include header row.
+pub fn format_rows_as_tsv(
+    model: &dyn super::model::TableModel,
+    selected_rows: &[TableRowId],
+    visible_columns: &[super::model::TableColumnKey],
+) -> String {
+    if selected_rows.is_empty() {
+        return String::new();
+    }
+
+    let schema = model.schema();
+
+    // Map column keys to indices
+    let col_indices: Vec<usize> = visible_columns
+        .iter()
+        .filter_map(|key| schema.columns.iter().position(|col| &col.key == key))
+        .collect();
+
+    let mut output = String::new();
+    for (row_num, &row_id) in selected_rows.iter().enumerate() {
+        if row_num > 0 {
+            output.push('\n');
+        }
+
+        for (col_num, &col_idx) in col_indices.iter().enumerate() {
+            if col_num > 0 {
+                output.push('\t');
+            }
+
+            let cell = model.cell(row_id, col_idx);
+            let text = match cell {
+                super::model::TableCell::Text(s) => s,
+                super::model::TableCell::RichText(rt) => rt.text().to_string(),
+            };
+
+            // Escape tabs and newlines in cell values
+            let escaped = text.replace(['\t', '\n'], " ");
+            output.push_str(&escaped);
+        }
+    }
+
+    output
+}
+
+/// Formats selected rows with a header row as tab-separated values.
+/// Includes column labels as first row.
+pub fn format_rows_as_tsv_with_header(
+    model: &dyn super::model::TableModel,
+    schema: &super::model::TableSchema,
+    selected_rows: &[TableRowId],
+    visible_columns: &[super::model::TableColumnKey],
+) -> String {
+    if selected_rows.is_empty() {
+        return String::new();
+    }
+
+    // Map column keys to indices and labels
+    let col_info: Vec<(usize, &str)> = visible_columns
+        .iter()
+        .filter_map(|key| {
+            schema
+                .columns
+                .iter()
+                .position(|col| &col.key == key)
+                .map(|idx| (idx, schema.columns[idx].label.as_str()))
+        })
+        .collect();
+
+    let mut output = String::new();
+
+    // Header row
+    for (col_num, (_, label)) in col_info.iter().enumerate() {
+        if col_num > 0 {
+            output.push('\t');
+        }
+        output.push_str(label);
+    }
+
+    // Data rows
+    for &row_id in selected_rows {
+        output.push('\n');
+
+        for (col_num, &(col_idx, _)) in col_info.iter().enumerate() {
+            if col_num > 0 {
+                output.push('\t');
+            }
+
+            let cell = model.cell(row_id, col_idx);
+            let text = match cell {
+                super::model::TableCell::Text(s) => s,
+                super::model::TableCell::RichText(rt) => rt.text().to_string(),
+            };
+
+            let escaped = text.replace(['\t', '\n'], " ");
+            output.push_str(&escaped);
+        }
+    }
+
+    output
 }

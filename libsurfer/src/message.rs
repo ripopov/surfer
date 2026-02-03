@@ -446,6 +446,19 @@ pub enum Message {
     ClearTableSelection {
         tile_id: TableTileId,
     },
+    /// Activate the selected row(s) - triggered by Enter key
+    TableActivateSelection {
+        tile_id: TableTileId,
+    },
+    /// Copy selected rows to clipboard
+    TableCopySelection {
+        tile_id: TableTileId,
+        include_header: bool,
+    },
+    /// Select all rows (Multi mode only)
+    TableSelectAll {
+        tile_id: TableTileId,
+    },
     /// Select Theme
     SelectTheme(Option<String>),
     /// Enable animations

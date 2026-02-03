@@ -514,3 +514,344 @@ pub fn sort_indicator(sort: &[TableSortSpec], column_key: &TableColumnKey) -> Op
         Some(format!("{}{}", arrow, position + 1))
     }
 }
+
+// ========================
+// Keyboard Navigation Functions
+// ========================
+
+/// Result of a keyboard navigation operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NavigationResult {
+    /// The row to navigate to (select and scroll into view).
+    pub target_row: Option<TableRowId>,
+    /// Whether the operation changed the selection.
+    pub selection_changed: bool,
+    /// New selection state (if changed).
+    pub new_selection: Option<TableSelection>,
+}
+
+/// Helper to find the position of the anchor or last selected row in visible rows.
+fn find_anchor_position(selection: &TableSelection, visible_rows: &[TableRowId]) -> Option<usize> {
+    // First try anchor
+    if let Some(anchor) = selection.anchor
+        && let Some(pos) = visible_rows.iter().position(|&r| r == anchor)
+    {
+        return Some(pos);
+    }
+    // Fallback to any selected row (use the last one in BTreeSet order)
+    selection
+        .rows
+        .iter()
+        .rev()
+        .find_map(|&r| visible_rows.iter().position(|&v| v == r))
+}
+
+/// Computes the target row when pressing Up arrow.
+/// Returns the previous row in display order, or stays at first row.
+/// With no selection, selects the last row.
+#[must_use]
+pub fn navigate_up(
+    current_selection: &TableSelection,
+    visible_rows: &[TableRowId],
+) -> NavigationResult {
+    if visible_rows.is_empty() {
+        return NavigationResult {
+            target_row: None,
+            selection_changed: false,
+            new_selection: None,
+        };
+    }
+
+    let current_pos = find_anchor_position(current_selection, visible_rows);
+
+    let target_idx = match current_pos {
+        Some(0) => 0, // Already at first row, stay there
+        Some(pos) => pos - 1,
+        None => visible_rows.len() - 1, // No selection: go to last row
+    };
+
+    let target_row = visible_rows[target_idx];
+
+    // Check if selection actually changed
+    if current_selection.len() == 1
+        && current_selection.contains(target_row)
+        && current_selection.anchor == Some(target_row)
+    {
+        return NavigationResult {
+            target_row: Some(target_row),
+            selection_changed: false,
+            new_selection: None,
+        };
+    }
+
+    let mut new_selection = TableSelection::new();
+    new_selection.rows.insert(target_row);
+    new_selection.anchor = Some(target_row);
+
+    NavigationResult {
+        target_row: Some(target_row),
+        selection_changed: true,
+        new_selection: Some(new_selection),
+    }
+}
+
+/// Computes the target row when pressing Down arrow.
+/// Returns the next row in display order, or stays at last row.
+/// With no selection, selects the first row.
+#[must_use]
+pub fn navigate_down(
+    current_selection: &TableSelection,
+    visible_rows: &[TableRowId],
+) -> NavigationResult {
+    if visible_rows.is_empty() {
+        return NavigationResult {
+            target_row: None,
+            selection_changed: false,
+            new_selection: None,
+        };
+    }
+
+    let current_pos = find_anchor_position(current_selection, visible_rows);
+
+    let target_idx = match current_pos {
+        Some(pos) if pos >= visible_rows.len() - 1 => visible_rows.len() - 1, // At last row, stay
+        Some(pos) => pos + 1,
+        None => 0, // No selection: go to first row
+    };
+
+    let target_row = visible_rows[target_idx];
+
+    // Check if selection actually changed
+    if current_selection.len() == 1
+        && current_selection.contains(target_row)
+        && current_selection.anchor == Some(target_row)
+    {
+        return NavigationResult {
+            target_row: Some(target_row),
+            selection_changed: false,
+            new_selection: None,
+        };
+    }
+
+    let mut new_selection = TableSelection::new();
+    new_selection.rows.insert(target_row);
+    new_selection.anchor = Some(target_row);
+
+    NavigationResult {
+        target_row: Some(target_row),
+        selection_changed: true,
+        new_selection: Some(new_selection),
+    }
+}
+
+/// Computes the target row when pressing Page Up.
+/// Moves up by `page_size` rows, or to first row if fewer remain.
+#[must_use]
+pub fn navigate_page_up(
+    current_selection: &TableSelection,
+    visible_rows: &[TableRowId],
+    page_size: usize,
+) -> NavigationResult {
+    if visible_rows.is_empty() {
+        return NavigationResult {
+            target_row: None,
+            selection_changed: false,
+            new_selection: None,
+        };
+    }
+
+    let current_pos = find_anchor_position(current_selection, visible_rows);
+
+    let target_idx = match current_pos {
+        Some(pos) => pos.saturating_sub(page_size),
+        None => visible_rows.len() - 1, // No selection: go to last row
+    };
+
+    let target_row = visible_rows[target_idx];
+
+    let mut new_selection = TableSelection::new();
+    new_selection.rows.insert(target_row);
+    new_selection.anchor = Some(target_row);
+
+    NavigationResult {
+        target_row: Some(target_row),
+        selection_changed: true,
+        new_selection: Some(new_selection),
+    }
+}
+
+/// Computes the target row when pressing Page Down.
+/// Moves down by `page_size` rows, or to last row if fewer remain.
+#[must_use]
+pub fn navigate_page_down(
+    current_selection: &TableSelection,
+    visible_rows: &[TableRowId],
+    page_size: usize,
+) -> NavigationResult {
+    if visible_rows.is_empty() {
+        return NavigationResult {
+            target_row: None,
+            selection_changed: false,
+            new_selection: None,
+        };
+    }
+
+    let current_pos = find_anchor_position(current_selection, visible_rows);
+
+    let target_idx = match current_pos {
+        Some(pos) => (pos + page_size).min(visible_rows.len() - 1),
+        None => 0, // No selection: go to first row
+    };
+
+    let target_row = visible_rows[target_idx];
+
+    let mut new_selection = TableSelection::new();
+    new_selection.rows.insert(target_row);
+    new_selection.anchor = Some(target_row);
+
+    NavigationResult {
+        target_row: Some(target_row),
+        selection_changed: true,
+        new_selection: Some(new_selection),
+    }
+}
+
+/// Computes the target row when pressing Home.
+/// Returns the first row in display order.
+#[must_use]
+pub fn navigate_home(visible_rows: &[TableRowId]) -> NavigationResult {
+    if visible_rows.is_empty() {
+        return NavigationResult {
+            target_row: None,
+            selection_changed: false,
+            new_selection: None,
+        };
+    }
+
+    let target_row = visible_rows[0];
+
+    let mut new_selection = TableSelection::new();
+    new_selection.rows.insert(target_row);
+    new_selection.anchor = Some(target_row);
+
+    NavigationResult {
+        target_row: Some(target_row),
+        selection_changed: true,
+        new_selection: Some(new_selection),
+    }
+}
+
+/// Computes the target row when pressing End.
+/// Returns the last row in display order.
+#[must_use]
+pub fn navigate_end(visible_rows: &[TableRowId]) -> NavigationResult {
+    if visible_rows.is_empty() {
+        return NavigationResult {
+            target_row: None,
+            selection_changed: false,
+            new_selection: None,
+        };
+    }
+
+    let target_row = visible_rows[visible_rows.len() - 1];
+
+    let mut new_selection = TableSelection::new();
+    new_selection.rows.insert(target_row);
+    new_selection.anchor = Some(target_row);
+
+    NavigationResult {
+        target_row: Some(target_row),
+        selection_changed: true,
+        new_selection: Some(new_selection),
+    }
+}
+
+/// Computes the result of Shift+navigation (extends selection).
+/// Used with Shift+Up, Shift+Down, Shift+Page Up/Down, Shift+Home/End.
+/// Selects all rows between anchor and target (inclusive).
+#[must_use]
+pub fn navigate_extend_selection(
+    current_selection: &TableSelection,
+    target_row: TableRowId,
+    visible_rows: &[TableRowId],
+) -> NavigationResult {
+    let target_pos = visible_rows.iter().position(|&r| r == target_row);
+    let Some(target_idx) = target_pos else {
+        return NavigationResult {
+            target_row: None,
+            selection_changed: false,
+            new_selection: None,
+        };
+    };
+
+    // Get anchor position, or use target as anchor if no anchor exists
+    let anchor = current_selection.anchor;
+    let anchor_idx = anchor.and_then(|a| visible_rows.iter().position(|&r| r == a));
+
+    let (start_idx, end_idx, final_anchor) = match anchor_idx {
+        Some(a_idx) => {
+            let start = a_idx.min(target_idx);
+            let end = a_idx.max(target_idx);
+            (start, end, anchor)
+        }
+        None => {
+            // No anchor - just select target and set as anchor
+            (target_idx, target_idx, Some(target_row))
+        }
+    };
+
+    let mut new_selection = TableSelection::new();
+    for idx in start_idx..=end_idx {
+        if let Some(&row_id) = visible_rows.get(idx) {
+            new_selection.rows.insert(row_id);
+        }
+    }
+    new_selection.anchor = final_anchor;
+
+    NavigationResult {
+        target_row: Some(target_row),
+        selection_changed: true,
+        new_selection: Some(new_selection),
+    }
+}
+
+/// Finds the best matching row for type-to-search.
+/// Returns the first row whose search_text starts with or contains the query.
+/// Prefers rows after the current selection for "find next" behavior.
+/// Case-insensitive matching.
+#[must_use]
+pub fn find_type_search_match(
+    query: &str,
+    current_selection: &TableSelection,
+    visible_rows: &[TableRowId],
+    search_texts: &[String],
+) -> Option<TableRowId> {
+    if query.is_empty() || visible_rows.is_empty() {
+        return None;
+    }
+
+    let query_lower = query.to_lowercase();
+
+    // Find current selection position to start search from
+    let start_idx = current_selection
+        .anchor
+        .and_then(|a| visible_rows.iter().position(|&r| r == a))
+        .map(|pos| (pos + 1) % visible_rows.len())
+        .unwrap_or(0);
+
+    // Search starting from position after current selection, wrapping around
+    let indices = (start_idx..visible_rows.len()).chain(0..start_idx);
+
+    for idx in indices {
+        if idx < search_texts.len() {
+            let text_lower = search_texts[idx].to_lowercase();
+
+            // First try prefix match, then contains match
+            if text_lower.starts_with(&query_lower) || text_lower.contains(&query_lower) {
+                return Some(visible_rows[idx]);
+            }
+        }
+    }
+
+    None
+}

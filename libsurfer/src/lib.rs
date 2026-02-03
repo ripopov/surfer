@@ -2410,6 +2410,95 @@ impl SystemState {
                     self.invalidate_draw_commands();
                 }
             }
+            Message::TableActivateSelection { tile_id } => {
+                // Get the selected rows and call model.on_activate() for each
+                let tile_state = self.user.table_tiles.get(&tile_id)?;
+                let model = tile_state.spec.create_model()?;
+                let runtime = self.table_runtime.get(&tile_id)?;
+
+                // For now, activate the anchor row if set
+                if let Some(anchor) = runtime.selection.anchor {
+                    let action = model.on_activate(anchor);
+                    match action {
+                        table::TableAction::CursorSet(time) => {
+                            // Use viewport 0 for now
+                            self.update(Message::GoToTime(Some(time), 0));
+                        }
+                        table::TableAction::FocusTransaction(_)
+                        | table::TableAction::SelectSignal(_)
+                        | table::TableAction::None => {
+                            // No action or not yet implemented
+                        }
+                    }
+                }
+            }
+            Message::TableCopySelection {
+                tile_id,
+                include_header,
+            } => {
+                let tile_state = self.user.table_tiles.get(&tile_id)?;
+                let model = tile_state.spec.create_model()?;
+                let runtime = self.table_runtime.get(&tile_id)?;
+
+                if runtime.selection.is_empty() {
+                    return Some(());
+                }
+
+                // Get visible columns from schema (all columns for now)
+                let schema = model.schema();
+                let visible_columns: Vec<_> =
+                    schema.columns.iter().map(|c| c.key.clone()).collect();
+
+                // Convert BTreeSet to Vec, preserving order
+                let selected_rows: Vec<_> = runtime.selection.rows.iter().copied().collect();
+
+                let tsv = if include_header {
+                    table::format_rows_as_tsv_with_header(
+                        model.as_ref(),
+                        &schema,
+                        &selected_rows,
+                        &visible_columns,
+                    )
+                } else {
+                    table::format_rows_as_tsv(model.as_ref(), &selected_rows, &visible_columns)
+                };
+
+                // Copy to clipboard if available
+                if let Some(ctx) = &self.context {
+                    ctx.copy_text(tsv);
+                }
+            }
+            Message::TableSelectAll { tile_id } => {
+                let tile_state = self.user.table_tiles.get(&tile_id)?;
+
+                // Only works in Multi mode
+                if tile_state.config.selection_mode != table::TableSelectionMode::Multi {
+                    return Some(());
+                }
+
+                // Get all visible rows from cache
+                let runtime = self.table_runtime.get(&tile_id)?;
+                let Some(cache_entry) = &runtime.cache else {
+                    return Some(());
+                };
+                let Some(cache) = cache_entry.get() else {
+                    return Some(());
+                };
+
+                // Select all visible rows
+                let mut new_selection = table::TableSelection::new();
+                for &row_id in &cache.row_ids {
+                    new_selection.rows.insert(row_id);
+                }
+                if !cache.row_ids.is_empty() {
+                    new_selection.anchor = Some(cache.row_ids[0]);
+                }
+
+                if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
+                    runtime.selection = new_selection;
+                    self.invalidate_draw_commands();
+                }
+            }
             Message::SelectTheme(theme_name) => {
                 let theme = SurferTheme::new(theme_name)
                     .with_context(|| "Failed to set theme")
