@@ -165,6 +165,11 @@ impl SystemState {
 
         Ok(result)
     }
+
+    /// Returns true if no table caches are currently being built
+    pub fn table_caches_ready(&self) -> bool {
+        self.table_inflight.is_empty()
+    }
 }
 
 impl From<UserState> for SystemState {

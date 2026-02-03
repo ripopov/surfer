@@ -244,7 +244,14 @@ impl Behavior<SurferPane> for SurferTileBehavior<'_> {
                 });
             }
             SurferPane::Table(table_tile_id) => {
-                draw_table_tile(self.state, self.ctx, ui, self.msgs, *table_tile_id);
+                draw_table_tile(
+                    self.state,
+                    self.ctx,
+                    ui,
+                    self.msgs,
+                    *table_tile_id,
+                    self.table_tiles,
+                );
             }
         }
         egui_tiles::UiResponse::None

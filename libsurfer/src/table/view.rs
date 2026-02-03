@@ -1,6 +1,16 @@
 use crate::SystemState;
 use crate::message::Message;
-use crate::table::{TableCacheKey, TableModelKey, TableTileId};
+use crate::table::{
+    TableCache, TableCacheKey, TableCell, TableModel, TableModelKey, TableTileId, TableTileState,
+};
+use egui_extras::{Column, TableBuilder};
+use std::collections::HashMap;
+use std::sync::Arc;
+
+/// Default row height for normal table rows.
+const ROW_HEIGHT_NORMAL: f32 = 20.0;
+/// Row height for dense mode (smaller text, less padding).
+const ROW_HEIGHT_DENSE: f32 = 16.0;
 
 /// Renders a table tile in the UI.
 ///
@@ -8,15 +18,19 @@ use crate::table::{TableCacheKey, TableModelKey, TableTileId};
 /// - If no tile config exists, shows an error message
 /// - If cache is not ready, shows a loading indicator and triggers cache build
 /// - If cache has an error, shows the error message
-/// - Otherwise, renders the table (placeholder for Stage 5)
+/// - Otherwise, renders the table using egui_extras::TableBuilder
+///
+/// Note: `table_tiles` is passed separately because it's temporarily moved out of
+/// `state.user` during the tile tree rendering to avoid borrow conflicts.
 pub fn draw_table_tile(
     state: &mut SystemState,
     _ctx: &egui::Context,
     ui: &mut egui::Ui,
     msgs: &mut Vec<Message>,
     tile_id: TableTileId,
+    table_tiles: &HashMap<TableTileId, TableTileState>,
 ) {
-    let Some(tile_state) = state.user.table_tiles.get(&tile_id) else {
+    let Some(tile_state) = table_tiles.get(&tile_id) else {
         ui.centered_and_justified(|ui| {
             ui.label("Table tile not found");
         });
@@ -26,6 +40,11 @@ pub fn draw_table_tile(
     let title = tile_state.config.title.clone();
     let display_filter = tile_state.config.display_filter.clone();
     let view_sort = tile_state.config.sort.clone();
+    let dense_rows = tile_state.config.dense_rows;
+    let sticky_header = tile_state.config.sticky_header;
+
+    // Get the model for schema access
+    let model = tile_state.spec.create_model();
 
     // Get or create runtime state
     let runtime = state.table_runtime.entry(tile_id).or_default();
@@ -54,6 +73,11 @@ pub fn draw_table_tile(
         });
     }
 
+    // Get theme colors
+    let theme = &state.user.config.theme;
+    let header_bg = theme.secondary_ui_color.background;
+    let text_color = theme.foreground;
+
     // Render UI based on current state
     ui.vertical(|ui| {
         ui.heading(&title);
@@ -70,10 +94,21 @@ pub fn draw_table_tile(
                 && cache_entry.is_ready()
                 && cache_entry.cache_key == cache_key
             {
-                // Cache is ready - render table (placeholder for Stage 5)
+                // Cache is ready - render the table
                 if let Some(cache) = cache_entry.get() {
-                    ui.label(format!("Rows: {}", cache.row_ids.len()));
-                    ui.label("(Table rendering will be implemented in Stage 5)");
+                    if let Some(ref model) = model {
+                        render_table(
+                            ui,
+                            model.clone(),
+                            cache,
+                            dense_rows,
+                            sticky_header,
+                            header_bg,
+                            text_color,
+                        );
+                    } else {
+                        ui.label("Model not available");
+                    }
                 }
             } else {
                 // Loading state
@@ -86,4 +121,85 @@ pub fn draw_table_tile(
             ui.label("Initializing...");
         }
     });
+}
+
+/// Renders the actual table using egui_extras::TableBuilder.
+///
+/// Note: `sticky_header` config is stored but egui_extras::TableBuilder always renders
+/// headers as sticky (fixed above the scrolling body). Non-sticky headers would require
+/// custom scrolling logic and is deferred to a future version.
+fn render_table(
+    ui: &mut egui::Ui,
+    model: Arc<dyn TableModel>,
+    cache: &TableCache,
+    dense_rows: bool,
+    _sticky_header: bool, // Reserved for future use; egui_extras headers are always sticky
+    header_bg: egui::Color32,
+    text_color: egui::Color32,
+) {
+    let schema = model.schema();
+    let row_height = if dense_rows {
+        ROW_HEIGHT_DENSE
+    } else {
+        ROW_HEIGHT_NORMAL
+    };
+
+    // Build columns from schema
+    let mut builder = TableBuilder::new(ui)
+        .striped(true)
+        .vscroll(true)
+        .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
+
+    // Add columns based on schema
+    for col in &schema.columns {
+        let width = col.default_width.unwrap_or(100.0);
+        let column = if col.default_resizable {
+            Column::initial(width).resizable(true).clip(true)
+        } else {
+            Column::exact(width)
+        };
+        builder = builder.column(column);
+    }
+
+    // Render header
+    builder
+        .header(row_height, |mut header| {
+            for col in &schema.columns {
+                header.col(|ui| {
+                    ui.painter()
+                        .rect_filled(ui.available_rect_before_wrap(), 0.0, header_bg);
+                    let label = if dense_rows {
+                        egui::RichText::new(&col.label).small().color(text_color)
+                    } else {
+                        egui::RichText::new(&col.label).strong().color(text_color)
+                    };
+                    ui.label(label);
+                });
+            }
+        })
+        .body(|body| {
+            body.rows(row_height, cache.row_ids.len(), |mut row| {
+                let row_idx = row.index();
+                if let Some(&row_id) = cache.row_ids.get(row_idx) {
+                    for col_idx in 0..schema.columns.len() {
+                        row.col(|ui| {
+                            let cell = model.cell(row_id, col_idx);
+                            let text = match cell {
+                                TableCell::Text(s) => s,
+                                TableCell::RichText(rt) => {
+                                    ui.label(rt);
+                                    return;
+                                }
+                            };
+                            let label = if dense_rows {
+                                egui::RichText::new(&text).small()
+                            } else {
+                                egui::RichText::new(&text)
+                            };
+                            ui.label(label);
+                        });
+                    }
+                }
+            });
+        });
 }

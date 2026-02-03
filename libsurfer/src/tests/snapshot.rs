@@ -92,14 +92,17 @@ pub(crate) fn render_and_compare_inner(
             ctx.set_visuals(state.get_visuals());
             setup_custom_font(ctx);
             let msgs = state.draw(ctx, Some(size));
-            // Process only BuildAnalogCache messages as other messages can be fuzzy (command matcher)
+            // Process cache build messages (analog and table)
             for msg in msgs {
-                if matches!(msg, Message::BuildAnalogCache { .. }) {
+                if matches!(
+                    msg,
+                    Message::BuildAnalogCache { .. } | Message::BuildTableCache { .. }
+                ) {
                     state.update(msg);
                 }
             }
-            // Wait for analog cache builds to complete
-            while !state.analog_caches_ready() {
+            // Wait for analog and table cache builds to complete
+            while !state.analog_caches_ready() || !state.table_caches_ready() {
                 std::thread::sleep(std::time::Duration::from_millis(1));
                 state.handle_async_messages();
             }
@@ -3325,3 +3328,83 @@ snapshot_ui_with_file_and_msgs! {analog_waveform_reg1024, "examples/analog.vcd",
         viewport_idx: 0
     },
 ]}
+
+// ========================
+// Table Widget Snapshot Tests (Stage 5)
+// ========================
+
+snapshot_ui!(table_virtual_10_rows_3_cols, || {
+    use crate::table::TableModelSpec;
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    // Add a virtual table tile with 10 rows and 3 columns
+    let spec = TableModelSpec::Virtual {
+        rows: 10,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(table_virtual_1000_rows, || {
+    use crate::table::TableModelSpec;
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    // Add a virtual table tile with 1000 rows (tests virtualization)
+    let spec = TableModelSpec::Virtual {
+        rows: 1000,
+        columns: 5,
+        seed: 123,
+    };
+    state.update(Message::AddTableTile { spec });
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(table_dense_rows, || {
+    use crate::table::{TableModelSpec, TableTileState, TableViewConfig};
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    // Create a table tile with dense_rows enabled
+    let table_id = state.user.tile_tree.next_table_id();
+    let spec = TableModelSpec::Virtual {
+        rows: 15,
+        columns: 4,
+        seed: 42,
+    };
+    let mut config = TableViewConfig::default();
+    config.title = "Dense Table".to_string();
+    config.dense_rows = true;
+
+    state
+        .user
+        .table_tiles
+        .insert(table_id, TableTileState { spec, config });
+    state.user.tile_tree.add_table_tile(table_id);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
