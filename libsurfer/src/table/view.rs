@@ -1,8 +1,9 @@
 use crate::SystemState;
 use crate::message::Message;
 use crate::table::{
-    TableCache, TableCacheKey, TableCell, TableModel, TableModelKey, TableSortSpec, TableTileId,
-    TableTileState, sort_indicator, sort_spec_on_click, sort_spec_on_shift_click,
+    TableCache, TableCacheKey, TableCell, TableModel, TableModelKey, TableSearchMode,
+    TableSearchSpec, TableSortSpec, TableTileId, TableTileState, sort_indicator,
+    sort_spec_on_click, sort_spec_on_shift_click,
 };
 use egui_extras::{Column, TableBuilder};
 use std::collections::HashMap;
@@ -79,6 +80,9 @@ pub fn draw_table_tile(
     let header_bg = theme.secondary_ui_color.background;
     let text_color = theme.foreground;
 
+    // Get total row count from model (unfiltered)
+    let total_rows = model.as_ref().map_or(0, |m| m.row_count());
+
     // Render UI based on current state
     ui.vertical(|ui| {
         ui.heading(&title);
@@ -98,6 +102,16 @@ pub fn draw_table_tile(
                 // Cache is ready - render the table
                 if let Some(cache) = cache_entry.get() {
                     if let Some(ref model) = model {
+                        // Render filter bar above the table
+                        render_filter_bar(
+                            ui,
+                            msgs,
+                            tile_id,
+                            &tile_state.config.display_filter,
+                            total_rows,
+                            cache.row_ids.len(),
+                        );
+
                         render_table(
                             ui,
                             msgs,
@@ -246,4 +260,127 @@ fn render_table(
     if let Some(sort) = new_sort {
         msgs.push(Message::SetTableSort { tile_id, sort });
     }
+}
+
+/// Renders the filter bar above the table with text input, mode selector, and case toggle.
+fn render_filter_bar(
+    ui: &mut egui::Ui,
+    msgs: &mut Vec<Message>,
+    tile_id: TableTileId,
+    current_filter: &TableSearchSpec,
+    total_rows: usize,
+    filtered_rows: usize,
+) {
+    // Track changes to emit after rendering
+    let mut filter_changed = false;
+    let mut new_text = current_filter.text.clone();
+    let mut new_mode = current_filter.mode;
+    let mut new_case_sensitive = current_filter.case_sensitive;
+
+    ui.horizontal(|ui| {
+        // Filter icon/label to indicate this is a filter bar
+        let filter_active = !current_filter.text.is_empty();
+        if filter_active {
+            ui.label(egui::RichText::new("Filter:").strong());
+        } else {
+            ui.label("Filter:");
+        }
+
+        // Text input field
+        let text_response = ui.add(
+            egui::TextEdit::singleline(&mut new_text)
+                .hint_text("Search...")
+                .desired_width(150.0),
+        );
+        if text_response.changed() {
+            filter_changed = true;
+        }
+
+        // Mode selector dropdown
+        let mode_label = match current_filter.mode {
+            TableSearchMode::Contains => "Contains",
+            TableSearchMode::Exact => "Exact",
+            TableSearchMode::Regex => "Regex",
+            TableSearchMode::Fuzzy => "Fuzzy",
+        };
+
+        egui::ComboBox::from_id_salt(format!("filter_mode_{}", tile_id.0))
+            .selected_text(mode_label)
+            .width(70.0)
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_value(&mut new_mode, TableSearchMode::Contains, "Contains")
+                    .changed()
+                {
+                    filter_changed = true;
+                }
+                if ui
+                    .selectable_value(&mut new_mode, TableSearchMode::Exact, "Exact")
+                    .changed()
+                {
+                    filter_changed = true;
+                }
+                if ui
+                    .selectable_value(&mut new_mode, TableSearchMode::Regex, "Regex")
+                    .changed()
+                {
+                    filter_changed = true;
+                }
+                if ui
+                    .selectable_value(&mut new_mode, TableSearchMode::Fuzzy, "Fuzzy")
+                    .changed()
+                {
+                    filter_changed = true;
+                }
+            });
+
+        // Case sensitivity toggle
+        let case_label = if new_case_sensitive { "Aa" } else { "aa" };
+        let case_tooltip = if new_case_sensitive {
+            "Case sensitive (click to toggle)"
+        } else {
+            "Case insensitive (click to toggle)"
+        };
+        if ui
+            .add(egui::Button::new(case_label).min_size(egui::vec2(28.0, 0.0)))
+            .on_hover_text(case_tooltip)
+            .clicked()
+        {
+            new_case_sensitive = !new_case_sensitive;
+            filter_changed = true;
+        }
+
+        // Clear button (only shown when filter is active)
+        if filter_active
+            && ui
+                .add(egui::Button::new("Clear").min_size(egui::vec2(40.0, 0.0)))
+                .clicked()
+        {
+            new_text.clear();
+            filter_changed = true;
+        }
+
+        // Row count display
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if filter_active {
+                ui.label(format!("Showing {} of {} rows", filtered_rows, total_rows));
+            } else {
+                ui.label(format!("{} rows", total_rows));
+            }
+        });
+    });
+
+    // Emit filter change message if needed
+    if filter_changed {
+        msgs.push(Message::SetTableDisplayFilter {
+            tile_id,
+            filter: TableSearchSpec {
+                mode: new_mode,
+                case_sensitive: new_case_sensitive,
+                text: new_text,
+            },
+        });
+    }
+
+    ui.separator();
 }

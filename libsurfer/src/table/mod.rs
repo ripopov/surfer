@@ -5,7 +5,7 @@ pub mod view;
 
 pub use cache::{
     TableCache, TableCacheEntry, TableCacheError, TableCacheKey, TableRuntimeState,
-    build_table_cache,
+    build_table_cache, fuzzy_match,
 };
 pub use model::{
     AnalysisKind, AnalysisParams, TableAction, TableCell, TableColumn, TableColumnConfig,

@@ -6,6 +6,37 @@ use regex::RegexBuilder;
 use std::cmp::Ordering;
 use std::sync::{Arc, OnceLock};
 
+/// Returns true if `needle` characters appear in `haystack` in order (subsequence).
+/// For example: "abc" matches "aXbYcZ" but not "bac".
+pub fn fuzzy_match(needle: &str, needle_lower: &str, haystack: &str, case_sensitive: bool) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+
+    let needle_chars: Vec<char> = if case_sensitive {
+        needle.chars().collect()
+    } else {
+        needle_lower.chars().collect()
+    };
+
+    let haystack_lower;
+    let haystack_chars: Box<dyn Iterator<Item = char>> = if case_sensitive {
+        Box::new(haystack.chars())
+    } else {
+        haystack_lower = haystack.to_lowercase();
+        Box::new(haystack_lower.chars())
+    };
+
+    let mut needle_idx = 0;
+    for hay_char in haystack_chars {
+        if needle_idx < needle_chars.len() && hay_char == needle_chars[needle_idx] {
+            needle_idx += 1;
+        }
+    }
+
+    needle_idx == needle_chars.len()
+}
+
 /// Cache key for table data.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TableCacheKey {
@@ -142,6 +173,9 @@ impl TableFilter {
                 .regex
                 .as_ref()
                 .is_some_and(|regex| regex.is_match(haystack)),
+            TableSearchMode::Fuzzy => {
+                fuzzy_match(&self.text, &self.text_lower, haystack, self.case_sensitive)
+            }
         }
     }
 }

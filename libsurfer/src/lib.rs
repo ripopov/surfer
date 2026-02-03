@@ -2390,6 +2390,14 @@ impl SystemState {
                     self.invalidate_draw_commands();
                 }
             }
+            Message::SetTableDisplayFilter { tile_id, filter } => {
+                if let Some(tile_state) = self.user.table_tiles.get_mut(&tile_id) {
+                    tile_state.config.display_filter = filter;
+                    // Cache invalidation happens automatically in draw_table_tile
+                    // when the cache_key (which includes display_filter) changes
+                    self.invalidate_draw_commands();
+                }
+            }
             Message::SelectTheme(theme_name) => {
                 let theme = SurferTheme::new(theme_name)
                     .with_context(|| "Failed to set theme")

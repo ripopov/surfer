@@ -851,3 +851,316 @@ fn multi_column_sort_via_messages() {
 
     assert_eq!(state.user.table_tiles[&tile_id].config.sort, multi_sort);
 }
+
+// ========================
+// Stage 7 Tests - Fuzzy Matching
+// ========================
+
+#[test]
+fn fuzzy_match_exact_characters_in_order() {
+    // "abc" should match "abc" exactly
+    assert!(fuzzy_match("abc", "abc", "abc", true));
+    assert!(fuzzy_match("abc", "abc", "abc", false));
+}
+
+#[test]
+fn fuzzy_match_subsequence_with_gaps() {
+    // "abc" should match "aXbYcZ" (characters in order with gaps)
+    assert!(fuzzy_match("abc", "abc", "aXbYcZ", true));
+    assert!(fuzzy_match("abc", "abc", "a_b_c", true));
+    assert!(fuzzy_match("abc", "abc", "a---b---c", true));
+}
+
+#[test]
+fn fuzzy_match_fails_wrong_order() {
+    // "abc" should NOT match "bac" (wrong order)
+    assert!(!fuzzy_match("abc", "abc", "bac", true));
+    assert!(!fuzzy_match("abc", "abc", "cba", true));
+    assert!(!fuzzy_match("abc", "abc", "acb", true));
+}
+
+#[test]
+fn fuzzy_match_fails_missing_character() {
+    // "abc" should NOT match "ab" (missing 'c')
+    assert!(!fuzzy_match("abc", "abc", "ab", true));
+    assert!(!fuzzy_match("abc", "abc", "ac", true));
+    assert!(!fuzzy_match("abc", "abc", "bc", true));
+}
+
+#[test]
+fn fuzzy_match_empty_needle_matches_all() {
+    // Empty needle matches everything
+    assert!(fuzzy_match("", "", "anything", true));
+    assert!(fuzzy_match("", "", "", true));
+}
+
+#[test]
+fn fuzzy_match_case_insensitive() {
+    // Case-insensitive matching
+    assert!(fuzzy_match("abc", "abc", "ABC", false));
+    assert!(fuzzy_match("ABC", "abc", "abc", false));
+    assert!(fuzzy_match("AbC", "abc", "aBc", false));
+    // Case-sensitive should fail
+    assert!(!fuzzy_match("abc", "abc", "ABC", true));
+}
+
+#[test]
+fn fuzzy_match_unicode() {
+    // Unicode characters should work
+    assert!(fuzzy_match("αβγ", "αβγ", "αXβYγ", true));
+    assert!(fuzzy_match("日本", "日本", "日X本", true));
+}
+
+// ========================
+// Stage 7 Tests - Filter Cache Building
+// ========================
+
+#[test]
+fn table_cache_builder_filters_fuzzy() {
+    let model = Arc::new(VirtualTableModel::new(10, 2, 0));
+    // VirtualTableModel cell format: "r{row}c{col}"
+    // Row 3 has "r3c0" and "r3c1" -> search_text contains "r3c0 r3c1"
+    // Fuzzy "r3" should match rows containing "r3" as subsequence
+    let cache = build_table_cache(
+        model,
+        TableSearchSpec {
+            mode: TableSearchMode::Fuzzy,
+            case_sensitive: false,
+            text: "r3".to_string(),
+        },
+        vec![],
+    )
+    .expect("cache build should succeed");
+
+    // Should match row 3 (contains "r3c0")
+    assert!(cache.row_ids.contains(&TableRowId(3)));
+}
+
+#[test]
+fn table_cache_builder_fuzzy_subsequence_matching() {
+    // Create a custom model with known search texts for precise fuzzy testing
+    #[derive(Clone)]
+    struct FuzzyTestModel {
+        rows: Vec<(TableRowId, String)>,
+    }
+
+    impl TableModel for FuzzyTestModel {
+        fn schema(&self) -> TableSchema {
+            TableSchema {
+                columns: vec![TableColumn {
+                    key: TableColumnKey::Str("col".to_string()),
+                    label: "Col".to_string(),
+                    default_width: None,
+                    default_visible: true,
+                    default_resizable: true,
+                }],
+            }
+        }
+
+        fn row_count(&self) -> usize {
+            self.rows.len()
+        }
+
+        fn row_id_at(&self, index: usize) -> Option<TableRowId> {
+            self.rows.get(index).map(|(id, _)| *id)
+        }
+
+        fn cell(&self, row: TableRowId, _col: usize) -> TableCell {
+            let text = self
+                .rows
+                .iter()
+                .find(|(id, _)| *id == row)
+                .map(|(_, t)| t.clone())
+                .unwrap_or_default();
+            TableCell::Text(text)
+        }
+
+        fn sort_key(&self, _row: TableRowId, _col: usize) -> TableSortKey {
+            TableSortKey::None
+        }
+
+        fn search_text(&self, row: TableRowId) -> String {
+            self.rows
+                .iter()
+                .find(|(id, _)| *id == row)
+                .map(|(_, t)| t.clone())
+                .unwrap_or_default()
+        }
+
+        fn on_activate(&self, _row: TableRowId) -> TableAction {
+            TableAction::None
+        }
+    }
+
+    let model = Arc::new(FuzzyTestModel {
+        rows: vec![
+            (TableRowId(0), "alpha".to_string()), // "aa" matches: a_l_p_h_a
+            (TableRowId(1), "beta".to_string()),  // "aa" does not match
+            (TableRowId(2), "gamma".to_string()), // "aa" matches: g_a_m_m_a
+            (TableRowId(3), "delta".to_string()), // "aa" does not match
+            (TableRowId(4), "abracadabra".to_string()), // "aa" matches: a_b_r_a_c...
+        ],
+    });
+
+    let cache = build_table_cache(
+        model,
+        TableSearchSpec {
+            mode: TableSearchMode::Fuzzy,
+            case_sensitive: false,
+            text: "aa".to_string(),
+        },
+        vec![],
+    )
+    .expect("cache build should succeed");
+
+    // Rows 0, 2, 4 have two 'a' characters in order
+    assert_eq!(cache.row_ids.len(), 3);
+    assert!(cache.row_ids.contains(&TableRowId(0)));
+    assert!(cache.row_ids.contains(&TableRowId(2)));
+    assert!(cache.row_ids.contains(&TableRowId(4)));
+}
+
+// ========================
+// Stage 7 Tests - Filter Spec Helpers
+// ========================
+
+#[test]
+fn table_search_spec_default_is_inactive() {
+    let spec = TableSearchSpec::default();
+    assert!(spec.text.is_empty());
+    assert_eq!(spec.mode, TableSearchMode::Contains);
+    assert!(!spec.case_sensitive);
+}
+
+#[test]
+fn table_search_spec_is_active() {
+    // Empty text means inactive
+    let inactive = TableSearchSpec {
+        mode: TableSearchMode::Contains,
+        case_sensitive: false,
+        text: String::new(),
+    };
+    assert!(inactive.text.is_empty());
+
+    // Non-empty text means active
+    let active = TableSearchSpec {
+        mode: TableSearchMode::Contains,
+        case_sensitive: false,
+        text: "search".to_string(),
+    };
+    assert!(!active.text.is_empty());
+}
+
+#[test]
+fn table_search_mode_serialization() {
+    // All modes should serialize/deserialize correctly
+    for mode in [
+        TableSearchMode::Contains,
+        TableSearchMode::Exact,
+        TableSearchMode::Regex,
+        TableSearchMode::Fuzzy,
+    ] {
+        let encoded = ron::ser::to_string(&mode).expect("serialize");
+        let decoded: TableSearchMode = ron::de::from_str(&encoded).expect("deserialize");
+        assert_eq!(mode, decoded);
+    }
+}
+
+// ========================
+// Stage 7 Tests - Message Handling Integration
+// ========================
+
+#[test]
+fn set_table_display_filter_updates_config() {
+    // Setup: create state with a table tile
+    let mut state = SystemState::new_default_config().expect("state");
+    let spec = TableModelSpec::Virtual {
+        rows: 10,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile exists");
+
+    // Initially: empty filter
+    assert!(
+        state.user.table_tiles[&tile_id]
+            .config
+            .display_filter
+            .text
+            .is_empty()
+    );
+
+    // Action: send SetTableDisplayFilter message
+    let new_filter = TableSearchSpec {
+        mode: TableSearchMode::Contains,
+        case_sensitive: true,
+        text: "search term".to_string(),
+    };
+    state.update(Message::SetTableDisplayFilter {
+        tile_id,
+        filter: new_filter.clone(),
+    });
+
+    // Verify: config updated
+    assert_eq!(
+        state.user.table_tiles[&tile_id].config.display_filter,
+        new_filter
+    );
+}
+
+#[test]
+fn set_table_display_filter_nonexistent_tile_ignored() {
+    // Setup: state with no table tiles
+    let mut state = SystemState::new_default_config().expect("state");
+
+    // Action: send SetTableDisplayFilter for non-existent tile
+    let fake_tile_id = TableTileId(9999);
+    state.update(Message::SetTableDisplayFilter {
+        tile_id: fake_tile_id,
+        filter: TableSearchSpec {
+            mode: TableSearchMode::Regex,
+            case_sensitive: false,
+            text: "test".to_string(),
+        },
+    });
+
+    // Verify: no crash, no state change
+    assert!(state.user.table_tiles.is_empty());
+}
+
+#[test]
+fn set_table_display_filter_with_all_modes() {
+    // Test that all search modes can be set via message
+    let mut state = SystemState::new_default_config().expect("state");
+    let spec = TableModelSpec::Virtual {
+        rows: 10,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile exists");
+
+    for mode in [
+        TableSearchMode::Contains,
+        TableSearchMode::Exact,
+        TableSearchMode::Regex,
+        TableSearchMode::Fuzzy,
+    ] {
+        let filter = TableSearchSpec {
+            mode,
+            case_sensitive: false,
+            text: "test".to_string(),
+        };
+        state.update(Message::SetTableDisplayFilter {
+            tile_id,
+            filter: filter.clone(),
+        });
+        assert_eq!(
+            state.user.table_tiles[&tile_id].config.display_filter.mode,
+            mode
+        );
+    }
+}

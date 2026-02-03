@@ -182,6 +182,8 @@ pub enum TableSearchMode {
     Contains,
     Exact,
     Regex,
+    /// Subsequence matching: "abc" matches "aXbYcZ" but not "bac".
+    Fuzzy,
 }
 
 /// Selection behavior.
