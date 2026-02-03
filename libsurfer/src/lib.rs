@@ -2398,6 +2398,18 @@ impl SystemState {
                     self.invalidate_draw_commands();
                 }
             }
+            Message::SetTableSelection { tile_id, selection } => {
+                if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
+                    runtime.selection = selection;
+                    self.invalidate_draw_commands();
+                }
+            }
+            Message::ClearTableSelection { tile_id } => {
+                if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
+                    runtime.selection.clear();
+                    self.invalidate_draw_commands();
+                }
+            }
             Message::SelectTheme(theme_name) => {
                 let theme = SurferTheme::new(theme_name)
                     .with_context(|| "Failed to set theme")

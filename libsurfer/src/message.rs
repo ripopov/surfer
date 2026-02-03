@@ -18,7 +18,7 @@ use crate::hierarchy::{ParameterDisplayLocation, ScopeExpandType};
 use crate::state::UserState;
 use crate::table::{
     TableCache, TableCacheEntry, TableCacheError, TableCacheKey, TableModelSpec, TableSearchSpec,
-    TableSortSpec, TableTileId,
+    TableSelection, TableSortSpec, TableTileId,
 };
 use crate::transaction_container::{
     StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
@@ -435,6 +435,16 @@ pub enum Message {
     SetTableDisplayFilter {
         tile_id: TableTileId,
         filter: TableSearchSpec,
+    },
+    /// Set the selection for a table tile
+    #[serde(skip)]
+    SetTableSelection {
+        tile_id: TableTileId,
+        selection: TableSelection,
+    },
+    /// Clear the selection for a table tile
+    ClearTableSelection {
+        tile_id: TableTileId,
     },
     /// Select Theme
     SelectTheme(Option<String>),

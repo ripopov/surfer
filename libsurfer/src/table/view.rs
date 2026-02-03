@@ -1,9 +1,11 @@
 use crate::SystemState;
 use crate::message::Message;
 use crate::table::{
-    TableCache, TableCacheKey, TableCell, TableModel, TableModelKey, TableSearchMode,
-    TableSearchSpec, TableSortSpec, TableTileId, TableTileState, sort_indicator,
-    sort_spec_on_click, sort_spec_on_shift_click,
+    TableCache, TableCacheKey, TableCell, TableModel, TableModelKey, TableRowId, TableSearchMode,
+    TableSearchSpec, TableSelection, TableSelectionMode, TableSortSpec, TableTileId,
+    TableTileState, format_selection_count, selection_on_click_multi, selection_on_click_single,
+    selection_on_ctrl_click, selection_on_shift_click, sort_indicator, sort_spec_on_click,
+    sort_spec_on_shift_click,
 };
 use egui_extras::{Column, TableBuilder};
 use std::collections::HashMap;
@@ -79,6 +81,10 @@ pub fn draw_table_tile(
     let theme = &state.user.config.theme;
     let header_bg = theme.secondary_ui_color.background;
     let text_color = theme.foreground;
+    let selection_bg = theme.selected_elements_colors.background;
+
+    // Get selection mode from config
+    let selection_mode = tile_state.config.selection_mode;
 
     // Get total row count from model (unfiltered)
     let total_rows = model.as_ref().map_or(0, |m| m.row_count());
@@ -102,6 +108,9 @@ pub fn draw_table_tile(
                 // Cache is ready - render the table
                 if let Some(cache) = cache_entry.get() {
                     if let Some(ref model) = model {
+                        // Get current selection for rendering
+                        let selection = runtime.selection.clone();
+
                         // Render filter bar above the table
                         render_filter_bar(
                             ui,
@@ -110,6 +119,8 @@ pub fn draw_table_tile(
                             &tile_state.config.display_filter,
                             total_rows,
                             cache.row_ids.len(),
+                            &selection,
+                            &cache.row_ids,
                         );
 
                         render_table(
@@ -119,10 +130,13 @@ pub fn draw_table_tile(
                             model.clone(),
                             cache,
                             &tile_state.config.sort,
+                            &selection,
+                            selection_mode,
                             dense_rows,
                             sticky_header,
                             header_bg,
                             text_color,
+                            selection_bg,
                         );
                     } else {
                         ui.label("Model not available");
@@ -154,10 +168,13 @@ fn render_table(
     model: Arc<dyn TableModel>,
     cache: &TableCache,
     current_sort: &[TableSortSpec],
+    selection: &TableSelection,
+    selection_mode: TableSelectionMode,
     dense_rows: bool,
     _sticky_header: bool, // Reserved for future use; egui_extras headers are always sticky
     header_bg: egui::Color32,
     text_color: egui::Color32,
+    selection_bg: egui::Color32,
 ) {
     let schema = model.schema();
     let row_height = if dense_rows {
@@ -170,6 +187,7 @@ fn render_table(
     let mut builder = TableBuilder::new(ui)
         .striped(true)
         .vscroll(true)
+        .sense(egui::Sense::click())
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
 
     // Add columns based on schema
@@ -183,8 +201,13 @@ fn render_table(
         builder = builder.column(column);
     }
 
-    // Track sort changes to emit after rendering
+    // Track sort changes and selection changes to emit after rendering
     let mut new_sort: Option<Vec<TableSortSpec>> = None;
+    let mut new_selection: Option<TableSelection> = None;
+
+    // Clone data needed inside closures
+    let selection_clone = selection.clone();
+    let visible_rows: Vec<TableRowId> = cache.row_ids.clone();
 
     // Render header with clickable sorting
     builder
@@ -234,8 +257,25 @@ fn render_table(
             body.rows(row_height, cache.row_ids.len(), |mut row| {
                 let row_idx = row.index();
                 if let Some(&row_id) = cache.row_ids.get(row_idx) {
+                    // Check if this row is selected
+                    let is_selected = selection_clone.contains(row_id);
+
+                    // Set row background color for selected rows
+                    if is_selected {
+                        row.set_selected(true);
+                    }
+
                     for col_idx in 0..schema.columns.len() {
                         row.col(|ui| {
+                            // Paint selection background if selected
+                            if is_selected {
+                                ui.painter().rect_filled(
+                                    ui.available_rect_before_wrap(),
+                                    0.0,
+                                    selection_bg,
+                                );
+                            }
+
                             let cell = model.cell(row_id, col_idx);
                             let text = match cell {
                                 TableCell::Text(s) => s,
@@ -252,6 +292,42 @@ fn render_table(
                             ui.label(label);
                         });
                     }
+
+                    // Handle row click for selection (only if selection mode is not None)
+                    if selection_mode != TableSelectionMode::None {
+                        let response = row.response();
+                        if response.clicked() {
+                            let modifiers = response.ctx.input(|i| i.modifiers);
+                            let update = match selection_mode {
+                                TableSelectionMode::None => None,
+                                TableSelectionMode::Single => {
+                                    Some(selection_on_click_single(&selection_clone, row_id))
+                                }
+                                TableSelectionMode::Multi => {
+                                    if modifiers.command {
+                                        // Ctrl/Cmd+click: toggle
+                                        Some(selection_on_ctrl_click(&selection_clone, row_id))
+                                    } else if modifiers.shift {
+                                        // Shift+click: range selection
+                                        Some(selection_on_shift_click(
+                                            &selection_clone,
+                                            row_id,
+                                            &visible_rows,
+                                        ))
+                                    } else {
+                                        // Plain click: select single
+                                        Some(selection_on_click_multi(&selection_clone, row_id))
+                                    }
+                                }
+                            };
+
+                            if let Some(update) = update
+                                && update.changed
+                            {
+                                new_selection = Some(update.selection);
+                            }
+                        }
+                    }
                 }
             });
         });
@@ -260,9 +336,15 @@ fn render_table(
     if let Some(sort) = new_sort {
         msgs.push(Message::SetTableSort { tile_id, sort });
     }
+
+    // Emit selection change message if needed
+    if let Some(selection) = new_selection {
+        msgs.push(Message::SetTableSelection { tile_id, selection });
+    }
 }
 
 /// Renders the filter bar above the table with text input, mode selector, and case toggle.
+#[allow(clippy::too_many_arguments)]
 fn render_filter_bar(
     ui: &mut egui::Ui,
     msgs: &mut Vec<Message>,
@@ -270,6 +352,8 @@ fn render_filter_bar(
     current_filter: &TableSearchSpec,
     total_rows: usize,
     filtered_rows: usize,
+    selection: &TableSelection,
+    visible_rows: &[TableRowId],
 ) {
     // Track changes to emit after rendering
     let mut filter_changed = false;
@@ -360,8 +444,17 @@ fn render_filter_bar(
             filter_changed = true;
         }
 
-        // Row count display
+        // Row count and selection count display
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Selection count (displayed on the right)
+            let hidden_count = selection.count_hidden(visible_rows);
+            let selection_text = format_selection_count(selection.len(), hidden_count);
+            if !selection_text.is_empty() {
+                ui.label(egui::RichText::new(&selection_text).italics());
+                ui.separator();
+            }
+
+            // Row count
             if filter_active {
                 ui.label(format!("Showing {} of {} rows", filtered_rows, total_rows));
             } else {

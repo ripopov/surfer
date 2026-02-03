@@ -1070,6 +1070,11 @@ fn table_search_mode_serialization() {
 // Stage 7 Tests - Message Handling Integration
 // ========================
 
+use super::{
+    format_selection_count, selection_on_click_multi, selection_on_click_single,
+    selection_on_ctrl_click, selection_on_shift_click,
+};
+
 #[test]
 fn set_table_display_filter_updates_config() {
     // Setup: create state with a table tile
@@ -1163,4 +1168,627 @@ fn set_table_display_filter_with_all_modes() {
             mode
         );
     }
+}
+
+// ========================
+// Stage 8 Tests - TableSelection Methods
+// ========================
+
+#[test]
+fn table_selection_new_is_empty() {
+    let sel = TableSelection::new();
+    assert!(sel.is_empty());
+    assert_eq!(sel.len(), 0);
+    assert!(sel.anchor.is_none());
+}
+
+#[test]
+fn table_selection_contains() {
+    let mut sel = TableSelection::new();
+    sel.rows.insert(TableRowId(1));
+    sel.rows.insert(TableRowId(3));
+    sel.rows.insert(TableRowId(5));
+
+    assert!(sel.contains(TableRowId(1)));
+    assert!(!sel.contains(TableRowId(2)));
+    assert!(sel.contains(TableRowId(3)));
+    assert!(sel.contains(TableRowId(5)));
+    assert!(!sel.contains(TableRowId(0)));
+}
+
+#[test]
+fn table_selection_clear() {
+    let mut sel = TableSelection::new();
+    sel.rows.insert(TableRowId(1));
+    sel.rows.insert(TableRowId(2));
+    sel.anchor = Some(TableRowId(1));
+
+    sel.clear();
+
+    assert!(sel.is_empty());
+    assert!(sel.anchor.is_none());
+}
+
+#[test]
+fn table_selection_count_visible() {
+    let mut sel = TableSelection::new();
+    sel.rows.insert(TableRowId(1));
+    sel.rows.insert(TableRowId(3));
+    sel.rows.insert(TableRowId(5));
+    sel.rows.insert(TableRowId(7));
+
+    // Only rows 1, 3, 5 are visible (7 is filtered out)
+    let visible = vec![
+        TableRowId(0),
+        TableRowId(1),
+        TableRowId(2),
+        TableRowId(3),
+        TableRowId(5),
+    ];
+
+    assert_eq!(sel.count_visible(&visible), 3);
+    assert_eq!(sel.count_hidden(&visible), 1);
+}
+
+#[test]
+fn table_selection_count_all_visible() {
+    let mut sel = TableSelection::new();
+    sel.rows.insert(TableRowId(1));
+    sel.rows.insert(TableRowId(2));
+
+    let visible = vec![TableRowId(0), TableRowId(1), TableRowId(2), TableRowId(3)];
+
+    assert_eq!(sel.count_visible(&visible), 2);
+    assert_eq!(sel.count_hidden(&visible), 0);
+}
+
+#[test]
+fn table_selection_count_all_hidden() {
+    let mut sel = TableSelection::new();
+    sel.rows.insert(TableRowId(10));
+    sel.rows.insert(TableRowId(20));
+
+    let visible = vec![TableRowId(0), TableRowId(1), TableRowId(2)];
+
+    assert_eq!(sel.count_visible(&visible), 0);
+    assert_eq!(sel.count_hidden(&visible), 2);
+}
+
+// ========================
+// Stage 8 Tests - Single Mode Selection
+// ========================
+
+#[test]
+fn selection_single_mode_click_selects_row() {
+    let current = TableSelection::new();
+    let result = selection_on_click_single(&current, TableRowId(5));
+
+    assert!(result.changed);
+    assert_eq!(result.selection.len(), 1);
+    assert!(result.selection.contains(TableRowId(5)));
+    assert_eq!(result.selection.anchor, Some(TableRowId(5)));
+}
+
+#[test]
+fn selection_single_mode_click_replaces_previous() {
+    let mut current = TableSelection::new();
+    current.rows.insert(TableRowId(3));
+    current.anchor = Some(TableRowId(3));
+
+    let result = selection_on_click_single(&current, TableRowId(7));
+
+    assert!(result.changed);
+    assert_eq!(result.selection.len(), 1);
+    assert!(!result.selection.contains(TableRowId(3)));
+    assert!(result.selection.contains(TableRowId(7)));
+    assert_eq!(result.selection.anchor, Some(TableRowId(7)));
+}
+
+#[test]
+fn selection_single_mode_click_same_row_unchanged() {
+    let mut current = TableSelection::new();
+    current.rows.insert(TableRowId(5));
+    current.anchor = Some(TableRowId(5));
+
+    let result = selection_on_click_single(&current, TableRowId(5));
+
+    // Clicking same row should not report change
+    assert!(!result.changed);
+    assert_eq!(result.selection.len(), 1);
+    assert!(result.selection.contains(TableRowId(5)));
+}
+
+// ========================
+// Stage 8 Tests - Multi Mode Selection
+// ========================
+
+#[test]
+fn selection_multi_mode_click_selects_row() {
+    let current = TableSelection::new();
+    let result = selection_on_click_multi(&current, TableRowId(5));
+
+    assert!(result.changed);
+    assert_eq!(result.selection.len(), 1);
+    assert!(result.selection.contains(TableRowId(5)));
+    assert_eq!(result.selection.anchor, Some(TableRowId(5)));
+}
+
+#[test]
+fn selection_multi_mode_click_clears_previous() {
+    let mut current = TableSelection::new();
+    current.rows.insert(TableRowId(1));
+    current.rows.insert(TableRowId(2));
+    current.rows.insert(TableRowId(3));
+    current.anchor = Some(TableRowId(1));
+
+    let result = selection_on_click_multi(&current, TableRowId(5));
+
+    assert!(result.changed);
+    assert_eq!(result.selection.len(), 1);
+    assert!(result.selection.contains(TableRowId(5)));
+    assert!(!result.selection.contains(TableRowId(1)));
+}
+
+#[test]
+fn selection_multi_mode_ctrl_click_toggles_on() {
+    let mut current = TableSelection::new();
+    current.rows.insert(TableRowId(1));
+    current.rows.insert(TableRowId(3));
+    current.anchor = Some(TableRowId(1));
+
+    let result = selection_on_ctrl_click(&current, TableRowId(5));
+
+    assert!(result.changed);
+    assert_eq!(result.selection.len(), 3);
+    assert!(result.selection.contains(TableRowId(1)));
+    assert!(result.selection.contains(TableRowId(3)));
+    assert!(result.selection.contains(TableRowId(5)));
+    assert_eq!(result.selection.anchor, Some(TableRowId(5)));
+}
+
+#[test]
+fn selection_multi_mode_ctrl_click_toggles_off() {
+    let mut current = TableSelection::new();
+    current.rows.insert(TableRowId(1));
+    current.rows.insert(TableRowId(3));
+    current.rows.insert(TableRowId(5));
+    current.anchor = Some(TableRowId(1));
+
+    let result = selection_on_ctrl_click(&current, TableRowId(3));
+
+    assert!(result.changed);
+    assert_eq!(result.selection.len(), 2);
+    assert!(result.selection.contains(TableRowId(1)));
+    assert!(!result.selection.contains(TableRowId(3)));
+    assert!(result.selection.contains(TableRowId(5)));
+    assert_eq!(result.selection.anchor, Some(TableRowId(3)));
+}
+
+#[test]
+fn selection_multi_mode_ctrl_click_empty_selection() {
+    let current = TableSelection::new();
+    let result = selection_on_ctrl_click(&current, TableRowId(5));
+
+    assert!(result.changed);
+    assert_eq!(result.selection.len(), 1);
+    assert!(result.selection.contains(TableRowId(5)));
+    assert_eq!(result.selection.anchor, Some(TableRowId(5)));
+}
+
+// ========================
+// Stage 8 Tests - Range Selection (Shift+Click)
+// ========================
+
+#[test]
+fn selection_shift_click_range_forward() {
+    let mut current = TableSelection::new();
+    current.rows.insert(TableRowId(2));
+    current.anchor = Some(TableRowId(2));
+
+    // Visible order: 0, 1, 2, 3, 4, 5
+    let visible = vec![
+        TableRowId(0),
+        TableRowId(1),
+        TableRowId(2),
+        TableRowId(3),
+        TableRowId(4),
+        TableRowId(5),
+    ];
+
+    let result = selection_on_shift_click(&current, TableRowId(5), &visible);
+
+    assert!(result.changed);
+    // Should select rows 2, 3, 4, 5 (inclusive range)
+    assert_eq!(result.selection.len(), 4);
+    assert!(result.selection.contains(TableRowId(2)));
+    assert!(result.selection.contains(TableRowId(3)));
+    assert!(result.selection.contains(TableRowId(4)));
+    assert!(result.selection.contains(TableRowId(5)));
+    // Anchor preserved
+    assert_eq!(result.selection.anchor, Some(TableRowId(2)));
+}
+
+#[test]
+fn selection_shift_click_range_backward() {
+    let mut current = TableSelection::new();
+    current.rows.insert(TableRowId(5));
+    current.anchor = Some(TableRowId(5));
+
+    let visible = vec![
+        TableRowId(0),
+        TableRowId(1),
+        TableRowId(2),
+        TableRowId(3),
+        TableRowId(4),
+        TableRowId(5),
+    ];
+
+    let result = selection_on_shift_click(&current, TableRowId(2), &visible);
+
+    assert!(result.changed);
+    // Should select rows 2, 3, 4, 5 (inclusive range backward)
+    assert_eq!(result.selection.len(), 4);
+    assert!(result.selection.contains(TableRowId(2)));
+    assert!(result.selection.contains(TableRowId(3)));
+    assert!(result.selection.contains(TableRowId(4)));
+    assert!(result.selection.contains(TableRowId(5)));
+    assert_eq!(result.selection.anchor, Some(TableRowId(5)));
+}
+
+#[test]
+fn selection_shift_click_single_row() {
+    let mut current = TableSelection::new();
+    current.rows.insert(TableRowId(3));
+    current.anchor = Some(TableRowId(3));
+
+    let visible = vec![TableRowId(0), TableRowId(1), TableRowId(2), TableRowId(3)];
+
+    let result = selection_on_shift_click(&current, TableRowId(3), &visible);
+
+    // Shift+click on same row as anchor - just that row
+    assert!(!result.changed); // Already selected
+    assert_eq!(result.selection.len(), 1);
+    assert!(result.selection.contains(TableRowId(3)));
+}
+
+#[test]
+fn selection_shift_click_no_anchor_uses_clicked_as_anchor() {
+    let current = TableSelection::new();
+    let visible = vec![TableRowId(0), TableRowId(1), TableRowId(2), TableRowId(3)];
+
+    let result = selection_on_shift_click(&current, TableRowId(2), &visible);
+
+    // No anchor means treat clicked row as both anchor and target
+    assert!(result.changed);
+    assert_eq!(result.selection.len(), 1);
+    assert!(result.selection.contains(TableRowId(2)));
+    assert_eq!(result.selection.anchor, Some(TableRowId(2)));
+}
+
+#[test]
+fn selection_shift_click_anchor_not_visible_uses_clicked() {
+    let mut current = TableSelection::new();
+    current.rows.insert(TableRowId(10)); // Row 10 is filtered out
+    current.anchor = Some(TableRowId(10));
+
+    let visible = vec![TableRowId(0), TableRowId(1), TableRowId(2), TableRowId(3)];
+
+    let result = selection_on_shift_click(&current, TableRowId(2), &visible);
+
+    // Anchor not in visible set - select just clicked row and set new anchor
+    assert!(result.changed);
+    assert!(result.selection.contains(TableRowId(2)));
+    assert_eq!(result.selection.anchor, Some(TableRowId(2)));
+}
+
+#[test]
+fn selection_shift_click_extends_from_anchor_replaces_selection() {
+    let mut current = TableSelection::new();
+    current.rows.insert(TableRowId(0));
+    current.rows.insert(TableRowId(1));
+    current.rows.insert(TableRowId(2));
+    current.anchor = Some(TableRowId(0));
+
+    let visible = vec![
+        TableRowId(0),
+        TableRowId(1),
+        TableRowId(2),
+        TableRowId(3),
+        TableRowId(4),
+        TableRowId(5),
+    ];
+
+    // Shift+click at row 4 should select 0-4, replacing 0-2
+    let result = selection_on_shift_click(&current, TableRowId(4), &visible);
+
+    assert!(result.changed);
+    assert_eq!(result.selection.len(), 5);
+    assert!(result.selection.contains(TableRowId(0)));
+    assert!(result.selection.contains(TableRowId(1)));
+    assert!(result.selection.contains(TableRowId(2)));
+    assert!(result.selection.contains(TableRowId(3)));
+    assert!(result.selection.contains(TableRowId(4)));
+    assert!(!result.selection.contains(TableRowId(5)));
+    // Anchor preserved
+    assert_eq!(result.selection.anchor, Some(TableRowId(0)));
+}
+
+// ========================
+// Stage 8 Tests - Selection Count Formatting
+// ========================
+
+#[test]
+fn format_selection_count_none() {
+    assert_eq!(format_selection_count(0, 0), "");
+}
+
+#[test]
+fn format_selection_count_visible_only() {
+    assert_eq!(format_selection_count(5, 0), "5 selected");
+    assert_eq!(format_selection_count(1, 0), "1 selected");
+}
+
+#[test]
+fn format_selection_count_with_hidden() {
+    assert_eq!(format_selection_count(5, 2), "5 selected (2 hidden)");
+    assert_eq!(format_selection_count(10, 1), "10 selected (1 hidden)");
+}
+
+#[test]
+fn format_selection_count_all_hidden() {
+    // All selected rows are hidden
+    assert_eq!(format_selection_count(3, 3), "3 selected (3 hidden)");
+}
+
+// ========================
+// Stage 8 Tests - Selection Mode Behavior
+// ========================
+
+#[test]
+fn selection_mode_none_value() {
+    // In None mode, selection should always be empty
+    // This is tested at the UI/integration level
+    let mode = TableSelectionMode::None;
+    assert_eq!(mode, TableSelectionMode::None);
+}
+
+#[test]
+fn selection_mode_serialization() {
+    for mode in [
+        TableSelectionMode::None,
+        TableSelectionMode::Single,
+        TableSelectionMode::Multi,
+    ] {
+        let encoded = ron::ser::to_string(&mode).expect("serialize");
+        let decoded: TableSelectionMode = ron::de::from_str(&encoded).expect("deserialize");
+        assert_eq!(mode, decoded);
+    }
+}
+
+// ========================
+// Stage 8 Tests - Message Handling Integration
+// ========================
+
+#[test]
+fn set_table_selection_updates_runtime() {
+    let mut state = SystemState::new_default_config().expect("state");
+    let spec = TableModelSpec::Virtual {
+        rows: 10,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile exists");
+
+    // Ensure runtime state exists
+    state
+        .table_runtime
+        .entry(tile_id)
+        .or_insert_with(TableRuntimeState::default);
+
+    // Initially: empty selection
+    assert!(state.table_runtime[&tile_id].selection.is_empty());
+
+    // Set selection
+    let mut selection = TableSelection::new();
+    selection.rows.insert(TableRowId(1));
+    selection.rows.insert(TableRowId(3));
+    selection.anchor = Some(TableRowId(1));
+
+    state.update(Message::SetTableSelection {
+        tile_id,
+        selection: selection.clone(),
+    });
+
+    assert_eq!(state.table_runtime[&tile_id].selection, selection);
+}
+
+#[test]
+fn clear_table_selection_clears_runtime() {
+    let mut state = SystemState::new_default_config().expect("state");
+    let spec = TableModelSpec::Virtual {
+        rows: 10,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile exists");
+
+    // Ensure runtime state exists
+    state
+        .table_runtime
+        .entry(tile_id)
+        .or_insert_with(TableRuntimeState::default);
+
+    // Set selection first
+    let mut selection = TableSelection::new();
+    selection.rows.insert(TableRowId(5));
+    selection.anchor = Some(TableRowId(5));
+    state.update(Message::SetTableSelection { tile_id, selection });
+
+    assert!(!state.table_runtime[&tile_id].selection.is_empty());
+
+    // Clear selection
+    state.update(Message::ClearTableSelection { tile_id });
+
+    assert!(state.table_runtime[&tile_id].selection.is_empty());
+    assert!(state.table_runtime[&tile_id].selection.anchor.is_none());
+}
+
+#[test]
+fn set_table_selection_nonexistent_tile_ignored() {
+    let mut state = SystemState::new_default_config().expect("state");
+
+    let fake_tile_id = TableTileId(9999);
+    let mut selection = TableSelection::new();
+    selection.rows.insert(TableRowId(1));
+
+    // Should not crash
+    state.update(Message::SetTableSelection {
+        tile_id: fake_tile_id,
+        selection,
+    });
+
+    assert!(state.user.table_tiles.is_empty());
+}
+
+#[test]
+fn selection_persists_after_sort_change() {
+    let mut state = SystemState::new_default_config().expect("state");
+    let spec = TableModelSpec::Virtual {
+        rows: 10,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile exists");
+
+    // Ensure runtime state exists
+    state
+        .table_runtime
+        .entry(tile_id)
+        .or_insert_with(TableRuntimeState::default);
+
+    // Set selection
+    let mut selection = TableSelection::new();
+    selection.rows.insert(TableRowId(3));
+    selection.rows.insert(TableRowId(7));
+    selection.anchor = Some(TableRowId(3));
+    state.update(Message::SetTableSelection {
+        tile_id,
+        selection: selection.clone(),
+    });
+
+    // Change sort
+    state.update(Message::SetTableSort {
+        tile_id,
+        sort: vec![TableSortSpec {
+            key: TableColumnKey::Str("col_0".to_string()),
+            direction: TableSortDirection::Descending,
+        }],
+    });
+
+    // Selection should persist (tracked by TableRowId, not index)
+    assert_eq!(state.table_runtime[&tile_id].selection.len(), 2);
+    assert!(
+        state.table_runtime[&tile_id]
+            .selection
+            .contains(TableRowId(3))
+    );
+    assert!(
+        state.table_runtime[&tile_id]
+            .selection
+            .contains(TableRowId(7))
+    );
+}
+
+#[test]
+fn selection_persists_after_filter_change() {
+    let mut state = SystemState::new_default_config().expect("state");
+    let spec = TableModelSpec::Virtual {
+        rows: 10,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile exists");
+
+    // Ensure runtime state exists
+    state
+        .table_runtime
+        .entry(tile_id)
+        .or_insert_with(TableRuntimeState::default);
+
+    // Select multiple rows
+    let mut selection = TableSelection::new();
+    selection.rows.insert(TableRowId(1));
+    selection.rows.insert(TableRowId(3));
+    selection.rows.insert(TableRowId(5));
+    selection.anchor = Some(TableRowId(1));
+    state.update(Message::SetTableSelection {
+        tile_id,
+        selection: selection.clone(),
+    });
+
+    // Apply filter that hides some rows
+    state.update(Message::SetTableDisplayFilter {
+        tile_id,
+        filter: TableSearchSpec {
+            mode: TableSearchMode::Contains,
+            case_sensitive: false,
+            text: "r3".to_string(), // Only matches row 3
+        },
+    });
+
+    // Selection should persist (hidden rows stay selected)
+    assert_eq!(state.table_runtime[&tile_id].selection.len(), 3);
+    assert!(
+        state.table_runtime[&tile_id]
+            .selection
+            .contains(TableRowId(1))
+    ); // hidden
+    assert!(
+        state.table_runtime[&tile_id]
+            .selection
+            .contains(TableRowId(3))
+    ); // visible
+    assert!(
+        state.table_runtime[&tile_id]
+            .selection
+            .contains(TableRowId(5))
+    ); // hidden
+}
+
+#[test]
+fn selection_shift_click_sorted_order() {
+    // After sorting, rows may appear in different order
+    let mut current = TableSelection::new();
+    current.anchor = Some(TableRowId(5));
+    current.rows.insert(TableRowId(5));
+
+    // Sorted order: 5, 3, 1, 4, 2, 0 (arbitrary sort result)
+    let visible = vec![
+        TableRowId(5),
+        TableRowId(3),
+        TableRowId(1),
+        TableRowId(4),
+        TableRowId(2),
+        TableRowId(0),
+    ];
+
+    let result = selection_on_shift_click(&current, TableRowId(4), &visible);
+
+    // Should select rows 5, 3, 1, 4 (by display order)
+    assert!(result.changed);
+    assert_eq!(result.selection.len(), 4);
+    assert!(result.selection.contains(TableRowId(5)));
+    assert!(result.selection.contains(TableRowId(3)));
+    assert!(result.selection.contains(TableRowId(1)));
+    assert!(result.selection.contains(TableRowId(4)));
+    assert!(!result.selection.contains(TableRowId(2)));
+    assert!(!result.selection.contains(TableRowId(0)));
 }

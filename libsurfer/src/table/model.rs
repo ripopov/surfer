@@ -12,7 +12,7 @@ use std::sync::Arc;
 pub struct TableTileId(pub u64);
 
 /// Stable row identity for selection and caching.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct TableRowId(pub u64);
 
 /// Serializable model selector.
@@ -199,6 +199,175 @@ pub enum TableSelectionMode {
 pub struct TableSelection {
     pub rows: BTreeSet<TableRowId>,
     pub anchor: Option<TableRowId>,
+}
+
+impl TableSelection {
+    /// Creates an empty selection.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns true if the selection is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// Returns the number of selected rows.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// Returns true if the given row is selected.
+    #[must_use]
+    pub fn contains(&self, row: TableRowId) -> bool {
+        self.rows.contains(&row)
+    }
+
+    /// Clears all selection.
+    pub fn clear(&mut self) {
+        self.rows.clear();
+        self.anchor = None;
+    }
+
+    /// Counts how many selected rows are in the visible set.
+    #[must_use]
+    pub fn count_visible(&self, visible_rows: &[TableRowId]) -> usize {
+        let visible_set: BTreeSet<_> = visible_rows.iter().copied().collect();
+        self.rows.intersection(&visible_set).count()
+    }
+
+    /// Counts how many selected rows are hidden (not in visible set).
+    #[must_use]
+    pub fn count_hidden(&self, visible_rows: &[TableRowId]) -> usize {
+        self.len() - self.count_visible(visible_rows)
+    }
+}
+
+/// Result of a selection click operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionUpdate {
+    pub selection: TableSelection,
+    pub changed: bool,
+}
+
+/// Computes selection update when a row is clicked in Single mode.
+/// - Clears previous selection and selects the clicked row.
+/// - Sets anchor to clicked row.
+#[must_use]
+pub fn selection_on_click_single(current: &TableSelection, clicked: TableRowId) -> SelectionUpdate {
+    let already_selected = current.rows.len() == 1 && current.contains(clicked);
+    if already_selected {
+        SelectionUpdate {
+            selection: current.clone(),
+            changed: false,
+        }
+    } else {
+        let mut new_selection = TableSelection::new();
+        new_selection.rows.insert(clicked);
+        new_selection.anchor = Some(clicked);
+        SelectionUpdate {
+            selection: new_selection,
+            changed: true,
+        }
+    }
+}
+
+/// Computes selection update when a row is clicked in Multi mode (no modifiers).
+/// - Clears previous selection and selects the clicked row.
+/// - Sets anchor to clicked row.
+#[must_use]
+pub fn selection_on_click_multi(current: &TableSelection, clicked: TableRowId) -> SelectionUpdate {
+    // Same behavior as single mode for plain click
+    selection_on_click_single(current, clicked)
+}
+
+/// Computes selection update when Ctrl/Cmd+click in Multi mode.
+/// - Toggles the clicked row without clearing others.
+/// - Sets anchor to clicked row.
+#[must_use]
+pub fn selection_on_ctrl_click(current: &TableSelection, clicked: TableRowId) -> SelectionUpdate {
+    let mut new_selection = current.clone();
+    let was_selected = new_selection.rows.contains(&clicked);
+    if was_selected {
+        new_selection.rows.remove(&clicked);
+    } else {
+        new_selection.rows.insert(clicked);
+    }
+    new_selection.anchor = Some(clicked);
+
+    SelectionUpdate {
+        selection: new_selection,
+        changed: true,
+    }
+}
+
+/// Computes selection update when Shift+click in Multi mode.
+/// - Selects range from anchor to clicked row (inclusive).
+/// - If no anchor or anchor not visible, treats clicked row as anchor.
+/// - Anchor is preserved (not moved to clicked row).
+#[must_use]
+pub fn selection_on_shift_click(
+    current: &TableSelection,
+    clicked: TableRowId,
+    visible_rows: &[TableRowId],
+) -> SelectionUpdate {
+    // Find positions in visible order
+    let clicked_pos = visible_rows.iter().position(|&r| r == clicked);
+    let anchor = current.anchor;
+
+    // If clicked row is not visible, do nothing
+    let Some(clicked_idx) = clicked_pos else {
+        return SelectionUpdate {
+            selection: current.clone(),
+            changed: false,
+        };
+    };
+
+    // Find anchor position, or use clicked as anchor if not found/visible
+    let anchor_idx = anchor.and_then(|a| visible_rows.iter().position(|&r| r == a));
+
+    let (start_idx, end_idx, final_anchor) = match anchor_idx {
+        Some(a_idx) => {
+            let start = a_idx.min(clicked_idx);
+            let end = a_idx.max(clicked_idx);
+            (start, end, anchor)
+        }
+        None => {
+            // No anchor or anchor not visible - just select clicked row
+            (clicked_idx, clicked_idx, Some(clicked))
+        }
+    };
+
+    // Build new selection with the range
+    let mut new_selection = TableSelection::new();
+    for idx in start_idx..=end_idx {
+        if let Some(&row_id) = visible_rows.get(idx) {
+            new_selection.rows.insert(row_id);
+        }
+    }
+    new_selection.anchor = final_anchor;
+
+    let changed = new_selection != *current;
+    SelectionUpdate {
+        selection: new_selection,
+        changed,
+    }
+}
+
+/// Formats the selection count for display.
+/// Returns empty string if no selection.
+#[must_use]
+pub fn format_selection_count(total_selected: usize, hidden_count: usize) -> String {
+    if total_selected == 0 {
+        String::new()
+    } else if hidden_count == 0 {
+        format!("{total_selected} selected")
+    } else {
+        format!("{total_selected} selected ({hidden_count} hidden)")
+    }
 }
 
 /// Display-ready cell content.
