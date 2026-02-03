@@ -561,8 +561,46 @@ impl SystemState {
         let response = ui.allocate_response(ui.available_size(), Sense::click());
         generic_context_menu(msgs, &response);
 
-        let mut painter = ui.painter().clone();
         let rect = response.rect;
+        self.draw_values_background_layer(ui, waves, rect);
+
+        let ucursor = waves.cursor.as_ref().and_then(num::BigInt::to_biguint);
+        let rect_with_margin = Rect {
+            min: rect.min + ui.spacing().item_spacing,
+            max: rect.max + Vec2::new(0.0, 40.0),
+        };
+
+        let builder = UiBuilder::new().max_rect(rect_with_margin);
+        ui.scope_builder(builder, |ui| {
+            ui.style_mut().override_text_style = Some(TextStyle::Monospace);
+
+            for (item_idx, drawing_info) in waves
+                .drawing_infos
+                .iter()
+                .sorted_by_key(|o| o.top() as i32)
+                .enumerate()
+            {
+                self.align_to_drawing_info(ui, drawing_info);
+                let bg_color = self.get_background_color(waves, drawing_info.vidx(), item_idx);
+                self.draw_value_for_item(ui, msgs, waves, drawing_info, ucursor.as_ref(), bg_color);
+            }
+
+            Self::add_padding_for_last_item(
+                ui,
+                waves.drawing_infos.last(),
+                self.user.config.layout.waveforms_line_height,
+            );
+        });
+    }
+
+    /// Draws background colors for all items in the values panel.
+    fn draw_values_background_layer(
+        &self,
+        ui: &Ui,
+        waves: &crate::wave_data::WaveData,
+        rect: Rect,
+    ) {
+        let mut painter = ui.painter().clone();
         let container_rect = Rect::from_min_size(Pos2::ZERO, rect.size());
         let to_screen = RectTransform::from_to(container_rect, rect);
         let cfg = DrawConfig::new(
@@ -571,132 +609,136 @@ impl SystemState {
             self.user.config.layout.waveforms_text_size,
         );
         let frame_width = rect.width();
+        let gap = ui.spacing().item_spacing.y * 0.5;
+        let y_zero = to_screen.transform_pos(Pos2::ZERO).y;
 
         let ctx = DrawingContext {
             painter: &mut painter,
             cfg: &cfg,
-            // This 0.5 is very odd, but it fixes the lines we draw being smushed out across two
-            // pixels, resulting in dimmer colors https://github.com/emilk/egui/issues/1322
+            // This 0.5 fixes lines being smushed across two pixels
+            // https://github.com/emilk/egui/issues/1322
             to_screen: &|x, y| to_screen.transform_pos(Pos2::new(x, y) + Vec2::new(0.5, 0.5)),
             theme: &self.user.config.theme,
         };
 
-        let gap = ui.spacing().item_spacing.y * 0.5;
-        let y_zero = to_screen.transform_pos(Pos2::ZERO).y;
-        let ucursor = waves.cursor.as_ref().and_then(num::BigInt::to_biguint);
+        for (item_count, drawing_info) in waves
+            .drawing_infos
+            .iter()
+            .sorted_by_key(|o| o.top() as i32)
+            .enumerate()
+        {
+            let bg_color = self.get_background_color(waves, drawing_info.vidx(), item_count);
+            self.draw_background(drawing_info, y_zero, &ctx, gap, frame_width, bg_color);
+        }
+    }
 
-        // Add default margin as it was removed when creating the frame
-        let rect_with_margin = Rect {
-            min: rect.min + ui.spacing().item_spacing,
-            max: rect.max + Vec2::new(0.0, 40.0),
+    /// Aligns the UI cursor to match the drawing info's vertical position.
+    fn align_to_drawing_info(&self, ui: &mut Ui, drawing_info: &ItemDrawingInfo) {
+        let next_y = ui.cursor().top();
+        if next_y < drawing_info.top() {
+            ui.add_space(drawing_info.top() - next_y);
+        }
+    }
+
+    /// Draws the value display for a single item based on its type.
+    fn draw_value_for_item(
+        &self,
+        ui: &mut Ui,
+        msgs: &mut Vec<Message>,
+        waves: &crate::wave_data::WaveData,
+        drawing_info: &ItemDrawingInfo,
+        ucursor: Option<&num::BigUint>,
+        bg_color: ecolor::Color32,
+    ) {
+        match drawing_info {
+            ItemDrawingInfo::Variable(var_info) => {
+                self.draw_variable_value(ui, msgs, waves, var_info, ucursor, bg_color);
+            }
+            ItemDrawingInfo::Marker(marker_info) => {
+                self.draw_marker_value(ui, msgs, waves, marker_info, bg_color);
+            }
+            ItemDrawingInfo::Divider(_)
+            | ItemDrawingInfo::TimeLine(_)
+            | ItemDrawingInfo::Stream(_)
+            | ItemDrawingInfo::Group(_)
+            | ItemDrawingInfo::Placeholder(_) => {
+                ui.label("");
+            }
+        }
+    }
+
+    /// Draws the current value for a variable at the cursor position.
+    fn draw_variable_value(
+        &self,
+        ui: &mut Ui,
+        msgs: &mut Vec<Message>,
+        waves: &crate::wave_data::WaveData,
+        var_info: &VariableDrawingInfo,
+        ucursor: Option<&num::BigUint>,
+        bg_color: ecolor::Color32,
+    ) {
+        let Some(ucursor) = ucursor else {
+            ui.label("");
+            return;
         };
 
-        let builder = UiBuilder::new().max_rect(rect_with_margin);
-        ui.scope_builder(builder, |ui| {
-            let text_style = TextStyle::Monospace;
-            ui.style_mut().override_text_style = Some(text_style);
-            for (item_count, drawing_info) in waves
-                .drawing_infos
-                .iter()
-                .sorted_by_key(|o| o.top() as i32)
-                .enumerate()
-            {
-                let next_y = ui.cursor().top();
-                // In order to align the text in this view with the variable tree,
-                // we need to keep track of how far away from the expected offset we are,
-                // and compensate for it
-                if next_y < drawing_info.top() {
-                    ui.add_space(drawing_info.top() - next_y);
-                }
+        let Some(value) =
+            self.get_variable_value(waves, &var_info.displayed_field_ref, Some(ucursor))
+        else {
+            return;
+        };
 
-                let backgroundcolor =
-                    self.get_background_color(waves, drawing_info.vidx(), item_count);
-                self.draw_background(
-                    drawing_info,
-                    y_zero,
-                    &ctx,
-                    gap,
-                    frame_width,
-                    backgroundcolor,
-                );
-                match drawing_info {
-                    ItemDrawingInfo::Variable(drawing_info) => {
-                        if ucursor.as_ref().is_none() {
-                            ui.label("");
-                            continue;
-                        }
-
-                        let v = self.get_variable_value(
-                            waves,
-                            &drawing_info.displayed_field_ref,
-                            ucursor.as_ref(),
-                        );
-                        if let Some(v) = v {
-                            ui.label(
-                                RichText::new(v)
-                                    .color(
-                                        self.user.config.theme.get_best_text_color(backgroundcolor),
-                                    )
-                                    .line_height(Some(
-                                        self.user.config.layout.waveforms_line_height,
-                                    )),
-                            )
-                            .context_menu(|ui| {
-                                self.item_context_menu(
-                                    Some(&FieldRef::without_fields(
-                                        drawing_info.field_ref.root.clone(),
-                                    )),
-                                    msgs,
-                                    ui,
-                                    drawing_info.vidx,
-                                    true,
-                                    crate::message::MessageTarget::CurrentSelection,
-                                );
-                            });
-                        }
-                    }
-
-                    ItemDrawingInfo::Marker(numbered_cursor) => {
-                        if let Some(cursor) = &waves.cursor {
-                            let delta = time_string(
-                                &(waves.numbered_marker_time(numbered_cursor.idx) - cursor),
-                                &waves.inner.metadata().timescale,
-                                &self.user.wanted_timeunit,
-                                &self.get_time_format(),
-                            );
-
-                            ui.label(RichText::new(format!("Δ: {delta}",)).color(
-                                self.user.config.theme.get_best_text_color(backgroundcolor),
-                            ))
-                            .context_menu(|ui| {
-                                self.item_context_menu(
-                                    None,
-                                    msgs,
-                                    ui,
-                                    drawing_info.vidx(),
-                                    true,
-                                    crate::message::MessageTarget::CurrentSelection,
-                                );
-                            });
-                        } else {
-                            ui.label("");
-                        }
-                    }
-                    ItemDrawingInfo::Divider(_)
-                    | ItemDrawingInfo::TimeLine(_)
-                    | ItemDrawingInfo::Stream(_)
-                    | ItemDrawingInfo::Group(_)
-                    | ItemDrawingInfo::Placeholder(_) => {
-                        ui.label("");
-                    }
-                }
-            }
-            Self::add_padding_for_last_item(
+        let text_color = self.user.config.theme.get_best_text_color(bg_color);
+        ui.label(
+            RichText::new(value)
+                .color(text_color)
+                .line_height(Some(self.user.config.layout.waveforms_line_height)),
+        )
+        .context_menu(|ui| {
+            self.item_context_menu(
+                Some(&FieldRef::without_fields(var_info.field_ref.root.clone())),
+                msgs,
                 ui,
-                waves.drawing_infos.last(),
-                self.user.config.layout.waveforms_line_height,
+                var_info.vidx,
+                true,
+                crate::message::MessageTarget::CurrentSelection,
             );
         });
+    }
+
+    /// Draws the time delta for a marker relative to the cursor.
+    fn draw_marker_value(
+        &self,
+        ui: &mut Ui,
+        msgs: &mut Vec<Message>,
+        waves: &crate::wave_data::WaveData,
+        marker_info: &MarkerDrawingInfo,
+        bg_color: ecolor::Color32,
+    ) {
+        let Some(cursor) = &waves.cursor else {
+            ui.label("");
+            return;
+        };
+
+        let delta = time_string(
+            &(waves.numbered_marker_time(marker_info.idx) - cursor),
+            &waves.inner.metadata().timescale,
+            &self.user.wanted_timeunit,
+            &self.get_time_format(),
+        );
+
+        let text_color = self.user.config.theme.get_best_text_color(bg_color);
+        ui.label(RichText::new(format!("Δ: {delta}")).color(text_color))
+            .context_menu(|ui| {
+                self.item_context_menu(
+                    None,
+                    msgs,
+                    ui,
+                    marker_info.vidx,
+                    true,
+                    crate::message::MessageTarget::CurrentSelection,
+                );
+            });
     }
 
     fn hierarchy_icon(
@@ -1055,89 +1097,11 @@ impl SystemState {
         ctx: &egui::Context,
         meta: Option<&VariableMeta>,
     ) -> egui::Response {
-        let color_pair = {
-            if self.item_is_focused(vidx) {
-                &self.user.config.theme.accent_info
-            } else if self.item_is_selected(displayed_id) {
-                &self.user.config.theme.selected_elements_colors
-            } else if matches!(
-                displayed_item,
-                DisplayedItem::Variable(_) | DisplayedItem::Placeholder(_)
-            ) {
-                &self.user.config.theme.primary_ui_color
-            } else {
-                &ThemeColorPair {
-                    background: self.user.config.theme.primary_ui_color.background,
-                    foreground: self.get_item_text_color(displayed_item),
-                }
-            }
-        };
-        {
-            let style = ui.style_mut();
-            style.visuals.selection.bg_fill = color_pair.background;
-        }
+        let color_pair = self.get_item_color_pair(vidx, displayed_id, displayed_item);
+        ui.style_mut().visuals.selection.bg_fill = color_pair.background;
 
-        let mut layout_job = LayoutJob::default();
-        match displayed_item {
-            DisplayedItem::Variable(var) if field.is_some() => {
-                let field = field.unwrap();
-                if field.field.is_empty() {
-                    let name_info = self.get_variable_name_info(&var.variable_ref, meta);
-
-                    if let Some(true_name) = name_info.and_then(|info| info.true_name) {
-                        let monospace_font =
-                            ui.style().text_styles.get(&TextStyle::Monospace).unwrap();
-                        let monospace_width = {
-                            ui.fonts_mut(|fonts| {
-                                fonts
-                                    .layout_no_wrap(
-                                        " ".to_string(),
-                                        monospace_font.clone(),
-                                        ecolor::Color32::BLACK,
-                                    )
-                                    .size()
-                                    .x
-                            })
-                        };
-                        let available_width = ui.available_width();
-
-                        draw_true_name(
-                            &true_name,
-                            &mut layout_job,
-                            monospace_font.clone(),
-                            color_pair.foreground,
-                            monospace_width,
-                            available_width,
-                        );
-                    } else {
-                        displayed_item.add_to_layout_job(
-                            color_pair.foreground,
-                            ui.style(),
-                            &mut layout_job,
-                            Some(field),
-                            &self.user.config,
-                        );
-                    }
-                } else {
-                    RichText::new(field.field.last().unwrap().clone())
-                        .color(color_pair.foreground)
-                        .line_height(Some(self.user.config.layout.waveforms_line_height))
-                        .append_to(
-                            &mut layout_job,
-                            ui.style(),
-                            FontSelection::Default,
-                            Align::Center,
-                        );
-                }
-            }
-            _ => displayed_item.add_to_layout_job(
-                color_pair.foreground,
-                ui.style(),
-                &mut layout_job,
-                field,
-                &self.user.config,
-            ),
-        }
+        let layout_job =
+            self.build_item_layout_job(ui, displayed_item, field, color_pair.foreground, meta);
 
         let item_label = ui
             .selectable_label(
@@ -1146,72 +1110,8 @@ impl SystemState {
             )
             .interact(Sense::drag());
 
-        // click can select and deselect, depending on previous selection state & modifiers
-        // with the rules:
-        // - a primary click on the single selected item will deselect it (so that there is a
-        //   way to deselect and get rid of the selection highlight)
-        // - a primary/secondary click otherwise will select just the clicked item
-        // - a secondary click on the selection will not change the selection
-        // - a click with shift added will select all items between focused and clicked
-        // - a click with control added will toggle the selection of the item
-        // - shift + control does not have special meaning
-        //
-        // We do not implement more complex behavior like the selection toggling
-        // that the windows explorer had in the past (with combined ctrl+shift)
         if item_label.clicked() || item_label.secondary_clicked() {
-            let focused_item = self.user.waves.as_ref().and_then(|w| w.focused_item);
-            let is_focused = focused_item == Some(vidx);
-            let is_selected = self.item_is_selected(displayed_id);
-            let single_selected = self
-                .user
-                .waves
-                .as_ref()
-                .map(|w| {
-                    // FIXME check if this is fast
-                    let it = w.items_tree.iter_visible_selected();
-                    it.count() == 1
-                })
-                .unwrap();
-
-            let modifiers = ctx.input(|i| i.modifiers);
-            tracing::trace!(focused_item=?focused_item, is_focused=?is_focused, is_selected=?is_selected, single_selected=?single_selected, modifiers=?modifiers);
-
-            // allow us to deselect, but only do so if this is the only selected item
-            if item_label.clicked() && is_selected && single_selected {
-                msgs.push(Message::Batch(vec![
-                    Message::ItemSelectionClear,
-                    Message::UnfocusItem,
-                ]));
-                return item_label;
-            }
-
-            match (item_label.clicked(), modifiers.command, modifiers.shift) {
-                (false, false, false) if is_selected => {}
-                (_, false, false) => {
-                    msgs.push(Message::Batch(vec![
-                        Message::ItemSelectionClear,
-                        Message::SetItemSelected(vidx, true),
-                        Message::FocusItem(vidx),
-                    ]));
-                }
-                (_, _, true) => msgs.push(Message::Batch(vec![
-                    Message::ItemSelectRange(vidx),
-                    Message::FocusItem(vidx),
-                ])),
-                (_, true, false) => {
-                    if !is_selected {
-                        msgs.push(Message::Batch(vec![
-                            Message::SetItemSelected(vidx, true),
-                            Message::FocusItem(vidx),
-                        ]));
-                    } else if item_label.clicked() {
-                        msgs.push(Message::Batch(vec![
-                            Message::SetItemSelected(vidx, false),
-                            Message::UnfocusItem,
-                        ]))
-                    }
-                }
-            }
+            self.handle_item_label_click(msgs, vidx, displayed_id, &item_label, ctx);
         }
 
         item_label.context_menu(|ui| {
@@ -1226,6 +1126,217 @@ impl SystemState {
         });
 
         item_label
+    }
+
+    /// Returns the color pair for an item based on its focus/selection state.
+    fn get_item_color_pair(
+        &self,
+        vidx: VisibleItemIndex,
+        displayed_id: DisplayedItemRef,
+        displayed_item: &DisplayedItem,
+    ) -> ThemeColorPair {
+        let theme = &self.user.config.theme;
+        if self.item_is_focused(vidx) {
+            ThemeColorPair {
+                background: theme.accent_info.background,
+                foreground: theme.accent_info.foreground,
+            }
+        } else if self.item_is_selected(displayed_id) {
+            ThemeColorPair {
+                background: theme.selected_elements_colors.background,
+                foreground: theme.selected_elements_colors.foreground,
+            }
+        } else if matches!(
+            displayed_item,
+            DisplayedItem::Variable(_) | DisplayedItem::Placeholder(_)
+        ) {
+            ThemeColorPair {
+                background: theme.primary_ui_color.background,
+                foreground: theme.primary_ui_color.foreground,
+            }
+        } else {
+            ThemeColorPair {
+                background: theme.primary_ui_color.background,
+                foreground: self.get_item_text_color(displayed_item),
+            }
+        }
+    }
+
+    /// Builds the layout job for rendering an item's label text.
+    fn build_item_layout_job(
+        &self,
+        ui: &mut Ui,
+        displayed_item: &DisplayedItem,
+        field: Option<&FieldRef>,
+        foreground: ecolor::Color32,
+        meta: Option<&VariableMeta>,
+    ) -> LayoutJob {
+        let mut layout_job = LayoutJob::default();
+
+        match displayed_item {
+            DisplayedItem::Variable(var) if field.is_some() => {
+                let field = field.unwrap();
+                if field.field.is_empty() {
+                    self.build_variable_root_layout(
+                        ui,
+                        var,
+                        field,
+                        foreground,
+                        meta,
+                        &mut layout_job,
+                    );
+                } else {
+                    self.build_variable_field_layout(ui, field, foreground, &mut layout_job);
+                }
+            }
+            _ => displayed_item.add_to_layout_job(
+                foreground,
+                ui.style(),
+                &mut layout_job,
+                field,
+                &self.user.config,
+            ),
+        }
+
+        layout_job
+    }
+
+    /// Builds layout for a variable's root name (not a subfield).
+    fn build_variable_root_layout(
+        &self,
+        ui: &mut Ui,
+        var: &crate::displayed_item::DisplayedVariable,
+        field: &FieldRef,
+        foreground: ecolor::Color32,
+        meta: Option<&VariableMeta>,
+        layout_job: &mut LayoutJob,
+    ) {
+        let name_info = self.get_variable_name_info(&var.variable_ref, meta);
+
+        if let Some(true_name) = name_info.and_then(|info| info.true_name) {
+            let monospace_font = ui.style().text_styles.get(&TextStyle::Monospace).unwrap();
+            let monospace_width = ui.fonts_mut(|fonts| {
+                fonts
+                    .layout_no_wrap(
+                        " ".to_string(),
+                        monospace_font.clone(),
+                        ecolor::Color32::BLACK,
+                    )
+                    .size()
+                    .x
+            });
+            let available_width = ui.available_width();
+
+            draw_true_name(
+                &true_name,
+                layout_job,
+                monospace_font.clone(),
+                foreground,
+                monospace_width,
+                available_width,
+            );
+        } else {
+            DisplayedItem::Variable(var.clone()).add_to_layout_job(
+                foreground,
+                ui.style(),
+                layout_job,
+                Some(field),
+                &self.user.config,
+            );
+        }
+    }
+
+    /// Builds layout for a variable's subfield name.
+    fn build_variable_field_layout(
+        &self,
+        ui: &Ui,
+        field: &FieldRef,
+        foreground: ecolor::Color32,
+        layout_job: &mut LayoutJob,
+    ) {
+        RichText::new(field.field.last().unwrap().clone())
+            .color(foreground)
+            .line_height(Some(self.user.config.layout.waveforms_line_height))
+            .append_to(
+                layout_job,
+                ui.style(),
+                FontSelection::Default,
+                Align::Center,
+            );
+    }
+
+    /// Handles click interactions on an item label (selection, focus, modifiers).
+    ///
+    /// Click behavior:
+    /// - Primary click on single selected item: deselects it
+    /// - Primary/secondary click otherwise: selects just the clicked item
+    /// - Secondary click on selection: no change
+    /// - Shift+click: selects range from focused to clicked
+    /// - Ctrl+click: toggles selection of the item
+    fn handle_item_label_click(
+        &self,
+        msgs: &mut Vec<Message>,
+        vidx: VisibleItemIndex,
+        displayed_id: DisplayedItemRef,
+        item_label: &egui::Response,
+        ctx: &egui::Context,
+    ) {
+        let focused_item = self.user.waves.as_ref().and_then(|w| w.focused_item);
+        let is_selected = self.item_is_selected(displayed_id);
+        let single_selected = self
+            .user
+            .waves
+            .as_ref()
+            .map(|w| w.items_tree.iter_visible_selected().count() == 1)
+            .unwrap_or(false);
+
+        let modifiers = ctx.input(|i| i.modifiers);
+        tracing::trace!(
+            focused_item=?focused_item,
+            is_selected=?is_selected,
+            single_selected=?single_selected,
+            modifiers=?modifiers
+        );
+
+        // Deselect if clicking the only selected item
+        if item_label.clicked() && is_selected && single_selected {
+            msgs.push(Message::Batch(vec![
+                Message::ItemSelectionClear,
+                Message::UnfocusItem,
+            ]));
+            return;
+        }
+
+        let clicked = item_label.clicked();
+        match (clicked, modifiers.command, modifiers.shift) {
+            (false, false, false) if is_selected => {}
+            (_, false, false) => {
+                msgs.push(Message::Batch(vec![
+                    Message::ItemSelectionClear,
+                    Message::SetItemSelected(vidx, true),
+                    Message::FocusItem(vidx),
+                ]));
+            }
+            (_, _, true) => {
+                msgs.push(Message::Batch(vec![
+                    Message::ItemSelectRange(vidx),
+                    Message::FocusItem(vidx),
+                ]));
+            }
+            (_, true, false) => {
+                if !is_selected {
+                    msgs.push(Message::Batch(vec![
+                        Message::SetItemSelected(vidx, true),
+                        Message::FocusItem(vidx),
+                    ]));
+                } else if clicked {
+                    msgs.push(Message::Batch(vec![
+                        Message::SetItemSelected(vidx, false),
+                        Message::UnfocusItem,
+                    ]));
+                }
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
