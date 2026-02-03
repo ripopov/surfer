@@ -855,17 +855,14 @@ impl WaveData {
         if self.drawing_infos.is_empty() {
             return;
         }
-        // Set scroll_offset to different between requested element and first element
-        let first_element_y = self.drawing_infos.first().unwrap().top();
-        let item_y = self
-            .drawing_infos
-            .get(idx)
-            .unwrap_or_else(|| self.drawing_infos.last().unwrap())
-            .top();
-        // only scroll if new location is outside of visible area
-        if self.scroll_offset > self.total_height {
-            self.scroll_offset = item_y - first_element_y;
+        // Don't scroll past the last item
+        if idx >= self.drawing_infos.len() {
+            return;
         }
+        // Set scroll_offset to difference between requested element and first element
+        let first_element_y = self.drawing_infos.first().unwrap().top();
+        let item_y = self.drawing_infos[idx].top();
+        self.scroll_offset = item_y - first_element_y;
     }
 
     /// Set cursor at next (or previous, if `next` is false) transition of `variable`. If `skip_zero` is true,
