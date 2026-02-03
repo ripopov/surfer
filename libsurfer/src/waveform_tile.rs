@@ -110,7 +110,6 @@ impl SystemState {
             .default_width(40.)
             .width_range(40.0..=max_width)
             .show_inside(ui, |ui| {
-                self.handle_pointer_in_ui(ui, msgs);
                 let response = ScrollArea::both()
                     .vertical_scroll_offset(scroll_offset)
                     .show(ui, |ui| {
@@ -140,7 +139,6 @@ impl SystemState {
             .show_inside(ui, |ui| {
                 ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
                 ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-                self.handle_pointer_in_ui(ui, msgs);
                 if self.show_default_timeline() {
                     ui.label(RichText::new("Time").italics());
                 }
@@ -181,7 +179,6 @@ impl SystemState {
                     self.user.config.theme.secondary_ui_color.background,
                 );
                 ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-                self.handle_pointer_in_ui(ui, msgs);
                 let response = ScrollArea::both()
                     .auto_shrink([false; 2])
                     .vertical_scroll_offset(scroll_offset)
