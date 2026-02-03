@@ -1375,36 +1375,62 @@ Stage 10 is complete when:
 
 ### Stage 11: SignalChangeList model
 
-**Goal:** Implement table model for signal value transitions.
+**Goal:** Implement the SignalChangeList table model and wire it into the Surfer UI (context menu + keyboard command) while keeping cache builds async and consistent with existing table infrastructure.
 
 **Prerequisites:** Stages 1-10 complete.
 
+**User experience:**
+- Right-click a signal (or subfield) in the waveform view and choose "Signal change list" to open a new table tile.
+- Keyboard command opens a change list for the currently focused/selected item (flow: `item_focus` -> `table_view`).
+- Table shows Time (column 1) and Value (column 2), sorted chronologically by default, and supports filter/search, sort, selection, copy, and activation like the Virtual model.
+- Activating a row (Enter/double-click) moves the cursor to that transition time.
+- On waveform reload, the table shows a loading state, cache is rebuilt, and selection clears.
+
 **Deliverables:**
-- Define `TableModelContext` struct providing:
-  - `wave_data: Option<&WaveData>` - access to waveform data
-  - `transaction_container: Option<&TransactionContainer>` - access to FTR transactions
-  - `time_format: &TimeStringFormatting` - for consistent time display
-  - `time_unit: TimeUnit` - current time unit for display
-- Extend `TableModelSpec::create_model(&self, ctx: &TableModelContext) -> Result<Arc<dyn TableModel>, TableCacheError>`
-  - Virtual model ignores context (returns Ok)
-  - SignalChangeList returns `Err(ModelNotFound)` if wave_data is None or variable not found
-- Implement `SignalChangeListModel` in `sources/signal_change_list.rs`:
-  - Constructor: takes `VariableRef`, `field: Vec<String>`, wave data reference.
-  - Schema: columns for "Time", "Value", optional "Duration".
-  - `row_id_at(index)`: timestamp of transition (ensures uniqueness).
-  - `cell()`: format time using `TimeStringFormatting`, value using translator.
-  - `sort_key()`: numeric timestamp for Time, formatted value for Value.
-  - `on_activate(row)`: return `TableAction::CursorSet(timestamp)`.
-- Handle missing variable gracefully (`TableCacheError::ModelNotFound`).
-- Invalidate cache on waveform reload (generation change).
+- Add `libsurfer/src/table/sources/signal_change_list.rs` with `SignalChangeListModel` implementing `TableModel`.
+- Extend `libsurfer/src/table/sources/mod.rs` to export the model.
+- Introduce `TableModelContext` (or equivalent) to provide:
+  - Waveform access (`WaveData`/`WaveContainer`) and `cache_generation`
+  - `TranslatorList` (or a thread-safe pre-resolved translator map)
+  - Time formatting inputs (`TimeScale`, `TimeUnit`, `TimeFormat`)
+  - Theme colors (for optional RichText coloring)
+- Update `TableModelSpec::create_model` to `create_model(&self, ctx: &TableModelContext) -> Result<Arc<dyn TableModel>, TableCacheError>` and refactor all call sites:
+  - `draw_table_tile` (for schema/row count)
+  - `Message::BuildTableCache`
+  - `Message::TableActivateSelection`
+  - `Message::TableCopySelection`
+  - Table tests that call `create_model()`
+- Implement SignalChangeList data access using `SignalAccessor`:
+  - Resolve `VariableRef` via `WaveContainer::update_variable_ref` (handle stale IDs on reload).
+  - Use `signal_id()` and `signal_accessor()`; return `ModelNotFound` if variable missing and `DataUnavailable` if signal not loaded.
+  - Keep model creation cheap (no full scans on UI thread). Build transition rows lazily with `OnceLock<Vec<TransitionRow>>` so heavy work happens in the cache build thread.
+- Schema and formatting:
+  - Columns: `Time` and `Value` with stable keys (e.g., `"time"`/`"value"`), default visible/resizable.
+  - Default view config for this model: title includes signal name + field path, sort ascending by time, selection mode single.
+  - Time formatting uses `TimeFormatter` (from `time.rs`) with current timescale/time unit/time string format.
+  - Value formatting mirrors waveform view: translate with selected translator + field formats and extract the matching field; fallback to "-" if missing.
+  - Optional: color value text using `ValueKindExt` + theme (use `TableCell::RichText`).
+- TableModel methods:
+  - `row_id_at`: `TableRowId(time)` (if duplicate timestamps are possible, disambiguate with a stable hash or index while keeping the true time in row data).
+  - `cell`: time/value formatted strings.
+  - `sort_key`: time -> `Numeric`; value -> `Numeric` if `translate_numeric` is available, else `Text`.
+  - `search_text`: concat time + value strings (avoid recomputing by caching formatted rows).
+  - `on_activate`: `TableAction::CursorSet(time)`.
+- UI integration:
+  - Add context menu action in `menus.rs::item_context_menu` for `DisplayedItem::Variable` to create a SignalChangeList table using the clicked `FieldRef`.
+  - Add a new command (e.g., `table_view`) in `command_parser.rs` that opens a SignalChangeList for the current selection; allow explicit item argument using the same list as `item_focus`.
+  - Add a keyboard shortcut in `keyboard_shortcuts.rs` and list it in help (`help.rs`).
+  - Ensure `Message::AddTableTile` or a new `AddTableTileWithConfig` message sets the title/sort defaults for this model.
 
 **Acceptance tests:**
-- [ ] Unit test: Model extracts correct transitions from test waveform.
-- [ ] Unit test: Time column formats according to current `TimeUnit`.
-- [ ] Unit test: Value column uses correct translator.
-- [ ] Integration test: Activating row sets cursor to transition time.
-- [ ] Integration test: Waveform reload clears cache and selection.
-- [ ] UI snapshot test: SignalChangeList renders for sample VCD.
+- [ ] Unit tests for `SignalChangeListModel`: `row_count`, `row_id_at`, `cell` formatting (time/value), `sort_key` (time/value), `search_text`, `on_activate`.
+- [ ] Unit tests for field path handling (root vs subfield) using real translation formatting.
+- [ ] Unit tests for error paths: no wave data, variable not found, signal not loaded -> correct `TableCacheError`.
+- [ ] Integration test: context menu action creates a table tile for a variable in a loaded VCD.
+- [ ] Integration test: `table_view` command opens a table for the focused item (`item_focus` -> `table_view`).
+- [ ] Integration test: activating a selected row moves the cursor to that time.
+- [ ] Snapshot test: SignalChangeList table renders Time/Value columns for `examples/counter.vcd`.
+- [ ] Coverage: all new branches in SignalChangeList model + UI wiring covered; `cargo test` passes.
 
 ---
 
