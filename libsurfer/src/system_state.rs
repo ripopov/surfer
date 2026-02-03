@@ -15,6 +15,7 @@ use crate::{
     hierarchy::ScopeExpandType,
     message::Message,
     state::UserState,
+    table::{TableCacheEntry, TableCacheKey, TableModel, TableRuntimeState, TableTileId},
     translation::{TranslatorList, all_translators},
     wave_container::VariableRef,
     wave_source::{LoadOptions, LoadProgress},
@@ -97,6 +98,10 @@ pub struct SystemState {
 
     pub(crate) url_callback: Option<Box<dyn Fn(String) -> Message + Send + 'static>>,
 
+    pub(crate) table_runtime: HashMap<TableTileId, TableRuntimeState>,
+    pub(crate) table_inflight: HashMap<TableCacheKey, Arc<TableCacheEntry>>,
+    pub(crate) table_models: HashMap<TableTileId, Arc<dyn TableModel>>,
+
     // Only used for testing
     pub(crate) expand_parameter_section: bool,
 }
@@ -149,6 +154,9 @@ impl SystemState {
 
             url_callback: None,
             continuous_redraw: false,
+            table_runtime: HashMap::new(),
+            table_inflight: HashMap::new(),
+            table_models: HashMap::new(),
             #[cfg(feature = "performance_plot")]
             rendering_cpu_times: VecDeque::new(),
             #[cfg(feature = "performance_plot")]

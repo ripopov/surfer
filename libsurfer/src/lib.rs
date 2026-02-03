@@ -2235,6 +2235,68 @@ impl SystemState {
                     &self.channels.msg_sender,
                 );
             }
+            Message::BuildTableCache { tile_id, cache_key } => {
+                let runtime = self.table_runtime.entry(tile_id).or_default();
+
+                if runtime.cache.as_ref().is_some_and(|entry| {
+                    entry.cache_key == cache_key && entry.generation == cache_key.generation
+                }) {
+                    return None;
+                }
+
+                if let Some(entry) = self.table_inflight.get(&cache_key)
+                    && entry.generation == cache_key.generation
+                {
+                    runtime.cache_key = Some(cache_key.clone());
+                    runtime.cache = Some(entry.clone());
+                    return None;
+                }
+
+                let model = match self.table_models.get(&tile_id) {
+                    Some(model) => model.clone(),
+                    None => {
+                        runtime.last_error = Some(crate::table::TableCacheError::ModelNotFound {
+                            description: "Missing table model".to_string(),
+                        });
+                        return None;
+                    }
+                };
+
+                let entry = std::sync::Arc::new(crate::table::TableCacheEntry::new(
+                    cache_key.clone(),
+                    cache_key.generation,
+                ));
+
+                runtime.cache_key = Some(cache_key.clone());
+                runtime.cache = Some(entry.clone());
+                runtime.last_error = None;
+
+                self.table_inflight.insert(cache_key.clone(), entry.clone());
+
+                let sender = self.channels.msg_sender.clone();
+                let cache_key_for_build = cache_key.clone();
+                crate::async_util::perform_work(move || {
+                    let result = crate::table::build_table_cache(
+                        model,
+                        cache_key_for_build.display_filter.clone(),
+                        cache_key_for_build.view_sort.clone(),
+                    );
+
+                    let msg = Message::TableCacheBuilt {
+                        tile_id,
+                        entry: entry.clone(),
+                        result,
+                    };
+
+                    crate::OUTSTANDING_TRANSACTIONS
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let _ = sender.send(msg);
+
+                    if let Some(ctx) = crate::EGUI_CONTEXT.read().unwrap().as_ref() {
+                        ctx.request_repaint();
+                    }
+                });
+            }
             Message::AnalogCacheBuilt { entry, result } => {
                 OUTSTANDING_TRANSACTIONS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 // Remove from in-flight registry (may already be gone if generation changed)
@@ -2249,6 +2311,36 @@ impl SystemState {
                         warn!("Failed to build analog cache: {err}");
                     }
                 }
+                self.invalidate_draw_commands();
+            }
+            Message::TableCacheBuilt {
+                tile_id,
+                entry,
+                result,
+            } => {
+                OUTSTANDING_TRANSACTIONS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                self.table_inflight.remove(&entry.cache_key);
+
+                let Some(runtime) = self.table_runtime.get_mut(&tile_id) else {
+                    return None;
+                };
+
+                if runtime.cache_key.as_ref() != Some(&entry.cache_key) {
+                    return None;
+                }
+
+                runtime.cache = Some(entry.clone());
+
+                match result {
+                    Ok(cache) => {
+                        entry.set(cache);
+                        runtime.last_error = None;
+                    }
+                    Err(err) => {
+                        runtime.last_error = Some(err);
+                    }
+                }
+
                 self.invalidate_draw_commands();
             }
             Message::Exit | Message::ToggleFullscreen => {} // Handled in eframe::update

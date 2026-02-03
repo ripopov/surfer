@@ -16,6 +16,7 @@ use crate::displayed_item_tree::{ItemIndex, VisibleItemIndex};
 use crate::graphics::{Graphic, GraphicId};
 use crate::hierarchy::{ParameterDisplayLocation, ScopeExpandType};
 use crate::state::UserState;
+use crate::table::{TableCache, TableCacheEntry, TableCacheError, TableCacheKey, TableTileId};
 use crate::transaction_container::{
     StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
 };
@@ -384,11 +385,24 @@ pub enum Message {
         cache_key: AnalogCacheKey,
     },
     #[serde(skip)]
+    BuildTableCache {
+        tile_id: TableTileId,
+        cache_key: TableCacheKey,
+    },
+    #[serde(skip)]
     AnalogCacheBuilt {
         #[debug(skip)]
         entry: Arc<crate::analog_signal_cache::AnalogCacheEntry>,
         #[debug(skip)]
         result: Result<crate::analog_signal_cache::AnalogSignalCache, String>,
+    },
+    #[serde(skip)]
+    TableCacheBuilt {
+        tile_id: TableTileId,
+        #[debug(skip)]
+        entry: Arc<TableCacheEntry>,
+        #[debug(skip)]
+        result: Result<TableCache, TableCacheError>,
     },
 
     SetViewportStrategy(ViewportStrategy),

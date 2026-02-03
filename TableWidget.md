@@ -406,6 +406,8 @@ The current `TableModelSpec::create_model(&self) -> Option<Arc<dyn TableModel>>`
 - Add `table_tiles: HashMap<TableTileId, TableTileState>` to `UserState`.
 - Add `table_runtime: HashMap<TableTileId, TableRuntimeState>` to `SystemState` (non-serialized).
   - `TableRuntimeState`: current cache entry, selection, scroll offset, error state.
+- Extend `TableRuntimeState` with selection + scroll (cache + error already added in Stage 3).
+- Replace the temporary `table_models` map with model creation from `table_tiles`/`TableModelSpec`.
 - Implement `SurferTileTree::add_table_tile(spec) -> TableTileId`.
 - Update `SurferTileBehavior::pane_ui()` to dispatch to `draw_table_tile()`.
 - Update `SurferTileBehavior::is_tab_closable()` to allow closing table tiles.

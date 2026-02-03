@@ -1,5 +1,9 @@
 use super::*;
+use crate::SystemState;
+use crate::message::Message;
+use crate::table::sources::VirtualTableModel;
 use crate::wave_container::VariableRefExt;
+use std::sync::Arc;
 
 // ========================
 // Stage 1 Tests
@@ -169,4 +173,265 @@ fn virtual_model_schema_keys_match_expected_format() {
     assert_eq!(labels[0], "Col 0");
     assert_eq!(labels[1], "Col 1");
     assert_eq!(labels[2], "Col 2");
+}
+
+// ========================
+// Stage 3 Tests
+// ========================
+
+#[test]
+fn table_cache_entry_ready_state() {
+    let cache_key = TableCacheKey {
+        model_key: TableModelKey(1),
+        display_filter: TableSearchSpec {
+            mode: TableSearchMode::Contains,
+            case_sensitive: false,
+            text: String::new(),
+        },
+        view_sort: vec![],
+        generation: 0,
+    };
+    let entry = TableCacheEntry::new(cache_key, 0);
+    assert!(!entry.is_ready());
+
+    entry.set(TableCache {
+        row_ids: vec![],
+        search_texts: vec![],
+        sort_keys: vec![],
+    });
+    assert!(entry.is_ready());
+}
+
+#[test]
+fn table_cache_builder_unfiltered_unsorted() {
+    let model = Arc::new(VirtualTableModel::new(5, 2, 0));
+    let cache = build_table_cache(
+        model,
+        TableSearchSpec {
+            mode: TableSearchMode::Contains,
+            case_sensitive: false,
+            text: String::new(),
+        },
+        vec![],
+    )
+    .expect("cache build should succeed");
+
+    let expected: Vec<_> = (0..5).map(|idx| TableRowId(idx as u64)).collect();
+    assert_eq!(cache.row_ids, expected);
+    assert_eq!(cache.search_texts.len(), expected.len());
+    assert_eq!(cache.sort_keys.len(), expected.len());
+}
+
+#[test]
+fn table_cache_builder_filters_contains() {
+    let model = Arc::new(VirtualTableModel::new(10, 2, 0));
+    let cache = build_table_cache(
+        model,
+        TableSearchSpec {
+            mode: TableSearchMode::Contains,
+            case_sensitive: false,
+            text: "r3c0".to_string(),
+        },
+        vec![],
+    )
+    .expect("cache build should succeed");
+
+    assert_eq!(cache.row_ids, vec![TableRowId(3)]);
+}
+
+#[test]
+fn table_cache_builder_sorts_rows() {
+    #[derive(Clone)]
+    struct TestModel {
+        rows: Vec<(TableRowId, f64, String)>,
+    }
+
+    impl TableModel for TestModel {
+        fn schema(&self) -> TableSchema {
+            TableSchema {
+                columns: vec![TableColumn {
+                    key: TableColumnKey::Str("col".to_string()),
+                    label: "Col".to_string(),
+                    default_width: None,
+                    default_visible: true,
+                    default_resizable: true,
+                }],
+            }
+        }
+
+        fn row_count(&self) -> usize {
+            self.rows.len()
+        }
+
+        fn row_id_at(&self, index: usize) -> Option<TableRowId> {
+            self.rows.get(index).map(|(id, _, _)| *id)
+        }
+
+        fn cell(&self, row: TableRowId, _col: usize) -> TableCell {
+            let text = self
+                .rows
+                .iter()
+                .find(|(id, _, _)| *id == row)
+                .map(|(_, _, text)| text.clone())
+                .unwrap_or_default();
+            TableCell::Text(text)
+        }
+
+        fn sort_key(&self, row: TableRowId, _col: usize) -> TableSortKey {
+            self.rows
+                .iter()
+                .find(|(id, _, _)| *id == row)
+                .map(|(_, value, _)| TableSortKey::Numeric(*value))
+                .unwrap_or(TableSortKey::None)
+        }
+
+        fn search_text(&self, row: TableRowId) -> String {
+            self.rows
+                .iter()
+                .find(|(id, _, _)| *id == row)
+                .map(|(_, _, text)| text.clone())
+                .unwrap_or_default()
+        }
+
+        fn on_activate(&self, _row: TableRowId) -> TableAction {
+            TableAction::None
+        }
+    }
+
+    let model = Arc::new(TestModel {
+        rows: vec![
+            (TableRowId(0), 5.0, "alpha".to_string()),
+            (TableRowId(1), 1.0, "beta".to_string()),
+            (TableRowId(2), 3.0, "gamma".to_string()),
+        ],
+    });
+
+    let cache = build_table_cache(
+        model.clone(),
+        TableSearchSpec {
+            mode: TableSearchMode::Contains,
+            case_sensitive: false,
+            text: String::new(),
+        },
+        vec![TableSortSpec {
+            key: TableColumnKey::Str("col".to_string()),
+            direction: TableSortDirection::Ascending,
+        }],
+    )
+    .expect("cache build should succeed");
+
+    assert_eq!(
+        cache.row_ids,
+        vec![TableRowId(1), TableRowId(2), TableRowId(0)]
+    );
+
+    let cache_desc = build_table_cache(
+        model,
+        TableSearchSpec {
+            mode: TableSearchMode::Contains,
+            case_sensitive: false,
+            text: String::new(),
+        },
+        vec![TableSortSpec {
+            key: TableColumnKey::Str("col".to_string()),
+            direction: TableSortDirection::Descending,
+        }],
+    )
+    .expect("cache build should succeed");
+
+    assert_eq!(
+        cache_desc.row_ids,
+        vec![TableRowId(0), TableRowId(2), TableRowId(1)]
+    );
+}
+
+#[test]
+fn table_cache_builder_empty_result() {
+    let model = Arc::new(VirtualTableModel::new(5, 2, 0));
+    let cache = build_table_cache(
+        model,
+        TableSearchSpec {
+            mode: TableSearchMode::Contains,
+            case_sensitive: true,
+            text: "nope".to_string(),
+        },
+        vec![],
+    )
+    .expect("cache build should succeed");
+
+    assert!(cache.row_ids.is_empty());
+    assert!(cache.search_texts.is_empty());
+    assert!(cache.sort_keys.is_empty());
+}
+
+#[test]
+fn table_cache_builder_invalid_regex() {
+    let model = Arc::new(VirtualTableModel::new(5, 2, 0));
+    let result = build_table_cache(
+        model,
+        TableSearchSpec {
+            mode: TableSearchMode::Regex,
+            case_sensitive: false,
+            text: "(".to_string(),
+        },
+        vec![],
+    );
+
+    match result {
+        Err(TableCacheError::InvalidSearch { pattern, .. }) => {
+            assert_eq!(pattern, "(");
+        }
+        other => panic!("Expected invalid regex error, got {other:?}"),
+    }
+}
+
+#[test]
+fn table_cache_built_stale_key_ignored() {
+    let mut state = SystemState::new_default_config().expect("state");
+    let tile_id = TableTileId(1);
+    let old_key = TableCacheKey {
+        model_key: TableModelKey(1),
+        display_filter: TableSearchSpec {
+            mode: TableSearchMode::Contains,
+            case_sensitive: false,
+            text: String::new(),
+        },
+        view_sort: vec![],
+        generation: 1,
+    };
+    let new_key = TableCacheKey {
+        model_key: TableModelKey(1),
+        display_filter: TableSearchSpec {
+            mode: TableSearchMode::Contains,
+            case_sensitive: false,
+            text: "new".to_string(),
+        },
+        view_sort: vec![],
+        generation: 1,
+    };
+
+    state.table_runtime.insert(
+        tile_id,
+        TableRuntimeState {
+            cache_key: Some(new_key),
+            cache: None,
+            last_error: None,
+        },
+    );
+
+    let entry = Arc::new(TableCacheEntry::new(old_key.clone(), old_key.generation));
+    state.table_inflight.insert(old_key, entry.clone());
+
+    let msg = Message::TableCacheBuilt {
+        tile_id,
+        entry: entry.clone(),
+        result: Ok(TableCache {
+            row_ids: vec![],
+            search_texts: vec![],
+            sort_keys: vec![],
+        }),
+    };
+
+    state.update(msg);
+    assert!(!entry.is_ready(), "stale cache should be ignored");
 }

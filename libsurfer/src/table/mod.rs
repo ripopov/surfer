@@ -3,7 +3,10 @@ pub mod model;
 pub mod sources;
 pub mod view;
 
-pub use cache::{TableCache, TableCacheEntry, TableCacheError, TableCacheKey};
+pub use cache::{
+    TableCache, TableCacheEntry, TableCacheError, TableCacheKey, TableRuntimeState,
+    build_table_cache,
+};
 pub use model::{
     AnalysisKind, AnalysisParams, TableAction, TableCell, TableColumn, TableColumnConfig,
     TableColumnKey, TableModel, TableModelKey, TableModelSpec, TableRowId, TableSchema,
