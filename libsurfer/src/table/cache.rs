@@ -291,9 +291,7 @@ fn compare_sort_keys(a: &TableSortKey, b: &TableSortKey) -> Ordering {
 
     match (a, b) {
         (TableSortKey::None, TableSortKey::None) => Ordering::Equal,
-        (TableSortKey::Numeric(left), TableSortKey::Numeric(right)) => {
-            left.partial_cmp(right).unwrap_or(Ordering::Equal)
-        }
+        (TableSortKey::Numeric(left), TableSortKey::Numeric(right)) => left.total_cmp(right),
         (TableSortKey::Text(left), TableSortKey::Text(right)) => left.cmp(right),
         (TableSortKey::Bytes(left), TableSortKey::Bytes(right)) => left.cmp(right),
         _ => Ordering::Equal,
