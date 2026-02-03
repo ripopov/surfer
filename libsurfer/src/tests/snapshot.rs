@@ -3408,3 +3408,55 @@ snapshot_ui!(table_dense_rows, || {
 
     state
 });
+
+snapshot_ui!(table_two_tiles, || {
+    use crate::table::{TableModelSpec, TableTileState, TableViewConfig};
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    // First table: normal mode, 8 rows, 3 columns
+    let table_id1 = state.user.tile_tree.next_table_id();
+    let spec1 = TableModelSpec::Virtual {
+        rows: 8,
+        columns: 3,
+        seed: 100,
+    };
+    let mut config1 = TableViewConfig::default();
+    config1.title = "Table A".to_string();
+    state.user.table_tiles.insert(
+        table_id1,
+        TableTileState {
+            spec: spec1,
+            config: config1,
+        },
+    );
+    state.user.tile_tree.add_table_tile(table_id1);
+
+    // Second table: dense mode, 12 rows, 4 columns, different seed
+    let table_id2 = state.user.tile_tree.next_table_id();
+    let spec2 = TableModelSpec::Virtual {
+        rows: 12,
+        columns: 4,
+        seed: 200,
+    };
+    let mut config2 = TableViewConfig::default();
+    config2.title = "Table B".to_string();
+    config2.dense_rows = true;
+    state.user.table_tiles.insert(
+        table_id2,
+        TableTileState {
+            spec: spec2,
+            config: config2,
+        },
+    );
+    state.user.tile_tree.add_table_tile(table_id2);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
