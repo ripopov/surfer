@@ -95,6 +95,7 @@ impl TableModelSpec {
                     direction: TableSortDirection::Ascending,
                 }];
                 config.selection_mode = TableSelectionMode::Single;
+                config.activate_on_select = true;
                 config
             }
             _ => TableViewConfig::default(),
@@ -127,6 +128,10 @@ pub struct TableViewConfig {
     /// When true, header row stays visible during vertical scroll.
     /// When false, header scrolls with content (rarely desired).
     pub sticky_header: bool,
+    /// When true, selecting a row immediately triggers activation (on_activate).
+    /// Useful for tables where row selection should update external state (e.g., cursor).
+    #[serde(default)]
+    pub activate_on_select: bool,
 }
 
 impl Default for TableViewConfig {
@@ -139,6 +144,7 @@ impl Default for TableViewConfig {
             selection_mode: TableSelectionMode::Single,
             dense_rows: false,
             sticky_header: true,
+            activate_on_select: false,
         }
     }
 }

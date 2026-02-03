@@ -2447,8 +2447,31 @@ impl SystemState {
             }
             Message::SetTableSelection { tile_id, selection } => {
                 if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
-                    runtime.selection = selection;
+                    runtime.selection = selection.clone();
                     self.invalidate_draw_commands();
+                }
+
+                // Check if we should trigger activation on selection
+                if let Some(tile_state) = self.user.table_tiles.get(&tile_id)
+                    && tile_state.config.activate_on_select
+                    && tile_state.config.selection_mode == table::TableSelectionMode::Single
+                    && let Some(anchor) = selection.anchor
+                {
+                    let model_ctx = self.table_model_context();
+                    if let Ok(model) = tile_state.spec.create_model(&model_ctx) {
+                        let action = model.on_activate(anchor);
+                        match action {
+                            table::TableAction::CursorSet(time) => {
+                                self.update(Message::CursorSet(time));
+                                self.update(Message::GoToCursorIfNotInView);
+                            }
+                            table::TableAction::FocusTransaction(_)
+                            | table::TableAction::SelectSignal(_)
+                            | table::TableAction::None => {
+                                // No action or not yet implemented
+                            }
+                        }
+                    }
                 }
             }
             Message::ClearTableSelection { tile_id } => {

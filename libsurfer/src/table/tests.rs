@@ -73,6 +73,7 @@ fn table_view_config_round_trip() {
         selection_mode: TableSelectionMode::Multi,
         dense_rows: true,
         sticky_header: false,
+        activate_on_select: false,
     };
 
     let encoded = ron::ser::to_string(&config).expect("serialize TableViewConfig");
@@ -536,6 +537,7 @@ fn table_tile_state_serialization_round_trip() {
             selection_mode: TableSelectionMode::Multi,
             dense_rows: true,
             sticky_header: false,
+            activate_on_select: false,
         },
     };
 
@@ -4114,4 +4116,84 @@ fn table_activate_selection_moves_cursor() {
     state.update(Message::TableActivateSelection { tile_id });
     let cursor = state.user.waves.as_ref().expect("waves").cursor.clone();
     assert_eq!(cursor, Some(expected_time));
+}
+
+#[test]
+fn signal_change_selection_moves_cursor() {
+    // Tests that selecting a row via SetTableSelection updates cursor
+    // when activate_on_select is true (SignalChangeList default)
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state_with_variable("tb.clk");
+    let spec = TableModelSpec::SignalChangeList {
+        variable: VariableRef::from_hierarchy_string("tb.clk"),
+        field: vec![],
+    };
+    state.update(Message::AddTableTile { spec: spec.clone() });
+
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile");
+    let ctx = state.table_model_context();
+    let model = spec.create_model(&ctx).expect("model");
+    let row_id = model.row_id_at(0).expect("row");
+    let expected_time = match model.on_activate(row_id) {
+        TableAction::CursorSet(time) => time,
+        _ => panic!("expected cursor set"),
+    };
+
+    // Verify activate_on_select is enabled for SignalChangeList
+    let tile_state = state.user.table_tiles.get(&tile_id).expect("tile");
+    assert!(
+        tile_state.config.activate_on_select,
+        "SignalChangeList should have activate_on_select=true"
+    );
+
+    // Select row via SetTableSelection - should trigger activation
+    let mut selection = TableSelection::new();
+    selection.rows.insert(row_id);
+    selection.anchor = Some(row_id);
+    state.update(Message::SetTableSelection { tile_id, selection });
+
+    let cursor = state.user.waves.as_ref().expect("waves").cursor.clone();
+    assert_eq!(cursor, Some(expected_time));
+}
+
+#[test]
+fn virtual_table_selection_does_not_move_cursor() {
+    // Tests that selecting a row via SetTableSelection does NOT move cursor
+    // when activate_on_select is false (Virtual model default)
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state_with_variable("tb.clk");
+    let spec = TableModelSpec::Virtual {
+        rows: 10,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec: spec.clone() });
+
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile");
+
+    // Verify activate_on_select is disabled for Virtual model
+    let tile_state = state.user.table_tiles.get(&tile_id).expect("tile");
+    assert!(
+        !tile_state.config.activate_on_select,
+        "Virtual model should have activate_on_select=false"
+    );
+
+    // Clear any existing cursor
+    state.update(Message::CursorSet(num::BigInt::from(100)));
+    let cursor_before = state.user.waves.as_ref().expect("waves").cursor.clone();
+
+    // Select row via SetTableSelection - should NOT change cursor
+    let row_id = TableRowId(0);
+    let mut selection = TableSelection::new();
+    selection.rows.insert(row_id);
+    selection.anchor = Some(row_id);
+    state.update(Message::SetTableSelection { tile_id, selection });
+
+    let cursor_after = state.user.waves.as_ref().expect("waves").cursor.clone();
+    assert_eq!(
+        cursor_before, cursor_after,
+        "Cursor should not change for Virtual table selection"
+    );
 }
