@@ -39,6 +39,7 @@ pub mod state_file_io;
 pub mod state_util;
 pub mod statusbar;
 pub mod system_state;
+pub mod table;
 #[cfg(test)]
 pub mod tests;
 pub mod tiles;
