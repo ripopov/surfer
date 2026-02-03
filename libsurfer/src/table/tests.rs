@@ -430,6 +430,7 @@ fn table_cache_built_stale_key_ignored() {
             scroll_offset: 0.0,
             type_search: TypeSearchState::default(),
             scroll_state: TableScrollState::default(),
+            filter_draft: None,
         },
     );
 
@@ -571,6 +572,7 @@ fn table_runtime_state_not_serialized() {
         scroll_offset: 42.0,
         type_search: TypeSearchState::default(),
         scroll_state: TableScrollState::default(),
+        filter_draft: None,
     };
 
     // Verify the runtime state has the expected fields
@@ -4196,4 +4198,160 @@ fn virtual_table_selection_does_not_move_cursor() {
         cursor_before, cursor_after,
         "Cursor should not change for Virtual table selection"
     );
+}
+
+// ========================
+// FilterDraft Tests
+// ========================
+
+#[test]
+fn filter_draft_from_spec() {
+    let spec = TableSearchSpec {
+        text: "foo".into(),
+        mode: TableSearchMode::Contains,
+        case_sensitive: false,
+    };
+    let draft = FilterDraft::from_spec(&spec);
+
+    assert_eq!(draft.text, "foo");
+    assert_eq!(draft.mode, TableSearchMode::Contains);
+    assert!(!draft.case_sensitive);
+    assert!(draft.last_changed.is_none());
+}
+
+#[test]
+fn filter_draft_to_spec() {
+    let draft = FilterDraft {
+        text: "bar".into(),
+        mode: TableSearchMode::Regex,
+        case_sensitive: true,
+        last_changed: Some(std::time::Instant::now()),
+    };
+    let spec = draft.to_spec();
+
+    assert_eq!(spec.text, "bar");
+    assert_eq!(spec.mode, TableSearchMode::Regex);
+    assert!(spec.case_sensitive);
+}
+
+#[test]
+fn filter_draft_is_dirty() {
+    let spec = TableSearchSpec {
+        text: "foo".into(),
+        mode: TableSearchMode::Contains,
+        case_sensitive: false,
+    };
+    let draft = FilterDraft::from_spec(&spec);
+
+    // Same values → not dirty
+    assert!(!draft.is_dirty(&spec));
+
+    // Different text → dirty
+    let mut draft2 = draft.clone();
+    draft2.text = "bar".into();
+    assert!(draft2.is_dirty(&spec));
+
+    // Different mode → dirty
+    let mut draft3 = draft.clone();
+    draft3.mode = TableSearchMode::Regex;
+    assert!(draft3.is_dirty(&spec));
+
+    // Different case → dirty
+    let mut draft4 = draft.clone();
+    draft4.case_sensitive = true;
+    assert!(draft4.is_dirty(&spec));
+}
+
+#[test]
+fn filter_draft_debounce_elapsed_with_injected_time() {
+    use std::time::{Duration, Instant};
+
+    let mut draft = FilterDraft::default();
+
+    // No last_changed → not elapsed
+    let now = Instant::now();
+    assert!(!draft.debounce_elapsed(now));
+
+    // Just changed → not elapsed
+    draft.last_changed = Some(now);
+    assert!(!draft.debounce_elapsed(now));
+
+    // 100ms later → not elapsed
+    let later_100ms = now + Duration::from_millis(100);
+    assert!(!draft.debounce_elapsed(later_100ms));
+
+    // 200ms later → elapsed
+    let later_200ms = now + Duration::from_millis(FILTER_DEBOUNCE_MS);
+    assert!(draft.debounce_elapsed(later_200ms));
+
+    // 300ms later → still elapsed
+    let later_300ms = now + Duration::from_millis(300);
+    assert!(draft.debounce_elapsed(later_300ms));
+}
+
+#[test]
+fn filter_draft_round_trip() {
+    let spec = TableSearchSpec {
+        text: "test query".into(),
+        mode: TableSearchMode::Fuzzy,
+        case_sensitive: true,
+    };
+    let draft = FilterDraft::from_spec(&spec);
+    let round_tripped = draft.to_spec();
+
+    assert_eq!(spec.text, round_tripped.text);
+    assert_eq!(spec.mode, round_tripped.mode);
+    assert_eq!(spec.case_sensitive, round_tripped.case_sensitive);
+}
+
+#[test]
+fn filter_draft_default() {
+    let draft = FilterDraft::default();
+
+    assert!(draft.text.is_empty());
+    assert_eq!(draft.mode, TableSearchMode::Contains);
+    assert!(!draft.case_sensitive);
+    assert!(draft.last_changed.is_none());
+}
+
+#[test]
+fn set_table_display_filter_syncs_draft() {
+    // Tests that SetTableDisplayFilter updates both config and runtime draft
+    let mut state = SystemState::new_default_config().expect("state");
+    let spec = TableModelSpec::Virtual {
+        rows: 10,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile");
+
+    // Initialize runtime
+    state.table_runtime.entry(tile_id).or_default();
+
+    // Set filter
+    let filter = TableSearchSpec {
+        mode: TableSearchMode::Regex,
+        case_sensitive: true,
+        text: "test".to_string(),
+    };
+    state.update(Message::SetTableDisplayFilter {
+        tile_id,
+        filter: filter.clone(),
+    });
+
+    // Verify config updated
+    assert_eq!(
+        state.user.table_tiles[&tile_id].config.display_filter,
+        filter
+    );
+
+    // Verify draft synced
+    let runtime = state.table_runtime.get(&tile_id).expect("runtime");
+    let draft = runtime.filter_draft.as_ref().expect("draft");
+    assert_eq!(draft.text, "test");
+    assert_eq!(draft.mode, TableSearchMode::Regex);
+    assert!(draft.case_sensitive);
+    // Timestamp should be None after sync (to prevent immediate re-apply)
+    assert!(draft.last_changed.is_none());
 }

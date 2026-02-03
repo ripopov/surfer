@@ -5,6 +5,79 @@ use super::model::{
 use regex::RegexBuilder;
 use std::cmp::Ordering;
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
+
+/// Debounce delay for filter application (milliseconds).
+pub const FILTER_DEBOUNCE_MS: u64 = 200;
+
+/// Draft filter state for debounced live search.
+///
+/// This struct mirrors `TableSearchSpec` fields (mode, case_sensitive, text) plus
+/// a timestamp for debounce tracking. If `TableSearchSpec` gains new fields,
+/// update `FilterDraft` accordingly.
+#[derive(Debug, Clone)]
+pub struct FilterDraft {
+    pub text: String,
+    pub mode: TableSearchMode,
+    pub case_sensitive: bool,
+    pub last_changed: Option<Instant>,
+}
+
+impl FilterDraft {
+    /// Creates a draft from an applied filter spec.
+    #[must_use]
+    pub fn from_spec(spec: &TableSearchSpec) -> Self {
+        Self {
+            text: spec.text.clone(),
+            mode: spec.mode,
+            case_sensitive: spec.case_sensitive,
+            last_changed: None,
+        }
+    }
+
+    /// Converts the draft back to a `TableSearchSpec`.
+    #[must_use]
+    pub fn to_spec(&self) -> TableSearchSpec {
+        TableSearchSpec {
+            text: self.text.clone(),
+            mode: self.mode,
+            case_sensitive: self.case_sensitive,
+        }
+    }
+
+    /// Returns true if the draft differs from the applied filter.
+    #[must_use]
+    pub fn is_dirty(&self, applied: &TableSearchSpec) -> bool {
+        self.text != applied.text
+            || self.mode != applied.mode
+            || self.case_sensitive != applied.case_sensitive
+    }
+
+    /// Returns true if the debounce period has elapsed since last change.
+    /// Accepts `now` parameter for deterministic testing.
+    #[must_use]
+    pub fn debounce_elapsed(&self, now: Instant) -> bool {
+        self.last_changed
+            .is_some_and(|t| now.duration_since(t) >= Duration::from_millis(FILTER_DEBOUNCE_MS))
+    }
+
+    /// Convenience method using current time.
+    #[must_use]
+    pub fn debounce_elapsed_now(&self) -> bool {
+        self.debounce_elapsed(Instant::now())
+    }
+}
+
+impl Default for FilterDraft {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            mode: TableSearchMode::Contains,
+            case_sensitive: false,
+            last_changed: None,
+        }
+    }
+}
 
 /// Returns true if `needle` characters appear in `haystack` in order (subsequence).
 /// For example: "abc" matches "aXbYcZ" but not "bac".
@@ -194,6 +267,8 @@ pub struct TableRuntimeState {
     pub type_search: TypeSearchState,
     /// Scroll state for tracking scroll targets and generation changes.
     pub scroll_state: TableScrollState,
+    /// Draft filter state for debounced live search.
+    pub filter_draft: Option<FilterDraft>,
 }
 
 struct TableFilter {

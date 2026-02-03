@@ -4,9 +4,9 @@ pub mod sources;
 pub mod view;
 
 pub use cache::{
-    PendingScrollOp, TableCache, TableCacheEntry, TableCacheError, TableCacheKey,
-    TableRuntimeState, TableScrollState, TypeSearchState, build_table_cache, format_rows_as_tsv,
-    format_rows_as_tsv_with_header, fuzzy_match,
+    FILTER_DEBOUNCE_MS, FilterDraft, PendingScrollOp, TableCache, TableCacheEntry, TableCacheError,
+    TableCacheKey, TableRuntimeState, TableScrollState, TypeSearchState, build_table_cache,
+    format_rows_as_tsv, format_rows_as_tsv_with_header, fuzzy_match,
 };
 pub use model::{
     AnalysisKind, AnalysisParams, ColumnResizeResult, MIN_COLUMN_WIDTH, NavigationResult,

@@ -1,11 +1,12 @@
 use crate::SystemState;
 use crate::message::Message;
 use crate::table::{
-    PendingScrollOp, ScrollTarget, TableCache, TableCacheKey, TableCell, TableColumnKey,
-    TableModel, TableModelKey, TableRowId, TableSearchMode, TableSearchSpec, TableSelection,
-    TableSelectionMode, TableSortSpec, TableTileId, TableTileState, find_type_search_match,
-    format_selection_count, hidden_columns, navigate_down, navigate_end, navigate_extend_selection,
-    navigate_home, navigate_page_down, navigate_page_up, navigate_up, scroll_target_after_filter,
+    FilterDraft, PendingScrollOp, ScrollTarget, TableCache, TableCacheKey, TableCell,
+    TableColumnKey, TableModel, TableModelKey, TableRowId, TableRuntimeState, TableSearchMode,
+    TableSearchSpec, TableSelection, TableSelectionMode, TableSortSpec, TableTileId,
+    TableTileState, TableViewConfig, find_type_search_match, format_selection_count,
+    hidden_columns, navigate_down, navigate_end, navigate_extend_selection, navigate_home,
+    navigate_page_down, navigate_page_up, navigate_up, scroll_target_after_filter,
     scroll_target_after_sort, selection_on_click_multi, selection_on_click_single,
     selection_on_ctrl_click, selection_on_shift_click, should_clear_selection_on_generation_change,
     sort_indicator, sort_spec_on_click, sort_spec_on_shift_click, visible_columns,
@@ -13,6 +14,7 @@ use crate::table::{
 use egui_extras::{Column, TableBuilder};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// Default row height for normal table rows.
 const ROW_HEIGHT_NORMAL: f32 = 20.0;
@@ -108,6 +110,23 @@ pub fn draw_table_tile(
             ui.heading(&title);
             ui.separator();
 
+            // Always render filter bar first (bound to draft state for focus preservation)
+            {
+                let runtime = state.table_runtime.entry(tile_id).or_default();
+                render_filter_bar(ui, msgs, tile_id, runtime, &tile_state.config);
+            }
+
+            // Check debounce AFTER render_filter_bar updates draft (avoids stale filter apply)
+            check_filter_debounce(state, tile_id, &tile_state.config.display_filter, msgs);
+
+            // Request repaint while draft is dirty (for debounce timer)
+            if let Some(runtime) = state.table_runtime.get(&tile_id)
+                && let Some(draft) = &runtime.filter_draft
+                && draft.is_dirty(&tile_state.config.display_filter)
+            {
+                ui.ctx().request_repaint_after(Duration::from_millis(50));
+            }
+
             // Re-get runtime state after potential mutation
             let runtime = state.table_runtime.get(&tile_id);
 
@@ -142,19 +161,6 @@ pub fn draw_table_tile(
                                         }
                                     })
                                 });
-
-                            // Render filter bar above the table
-                            let total_rows = model.row_count();
-                            render_filter_bar(
-                                ui,
-                                msgs,
-                                tile_id,
-                                &tile_state.config.display_filter,
-                                total_rows,
-                                cache.row_ids.len(),
-                                &selection,
-                                &cache.row_ids,
-                            );
 
                             // Render column visibility toggle
                             let columns_config = &tile_state.config.columns;
@@ -198,10 +204,10 @@ pub fn draw_table_tile(
                         }
                     }
                 } else {
-                    // Loading state
+                    // Loading state - filter bar is already shown above
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("Loading table data...");
+                        ui.label("Filtering...");
                     });
                 }
             } else {
@@ -667,45 +673,73 @@ fn render_table(
     }
 }
 
+/// Checks if the filter draft should be applied (debounce elapsed) and emits message if so.
+/// MUST be called AFTER `render_filter_bar` to avoid applying stale values.
+fn check_filter_debounce(
+    state: &mut SystemState,
+    tile_id: TableTileId,
+    applied_filter: &TableSearchSpec,
+    msgs: &mut Vec<Message>,
+) {
+    let Some(runtime) = state.table_runtime.get_mut(&tile_id) else {
+        return;
+    };
+    let Some(draft) = &runtime.filter_draft else {
+        return;
+    };
+
+    if draft.is_dirty(applied_filter) && draft.debounce_elapsed_now() {
+        let filter_spec = draft.to_spec();
+        msgs.push(Message::SetTableDisplayFilter {
+            tile_id,
+            filter: filter_spec,
+        });
+        // Clear timestamp to prevent re-applying until next change
+        if let Some(d) = &mut runtime.filter_draft {
+            d.last_changed = None;
+        }
+    }
+}
+
 /// Renders the filter bar above the table with text input, mode selector, and case toggle.
-#[allow(clippy::too_many_arguments)]
+/// Uses draft state for UI binding to preserve focus during cache rebuilds.
 fn render_filter_bar(
     ui: &mut egui::Ui,
     msgs: &mut Vec<Message>,
     tile_id: TableTileId,
-    current_filter: &TableSearchSpec,
-    total_rows: usize,
-    filtered_rows: usize,
-    selection: &TableSelection,
-    visible_rows: &[TableRowId],
+    runtime: &mut TableRuntimeState,
+    config: &TableViewConfig,
 ) {
-    // Track changes to emit after rendering
-    let mut filter_changed = false;
-    let mut new_text = current_filter.text.clone();
-    let mut new_mode = current_filter.mode;
-    let mut new_case_sensitive = current_filter.case_sensitive;
+    // Initialize draft from applied filter if needed.
+    // This handles: fresh runtime, state load from disk, external filter changes.
+    let draft = runtime
+        .filter_draft
+        .get_or_insert_with(|| FilterDraft::from_spec(&config.display_filter));
+
+    let mut changed = false;
+    let filter_active = !draft.text.is_empty();
 
     ui.horizontal(|ui| {
         // Filter icon/label to indicate this is a filter bar
-        let filter_active = !current_filter.text.is_empty();
         if filter_active {
             ui.label(egui::RichText::new("Filter:").strong());
         } else {
             ui.label("Filter:");
         }
 
-        // Text input field
+        // Text input bound to draft - MUST have tile-scoped ID for multi-table support
         let text_response = ui.add(
-            egui::TextEdit::singleline(&mut new_text)
+            egui::TextEdit::singleline(&mut draft.text)
+                .id(egui::Id::new(("filter_text", tile_id.0)))
                 .hint_text("Search...")
                 .desired_width(150.0),
         );
         if text_response.changed() {
-            filter_changed = true;
+            changed = true;
         }
 
-        // Mode selector dropdown
-        let mode_label = match current_filter.mode {
+        // Mode selector bound to draft (already tile-scoped via from_id_salt)
+        let mode_label = match draft.mode {
             TableSearchMode::Contains => "Contains",
             TableSearchMode::Exact => "Exact",
             TableSearchMode::Regex => "Regex",
@@ -717,34 +751,34 @@ fn render_filter_bar(
             .width(70.0)
             .show_ui(ui, |ui| {
                 if ui
-                    .selectable_value(&mut new_mode, TableSearchMode::Contains, "Contains")
+                    .selectable_value(&mut draft.mode, TableSearchMode::Contains, "Contains")
                     .changed()
                 {
-                    filter_changed = true;
+                    changed = true;
                 }
                 if ui
-                    .selectable_value(&mut new_mode, TableSearchMode::Exact, "Exact")
+                    .selectable_value(&mut draft.mode, TableSearchMode::Exact, "Exact")
                     .changed()
                 {
-                    filter_changed = true;
+                    changed = true;
                 }
                 if ui
-                    .selectable_value(&mut new_mode, TableSearchMode::Regex, "Regex")
+                    .selectable_value(&mut draft.mode, TableSearchMode::Regex, "Regex")
                     .changed()
                 {
-                    filter_changed = true;
+                    changed = true;
                 }
                 if ui
-                    .selectable_value(&mut new_mode, TableSearchMode::Fuzzy, "Fuzzy")
+                    .selectable_value(&mut draft.mode, TableSearchMode::Fuzzy, "Fuzzy")
                     .changed()
                 {
-                    filter_changed = true;
+                    changed = true;
                 }
             });
 
-        // Case sensitivity toggle
-        let case_label = if new_case_sensitive { "Aa" } else { "aa" };
-        let case_tooltip = if new_case_sensitive {
+        // Case sensitivity toggle bound to draft
+        let case_label = if draft.case_sensitive { "Aa" } else { "aa" };
+        let case_tooltip = if draft.case_sensitive {
             "Case sensitive (click to toggle)"
         } else {
             "Case insensitive (click to toggle)"
@@ -754,49 +788,67 @@ fn render_filter_bar(
             .on_hover_text(case_tooltip)
             .clicked()
         {
-            new_case_sensitive = !new_case_sensitive;
-            filter_changed = true;
+            draft.case_sensitive = !draft.case_sensitive;
+            changed = true;
         }
 
-        // Clear button (only shown when filter is active)
+        // Clear button - applies immediately (no debounce)
         if filter_active
             && ui
                 .add(egui::Button::new("Clear").min_size(egui::vec2(40.0, 0.0)))
                 .clicked()
         {
-            new_text.clear();
-            filter_changed = true;
+            draft.text.clear();
+            draft.mode = TableSearchMode::Contains;
+            draft.case_sensitive = false;
+            draft.last_changed = None; // Clear timestamp to prevent debounce apply
+            msgs.push(Message::SetTableDisplayFilter {
+                tile_id,
+                filter: draft.to_spec(),
+            });
         }
 
-        // Row count and selection count display
+        // Show pending indicator when draft differs from applied
+        if draft.is_dirty(&config.display_filter) {
+            ui.spinner();
+        }
+
+        // Row count and selection count display (right-aligned)
+        // Note: Uses applied filter stats since those reflect currently displayed data
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Selection count (displayed on the right)
-            let hidden_count = selection.count_hidden(visible_rows);
+            let selection = &runtime.selection;
+            let visible_rows: Vec<_> = runtime
+                .cache
+                .as_ref()
+                .and_then(|c| c.get())
+                .map(|c| c.row_ids.clone())
+                .unwrap_or_default();
+            let hidden_count = selection.count_hidden(&visible_rows);
             let selection_text = format_selection_count(selection.len(), hidden_count);
             if !selection_text.is_empty() {
                 ui.label(egui::RichText::new(&selection_text).italics());
                 ui.separator();
             }
 
-            // Row count
-            if filter_active {
-                ui.label(format!("Showing {} of {} rows", filtered_rows, total_rows));
-            } else {
-                ui.label(format!("{} rows", total_rows));
+            // Row count - show from cache if available
+            if let Some(cache_entry) = &runtime.cache
+                && let Some(cache) = cache_entry.get()
+            {
+                let filtered_rows = cache.row_ids.len();
+                if filter_active || draft.is_dirty(&config.display_filter) {
+                    // During filtering, we may not have accurate total
+                    ui.label(format!("{filtered_rows} rows"));
+                } else {
+                    ui.label(format!("{filtered_rows} rows"));
+                }
             }
         });
     });
 
-    // Emit filter change message if needed
-    if filter_changed {
-        msgs.push(Message::SetTableDisplayFilter {
-            tile_id,
-            filter: TableSearchSpec {
-                mode: new_mode,
-                case_sensitive: new_case_sensitive,
-                text: new_text,
-            },
-        });
+    // Mark draft as changed AFTER all UI interactions
+    if changed {
+        draft.last_changed = Some(Instant::now());
     }
 
     ui.separator();

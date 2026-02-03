@@ -2433,9 +2433,11 @@ impl SystemState {
             }
             Message::SetTableDisplayFilter { tile_id, filter } => {
                 if let Some(tile_state) = self.user.table_tiles.get_mut(&tile_id) {
-                    tile_state.config.display_filter = filter;
-                    // Set pending scroll operation to scroll after filter
+                    tile_state.config.display_filter = filter.clone();
+                    // Set pending scroll operation and sync draft to applied filter.
+                    // This handles: Clear button, external API calls, programmatic filter changes.
                     if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
+                        runtime.filter_draft = Some(table::FilterDraft::from_spec(&filter));
                         runtime
                             .scroll_state
                             .set_pending_scroll_op(table::PendingScrollOp::AfterFilter);
