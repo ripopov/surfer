@@ -308,3 +308,408 @@ This mirrors analog cache behavior (AnalogVarState + AnalogCacheEntry + cache_ge
 - Keyboard navigation tests: verify Up/Down/Page/Home/End/type-to-search behavior.
 - Copy tests: verify tab-separated output format for selected rows.
 - Performance tests: large virtual data sets, ensure no per-frame O(n) work and acceptable FPS.
+
+## Staged implementation plan
+
+The implementation is divided into stages. Stages 1-10 use only the Virtual model to build and validate all table infrastructure. Stages 11+ add concrete models for real waveform/transaction data. Each stage includes acceptance tests that must pass before proceeding.
+
+### Stage 1: Core types and module structure
+
+**Goal:** Define all public types and traits; establish module layout.
+
+**Deliverables:**
+- Create `libsurfer/src/table/mod.rs` with module declarations and re-exports.
+- Create `libsurfer/src/table/model.rs` with:
+  - `TableTileId`, `TableRowId` (with Serialize/Deserialize)
+  - `TableModelSpec` enum (all variants, but only Virtual implemented)
+  - `TableSchema`, `TableColumnConfig`, `TableSortSpec`, `TableSearchSpec`
+  - `TableSelectionMode`, `TableSelection`
+  - `TableCell`, `TableSortKey`, `TableAction`
+  - `TableModel` trait definition
+- Create `libsurfer/src/table/cache.rs` with:
+  - `TableCacheKey`, `TableCache`, `TableCacheEntry`, `TableCacheError`
+- Create `libsurfer/src/table/view.rs` with stub `draw_table_tile()`.
+- Create `libsurfer/src/table/sources/mod.rs` and `libsurfer/src/table/sources/virtual_model.rs` with stub.
+
+**Acceptance tests:**
+- [ ] `cargo build` succeeds with new module structure.
+- [ ] Unit test: `TableTileId`, `TableRowId` serialize/deserialize round-trip.
+- [ ] Unit test: `TableModelSpec::Virtual` serializes to expected RON format.
+- [ ] Unit test: `TableViewConfig` with all fields serializes/deserializes correctly.
+
+---
+
+### Stage 2: Virtual model implementation
+
+**Goal:** Implement `VirtualTableModel` that generates deterministic synthetic data for testing.
+
+**Deliverables:**
+- Implement `VirtualTableModel` in `sources/virtual_model.rs`:
+  - Constructor: `new(rows: usize, columns: usize, seed: u64)`
+  - Schema: columns named "Col 0", "Col 1", ... with string keys "col_0", "col_1", ...
+  - `row_count()`: returns configured row count.
+  - `row_id_at(index)`: returns `TableRowId(index as u64)`.
+  - `cell(row, col)`: deterministic string based on `(seed, row.0, col)`.
+  - `sort_key(row, col)`: numeric key derived from cell content for sortable columns.
+  - `search_text(row)`: concatenation of all cell values for the row.
+  - `on_activate(row)`: returns `TableAction::None`.
+- Add factory function: `TableModelSpec::create_model(&self, ...) -> Option<Arc<dyn TableModel>>`.
+
+**Acceptance tests:**
+- [ ] Unit test: `VirtualTableModel::row_count()` returns correct value.
+- [ ] Unit test: `VirtualTableModel::row_id_at()` returns sequential IDs.
+- [ ] Unit test: `VirtualTableModel::cell()` returns deterministic, reproducible content.
+- [ ] Unit test: Same `(rows, columns, seed)` produces identical model output.
+- [ ] Unit test: `VirtualTableModel::schema()` returns expected column count and keys.
+- [ ] Unit test: `VirtualTableModel::search_text()` includes all column values.
+
+---
+
+### Stage 3: Cache system
+
+**Goal:** Implement async cache building with invalidation and stale-result rejection.
+
+**Deliverables:**
+- Implement `TableCacheEntry::new()`, `is_ready()`, `get()`, `set()`.
+- Implement `TableCache` structure: `row_ids: Vec<TableRowId>`, `search_texts: Vec<String>`, `sort_keys: Vec<Vec<TableSortKey>>`.
+- Implement cache builder function (runs off-thread):
+  - Takes `Arc<dyn TableModel>`, `TableSearchSpec`, `Vec<TableSortSpec>`.
+  - Builds filtered and sorted row index.
+  - Returns `Result<TableCache, TableCacheError>`.
+- Add `Message::BuildTableCache` and `Message::TableCacheBuilt` to `message.rs`.
+- Implement message handlers in `SystemState`:
+  - `BuildTableCache`: spawn worker if not already in-flight for same cache_key.
+  - `TableCacheBuilt`: apply result only if cache_key matches current state.
+- Add in-flight tracking to prevent duplicate builds.
+
+**Acceptance tests:**
+- [ ] Unit test: `TableCacheEntry` starts not ready, becomes ready after `set()`.
+- [ ] Unit test: Cache builder produces correct row_ids for unfiltered, unsorted input.
+- [ ] Unit test: Cache builder filters rows correctly (contains mode).
+- [ ] Unit test: Cache builder sorts rows correctly (single column, ascending/descending).
+- [ ] Unit test: Cache builder handles empty result set gracefully.
+- [ ] Unit test: Cache builder returns `InvalidSearch` error for bad regex.
+- [ ] Integration test: `TableCacheBuilt` with stale cache_key is ignored (simulate via delayed message).
+
+---
+
+### Stage 4: Tile integration
+
+**Goal:** Integrate table tiles into the egui_tiles layout system.
+
+**Deliverables:**
+- Add `SurferPane::Table(TableTileId)` variant to `tiles.rs`.
+- Add `TableTileState { spec: TableModelSpec, config: TableViewConfig }` to `state.rs`.
+- Add `table_tiles: HashMap<TableTileId, TableTileState>` to `UserState`.
+- Add `table_runtime: HashMap<TableTileId, TableRuntimeState>` to `SystemState` (non-serialized).
+  - `TableRuntimeState`: current cache entry, selection, scroll offset, error state.
+- Implement `SurferTileTree::add_table_tile(spec) -> TableTileId`.
+- Update `SurferTileBehavior::pane_ui()` to dispatch to `draw_table_tile()`.
+- Update `SurferTileBehavior::is_tab_closable()` to allow closing table tiles.
+- Update `SurferTileBehavior::on_tab_close()` to clean up table tile state.
+- Add `Message::AddTableTile` and `Message::RemoveTableTile` handlers.
+
+**Acceptance tests:**
+- [ ] Integration test: `AddTableTile` creates tile visible in tile tree.
+- [ ] Integration test: Closing table tile removes it from `table_tiles` and `table_runtime`.
+- [ ] Serialization test: Save state with table tile, reload, tile config preserved.
+- [ ] Serialization test: Runtime state (selection, scroll) is NOT serialized.
+- [ ] Unit test: `TableTileId` generation produces unique IDs.
+
+---
+
+### Stage 5: Basic table rendering
+
+**Goal:** Render a table with header and virtualized rows using `egui_extras::TableBuilder`.
+
+**Deliverables:**
+- Implement `draw_table_tile()` in `view.rs`:
+  - Retrieve `TableTileState` and `TableRuntimeState`.
+  - If cache not ready, show loading spinner and emit `BuildTableCache`.
+  - If cache error, show error message.
+  - Otherwise, render table with `egui_extras::TableBuilder`.
+- Render header row with column labels from schema.
+- Render body rows using virtualization (`vscroll(true)`, `row(height, |row| ...)`).
+- Apply theme colors from `SurferConfig`.
+- Implement basic horizontal scrolling for wide tables.
+- Wire up `dense_rows` config (adjust row height and font).
+- Wire up `sticky_header` config.
+
+**Acceptance tests:**
+- [ ] UI snapshot test: Virtual table (10 rows, 3 columns) renders correctly.
+- [ ] UI snapshot test: Virtual table (1000 rows) renders without lag (virtualization working).
+- [ ] UI snapshot test: Table with `dense_rows: true` has reduced row height.
+- [ ] UI snapshot test: Loading state shows spinner.
+- [ ] UI snapshot test: Error state shows error message.
+- [ ] Manual test: Vertical scroll is smooth with 10,000 rows.
+
+---
+
+### Stage 6: Sorting
+
+**Goal:** Implement column header click-to-sort with multi-column support.
+
+**Deliverables:**
+- Make column headers clickable.
+- On click: set primary sort to clicked column, toggle direction if already primary.
+- On Shift+click: add/modify secondary sort.
+- Render sort indicators (▲/▼) with priority numbers in header.
+- Emit `Message::SetTableSort` on sort change.
+- Implement message handler to update `TableViewConfig.sort`.
+- Invalidate cache (create new entry) when sort changes.
+- Implement stable sorting in cache builder using `row_id_at()` order as tie-breaker.
+
+**Acceptance tests:**
+- [ ] Unit test: Stable sort preserves original order for equal keys.
+- [ ] Unit test: Multi-column sort applies correct priority.
+- [ ] Integration test: Click column header updates sort and rebuilds cache.
+- [ ] Integration test: Shift+click adds secondary sort without clearing primary.
+- [ ] Integration test: Click without Shift resets to single-column sort.
+- [ ] UI snapshot test: Sort indicators render correctly (▲1, ▼2).
+
+---
+
+### Stage 7: Display filter (search)
+
+**Goal:** Implement view-level filtering with contains/regex/fuzzy modes.
+
+**Deliverables:**
+- Add filter input UI above table (text field + mode selector + case toggle).
+- Emit `Message::SetTableDisplayFilter` on filter change.
+- Implement message handler to update `TableViewConfig.display_filter`.
+- Invalidate cache when filter changes.
+- Implement filtering in cache builder:
+  - Contains: substring match on `search_text`.
+  - Regex: compile pattern, match against `search_text`.
+  - Fuzzy: implement simple fuzzy matching (subsequence).
+- Cache compiled regex to avoid repeated compilation.
+- Show filter badge indicating active filter.
+- Show row count: "Showing N of M rows".
+
+**Acceptance tests:**
+- [ ] Unit test: Contains filter matches substring correctly.
+- [ ] Unit test: Regex filter matches pattern correctly.
+- [ ] Unit test: Fuzzy filter matches subsequence correctly.
+- [ ] Unit test: Case-insensitive matching works.
+- [ ] Unit test: Invalid regex returns `TableCacheError::InvalidSearch`.
+- [ ] Integration test: Filter change rebuilds cache with filtered rows.
+- [ ] UI snapshot test: Filter input and badge render correctly.
+- [ ] UI snapshot test: "Showing N of M rows" displays correct counts.
+
+---
+
+### Stage 8: Selection
+
+**Goal:** Implement single and multi-row selection with persistence across sort/filter.
+
+**Deliverables:**
+- Implement `TableSelection` in runtime state.
+- Single-click row: select (clear previous in Single mode, toggle in Multi mode).
+- Shift+click: range selection from anchor.
+- Ctrl/Cmd+click: toggle selection without clearing.
+- Highlight selected rows with theme selection color.
+- Track selection by `TableRowId`, not by index.
+- Selection persists when sort changes (rows reorder but selection preserved).
+- Selection persists when filter hides rows (hidden rows stay selected).
+- Show selection count: "N selected" or "N selected (M hidden)".
+- Clear selection when `cache_generation` changes (waveform reload).
+
+**Acceptance tests:**
+- [ ] Unit test: Single mode replaces selection on click.
+- [ ] Unit test: Multi mode toggles on Ctrl+click.
+- [ ] Unit test: Range selection selects all rows between anchor and target.
+- [ ] Integration test: Selection persists after sort.
+- [ ] Integration test: Selection persists for filtered-out rows, count shows "(M hidden)".
+- [ ] Integration test: Selection clears on generation change.
+- [ ] UI snapshot test: Selected rows are highlighted.
+
+---
+
+### Stage 9: Keyboard navigation and clipboard
+
+**Goal:** Full keyboard navigation and copy-to-clipboard support.
+
+**Deliverables:**
+- Implement keyboard handling when table has focus:
+  - Up/Down: move selection by one row.
+  - Page Up/Down: move by visible page height.
+  - Home/End: jump to first/last row.
+  - Ctrl+Home/Ctrl+End: jump and scroll to first/last.
+  - Enter: activate selected row (emit `TableAction`).
+  - Escape: clear selection.
+  - Ctrl/Cmd+A: select all (in Multi mode).
+  - Ctrl/Cmd+C: copy selected rows to clipboard.
+- Implement type-to-search: buffer keystrokes, fuzzy jump to matching row.
+- Implement copy format: tab-separated values, visible columns only.
+- Scroll to keep focused/selected row visible.
+
+**Acceptance tests:**
+- [ ] Integration test: Up/Down moves selection correctly.
+- [ ] Integration test: Page Up/Down moves by page.
+- [ ] Integration test: Home/End jumps to boundaries.
+- [ ] Integration test: Enter activates row (check Message emitted).
+- [ ] Integration test: Ctrl+C copies correct tab-separated format.
+- [ ] Integration test: Type-to-search jumps to matching row.
+- [ ] Integration test: Selection scrolls into view.
+
+---
+
+### Stage 10: Scroll behavior and polish
+
+**Goal:** Implement scroll position preservation rules and final polish.
+
+**Deliverables:**
+- After sort: scroll to keep first selected row visible.
+- After filter: scroll to top if selected row is hidden.
+- After activation: ensure activated row is visible.
+- Implement column resizing (drag column borders).
+- Persist column widths in `TableViewConfig.columns`.
+- Implement column visibility toggle (context menu or column picker).
+- Wire up accessibility (ensure rows are keyboard-focusable, accesskit labels).
+- Performance optimization: ensure no per-frame O(n) work.
+
+**Acceptance tests:**
+- [ ] Integration test: Sort preserves scroll to selected row.
+- [ ] Integration test: Filter scrolls to top when selection hidden.
+- [ ] Integration test: Column resize persists to config.
+- [ ] UI snapshot test: Column resize handles visible.
+- [ ] Performance test: 100,000 row table maintains 60 FPS scroll.
+- [ ] Accessibility test: Screen reader can navigate table rows.
+
+---
+
+### Stage 11: SignalChangeList model
+
+**Goal:** Implement table model for signal value transitions.
+
+**Prerequisites:** Stages 1-10 complete.
+
+**Deliverables:**
+- Implement `SignalChangeListModel` in `sources/signal_change_list.rs`:
+  - Constructor: takes `VariableRef`, `field: Vec<String>`, wave data reference.
+  - Schema: columns for "Time", "Value", optional "Duration".
+  - `row_id_at(index)`: timestamp of transition (ensures uniqueness).
+  - `cell()`: format time using `TimeStringFormatting`, value using translator.
+  - `sort_key()`: numeric timestamp for Time, formatted value for Value.
+  - `on_activate(row)`: return `TableAction::CursorSet(timestamp)`.
+- Wire up `TableModelSpec::SignalChangeList` in factory.
+- Handle missing variable gracefully (`TableCacheError::ModelNotFound`).
+- Invalidate cache on waveform reload (generation change).
+
+**Acceptance tests:**
+- [ ] Unit test: Model extracts correct transitions from test waveform.
+- [ ] Unit test: Time column formats according to current `TimeUnit`.
+- [ ] Unit test: Value column uses correct translator.
+- [ ] Integration test: Activating row sets cursor to transition time.
+- [ ] Integration test: Waveform reload clears cache and selection.
+- [ ] UI snapshot test: SignalChangeList renders for sample VCD.
+
+---
+
+### Stage 12: TransactionTrace model
+
+**Goal:** Implement table model for FTR transaction traces.
+
+**Prerequisites:** Stages 1-10 complete.
+
+**Deliverables:**
+- Implement `TransactionTraceModel` in `sources/transaction_trace.rs`:
+  - Constructor: takes `StreamScopeRef`, optional `TransactionStreamRef`.
+  - Schema: columns for "Type", "Start", "End", "Duration", "Generator", plus attribute columns.
+  - `row_id_at(index)`: transaction ID from FTR.
+  - `cell()`: format times, extract attributes.
+  - `on_activate(row)`: return `TableAction::FocusTransaction(tx_ref)`.
+- Wire up `TableModelSpec::TransactionTrace` in factory.
+- Handle missing stream gracefully.
+- Dynamic schema: attribute columns derived from transaction data.
+
+**Acceptance tests:**
+- [ ] Unit test: Model extracts transactions from test FTR data.
+- [ ] Unit test: Duration calculated correctly from start/end.
+- [ ] Unit test: Attribute columns appear in schema.
+- [ ] Integration test: Activating row focuses transaction in viewer.
+- [ ] UI snapshot test: TransactionTrace renders for sample FTR.
+
+---
+
+### Stage 13: SearchResults model
+
+**Goal:** Implement source-level search producing a derived table.
+
+**Prerequisites:** Stages 1-10 complete.
+
+**Deliverables:**
+- Implement `SearchResultsModel` in `sources/search_results.rs`:
+  - Constructor: takes `TableSearchSpec` (source_query), searches across signals.
+  - Schema: columns for "Signal", "Time", "Value", "Context".
+  - Each row: one occurrence of search pattern in waveform data.
+  - `row_id_at(index)`: composite ID from signal + timestamp.
+  - `on_activate(row)`: return `TableAction::CursorSet` + highlight signal.
+- Wire up `TableModelSpec::SearchResults` in factory.
+- Search runs in worker thread (can be slow for large waveforms).
+- Show progress indicator for long searches.
+
+**Acceptance tests:**
+- [ ] Unit test: Search finds correct occurrences in test data.
+- [ ] Unit test: Results include signal name and context.
+- [ ] Integration test: Activating row jumps to time and highlights signal.
+- [ ] Integration test: Long search shows progress, can be cancelled.
+- [ ] UI snapshot test: SearchResults renders for sample search.
+
+---
+
+### Stage 14: Custom model support
+
+**Goal:** Enable external/plugin models via Custom variant.
+
+**Prerequisites:** Stages 1-10 complete.
+
+**Deliverables:**
+- Define `CustomModelRegistry` for registering model factories by key.
+- Wire up `TableModelSpec::Custom` to look up factory by key.
+- Document API for creating custom models.
+- Example: WASM-based custom table model.
+
+**Acceptance tests:**
+- [ ] Unit test: Custom model factory registration works.
+- [ ] Unit test: Unknown custom key returns `ModelNotFound` error.
+- [ ] Integration test: Custom model renders in table tile.
+
+---
+
+### Stage 15 (v2): AnalysisResults model
+
+**Goal:** Implement derived analysis metrics (deferred to v2).
+
+**Prerequisites:** Stages 1-10 complete, analysis framework designed.
+
+**Deliverables:**
+- Define `AnalysisKind` enum: `TopSpikes`, `LongestIdle`, `GlitchDetection`, etc.
+- Define `AnalysisParams` for configuring each analysis type.
+- Implement analysis workers that produce table rows.
+- Wire up `TableModelSpec::AnalysisResults` in factory.
+
+**Acceptance tests:**
+- [ ] To be defined when v2 analysis framework is designed.
+
+---
+
+### Implementation order summary
+
+```
+MVP (Virtual model only):
+  Stage 1  → Stage 2  → Stage 3  → Stage 4  → Stage 5
+     ↓
+  Stage 6  → Stage 7  → Stage 8  → Stage 9  → Stage 10
+     ↓
+Real data models (can be parallelized):
+  Stage 11 (SignalChangeList)
+  Stage 12 (TransactionTrace)
+  Stage 13 (SearchResults)
+  Stage 14 (Custom)
+     ↓
+Future:
+  Stage 15 (AnalysisResults - v2)
+```
+
+Each stage should be completed with all acceptance tests passing before moving to the next. Stages 11-14 can be implemented in parallel after Stage 10 is complete.
