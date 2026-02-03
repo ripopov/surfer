@@ -135,6 +135,51 @@ impl TypeSearchState {
     }
 }
 
+/// Pending scroll operation type.
+/// Used to determine scroll behavior after cache rebuild.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingScrollOp {
+    /// Sort changed - scroll to keep first selected row visible.
+    AfterSort,
+    /// Filter changed - scroll to top if selected row hidden.
+    AfterFilter,
+    /// Activation - ensure activated row is visible.
+    AfterActivation(super::model::TableRowId),
+}
+
+/// Scroll state stored in TableRuntimeState.
+#[derive(Debug, Clone, Default)]
+pub struct TableScrollState {
+    /// Target row to scroll to (set after sort/filter/activation).
+    pub scroll_target: Option<super::model::ScrollTarget>,
+    /// Previous generation for detecting waveform reload.
+    pub last_generation: u64,
+    /// Pending scroll operation (set when sort/filter changes, processed after cache rebuild).
+    pub pending_scroll_op: Option<PendingScrollOp>,
+}
+
+impl TableScrollState {
+    /// Consumes and returns the scroll target, resetting it to None.
+    pub fn take_scroll_target(&mut self) -> Option<super::model::ScrollTarget> {
+        self.scroll_target.take()
+    }
+
+    /// Sets a new scroll target.
+    pub fn set_scroll_target(&mut self, target: super::model::ScrollTarget) {
+        self.scroll_target = Some(target);
+    }
+
+    /// Consumes and returns the pending scroll operation, resetting it to None.
+    pub fn take_pending_scroll_op(&mut self) -> Option<PendingScrollOp> {
+        self.pending_scroll_op.take()
+    }
+
+    /// Sets a pending scroll operation.
+    pub fn set_pending_scroll_op(&mut self, op: PendingScrollOp) {
+        self.pending_scroll_op = Some(op);
+    }
+}
+
 /// Runtime state for a table tile (non-serialized).
 #[derive(Debug, Default)]
 pub struct TableRuntimeState {
@@ -147,6 +192,8 @@ pub struct TableRuntimeState {
     pub scroll_offset: f32,
     /// Type-to-search state for keyboard navigation.
     pub type_search: TypeSearchState,
+    /// Scroll state for tracking scroll targets and generation changes.
+    pub scroll_state: TableScrollState,
 }
 
 struct TableFilter {

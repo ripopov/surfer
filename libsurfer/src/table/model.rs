@@ -855,3 +855,186 @@ pub fn find_type_search_match(
 
     None
 }
+
+// ========================
+// Stage 10: Scroll Target Functions
+// ========================
+
+/// Scroll target after a table operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScrollTarget {
+    /// Keep current scroll position.
+    Preserve,
+    /// Scroll to make the given row visible.
+    ToRow(TableRowId),
+    /// Scroll to the top of the table.
+    ToTop,
+    /// Scroll to the bottom of the table.
+    ToBottom,
+}
+
+/// Computes scroll target after sort change.
+/// - If selection exists and first selected row is visible, scroll to it.
+/// - Otherwise, preserve approximate scroll position.
+#[must_use]
+pub fn scroll_target_after_sort(
+    selection: &TableSelection,
+    new_visible_rows: &[TableRowId],
+) -> ScrollTarget {
+    if selection.is_empty() {
+        return ScrollTarget::Preserve;
+    }
+
+    // Find first selected row in new visible order
+    for &row_id in new_visible_rows {
+        if selection.contains(row_id) {
+            return ScrollTarget::ToRow(row_id);
+        }
+    }
+
+    // Selected rows not in visible set (should not happen unless filter hid them)
+    ScrollTarget::Preserve
+}
+
+/// Computes scroll target after filter change.
+/// - If selected row is still visible, scroll to it.
+/// - If selected row is hidden, scroll to top.
+/// - If no selection, preserve position.
+#[must_use]
+pub fn scroll_target_after_filter(
+    selection: &TableSelection,
+    new_visible_rows: &[TableRowId],
+) -> ScrollTarget {
+    if selection.is_empty() {
+        return ScrollTarget::Preserve;
+    }
+
+    // Check if any selected row is visible
+    let visible_selected = selection.count_visible(new_visible_rows);
+    if visible_selected > 0 {
+        // Find first visible selected row
+        for &row_id in new_visible_rows {
+            if selection.contains(row_id) {
+                return ScrollTarget::ToRow(row_id);
+            }
+        }
+    }
+
+    // All selected rows are hidden - scroll to top
+    ScrollTarget::ToTop
+}
+
+/// Computes scroll target after activation.
+/// Always scrolls to make activated row visible.
+#[must_use]
+pub fn scroll_target_after_activation(activated_row: TableRowId) -> ScrollTarget {
+    ScrollTarget::ToRow(activated_row)
+}
+
+// ========================
+// Stage 10: Column Configuration Functions
+// ========================
+
+/// Minimum column width in pixels to prevent invisible columns.
+pub const MIN_COLUMN_WIDTH: f32 = 20.0;
+
+/// Result of a column resize operation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColumnResizeResult {
+    /// Updated column configurations.
+    pub columns: Vec<TableColumnConfig>,
+    /// Whether any column was actually resized.
+    pub changed: bool,
+}
+
+/// Updates column width in configuration.
+/// Enforces minimum width constraint.
+#[must_use]
+pub fn resize_column(
+    columns: &[TableColumnConfig],
+    column_key: &TableColumnKey,
+    new_width: f32,
+    min_width: f32,
+) -> ColumnResizeResult {
+    let min_width = min_width.max(MIN_COLUMN_WIDTH);
+    let clamped_width = new_width.max(min_width);
+
+    let mut result = columns.to_vec();
+    let mut changed = false;
+
+    for col in &mut result {
+        if &col.key == column_key {
+            let current_width = col.width.unwrap_or(100.0);
+            // Use approximate equality for floats
+            if (current_width - clamped_width).abs() > 0.1 {
+                col.width = Some(clamped_width);
+                changed = true;
+            }
+            break;
+        }
+    }
+
+    ColumnResizeResult {
+        columns: result,
+        changed,
+    }
+}
+
+/// Toggles column visibility.
+/// Returns updated column configuration.
+/// Will not hide the last visible column.
+#[must_use]
+pub fn toggle_column_visibility(
+    columns: &[TableColumnConfig],
+    column_key: &TableColumnKey,
+) -> Vec<TableColumnConfig> {
+    let visible_count = columns.iter().filter(|c| c.visible).count();
+
+    let mut result = columns.to_vec();
+    for col in &mut result {
+        if &col.key == column_key {
+            // Don't hide the last visible column
+            if col.visible && visible_count <= 1 {
+                break;
+            }
+            col.visible = !col.visible;
+            break;
+        }
+    }
+
+    result
+}
+
+/// Returns list of visible column keys in order.
+#[must_use]
+pub fn visible_columns(columns: &[TableColumnConfig]) -> Vec<TableColumnKey> {
+    columns
+        .iter()
+        .filter(|c| c.visible)
+        .map(|c| c.key.clone())
+        .collect()
+}
+
+/// Returns list of hidden column keys.
+#[must_use]
+pub fn hidden_columns(columns: &[TableColumnConfig]) -> Vec<TableColumnKey> {
+    columns
+        .iter()
+        .filter(|c| !c.visible)
+        .map(|c| c.key.clone())
+        .collect()
+}
+
+// ========================
+// Stage 10: Generation Tracking
+// ========================
+
+/// Checks if cache generation has changed and selection should be cleared.
+/// Returns true if generation changed (indicating waveform reload).
+#[must_use]
+pub fn should_clear_selection_on_generation_change(
+    current_generation: u64,
+    previous_generation: u64,
+) -> bool {
+    current_generation != previous_generation
+}

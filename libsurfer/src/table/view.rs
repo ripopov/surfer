@@ -1,12 +1,14 @@
 use crate::SystemState;
 use crate::message::Message;
 use crate::table::{
-    TableCache, TableCacheKey, TableCell, TableModel, TableModelKey, TableRowId, TableSearchMode,
-    TableSearchSpec, TableSelection, TableSelectionMode, TableSortSpec, TableTileId,
-    TableTileState, find_type_search_match, format_selection_count, navigate_down, navigate_end,
-    navigate_extend_selection, navigate_home, navigate_page_down, navigate_page_up, navigate_up,
-    selection_on_click_multi, selection_on_click_single, selection_on_ctrl_click,
-    selection_on_shift_click, sort_indicator, sort_spec_on_click, sort_spec_on_shift_click,
+    PendingScrollOp, ScrollTarget, TableCache, TableCacheKey, TableCell, TableColumnKey,
+    TableModel, TableModelKey, TableRowId, TableSearchMode, TableSearchSpec, TableSelection,
+    TableSelectionMode, TableSortSpec, TableTileId, TableTileState, find_type_search_match,
+    format_selection_count, hidden_columns, navigate_down, navigate_end, navigate_extend_selection,
+    navigate_home, navigate_page_down, navigate_page_up, navigate_up, scroll_target_after_filter,
+    scroll_target_after_sort, selection_on_click_multi, selection_on_click_single,
+    selection_on_ctrl_click, selection_on_shift_click, should_clear_selection_on_generation_change,
+    sort_indicator, sort_spec_on_click, sort_spec_on_shift_click, visible_columns,
 };
 use egui_extras::{Column, TableBuilder};
 use std::collections::HashMap;
@@ -54,13 +56,22 @@ pub fn draw_table_tile(
     // Get or create runtime state
     let runtime = state.table_runtime.entry(tile_id).or_default();
 
+    // Get current generation from wave data (0 if no wave data loaded)
+    let current_generation = state.user.waves.as_ref().map_or(0, |w| w.cache_generation);
+
+    // Check if generation changed and clear selection if so
+    let last_generation = runtime.scroll_state.last_generation;
+    if should_clear_selection_on_generation_change(current_generation, last_generation) {
+        runtime.selection.clear();
+        runtime.scroll_state.last_generation = current_generation;
+    }
+
     // Compute current cache key
-    // For now, use tile_id as a simple model_key; generation is 0 until waveform reload support
     let cache_key = TableCacheKey {
         model_key: TableModelKey(tile_id.0),
         display_filter,
         view_sort,
-        generation: 0,
+        generation: current_generation,
     };
 
     // Check if we need to request a cache build
@@ -117,6 +128,23 @@ pub fn draw_table_tile(
                             let selection = runtime.selection.clone();
                             let type_search_buffer = runtime.type_search.buffer.clone();
 
+                            // Process pending scroll operations
+                            let pending_op = runtime.scroll_state.pending_scroll_op;
+                            let scroll_target =
+                                runtime.scroll_state.scroll_target.clone().or_else(|| {
+                                    pending_op.map(|op| match op {
+                                        PendingScrollOp::AfterSort => {
+                                            scroll_target_after_sort(&selection, &cache.row_ids)
+                                        }
+                                        PendingScrollOp::AfterFilter => {
+                                            scroll_target_after_filter(&selection, &cache.row_ids)
+                                        }
+                                        PendingScrollOp::AfterActivation(row) => {
+                                            ScrollTarget::ToRow(row)
+                                        }
+                                    })
+                                });
+
                             // Render filter bar above the table
                             render_filter_bar(
                                 ui,
@@ -128,6 +156,13 @@ pub fn draw_table_tile(
                                 &selection,
                                 &cache.row_ids,
                             );
+
+                            // Render column visibility toggle
+                            let columns_config = &tile_state.config.columns;
+                            let hidden_cols = hidden_columns(columns_config);
+                            if !hidden_cols.is_empty() {
+                                render_column_visibility_bar(ui, msgs, tile_id, &hidden_cols);
+                            }
 
                             // Show type-to-search indicator if active
                             if !type_search_buffer.is_empty() {
@@ -149,6 +184,7 @@ pub fn draw_table_tile(
                                 model.clone(),
                                 cache,
                                 &tile_state.config.sort,
+                                &tile_state.config.columns,
                                 &selection,
                                 selection_mode,
                                 dense_rows,
@@ -156,6 +192,7 @@ pub fn draw_table_tile(
                                 header_bg,
                                 text_color,
                                 selection_bg,
+                                scroll_target.as_ref(),
                             );
                         } else {
                             ui.label("Model not available");
@@ -184,6 +221,12 @@ pub fn draw_table_tile(
     let has_focus = ui.memory(|mem| mem.has_focus(table_area_id));
     if has_focus {
         handle_keyboard_navigation(state, ui, msgs, tile_id, selection_mode, table_tiles);
+    }
+
+    // Clear pending scroll operations after rendering
+    if let Some(runtime) = state.table_runtime.get_mut(&tile_id) {
+        runtime.scroll_state.pending_scroll_op = None;
+        runtime.scroll_state.scroll_target = None;
     }
 }
 
@@ -363,6 +406,7 @@ fn render_table(
     model: Arc<dyn TableModel>,
     cache: &TableCache,
     current_sort: &[TableSortSpec],
+    columns_config: &[crate::table::TableColumnConfig],
     selection: &TableSelection,
     selection_mode: TableSelectionMode,
     dense_rows: bool,
@@ -370,6 +414,7 @@ fn render_table(
     header_bg: egui::Color32,
     text_color: egui::Color32,
     selection_bg: egui::Color32,
+    scroll_target: Option<&ScrollTarget>,
 ) {
     let schema = model.schema();
     let row_height = if dense_rows {
@@ -378,36 +423,91 @@ fn render_table(
         ROW_HEIGHT_NORMAL
     };
 
-    // Build columns from schema
+    // Build list of visible columns with their indices
+    // If columns_config is empty, show all schema columns
+    let visible_col_info: Vec<(usize, &crate::table::TableColumn)> = if columns_config.is_empty() {
+        schema.columns.iter().enumerate().collect()
+    } else {
+        // Get visible columns in config order
+        let vis_keys = visible_columns(columns_config);
+        vis_keys
+            .iter()
+            .filter_map(|key| {
+                schema
+                    .columns
+                    .iter()
+                    .position(|col| &col.key == key)
+                    .map(|idx| (idx, &schema.columns[idx]))
+            })
+            .collect()
+    };
+
+    // Build columns from visible columns
     let mut builder = TableBuilder::new(ui)
         .striped(true)
         .vscroll(true)
         .sense(egui::Sense::click())
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
 
-    // Add columns based on schema
-    for col in &schema.columns {
-        let width = col.default_width.unwrap_or(100.0);
-        let column = if col.default_resizable {
+    // Add columns based on visible columns
+    for (schema_idx, col) in &visible_col_info {
+        // Get width from config if available, otherwise use schema default
+        let width = columns_config
+            .iter()
+            .find(|c| c.key == col.key)
+            .and_then(|c| c.width)
+            .or(col.default_width)
+            .unwrap_or(100.0);
+
+        let resizable = columns_config
+            .iter()
+            .find(|c| c.key == col.key)
+            .map(|c| c.resizable)
+            .unwrap_or(col.default_resizable);
+
+        let column = if resizable {
             Column::initial(width).resizable(true).clip(true)
         } else {
             Column::exact(width)
         };
         builder = builder.column(column);
+        let _ = schema_idx; // Used in body rendering
     }
 
-    // Track sort changes and selection changes to emit after rendering
+    // Determine scroll-to row index if scroll target specified
+    let scroll_to_row = scroll_target.and_then(|target| match target {
+        ScrollTarget::ToRow(row_id) => cache.row_ids.iter().position(|&r| r == *row_id),
+        ScrollTarget::ToTop => Some(0),
+        ScrollTarget::ToBottom if !cache.row_ids.is_empty() => Some(cache.row_ids.len() - 1),
+        _ => None,
+    });
+
+    // Apply scroll target using egui's scroll_to_row
+    if let Some(row_idx) = scroll_to_row {
+        builder = builder.scroll_to_row(row_idx, Some(egui::Align::Center));
+    }
+
+    // Track sort changes, selection changes, and visibility changes to emit after rendering
     let mut new_sort: Option<Vec<TableSortSpec>> = None;
     let mut new_selection: Option<TableSelection> = None;
+    let mut new_visibility_toggle: Option<TableColumnKey> = None;
 
     // Clone data needed inside closures
     let selection_clone = selection.clone();
     let visible_rows: Vec<TableRowId> = cache.row_ids.clone();
 
+    // Track column keys and indices for context menu and rendering
+    let column_keys: Vec<TableColumnKey> = visible_col_info
+        .iter()
+        .map(|(_, c)| c.key.clone())
+        .collect();
+    let all_schema_columns: Vec<TableColumnKey> =
+        schema.columns.iter().map(|c| c.key.clone()).collect();
+
     // Render header with clickable sorting
     builder
         .header(row_height, |mut header| {
-            for col in &schema.columns {
+            for (_, col) in &visible_col_info {
                 header.col(|ui| {
                     ui.painter()
                         .rect_filled(ui.available_rect_before_wrap(), 0.0, header_bg);
@@ -443,8 +543,29 @@ fn render_table(
                         new_sort = Some(computed_sort);
                     }
 
+                    // Context menu for column visibility
+                    response.context_menu(|ui| {
+                        ui.label("Column visibility:");
+                        ui.separator();
+                        for key in &all_schema_columns {
+                            let is_visible = column_keys.contains(key);
+                            let col_label = schema
+                                .columns
+                                .iter()
+                                .find(|c| &c.key == key)
+                                .map(|c| c.label.as_str())
+                                .unwrap_or("Unknown");
+                            if ui.checkbox(&mut is_visible.clone(), col_label).clicked() {
+                                new_visibility_toggle = Some(key.clone());
+                                ui.close();
+                            }
+                        }
+                    });
+
                     // Show tooltip for sorting help
-                    response.on_hover_text("Click to sort, Shift+click for multi-column sort");
+                    response.on_hover_text(
+                        "Click to sort, Shift+click for multi-column sort, right-click for column options",
+                    );
                 });
             }
         })
@@ -460,7 +581,8 @@ fn render_table(
                         row.set_selected(true);
                     }
 
-                    for col_idx in 0..schema.columns.len() {
+                    // Render only visible columns
+                    for (col_idx, _) in &visible_col_info {
                         row.col(|ui| {
                             // Paint selection background if selected
                             if is_selected {
@@ -471,7 +593,7 @@ fn render_table(
                                 );
                             }
 
-                            let cell = model.cell(row_id, col_idx);
+                            let cell = model.cell(row_id, *col_idx);
                             let text = match cell {
                                 TableCell::Text(s) => s,
                                 TableCell::RichText(rt) => {
@@ -535,6 +657,14 @@ fn render_table(
     // Emit selection change message if needed
     if let Some(selection) = new_selection {
         msgs.push(Message::SetTableSelection { tile_id, selection });
+    }
+
+    // Emit column visibility toggle message if needed
+    if let Some(column_key) = new_visibility_toggle {
+        msgs.push(Message::ToggleTableColumnVisibility {
+            tile_id,
+            column_key,
+        });
     }
 }
 
@@ -671,4 +801,41 @@ fn render_filter_bar(
     }
 
     ui.separator();
+}
+
+/// Renders a bar showing hidden columns that can be clicked to show.
+fn render_column_visibility_bar(
+    ui: &mut egui::Ui,
+    msgs: &mut Vec<Message>,
+    tile_id: TableTileId,
+    hidden_cols: &[TableColumnKey],
+) {
+    if hidden_cols.is_empty() {
+        return;
+    }
+
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(format!("{} hidden column(s):", hidden_cols.len()))
+                .small()
+                .italics(),
+        );
+
+        for key in hidden_cols {
+            let label = match key {
+                TableColumnKey::Str(s) => s.clone(),
+                TableColumnKey::Id(id) => format!("Col {id}"),
+            };
+            if ui
+                .small_button(&label)
+                .on_hover_text("Click to show")
+                .clicked()
+            {
+                msgs.push(Message::ToggleTableColumnVisibility {
+                    tile_id,
+                    column_key: key.clone(),
+                });
+            }
+        }
+    });
 }

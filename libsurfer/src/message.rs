@@ -17,8 +17,8 @@ use crate::graphics::{Graphic, GraphicId};
 use crate::hierarchy::{ParameterDisplayLocation, ScopeExpandType};
 use crate::state::UserState;
 use crate::table::{
-    TableCache, TableCacheEntry, TableCacheError, TableCacheKey, TableModelSpec, TableSearchSpec,
-    TableSelection, TableSortSpec, TableTileId,
+    TableCache, TableCacheEntry, TableCacheError, TableCacheKey, TableColumnKey, TableModelSpec,
+    TableSearchSpec, TableSelection, TableSortSpec, TableTileId,
 };
 use crate::transaction_container::{
     StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
@@ -458,6 +458,22 @@ pub enum Message {
     /// Select all rows (Multi mode only)
     TableSelectAll {
         tile_id: TableTileId,
+    },
+    /// Resize a table column
+    ResizeTableColumn {
+        tile_id: TableTileId,
+        column_key: TableColumnKey,
+        new_width: f32,
+    },
+    /// Toggle column visibility
+    ToggleTableColumnVisibility {
+        tile_id: TableTileId,
+        column_key: TableColumnKey,
+    },
+    /// Set column visibility for multiple columns
+    SetTableColumnVisibility {
+        tile_id: TableTileId,
+        visible_columns: Vec<TableColumnKey>,
     },
     /// Select Theme
     SelectTheme(Option<String>),

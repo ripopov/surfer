@@ -2385,6 +2385,12 @@ impl SystemState {
             Message::SetTableSort { tile_id, sort } => {
                 if let Some(tile_state) = self.user.table_tiles.get_mut(&tile_id) {
                     tile_state.config.sort = sort;
+                    // Set pending scroll operation to scroll to selection after sort
+                    if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
+                        runtime
+                            .scroll_state
+                            .set_pending_scroll_op(table::PendingScrollOp::AfterSort);
+                    }
                     // Cache invalidation happens automatically in draw_table_tile
                     // when the cache_key (which includes view_sort) changes
                     self.invalidate_draw_commands();
@@ -2393,6 +2399,12 @@ impl SystemState {
             Message::SetTableDisplayFilter { tile_id, filter } => {
                 if let Some(tile_state) = self.user.table_tiles.get_mut(&tile_id) {
                     tile_state.config.display_filter = filter;
+                    // Set pending scroll operation to scroll after filter
+                    if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
+                        runtime
+                            .scroll_state
+                            .set_pending_scroll_op(table::PendingScrollOp::AfterFilter);
+                    }
                     // Cache invalidation happens automatically in draw_table_tile
                     // when the cache_key (which includes display_filter) changes
                     self.invalidate_draw_commands();
@@ -2498,6 +2510,43 @@ impl SystemState {
                     runtime.selection = new_selection;
                     self.invalidate_draw_commands();
                 }
+            }
+            Message::ResizeTableColumn {
+                tile_id,
+                column_key,
+                new_width,
+            } => {
+                let tile_state = self.user.table_tiles.get_mut(&tile_id)?;
+                let result = table::resize_column(
+                    &tile_state.config.columns,
+                    &column_key,
+                    new_width,
+                    table::MIN_COLUMN_WIDTH,
+                );
+                if result.changed {
+                    tile_state.config.columns = result.columns;
+                    self.invalidate_draw_commands();
+                }
+            }
+            Message::ToggleTableColumnVisibility {
+                tile_id,
+                column_key,
+            } => {
+                let tile_state = self.user.table_tiles.get_mut(&tile_id)?;
+                tile_state.config.columns =
+                    table::toggle_column_visibility(&tile_state.config.columns, &column_key);
+                self.invalidate_draw_commands();
+            }
+            Message::SetTableColumnVisibility {
+                tile_id,
+                visible_columns,
+            } => {
+                let tile_state = self.user.table_tiles.get_mut(&tile_id)?;
+                // Update visibility based on the provided list
+                for col in &mut tile_state.config.columns {
+                    col.visible = visible_columns.contains(&col.key);
+                }
+                self.invalidate_draw_commands();
             }
             Message::SelectTheme(theme_name) => {
                 let theme = SurferTheme::new(theme_name)
