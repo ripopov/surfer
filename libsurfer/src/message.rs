@@ -17,7 +17,8 @@ use crate::graphics::{Graphic, GraphicId};
 use crate::hierarchy::{ParameterDisplayLocation, ScopeExpandType};
 use crate::state::UserState;
 use crate::table::{
-    TableCache, TableCacheEntry, TableCacheError, TableCacheKey, TableModelSpec, TableTileId,
+    TableCache, TableCacheEntry, TableCacheError, TableCacheKey, TableModelSpec, TableSortSpec,
+    TableTileId,
 };
 use crate::transaction_container::{
     StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
@@ -424,6 +425,11 @@ pub enum Message {
     /// Remove a table tile from the tile tree
     RemoveTableTile {
         tile_id: TableTileId,
+    },
+    /// Set the sort specification for a table tile
+    SetTableSort {
+        tile_id: TableTileId,
+        sort: Vec<TableSortSpec>,
     },
     /// Select Theme
     SelectTheme(Option<String>),

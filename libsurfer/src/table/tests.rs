@@ -584,3 +584,270 @@ fn table_tile_id_generation_unique() {
     assert_ne!(id2, id3);
     assert_ne!(id1, id3);
 }
+
+// ========================
+// Stage 6 Tests - Sort Spec Manipulation
+// ========================
+
+#[test]
+fn sort_spec_click_unsorted_column_sets_primary_ascending() {
+    // Given: no current sort
+    // When: click on "col_0"
+    // Then: sort becomes [col_0 Ascending]
+    let current: Vec<TableSortSpec> = vec![];
+    let clicked = TableColumnKey::Str("col_0".to_string());
+    let result = sort_spec_on_click(&current, &clicked);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].key, clicked);
+    assert_eq!(result[0].direction, TableSortDirection::Ascending);
+}
+
+#[test]
+fn sort_spec_click_primary_column_toggles_direction() {
+    // Given: sort is [col_0 Ascending]
+    // When: click on "col_0"
+    // Then: sort becomes [col_0 Descending]
+    let current = vec![TableSortSpec {
+        key: TableColumnKey::Str("col_0".to_string()),
+        direction: TableSortDirection::Ascending,
+    }];
+    let clicked = TableColumnKey::Str("col_0".to_string());
+    let result = sort_spec_on_click(&current, &clicked);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].direction, TableSortDirection::Descending);
+
+    // Click again: Descending -> Ascending
+    let result2 = sort_spec_on_click(&result, &clicked);
+    assert_eq!(result2[0].direction, TableSortDirection::Ascending);
+}
+
+#[test]
+fn sort_spec_click_different_column_replaces_sort() {
+    // Given: sort is [col_0 Descending]
+    // When: click on "col_1"
+    // Then: sort becomes [col_1 Ascending] (col_0 removed)
+    let current = vec![TableSortSpec {
+        key: TableColumnKey::Str("col_0".to_string()),
+        direction: TableSortDirection::Descending,
+    }];
+    let clicked = TableColumnKey::Str("col_1".to_string());
+    let result = sort_spec_on_click(&current, &clicked);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].key, clicked);
+    assert_eq!(result[0].direction, TableSortDirection::Ascending);
+}
+
+#[test]
+fn sort_spec_click_secondary_column_promotes_to_primary() {
+    // Given: sort is [col_0 Asc, col_1 Desc]
+    // When: click on "col_1" (secondary)
+    // Then: sort becomes [col_1 Ascending] (promoted, direction reset, others cleared)
+    let current = vec![
+        TableSortSpec {
+            key: TableColumnKey::Str("col_0".to_string()),
+            direction: TableSortDirection::Ascending,
+        },
+        TableSortSpec {
+            key: TableColumnKey::Str("col_1".to_string()),
+            direction: TableSortDirection::Descending,
+        },
+    ];
+    let clicked = TableColumnKey::Str("col_1".to_string());
+    let result = sort_spec_on_click(&current, &clicked);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].key, clicked);
+    assert_eq!(result[0].direction, TableSortDirection::Ascending);
+}
+
+#[test]
+fn sort_spec_shift_click_adds_secondary_sort() {
+    // Given: sort is [col_0 Ascending]
+    // When: Shift+click on "col_1"
+    // Then: sort becomes [col_0 Ascending, col_1 Ascending]
+    let current = vec![TableSortSpec {
+        key: TableColumnKey::Str("col_0".to_string()),
+        direction: TableSortDirection::Ascending,
+    }];
+    let clicked = TableColumnKey::Str("col_1".to_string());
+    let result = sort_spec_on_shift_click(&current, &clicked);
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].key, TableColumnKey::Str("col_0".to_string()));
+    assert_eq!(result[1].key, clicked);
+    assert_eq!(result[1].direction, TableSortDirection::Ascending);
+}
+
+#[test]
+fn sort_spec_shift_click_existing_column_toggles_direction() {
+    // Given: sort is [col_0 Asc, col_1 Asc]
+    // When: Shift+click on "col_1"
+    // Then: sort becomes [col_0 Asc, col_1 Desc] (position preserved)
+    let current = vec![
+        TableSortSpec {
+            key: TableColumnKey::Str("col_0".to_string()),
+            direction: TableSortDirection::Ascending,
+        },
+        TableSortSpec {
+            key: TableColumnKey::Str("col_1".to_string()),
+            direction: TableSortDirection::Ascending,
+        },
+    ];
+    let clicked = TableColumnKey::Str("col_1".to_string());
+    let result = sort_spec_on_shift_click(&current, &clicked);
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[1].key, clicked);
+    assert_eq!(result[1].direction, TableSortDirection::Descending);
+}
+
+#[test]
+fn sort_spec_shift_click_on_unsorted_table_sets_primary() {
+    // Given: no current sort
+    // When: Shift+click on "col_0"
+    // Then: sort becomes [col_0 Ascending]
+    let current: Vec<TableSortSpec> = vec![];
+    let clicked = TableColumnKey::Str("col_0".to_string());
+    let result = sort_spec_on_shift_click(&current, &clicked);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].direction, TableSortDirection::Ascending);
+}
+
+#[test]
+fn sort_indicator_no_sort_returns_none() {
+    let sort: Vec<TableSortSpec> = vec![];
+    let key = TableColumnKey::Str("col_0".to_string());
+    assert_eq!(sort_indicator(&sort, &key), None);
+}
+
+#[test]
+fn sort_indicator_column_not_in_sort_returns_none() {
+    let sort = vec![TableSortSpec {
+        key: TableColumnKey::Str("col_0".to_string()),
+        direction: TableSortDirection::Ascending,
+    }];
+    let key = TableColumnKey::Str("col_1".to_string());
+    assert_eq!(sort_indicator(&sort, &key), None);
+}
+
+#[test]
+fn sort_indicator_single_column_no_number() {
+    // Single-column sort: just arrow, no number
+    let sort = vec![TableSortSpec {
+        key: TableColumnKey::Str("col_0".to_string()),
+        direction: TableSortDirection::Ascending,
+    }];
+    let key = TableColumnKey::Str("col_0".to_string());
+    assert_eq!(sort_indicator(&sort, &key), Some("▲".to_string()));
+
+    let sort_desc = vec![TableSortSpec {
+        key: TableColumnKey::Str("col_0".to_string()),
+        direction: TableSortDirection::Descending,
+    }];
+    assert_eq!(sort_indicator(&sort_desc, &key), Some("▼".to_string()));
+}
+
+#[test]
+fn sort_indicator_multi_column_shows_priority() {
+    // Multi-column sort: arrow + priority number
+    let sort = vec![
+        TableSortSpec {
+            key: TableColumnKey::Str("col_0".to_string()),
+            direction: TableSortDirection::Ascending,
+        },
+        TableSortSpec {
+            key: TableColumnKey::Str("col_1".to_string()),
+            direction: TableSortDirection::Descending,
+        },
+    ];
+    assert_eq!(
+        sort_indicator(&sort, &TableColumnKey::Str("col_0".to_string())),
+        Some("▲1".to_string())
+    );
+    assert_eq!(
+        sort_indicator(&sort, &TableColumnKey::Str("col_1".to_string())),
+        Some("▼2".to_string())
+    );
+}
+
+// ========================
+// Stage 6 Tests - Message Handling Integration
+// ========================
+
+#[test]
+fn set_table_sort_updates_config() {
+    // Setup: create state with a table tile
+    let mut state = SystemState::new_default_config().expect("state");
+    let spec = TableModelSpec::Virtual {
+        rows: 10,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile exists");
+
+    // Initially: no sort
+    assert!(state.user.table_tiles[&tile_id].config.sort.is_empty());
+
+    // Action: send SetTableSort message
+    let new_sort = vec![TableSortSpec {
+        key: TableColumnKey::Str("col_0".to_string()),
+        direction: TableSortDirection::Ascending,
+    }];
+    state.update(Message::SetTableSort {
+        tile_id,
+        sort: new_sort.clone(),
+    });
+
+    // Verify: config updated
+    assert_eq!(state.user.table_tiles[&tile_id].config.sort, new_sort);
+}
+
+#[test]
+fn set_table_sort_nonexistent_tile_ignored() {
+    // Setup: state with no table tiles
+    let mut state = SystemState::new_default_config().expect("state");
+
+    // Action: send SetTableSort for non-existent tile
+    let fake_tile_id = TableTileId(9999);
+    state.update(Message::SetTableSort {
+        tile_id: fake_tile_id,
+        sort: vec![TableSortSpec {
+            key: TableColumnKey::Str("col_0".to_string()),
+            direction: TableSortDirection::Ascending,
+        }],
+    });
+
+    // Verify: no crash, no state change
+    assert!(state.user.table_tiles.is_empty());
+}
+
+#[test]
+fn multi_column_sort_via_messages() {
+    // Test setting up multi-column sort through message updates
+    let mut state = SystemState::new_default_config().expect("state");
+    let spec = TableModelSpec::Virtual {
+        rows: 10,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile exists");
+
+    // Set multi-column sort
+    let multi_sort = vec![
+        TableSortSpec {
+            key: TableColumnKey::Str("col_0".to_string()),
+            direction: TableSortDirection::Ascending,
+        },
+        TableSortSpec {
+            key: TableColumnKey::Str("col_1".to_string()),
+            direction: TableSortDirection::Descending,
+        },
+    ];
+    state.update(Message::SetTableSort {
+        tile_id,
+        sort: multi_sort.clone(),
+    });
+
+    assert_eq!(state.user.table_tiles[&tile_id].config.sort, multi_sort);
+}

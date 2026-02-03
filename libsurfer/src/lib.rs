@@ -2382,6 +2382,14 @@ impl SystemState {
                 self.table_runtime.remove(&tile_id);
                 self.invalidate_draw_commands();
             }
+            Message::SetTableSort { tile_id, sort } => {
+                if let Some(tile_state) = self.user.table_tiles.get_mut(&tile_id) {
+                    tile_state.config.sort = sort;
+                    // Cache invalidation happens automatically in draw_table_tile
+                    // when the cache_key (which includes view_sort) changes
+                    self.invalidate_draw_commands();
+                }
+            }
             Message::SelectTheme(theme_name) => {
                 let theme = SurferTheme::new(theme_name)
                     .with_context(|| "Failed to set theme")

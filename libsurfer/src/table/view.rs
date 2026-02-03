@@ -1,7 +1,8 @@
 use crate::SystemState;
 use crate::message::Message;
 use crate::table::{
-    TableCache, TableCacheKey, TableCell, TableModel, TableModelKey, TableTileId, TableTileState,
+    TableCache, TableCacheKey, TableCell, TableModel, TableModelKey, TableSortSpec, TableTileId,
+    TableTileState, sort_indicator, sort_spec_on_click, sort_spec_on_shift_click,
 };
 use egui_extras::{Column, TableBuilder};
 use std::collections::HashMap;
@@ -99,8 +100,11 @@ pub fn draw_table_tile(
                     if let Some(ref model) = model {
                         render_table(
                             ui,
+                            msgs,
+                            tile_id,
                             model.clone(),
                             cache,
+                            &tile_state.config.sort,
                             dense_rows,
                             sticky_header,
                             header_bg,
@@ -128,10 +132,14 @@ pub fn draw_table_tile(
 /// Note: `sticky_header` config is stored but egui_extras::TableBuilder always renders
 /// headers as sticky (fixed above the scrolling body). Non-sticky headers would require
 /// custom scrolling logic and is deferred to a future version.
+#[allow(clippy::too_many_arguments)]
 fn render_table(
     ui: &mut egui::Ui,
+    msgs: &mut Vec<Message>,
+    tile_id: TableTileId,
     model: Arc<dyn TableModel>,
     cache: &TableCache,
+    current_sort: &[TableSortSpec],
     dense_rows: bool,
     _sticky_header: bool, // Reserved for future use; egui_extras headers are always sticky
     header_bg: egui::Color32,
@@ -161,19 +169,50 @@ fn render_table(
         builder = builder.column(column);
     }
 
-    // Render header
+    // Track sort changes to emit after rendering
+    let mut new_sort: Option<Vec<TableSortSpec>> = None;
+
+    // Render header with clickable sorting
     builder
         .header(row_height, |mut header| {
             for col in &schema.columns {
                 header.col(|ui| {
                     ui.painter()
                         .rect_filled(ui.available_rect_before_wrap(), 0.0, header_bg);
-                    let label = if dense_rows {
-                        egui::RichText::new(&col.label).small().color(text_color)
-                    } else {
-                        egui::RichText::new(&col.label).strong().color(text_color)
+
+                    // Build header text with sort indicator
+                    let indicator = sort_indicator(current_sort, &col.key);
+                    let header_text = match &indicator {
+                        Some(ind) => format!("{} {}", col.label, ind),
+                        None => col.label.clone(),
                     };
-                    ui.label(label);
+
+                    let label = if dense_rows {
+                        egui::RichText::new(&header_text).small().color(text_color)
+                    } else {
+                        egui::RichText::new(&header_text).strong().color(text_color)
+                    };
+
+                    // Make the header clickable for sorting
+                    let response = ui.add(
+                        egui::Label::new(label)
+                            .selectable(false)
+                            .sense(egui::Sense::click()),
+                    );
+
+                    if response.clicked() {
+                        // Check for Shift modifier
+                        let modifiers = ui.input(|i| i.modifiers);
+                        let computed_sort = if modifiers.shift {
+                            sort_spec_on_shift_click(current_sort, &col.key)
+                        } else {
+                            sort_spec_on_click(current_sort, &col.key)
+                        };
+                        new_sort = Some(computed_sort);
+                    }
+
+                    // Show tooltip for sorting help
+                    response.on_hover_text("Click to sort, Shift+click for multi-column sort");
                 });
             }
         })
@@ -202,4 +241,9 @@ fn render_table(
                 }
             });
         });
+
+    // Emit sort change message if needed
+    if let Some(sort) = new_sort {
+        msgs.push(Message::SetTableSort { tile_id, sort });
+    }
 }

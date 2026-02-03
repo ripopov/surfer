@@ -3460,3 +3460,160 @@ snapshot_ui!(table_two_tiles, || {
 
     state
 });
+
+// ========================
+// Table Widget Snapshot Tests (Stage 6 - Sorting)
+// ========================
+
+snapshot_ui!(table_sort_single_column_ascending, || {
+    use crate::table::{
+        TableColumnKey, TableModelSpec, TableSortDirection, TableSortSpec, TableTileState,
+        TableViewConfig,
+    };
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    let table_id = state.user.tile_tree.next_table_id();
+    let spec = TableModelSpec::Virtual {
+        rows: 5,
+        columns: 3,
+        seed: 42,
+    };
+    let mut config = TableViewConfig::default();
+    config.title = "Sorted Ascending".to_string();
+    config.sort = vec![TableSortSpec {
+        key: TableColumnKey::Str("col_0".to_string()),
+        direction: TableSortDirection::Ascending,
+    }];
+    state
+        .user
+        .table_tiles
+        .insert(table_id, TableTileState { spec, config });
+    state.user.tile_tree.add_table_tile(table_id);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(table_sort_single_column_descending, || {
+    use crate::table::{
+        TableColumnKey, TableModelSpec, TableSortDirection, TableSortSpec, TableTileState,
+        TableViewConfig,
+    };
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    let table_id = state.user.tile_tree.next_table_id();
+    let spec = TableModelSpec::Virtual {
+        rows: 5,
+        columns: 3,
+        seed: 42,
+    };
+    let mut config = TableViewConfig::default();
+    config.title = "Sorted Descending".to_string();
+    config.sort = vec![TableSortSpec {
+        key: TableColumnKey::Str("col_1".to_string()),
+        direction: TableSortDirection::Descending,
+    }];
+    state
+        .user
+        .table_tiles
+        .insert(table_id, TableTileState { spec, config });
+    state.user.tile_tree.add_table_tile(table_id);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(table_sort_multi_column, || {
+    use crate::table::{
+        TableColumnKey, TableModelSpec, TableSortDirection, TableSortSpec, TableTileState,
+        TableViewConfig,
+    };
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    let table_id = state.user.tile_tree.next_table_id();
+    let spec = TableModelSpec::Virtual {
+        rows: 5,
+        columns: 3,
+        seed: 42,
+    };
+    let mut config = TableViewConfig::default();
+    config.title = "Multi-Column Sort".to_string();
+    // Multi-column sort: col_0 ascending (primary), col_2 descending (secondary)
+    config.sort = vec![
+        TableSortSpec {
+            key: TableColumnKey::Str("col_0".to_string()),
+            direction: TableSortDirection::Ascending,
+        },
+        TableSortSpec {
+            key: TableColumnKey::Str("col_2".to_string()),
+            direction: TableSortDirection::Descending,
+        },
+    ];
+    state
+        .user
+        .table_tiles
+        .insert(table_id, TableTileState { spec, config });
+    state.user.tile_tree.add_table_tile(table_id);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});
+
+snapshot_ui!(table_sort_affects_row_order, || {
+    use crate::table::{
+        TableColumnKey, TableModelSpec, TableSortDirection, TableSortSpec, TableTileState,
+        TableViewConfig,
+    };
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams::default());
+
+    // Use a small table where sort order is visually verifiable
+    let table_id = state.user.tile_tree.next_table_id();
+    let spec = TableModelSpec::Virtual {
+        rows: 5,
+        columns: 2,
+        seed: 123,
+    };
+    let mut config = TableViewConfig::default();
+    config.title = "Sort Row Order".to_string();
+    // Sort by col_0 descending - rows should be reordered
+    config.sort = vec![TableSortSpec {
+        key: TableColumnKey::Str("col_0".to_string()),
+        direction: TableSortDirection::Descending,
+    }];
+    state
+        .user
+        .table_tiles
+        .insert(table_id, TableTileState { spec, config });
+    state.user.tile_tree.add_table_tile(table_id);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+
+    state
+});

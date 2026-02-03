@@ -245,3 +245,99 @@ pub trait TableModel: Send + Sync {
     fn search_text(&self, row: TableRowId) -> String;
     fn on_activate(&self, row: TableRowId) -> TableAction;
 }
+
+// ========================
+// Sort Spec Helper Functions
+// ========================
+
+/// Computes the new sort spec when a column header is clicked (without Shift).
+/// - If column is not in sort: set as primary ascending, clear other sorts
+/// - If column is primary: toggle direction
+/// - If column is secondary+: promote to primary ascending, clear others
+pub fn sort_spec_on_click(
+    current: &[TableSortSpec],
+    clicked_key: &TableColumnKey,
+) -> Vec<TableSortSpec> {
+    // Check if the clicked column is already in the sort
+    let position = current.iter().position(|spec| &spec.key == clicked_key);
+
+    match position {
+        Some(0) => {
+            // Column is primary - toggle direction
+            vec![TableSortSpec {
+                key: clicked_key.clone(),
+                direction: match current[0].direction {
+                    TableSortDirection::Ascending => TableSortDirection::Descending,
+                    TableSortDirection::Descending => TableSortDirection::Ascending,
+                },
+            }]
+        }
+        Some(_) => {
+            // Column is secondary+ - promote to primary ascending, clear others
+            vec![TableSortSpec {
+                key: clicked_key.clone(),
+                direction: TableSortDirection::Ascending,
+            }]
+        }
+        None => {
+            // Column not in sort - set as primary ascending
+            vec![TableSortSpec {
+                key: clicked_key.clone(),
+                direction: TableSortDirection::Ascending,
+            }]
+        }
+    }
+}
+
+/// Computes the new sort spec when a column header is Shift+clicked.
+/// - If column is not in sort: append as new sort level (ascending)
+/// - If column is in sort: toggle its direction (keep position)
+pub fn sort_spec_on_shift_click(
+    current: &[TableSortSpec],
+    clicked_key: &TableColumnKey,
+) -> Vec<TableSortSpec> {
+    let position = current.iter().position(|spec| &spec.key == clicked_key);
+
+    match position {
+        Some(idx) => {
+            // Column is in sort - toggle direction, keep position
+            let mut result = current.to_vec();
+            result[idx].direction = match result[idx].direction {
+                TableSortDirection::Ascending => TableSortDirection::Descending,
+                TableSortDirection::Descending => TableSortDirection::Ascending,
+            };
+            result
+        }
+        None => {
+            // Column not in sort - append as new sort level
+            let mut result = current.to_vec();
+            result.push(TableSortSpec {
+                key: clicked_key.clone(),
+                direction: TableSortDirection::Ascending,
+            });
+            result
+        }
+    }
+}
+
+/// Returns the sort indicator text for a column header.
+/// - Returns None if column is not in sort
+/// - Returns "▲" or "▼" for single-column sort
+/// - Returns "▲1", "▼2", etc. for multi-column sort
+pub fn sort_indicator(sort: &[TableSortSpec], column_key: &TableColumnKey) -> Option<String> {
+    let position = sort.iter().position(|spec| &spec.key == column_key)?;
+    let spec = &sort[position];
+
+    let arrow = match spec.direction {
+        TableSortDirection::Ascending => "▲",
+        TableSortDirection::Descending => "▼",
+    };
+
+    if sort.len() == 1 {
+        // Single-column sort: just the arrow
+        Some(arrow.to_string())
+    } else {
+        // Multi-column sort: arrow + priority number (1-indexed)
+        Some(format!("{}{}", arrow, position + 1))
+    }
+}
