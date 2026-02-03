@@ -735,13 +735,13 @@ fn sort_indicator_single_column_no_number() {
         direction: TableSortDirection::Ascending,
     }];
     let key = TableColumnKey::Str("col_0".to_string());
-    assert_eq!(sort_indicator(&sort, &key), Some("▲".to_string()));
+    assert_eq!(sort_indicator(&sort, &key), Some("⬆".to_string()));
 
     let sort_desc = vec![TableSortSpec {
         key: TableColumnKey::Str("col_0".to_string()),
         direction: TableSortDirection::Descending,
     }];
-    assert_eq!(sort_indicator(&sort_desc, &key), Some("▼".to_string()));
+    assert_eq!(sort_indicator(&sort_desc, &key), Some("⬇".to_string()));
 }
 
 #[test]
@@ -759,11 +759,11 @@ fn sort_indicator_multi_column_shows_priority() {
     ];
     assert_eq!(
         sort_indicator(&sort, &TableColumnKey::Str("col_0".to_string())),
-        Some("▲1".to_string())
+        Some("⬆1".to_string())
     );
     assert_eq!(
         sort_indicator(&sort, &TableColumnKey::Str("col_1".to_string())),
-        Some("▼2".to_string())
+        Some("⬇2".to_string())
     );
 }
 

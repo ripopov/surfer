@@ -322,15 +322,17 @@ pub fn sort_spec_on_shift_click(
 
 /// Returns the sort indicator text for a column header.
 /// - Returns None if column is not in sort
-/// - Returns "▲" or "▼" for single-column sort
-/// - Returns "▲1", "▼2", etc. for multi-column sort
+/// - Returns "⬆" or "⬇" for single-column sort
+/// - Returns "⬆1", "⬇2", etc. for multi-column sort
+///
+/// Uses arrow symbols that are included in the default egui fonts.
 pub fn sort_indicator(sort: &[TableSortSpec], column_key: &TableColumnKey) -> Option<String> {
     let position = sort.iter().position(|spec| &spec.key == column_key)?;
     let spec = &sort[position];
 
     let arrow = match spec.direction {
-        TableSortDirection::Ascending => "▲",
-        TableSortDirection::Descending => "▼",
+        TableSortDirection::Ascending => "⬆",
+        TableSortDirection::Descending => "⬇",
     };
 
     if sort.len() == 1 {
