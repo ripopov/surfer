@@ -10,6 +10,7 @@ use std::fmt::Write;
 
 use crate::message::Message;
 use crate::system_state::SystemState;
+use crate::table::{TableTileId, TableTileState, draw_table_tile};
 
 /// Unique identifier for tiles within the application
 pub type SurferTileId = u64;
@@ -23,14 +24,23 @@ pub enum SurferPane {
     /// Placeholder tile, for debug purposes.
     /// Renders current tile tree. Can be closed by user.
     DebugTile(SurferTileId),
+    /// A table tile displaying tabular data (signal changes, transactions, etc.).
+    Table(TableTileId),
 }
 
 impl SurferPane {
     /// Returns the display name for this pane type
-    fn title(&self) -> String {
+    fn title(
+        &self,
+        table_tiles: &std::collections::HashMap<TableTileId, TableTileState>,
+    ) -> String {
         match self {
             SurferPane::Waveform => "Waveform".to_string(),
             SurferPane::DebugTile(id) => format!("Debug Tile {id}"),
+            SurferPane::Table(id) => table_tiles
+                .get(id)
+                .map(|state| state.config.title.clone())
+                .unwrap_or_else(|| format!("Table {}", id.0)),
         }
     }
 }
@@ -42,6 +52,9 @@ pub struct SurferTileTree {
     pub tree: Tree<SurferPane>,
     /// Counter for generating unique tile IDs
     next_tile_id: SurferTileId,
+    /// Counter for generating unique table tile IDs
+    #[serde(default)]
+    next_table_tile_id: u64,
 }
 
 impl Default for SurferTileTree {
@@ -60,6 +73,7 @@ impl SurferTileTree {
         Self {
             tree: Tree::new("surfer_tiles", root, tiles),
             next_tile_id: 1,
+            next_table_tile_id: 1,
         }
     }
 
@@ -130,6 +144,63 @@ impl SurferTileTree {
         }
     }
 
+    /// Adds a new table tile to the tree and returns its ID.
+    ///
+    /// Layout strategy: same as add_debug_tile (vertical split with waveform on top).
+    pub fn add_table_tile(&mut self, table_tile_id: TableTileId) {
+        let Some(root) = self.tree.root() else {
+            return;
+        };
+
+        let new_pane = self
+            .tree
+            .tiles
+            .insert_pane(SurferPane::Table(table_tile_id));
+
+        // Check if root is a vertical split with a bottom section
+        let bottom_id = self.tree.tiles.get(root).and_then(|tile| {
+            if let Tile::Container(Container::Linear(linear)) = tile
+                && linear.dir == LinearDir::Vertical
+                && linear.children.len() >= 2
+            {
+                Some(linear.children[1])
+            } else {
+                None
+            }
+        });
+
+        let Some(bottom_id) = bottom_id else {
+            // First tile: create vertical split with waveform on top, new tile on bottom
+            let new_root = self.tree.tiles.insert_vertical_tile(vec![root, new_pane]);
+            self.tree.root = Some(new_root);
+            return;
+        };
+
+        // If bottom is already horizontal, add directly to it
+        if let Some(Tile::Container(Container::Linear(bottom))) = self.tree.tiles.get_mut(bottom_id)
+            && bottom.dir == LinearDir::Horizontal
+        {
+            bottom.add_child(new_pane);
+            return;
+        }
+
+        // Wrap existing bottom in a horizontal split
+        let new_horizontal = self
+            .tree
+            .tiles
+            .insert_horizontal_tile(vec![bottom_id, new_pane]);
+        if let Some(Tile::Container(Container::Linear(linear))) = self.tree.tiles.get_mut(root) {
+            linear.children[1] = new_horizontal;
+        }
+    }
+
+    /// Generates a new unique table tile ID.
+    pub fn next_table_id(&mut self) -> TableTileId {
+        let id = TableTileId(self.next_table_tile_id);
+        self.next_table_tile_id += 1;
+        id
+    }
+
     /// Removes a tile by its TileId.
     /// The waveform tile cannot be removed.
     fn remove_tile(&mut self, tile_id: TileId) {
@@ -147,7 +218,9 @@ pub struct SurferTileBehavior<'a> {
     pub msgs: &'a mut Vec<Message>,
     pub hide_chrome: bool,
     pub tile_to_remove: Option<TileId>,
+    pub table_tile_to_remove: Option<TableTileId>,
     pub debug_tree: String,
+    pub table_tiles: &'a std::collections::HashMap<TableTileId, TableTileState>,
 }
 
 impl Behavior<SurferPane> for SurferTileBehavior<'_> {
@@ -170,23 +243,30 @@ impl Behavior<SurferPane> for SurferTileBehavior<'_> {
                     );
                 });
             }
+            SurferPane::Table(table_tile_id) => {
+                draw_table_tile(self.state, self.ctx, ui, self.msgs, *table_tile_id);
+            }
         }
         egui_tiles::UiResponse::None
     }
 
     fn tab_title_for_pane(&mut self, pane: &SurferPane) -> egui::WidgetText {
-        pane.title().into()
+        pane.title(self.table_tiles).into()
     }
 
     fn is_tab_closable(&self, tiles: &Tiles<SurferPane>, tile_id: TileId) -> bool {
-        // Waveform tile is never closable; Empty tiles are closable when chrome is visible
+        // Waveform tile is never closable; all others are closable when chrome is visible
         if let Some(Tile::Pane(SurferPane::Waveform)) = tiles.get(tile_id) {
             return false;
         }
         !self.hide_chrome
     }
 
-    fn on_tab_close(&mut self, _tiles: &mut Tiles<SurferPane>, tile_id: TileId) -> bool {
+    fn on_tab_close(&mut self, tiles: &mut Tiles<SurferPane>, tile_id: TileId) -> bool {
+        // Track table tiles for cleanup
+        if let Some(Tile::Pane(SurferPane::Table(table_tile_id))) = tiles.get(tile_id) {
+            self.table_tile_to_remove = Some(*table_tile_id);
+        }
         self.tile_to_remove = Some(tile_id);
         true
     }
@@ -242,7 +322,8 @@ impl SystemState {
         // needs `&mut SystemState` for waveform rendering. This creates a borrow conflict.
         // Take tree out of self to enable disjoint borrows.
         let mut tile_tree = std::mem::take(&mut self.user.tile_tree);
-        let debug_tree_str = format_tile_tree_cli(&tile_tree.tree);
+        let mut table_tiles = std::mem::take(&mut self.user.table_tiles);
+        let debug_tree_str = format_tile_tree_cli(&tile_tree.tree, &table_tiles);
         let hide_chrome = tile_tree.is_single_waveform();
 
         let mut behavior = SurferTileBehavior {
@@ -251,23 +332,35 @@ impl SystemState {
             msgs,
             hide_chrome,
             tile_to_remove: None,
+            table_tile_to_remove: None,
             debug_tree: debug_tree_str,
+            table_tiles: &table_tiles,
         };
 
         tile_tree.tree.ui(&mut behavior, ui);
 
-        // Handle deferred tile removal, does it make sense to create a message?
+        // Handle deferred tile removal
         if let Some(tile_id) = behavior.tile_to_remove {
             tile_tree.remove_tile(tile_id);
         }
 
-        // Restore tree back to self
+        // Handle table tile cleanup
+        if let Some(table_tile_id) = behavior.table_tile_to_remove {
+            table_tiles.remove(&table_tile_id);
+            self.table_runtime.remove(&table_tile_id);
+        }
+
+        // Restore tree and table_tiles back to self
         self.user.tile_tree = tile_tree;
+        self.user.table_tiles = table_tiles;
     }
 }
 
 /// Format tiles into a CLI-style tree for debug output.
-fn format_tile_tree_cli(tree: &Tree<SurferPane>) -> String {
+fn format_tile_tree_cli(
+    tree: &Tree<SurferPane>,
+    table_tiles: &std::collections::HashMap<TableTileId, TableTileState>,
+) -> String {
     let mut out = String::new();
     let Some(root) = tree.root else {
         out.push_str("(empty)\n");
@@ -281,7 +374,7 @@ fn format_tile_tree_cli(tree: &Tree<SurferPane>) -> String {
         let next_prefix = if is_last { "    " } else { "│   " };
 
         let description = match tree.tiles.get(tile_id) {
-            Some(Tile::Pane(pane)) => format!("{tile_id:?} Pane({})", pane.title()),
+            Some(Tile::Pane(pane)) => format!("{tile_id:?} Pane({})", pane.title(table_tiles)),
             Some(Tile::Container(container)) => {
                 let kind = match container {
                     Container::Tabs(_) => "Tabs".to_string(),

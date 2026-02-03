@@ -73,6 +73,10 @@ pub struct TableRuntimeState {
     pub cache_key: Option<TableCacheKey>,
     pub cache: Option<Arc<TableCacheEntry>>,
     pub last_error: Option<TableCacheError>,
+    /// Runtime selection state (keyed by TableRowId for stability across sort/filter).
+    pub selection: super::model::TableSelection,
+    /// Vertical scroll offset in pixels.
+    pub scroll_offset: f32,
 }
 
 struct TableFilter {
@@ -137,7 +141,7 @@ impl TableFilter {
             TableSearchMode::Regex => self
                 .regex
                 .as_ref()
-                .map_or(false, |regex| regex.is_match(haystack)),
+                .is_some_and(|regex| regex.is_match(haystack)),
         }
     }
 }

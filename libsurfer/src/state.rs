@@ -14,6 +14,7 @@ use crate::{
     hierarchy::{HierarchyStyle, ParameterDisplayLocation},
     message::Message,
     system_state::SystemState,
+    table::{TableTileId, TableTileState},
     tiles::SurferTileTree,
     time::{TimeStringFormatting, TimeUnit},
     transaction_container::TransactionContainer,
@@ -127,6 +128,8 @@ pub struct UserState {
     pub(crate) transition_value: Option<TransitionValue>,
     #[serde(default)]
     pub(crate) tile_tree: SurferTileTree,
+    #[serde(default)]
+    pub(crate) table_tiles: HashMap<TableTileId, TableTileState>,
 
     // Path of last saved-to state file
     // Do not serialize as this causes a few issues and doesn't help:
@@ -218,6 +221,7 @@ impl Default for UserState {
             surver_url: None,
             transition_value: None,
             tile_tree: SurferTileTree::default(),
+            table_tiles: HashMap::new(),
         }
     }
 }

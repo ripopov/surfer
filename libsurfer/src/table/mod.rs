@@ -11,7 +11,7 @@ pub use model::{
     AnalysisKind, AnalysisParams, TableAction, TableCell, TableColumn, TableColumnConfig,
     TableColumnKey, TableModel, TableModelKey, TableModelSpec, TableRowId, TableSchema,
     TableSearchMode, TableSearchSpec, TableSelection, TableSelectionMode, TableSortDirection,
-    TableSortKey, TableSortSpec, TableTileId, TableViewConfig,
+    TableSortKey, TableSortSpec, TableTileId, TableTileState, TableViewConfig,
 };
 pub use view::draw_table_tile;
 

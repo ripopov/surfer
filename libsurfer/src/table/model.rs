@@ -86,6 +86,37 @@ pub struct TableViewConfig {
     pub sticky_header: bool,
 }
 
+impl Default for TableViewConfig {
+    fn default() -> Self {
+        Self {
+            title: "Table".to_string(),
+            columns: vec![],
+            sort: vec![],
+            display_filter: TableSearchSpec::default(),
+            selection_mode: TableSelectionMode::Single,
+            dense_rows: false,
+            sticky_header: true,
+        }
+    }
+}
+
+impl Default for TableSearchSpec {
+    fn default() -> Self {
+        Self {
+            mode: TableSearchMode::Contains,
+            case_sensitive: false,
+            text: String::new(),
+        }
+    }
+}
+
+/// Serializable table tile state (model spec + view config).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableTileState {
+    pub spec: TableModelSpec,
+    pub config: TableViewConfig,
+}
+
 /// Stable key for identifying model instances in caches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TableModelKey(pub u64);

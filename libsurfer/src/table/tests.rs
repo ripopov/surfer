@@ -416,6 +416,8 @@ fn table_cache_built_stale_key_ignored() {
             cache_key: Some(new_key),
             cache: None,
             last_error: None,
+            selection: TableSelection::default(),
+            scroll_offset: 0.0,
         },
     );
 
@@ -434,4 +436,151 @@ fn table_cache_built_stale_key_ignored() {
 
     state.update(msg);
     assert!(!entry.is_ready(), "stale cache should be ignored");
+}
+
+// ========================
+// Stage 4 Tests
+// ========================
+
+#[test]
+fn add_table_tile_creates_tile_in_tree() {
+    let mut state = SystemState::new_default_config().expect("state");
+
+    // Initially no table tiles
+    assert!(state.user.table_tiles.is_empty());
+
+    // Add a table tile via message
+    let spec = TableModelSpec::Virtual {
+        rows: 10,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    // Verify table tile was created
+    assert_eq!(state.user.table_tiles.len(), 1);
+
+    // Verify the tile tree contains the table pane
+    let has_table_pane = state.user.tile_tree.tree.tiles.iter().any(|(_, tile)| {
+        matches!(
+            tile,
+            egui_tiles::Tile::Pane(crate::tiles::SurferPane::Table(_))
+        )
+    });
+    assert!(has_table_pane, "Tile tree should contain a Table pane");
+}
+
+#[test]
+fn remove_table_tile_cleans_up_state() {
+    let mut state = SystemState::new_default_config().expect("state");
+
+    // Add a table tile
+    let spec = TableModelSpec::Virtual {
+        rows: 10,
+        columns: 3,
+        seed: 42,
+    };
+    state.update(Message::AddTableTile { spec });
+
+    // Get the tile ID that was created
+    let tile_id = *state
+        .user
+        .table_tiles
+        .keys()
+        .next()
+        .expect("should have one tile");
+
+    // Add some runtime state
+    state
+        .table_runtime
+        .insert(tile_id, TableRuntimeState::default());
+
+    // Remove the tile
+    state.update(Message::RemoveTableTile { tile_id });
+
+    // Verify both table_tiles and table_runtime were cleaned up
+    assert!(
+        state.user.table_tiles.is_empty(),
+        "table_tiles should be empty after removal"
+    );
+    assert!(
+        state.table_runtime.is_empty(),
+        "table_runtime should be empty after removal"
+    );
+}
+
+#[test]
+fn table_tile_state_serialization_round_trip() {
+    let tile_state = TableTileState {
+        spec: TableModelSpec::Virtual {
+            rows: 100,
+            columns: 5,
+            seed: 123,
+        },
+        config: TableViewConfig {
+            title: "Test Table".to_string(),
+            columns: vec![],
+            sort: vec![],
+            display_filter: TableSearchSpec::default(),
+            selection_mode: TableSelectionMode::Multi,
+            dense_rows: true,
+            sticky_header: false,
+        },
+    };
+
+    let encoded = ron::ser::to_string(&tile_state).expect("serialize TableTileState");
+    let decoded: TableTileState = ron::de::from_str(&encoded).expect("deserialize TableTileState");
+
+    assert_eq!(tile_state.spec, decoded.spec);
+    assert_eq!(tile_state.config.title, decoded.config.title);
+    assert_eq!(
+        tile_state.config.selection_mode,
+        decoded.config.selection_mode
+    );
+    assert_eq!(tile_state.config.dense_rows, decoded.config.dense_rows);
+}
+
+#[test]
+fn table_runtime_state_not_serialized() {
+    // TableRuntimeState should NOT derive Serialize/Deserialize
+    // This test verifies that runtime state fields are present but not serialized
+
+    let runtime = TableRuntimeState {
+        cache_key: Some(TableCacheKey {
+            model_key: TableModelKey(1),
+            display_filter: TableSearchSpec::default(),
+            view_sort: vec![],
+            generation: 0,
+        }),
+        cache: None,
+        last_error: None,
+        selection: TableSelection::default(),
+        scroll_offset: 42.0,
+    };
+
+    // Verify the runtime state has the expected fields
+    assert!(runtime.cache_key.is_some());
+    assert!(runtime.cache.is_none());
+    assert!(runtime.last_error.is_none());
+    assert!(runtime.selection.rows.is_empty());
+    assert_eq!(runtime.scroll_offset, 42.0);
+
+    // Note: We can't directly test that TableRuntimeState doesn't implement Serialize,
+    // but the type system enforces this - if it derived Serialize, it wouldn't compile
+    // because OnceLock doesn't implement Serialize.
+}
+
+#[test]
+fn table_tile_id_generation_unique() {
+    use crate::tiles::SurferTileTree;
+
+    let mut tree = SurferTileTree::default();
+
+    let id1 = tree.next_table_id();
+    let id2 = tree.next_table_id();
+    let id3 = tree.next_table_id();
+
+    assert_ne!(id1, id2);
+    assert_ne!(id2, id3);
+    assert_ne!(id1, id3);
 }

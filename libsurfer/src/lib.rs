@@ -2252,11 +2252,21 @@ impl SystemState {
                     return None;
                 }
 
-                let model = match self.table_models.get(&tile_id) {
-                    Some(model) => model.clone(),
+                // Create model from table tile spec
+                let model = match self.user.table_tiles.get(&tile_id) {
+                    Some(tile_state) => match tile_state.spec.create_model() {
+                        Some(model) => model,
+                        None => {
+                            runtime.last_error =
+                                Some(crate::table::TableCacheError::ModelNotFound {
+                                    description: "Model type not yet implemented".to_string(),
+                                });
+                            return None;
+                        }
+                    },
                     None => {
                         runtime.last_error = Some(crate::table::TableCacheError::ModelNotFound {
-                            description: "Missing table model".to_string(),
+                            description: "Table tile not found".to_string(),
                         });
                         return None;
                     }
@@ -2321,9 +2331,7 @@ impl SystemState {
                 OUTSTANDING_TRANSACTIONS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 self.table_inflight.remove(&entry.cache_key);
 
-                let Some(runtime) = self.table_runtime.get_mut(&tile_id) else {
-                    return None;
-                };
+                let runtime = self.table_runtime.get_mut(&tile_id)?;
 
                 if runtime.cache_key.as_ref() != Some(&entry.cache_key) {
                     return None;
@@ -2359,6 +2367,19 @@ impl SystemState {
             }
             Message::AddTile => {
                 self.user.tile_tree.add_debug_tile();
+                self.invalidate_draw_commands();
+            }
+            Message::AddTableTile { spec } => {
+                let table_tile_id = self.user.tile_tree.next_table_id();
+                let config = crate::table::TableViewConfig::default();
+                let state = crate::table::TableTileState { spec, config };
+                self.user.table_tiles.insert(table_tile_id, state);
+                self.user.tile_tree.add_table_tile(table_tile_id);
+                self.invalidate_draw_commands();
+            }
+            Message::RemoveTableTile { tile_id } => {
+                self.user.table_tiles.remove(&tile_id);
+                self.table_runtime.remove(&tile_id);
                 self.invalidate_draw_commands();
             }
             Message::SelectTheme(theme_name) => {

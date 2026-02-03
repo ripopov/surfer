@@ -16,7 +16,9 @@ use crate::displayed_item_tree::{ItemIndex, VisibleItemIndex};
 use crate::graphics::{Graphic, GraphicId};
 use crate::hierarchy::{ParameterDisplayLocation, ScopeExpandType};
 use crate::state::UserState;
-use crate::table::{TableCache, TableCacheEntry, TableCacheError, TableCacheKey, TableTileId};
+use crate::table::{
+    TableCache, TableCacheEntry, TableCacheError, TableCacheKey, TableModelSpec, TableTileId,
+};
 use crate::transaction_container::{
     StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
 };
@@ -415,6 +417,14 @@ pub enum Message {
     RemoveViewport,
     /// Add a new debug tile to the tile tree
     AddTile,
+    /// Add a new table tile to the tile tree
+    AddTableTile {
+        spec: TableModelSpec,
+    },
+    /// Remove a table tile from the tile tree
+    RemoveTableTile {
+        tile_id: TableTileId,
+    },
     /// Select Theme
     SelectTheme(Option<String>),
     /// Enable animations
