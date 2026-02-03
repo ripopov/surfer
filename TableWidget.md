@@ -39,10 +39,10 @@ This closely mirrors the analog signal rendering pipeline:
 
 - Model/view separation: data sources implement a TableModel trait; the table UI is a TableView that depends only on the trait and a cached index.
 - Serializable config only: table tiles store a TableModelSpec and TableViewConfig in .ron files. No table row data is serialized. This matches analog_signal_cache and avoids bloating state files.
-- Async caching with invalidation: expensive operations (sorting, search, row index construction) run in a worker thread. Cache entries are keyed by (model identity + view search + sort + generation) and invalidated when wave data reloads.
+- Async caching with invalidation: expensive operations (sorting, search, row index construction) run in a worker thread. Cache entries are keyed by (model identity + display_filter + sort + generation) and invalidated when wave data reloads.
 - In-flight dedupe: at most one cache build per (tile_id, cache_key) runs at a time.
-- Cache adoption guard: TableCacheBuilt is only applied if (tile_id exists, cache_key matches current view state, and generation matches). Stale results are dropped to avoid UI races after sort/search changes or tile close.
-- Stable row identity: selection uses a stable TableRowId (not an index) so selections survive sorting/filtering and incremental updates.
+- Cache adoption guard: TableCacheBuilt is only applied if (tile_id exists, cache_key matches current view state, and generation matches). Stale results are dropped to avoid UI races after sort/filter changes or tile close.
+- Stable row identity: selection uses a stable TableRowId (not an index) so selections survive sorting/filtering and incremental updates. Selection persists for filtered-out rows.
 - Selection invalidation on reload: when cache_generation changes, selection is cleared (or remapped if a model provides a remap hook in a future version).
 - Single source of truth: table data is derived from WaveData/TransactionContainer. Tables do not own or mutate waveform data.
 - Threading contract: TableModel implementations must be Send + Sync and backed by immutable data (Arc snapshots or read-only handles) so cache builds can run off-thread without borrowing UI thread state.
@@ -53,7 +53,7 @@ This closely mirrors the analog signal rendering pipeline:
 - Undo/redo safety: runtime caches are excluded from Clone/serde, similar to AnalogVarState. Table config changes can be undoable, but caches must be rebuilt.
 - Tile lifecycle: table tiles are closable; closing a tile removes its config and runtime cache and prunes the tile tree.
 - Column formatting (v1): no per-column alignment/format configuration beyond schema defaults; TableColumnConfig only covers layout behavior (width, visibility, resizing).
-- Selection state is runtime-only (not serialized); TableViewConfig only stores the selection mode.
+- Selection state is runtime-only (not serialized); TableViewConfig only stores the selection_mode. Scroll position is also runtime-only.
 
 ## API
 
@@ -65,6 +65,14 @@ This closely mirrors the analog signal rendering pipeline:
 pub struct TableTileId(pub u64);
 
 /// Stable row identity for selection and caching.
+///
+/// Row identity contract:
+/// - SignalChangeList: timestamp of the transition
+/// - TransactionTrace: transaction ID from FTR
+/// - SearchResults: underlying model's row ID
+/// - Virtual: row index (stable within session)
+///
+/// Models MUST provide stable IDs within a generation; IDs may change across reloads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TableRowId(pub u64);
 
@@ -73,7 +81,11 @@ pub struct TableRowId(pub u64);
 pub enum TableModelSpec {
     SignalChangeList { variable: VariableRef, field: Vec<String> },
     TransactionTrace { stream: StreamScopeRef, generator: Option<TransactionStreamRef> },
-    SearchResults { query: TableSearchSpec },
+    /// Source-level search that produces a derived table model from waveform data.
+    /// Named `source_query` to distinguish from view-level `display_filter`.
+    SearchResults { source_query: TableSearchSpec },
+    /// Deferred to v2: AnalysisKind and AnalysisParams will define derived metrics
+    /// (top 10 spikes, longest idle windows, glitch detection, etc.).
     AnalysisResults { kind: AnalysisKind, params: AnalysisParams },
     Virtual { rows: usize, columns: usize, seed: u64 },
     Custom { key: String, payload: String },
@@ -85,17 +97,40 @@ pub struct TableViewConfig {
     pub title: String,
     pub columns: Vec<TableColumnConfig>,
     pub sort: Vec<TableSortSpec>,
-    pub search: TableSearchSpec,
-    pub selection: TableSelectionMode,
+    /// View-level filter applied to current table cache (post-source search).
+    /// Named `display_filter` to distinguish from model-level `source_query`.
+    pub display_filter: TableSearchSpec,
+    pub selection_mode: TableSelectionMode,
+    /// When true, reduces vertical padding from 4px to 2px and uses smaller font.
     pub dense_rows: bool,
+    /// When true, header row stays visible during vertical scroll.
+    /// When false, header scrolls with content (rarely desired).
     pub sticky_header: bool,
 }
 
 /// Runtime, non-serialized cache handle.
+///
+/// OnceLock invalidation semantics: OnceLock can only be set once. When cache_key
+/// or generation changes, the old TableCacheEntry is dropped and a new one created.
+/// OnceLock provides atomic single-write semantics, not mutable updates.
+/// This matches the AnalogCacheEntry pattern in analog_signal_cache.rs.
 pub struct TableCacheEntry {
     inner: OnceLock<TableCache>,
     pub cache_key: TableCacheKey,
     pub generation: u64,
+}
+
+/// Error type for cache build failures.
+#[derive(Debug, Clone)]
+pub enum TableCacheError {
+    /// The referenced model (variable, stream, etc.) was not found.
+    ModelNotFound { description: String },
+    /// Search pattern compilation failed (e.g., invalid regex).
+    InvalidSearch { pattern: String, reason: String },
+    /// Underlying waveform/transaction data is not available.
+    DataUnavailable,
+    /// Cache build was cancelled (e.g., tile closed during build).
+    Cancelled,
 }
 ```
 
@@ -134,26 +169,28 @@ pub enum Message {
     AddTableTile { spec: TableModelSpec },
     RemoveTableTile { tile_id: TableTileId },
     SetTableSort { tile_id: TableTileId, sort: Vec<TableSortSpec> },
-    SetTableSearch { tile_id: TableTileId, search: TableSearchSpec },
+    SetTableDisplayFilter { tile_id: TableTileId, filter: TableSearchSpec },
     SetTableSelection { tile_id: TableTileId, selection: TableSelection },
     BuildTableCache { tile_id: TableTileId, cache_key: TableCacheKey },
-    TableCacheBuilt { tile_id: TableTileId, entry: Arc<TableCacheEntry>, result: Result<TableCache, String> },
+    TableCacheBuilt { tile_id: TableTileId, entry: Arc<TableCacheEntry>, result: Result<TableCache, TableCacheError> },
 }
 ```
 
 ### Type glossary (v1)
 
 - TableSchema: ordered list of columns with stable keys and labels, with optional default width/visibility hints. Keys are strings or u64s.
-- TableColumnConfig: view layout for a column key (key, width, visibility, resizable). No formatting or alignment overrides in v1.
+- TableColumnConfig: view layout for a column key (key, width, visibility, resizable). No formatting or alignment overrides in v1. Column drag-to-reorder deferred to v2.
 - TableSortSpec: (column key, direction) list used for multi-column sorting.
-- TableSearchSpec: { mode, case_sensitive, text }. Empty text means no filter.
+- TableSearchSpec: { mode, case_sensitive, text }. Empty text means no filter. Used for both source_query (model-level) and display_filter (view-level).
 - TableSelectionMode: None | Single | Multi.
-- TableSelection: runtime selection state (set of TableRowId + anchor for range selection).
-- TableCell: display-ready cell content (string or rich text), optional tooltip.
+- TableSelection: runtime selection state (set of TableRowId + anchor for range selection). Selection persists for filtered-out rows; when filter is cleared, previously selected rows become visible again.
+- TableCell: display-ready cell content (string or rich text), optional tooltip. Icons, badges, and progress indicators deferred to v2.
 - TableSortKey: sortable value (numeric/string/bytes) used for stable ordering.
-- TableCacheKey: { model_key, view_search, view_sort, generation }. model_key is derived from TableModelSpec (including source-level search).
+- TableCacheKey: { model_key, display_filter, view_sort, generation }. model_key is derived from TableModelSpec via Hash/Eq (SignalChangeList uses variable+field, TransactionTrace uses stream+generator, etc.).
 - TableCache: cached row_ids in display order + per-row search text + per-row sort keys.
+- TableCacheError: structured error type for cache build failures (ModelNotFound, InvalidSearch, DataUnavailable, Cancelled).
 - TableAction: activation result (CursorSet, FocusTransaction, SelectSignal, None).
+- Row height: uniform height for all rows to enable virtualization. Variable row heights deferred to v2.
 
 ## Implementation details
 
@@ -174,37 +211,55 @@ pub enum Message {
 
 ### Runtime cache flow (analog-inspired)
 
-1. Table view attempts to access a cache entry by key (model identity + view search + sort + generation).
-2. If the cache is missing or stale, the view renders a loading state and emits Message::BuildTableCache.
+1. Table view attempts to access a cache entry by key (model identity + display_filter + sort + generation).
+2. If the cache is missing or stale (cache_key or generation mismatch), the old TableCacheEntry is dropped and a **new** TableCacheEntry is created. The view renders a loading state and emits Message::BuildTableCache.
 3. The SystemState handler starts a worker (perform_work) that builds the row index and any search/sort metadata. Cache building is always off-thread.
 4. If a build for the same cache_key is already in-flight, new BuildTableCache requests are ignored to avoid duplicate work.
 5. On completion, the worker sends Message::TableCacheBuilt and decrements OUTSTANDING_TRANSACTIONS.
-6. The cache entry stores the built TableCache in a OnceLock only if tile_id still exists and the cache_key + generation still match the current view state; otherwise the result is dropped. The next frame renders the table normally when a valid cache exists.
-7. If cache building fails, the error string is stored in runtime state for the tile and displayed in the UI until the next successful build or query change.
+6. The cache entry stores the built TableCache in its OnceLock only if tile_id still exists and the cache_key + generation still match the current view state; otherwise the result is dropped. OnceLock provides atomic single-write semantics. The next frame renders the table normally when a valid cache exists.
+7. If cache building fails, a TableCacheError is stored in runtime state for the tile and displayed in the UI until the next successful build or query change.
 
 This mirrors analog cache behavior (AnalogVarState + AnalogCacheEntry + cache_generation).
 
 ### Search and sort
 
 - Search uses a TableSearchSpec similar to VariableFilter: mode (contains, regex, fuzzy), case sensitivity, and an input string.
-- Regex compilation is cached to avoid per-frame rebuilds; invalid regex yields an error state in the UI.
+- Regex compilation is cached to avoid per-frame rebuilds; invalid regex yields a TableCacheError::InvalidSearch in the UI.
 - Sorting is stable and multi-column (primary, secondary) and uses cached sort keys to avoid repeated string formatting.
-- Search scope split: TableModelSpec::SearchResults is a source-level search (built from underlying waveform data by a worker), producing a derived table model. TableViewConfig.search is a view-level filter applied to the current table cache (post-source search). Both can be active: source search narrows the dataset; view search further filters rows in the cache. The UI should show both scopes distinctly to avoid confusion.
+- Multi-column sort UI: Click column header to set primary sort (toggles ascending/descending). Shift+click adds or modifies secondary/tertiary sort. Header shows sort indicators (▲/▼) with numbers for multi-column priority (1▲ 2▼). Clicking without Shift resets to single-column sort.
+- Search scope split: TableModelSpec::SearchResults uses `source_query` (source-level search built from underlying waveform data by a worker), producing a derived table model. TableViewConfig uses `display_filter` (view-level filter applied to the current table cache). Both can be active: source_query narrows the dataset; display_filter further filters rows in the cache. The UI shows both scopes distinctly (e.g., separate filter badges) to avoid confusion.
 - Cache build stores per-row search text and sort keys; TableModel::search_text is called only during cache build, not per frame.
 
 ### Selection and activation
 
 - Selection is stored as TableSelection (single/multi). It is keyed by TableRowId to survive sorting.
-- Keyboard navigation uses Up/Down to move selection, Enter to activate, and Ctrl/Cmd-C to copy row text.
+- Selection persists even for rows filtered out by display_filter. When filter is cleared, previously selected rows become visible again. Selection count UI shows "N selected (M hidden)" when applicable.
+- Keyboard navigation:
+  - Up/Down: move selection by one row
+  - Page Up/Down: move selection by visible page height
+  - Home/End: jump to first/last row
+  - Ctrl+Home/Ctrl+End: jump to first/last row and scroll
+  - Enter: activate selected row
+  - Ctrl/Cmd-C: copy selected rows as tab-separated values (visible columns only, no header row). Future: configurable format (CSV, JSON).
+  - Type-to-search: typing alphanumeric characters triggers fuzzy jump to matching row (with debounce).
 - Activation returns a TableAction, mapped to Messages like CursorSet or FocusTransaction.
 - Selection lifecycle: on cache_generation change, selection is cleared because row ids may no longer be valid across reloads. If a model can provide stable ids across reloads in the future, a remap hook can preserve selection.
+- Context menus for rows/cells deferred to v2.
 
 ### Responsiveness and accessibility
 
 - Use egui_extras::TableBuilder with vscroll(true) and row virtualization.
+- Row height is uniform across all rows to enable efficient virtualization. Variable row heights deferred to v2.
 - Column widths persist in TableViewConfig; columns can be resizable and auto-sized.
 - Rows are drawn with selectable labels for accessibility and keyboard focus.
 - Respect theme colors (SurferConfig theme) and ui zoom factor.
+
+### Scroll position behavior
+
+- After sort: scroll to keep the first selected row visible; if none selected, maintain approximate scroll position.
+- After filter change: if current scroll position would show empty space beyond content, scroll to keep content visible. If selected row is now filtered out, scroll to top.
+- After activation: keep activated row visible (scroll minimally to bring into view if needed).
+- Scroll position is runtime-only and not serialized; table opens at top on state load.
 
 ### Serialization
 
@@ -219,7 +274,7 @@ This mirrors analog cache behavior (AnalogVarState + AnalogCacheEntry + cache_ge
 - TableColumnConfig and TableSortSpec reference columns by key, not by index.
 - Column order is defined by TableViewConfig.columns; any schema columns not present are appended in schema order.
 - Unknown column keys in config/sort are ignored; missing columns are added from the schema with defaults.
-- Column widths/visibility do not affect cache_key; only model identity + view search + sort + generation do.
+- Column widths/visibility do not affect cache_key; only model identity + display_filter + sort + generation do.
 
 ### Missing requirements from codebase review
 
@@ -230,13 +285,26 @@ This mirrors analog cache behavior (AnalogVarState + AnalogCacheEntry + cache_ge
 - Support DataContainer::Empty and partially loaded waveforms with clear loading/empty states.
 - Wire table actions into command_parser and keyboard_shortcuts (search focus, close tile, copy row).
 
+### Deferred to v2
+
+- AnalysisKind and AnalysisParams: derived metrics like top 10 spikes, longest idle windows, glitch detection.
+- Context menus for rows and cells (copy, filter by value, jump to related, etc.).
+- Column drag-to-reorder via mouse.
+- Variable row heights (requires different virtualization strategy).
+- Rich cell content: icons, badges, progress indicators, sparklines.
+- Configurable copy format (CSV, JSON, custom delimiter).
+- Selection remap hook for preserving selection across reloads when model provides stable cross-generation IDs.
+
 ## Testing strategy
 
 - Unit tests for TableModel implementations (row_count, sort_key, search_text correctness).
 - Cache tests: build, reuse, invalidate on generation change; ensure no stale results.
 - Search tests: contains/regex/fuzzy; invalid regex reports error but does not panic.
-- Sorting tests: stable ordering, multi-column sort.
-- Selection tests: selection persists across sorting/filtering and clears on generation change.
+- Sorting tests: stable ordering, multi-column sort, Shift+click adds secondary sort, click without Shift resets to single-column.
+- Selection tests: selection persists across sorting/filtering (including hidden rows), clears on generation change, and UI shows correct "N selected (M hidden)" counts.
 - Serialization tests: TableTileState round-trip in .ron; caches omitted and rebuilt.
 - UI snapshot tests: add a virtual table tile and verify rendering and scroll behavior.
+- Scroll position tests: verify scroll maintains selected row visibility after sort, scrolls to top when filter hides selected row.
+- Keyboard navigation tests: verify Up/Down/Page/Home/End/type-to-search behavior.
+- Copy tests: verify tab-separated output format for selected rows.
 - Performance tests: large virtual data sets, ensure no per-frame O(n) work and acceptable FPS.
