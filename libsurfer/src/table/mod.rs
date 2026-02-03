@@ -11,9 +11,9 @@ pub use cache::{
 pub use model::{
     AnalysisKind, AnalysisParams, ColumnResizeResult, MIN_COLUMN_WIDTH, NavigationResult,
     ScrollTarget, SelectionUpdate, TableAction, TableCell, TableColumn, TableColumnConfig,
-    TableColumnKey, TableModel, TableModelKey, TableModelSpec, TableRowId, TableSchema,
-    TableSearchMode, TableSearchSpec, TableSelection, TableSelectionMode, TableSortDirection,
-    TableSortKey, TableSortSpec, TableTileId, TableTileState, TableViewConfig,
+    TableColumnKey, TableModel, TableModelContext, TableModelKey, TableModelSpec, TableRowId,
+    TableSchema, TableSearchMode, TableSearchSpec, TableSelection, TableSelectionMode,
+    TableSortDirection, TableSortKey, TableSortSpec, TableTileId, TableTileState, TableViewConfig,
     find_type_search_match, format_selection_count, hidden_columns, navigate_down, navigate_end,
     navigate_extend_selection, navigate_home, navigate_page_down, navigate_page_up, navigate_up,
     resize_column, scroll_target_after_activation, scroll_target_after_filter,

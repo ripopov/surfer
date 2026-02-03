@@ -3409,6 +3409,17 @@ snapshot_ui!(table_dense_rows, || {
     state
 });
 
+snapshot_ui_with_file_and_msgs! {table_signal_change_list_counter, "examples/counter.vcd", [
+    Message::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"])))),
+    Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.clk")]),
+    Message::AddTableTile {
+        spec: crate::table::TableModelSpec::SignalChangeList {
+            variable: VariableRef::from_hierarchy_string("tb.clk"),
+            field: vec![],
+        },
+    },
+]}
+
 snapshot_ui!(table_two_tiles, || {
     use crate::table::{TableModelSpec, TableTileState, TableViewConfig};
 

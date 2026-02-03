@@ -1,8 +1,12 @@
 use super::*;
 use crate::SystemState;
-use crate::message::Message;
+use crate::message::{Message, MessageTarget};
 use crate::table::sources::VirtualTableModel;
+use crate::tests::snapshot::wait_for_waves_fully_loaded;
+use crate::wave_container::VariableRef;
 use crate::wave_container::VariableRefExt;
+use crate::{StartupParams, WaveSource};
+use project_root::get_project_root;
 use std::sync::Arc;
 
 // ========================
@@ -84,29 +88,30 @@ fn table_view_config_round_trip() {
 
 #[test]
 fn table_model_spec_create_virtual_model() {
+    let state = SystemState::new_default_config().expect("state");
+    let ctx = state.table_model_context();
     let spec = TableModelSpec::Virtual {
         rows: 100,
         columns: 5,
         seed: 42,
     };
 
-    let model = spec.create_model();
-    assert!(model.is_some(), "Virtual model should be created");
-
-    let model = model.unwrap();
+    let model = spec.create_model(&ctx).expect("model");
     assert_eq!(model.row_count(), 100);
     assert_eq!(model.schema().columns.len(), 5);
 }
 
 #[test]
-fn table_model_spec_create_unimplemented_returns_none() {
+fn table_model_spec_create_unimplemented_returns_error() {
+    let state = SystemState::new_default_config().expect("state");
+    let ctx = state.table_model_context();
     let signal_spec = TableModelSpec::SignalChangeList {
         variable: crate::wave_container::VariableRef::from_hierarchy_string(""),
         field: vec![],
     };
     assert!(
-        signal_spec.create_model().is_none(),
-        "SignalChangeList not yet implemented"
+        signal_spec.create_model(&ctx).is_err(),
+        "SignalChangeList requires wave data"
     );
 
     let custom_spec = TableModelSpec::Custom {
@@ -114,21 +119,23 @@ fn table_model_spec_create_unimplemented_returns_none() {
         payload: "{}".to_string(),
     };
     assert!(
-        custom_spec.create_model().is_none(),
+        custom_spec.create_model(&ctx).is_err(),
         "Custom not yet implemented"
     );
 }
 
 #[test]
 fn virtual_model_via_factory_deterministic() {
+    let state = SystemState::new_default_config().expect("state");
+    let ctx = state.table_model_context();
     let spec = TableModelSpec::Virtual {
         rows: 10,
         columns: 3,
         seed: 42,
     };
 
-    let model1 = spec.create_model().unwrap();
-    let model2 = spec.create_model().unwrap();
+    let model1 = spec.create_model(&ctx).unwrap();
+    let model2 = spec.create_model(&ctx).unwrap();
 
     // Both models should produce identical output
     for row_idx in 0..10 {
@@ -153,13 +160,15 @@ fn virtual_model_via_factory_deterministic() {
 
 #[test]
 fn virtual_model_schema_keys_match_expected_format() {
+    let state = SystemState::new_default_config().expect("state");
+    let ctx = state.table_model_context();
     let spec = TableModelSpec::Virtual {
         rows: 5,
         columns: 3,
         seed: 0,
     };
 
-    let model = spec.create_model().unwrap();
+    let model = spec.create_model(&ctx).unwrap();
     let schema = model.schema();
 
     // Verify keys are "col_0", "col_1", "col_2"
@@ -2644,7 +2653,8 @@ fn table_select_all_in_multi_mode() {
         .or_insert_with(TableRuntimeState::default);
 
     // Build cache manually for the test
-    let model = spec.create_model().unwrap();
+    let ctx = state.table_model_context();
+    let model = spec.create_model(&ctx).unwrap();
     let cache = build_table_cache(model, TableSearchSpec::default(), vec![]).unwrap();
     let cache_key = TableCacheKey {
         model_key: TableModelKey(tile_id.0),
@@ -3868,4 +3878,240 @@ fn filter_change_sets_pending_scroll_op() {
         runtime.scroll_state.pending_scroll_op,
         Some(PendingScrollOp::AfterFilter)
     );
+}
+
+// ========================
+// Stage 11 Tests - SignalChangeList Model
+// ========================
+
+fn load_counter_state() -> SystemState {
+    let mut state = SystemState::new_default_config()
+        .expect("state")
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .expect("project root")
+                    .join("examples/counter.vcd")
+                    .try_into()
+                    .expect("path"),
+            )),
+            ..Default::default()
+        });
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state
+}
+
+fn test_runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .expect("runtime")
+}
+
+fn load_counter_state_with_variable(var_path: &str) -> SystemState {
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string(var_path),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state
+}
+
+fn find_visible_index_for_variable(
+    waves: &crate::wave_data::WaveData,
+    variable: &VariableRef,
+) -> Option<crate::displayed_item_tree::VisibleItemIndex> {
+    waves
+        .items_tree
+        .iter_visible()
+        .enumerate()
+        .find_map(
+            |(idx, node)| match waves.displayed_items.get(&node.item_ref) {
+                Some(crate::displayed_item::DisplayedItem::Variable(var))
+                    if &var.variable_ref == variable =>
+                {
+                    Some(crate::displayed_item_tree::VisibleItemIndex(idx))
+                }
+                _ => None,
+            },
+        )
+}
+
+#[test]
+fn signal_change_list_model_basic_rows() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = load_counter_state_with_variable("tb.clk");
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::SignalChangeList {
+        variable: VariableRef::from_hierarchy_string("tb.clk"),
+        field: vec![],
+    };
+    let model = spec.create_model(&ctx).expect("model");
+
+    assert!(model.row_count() > 0);
+    let row_id = model.row_id_at(0).expect("row");
+    let time_text = match model.cell(row_id, 0) {
+        TableCell::Text(text) => text,
+        TableCell::RichText(text) => text.text().to_string(),
+    };
+    let value_text = match model.cell(row_id, 1) {
+        TableCell::Text(text) => text,
+        TableCell::RichText(text) => text.text().to_string(),
+    };
+    assert!(!time_text.is_empty());
+    assert!(!value_text.is_empty());
+    assert!(matches!(
+        model.sort_key(row_id, 0),
+        TableSortKey::Numeric(_)
+    ));
+    assert!(matches!(
+        model.sort_key(row_id, 1),
+        TableSortKey::Numeric(_) | TableSortKey::Text(_)
+    ));
+
+    let search = model.search_text(row_id);
+    assert!(search.contains(&time_text));
+    assert!(search.contains(&value_text));
+
+    let time = match model.on_activate(row_id) {
+        TableAction::CursorSet(time) => time,
+        _ => panic!("expected cursor set"),
+    };
+    let waves = state.user.waves.as_ref().expect("waves");
+    let formatter = crate::time::TimeFormatter::new(
+        &waves.inner.as_waves().unwrap().metadata().timescale,
+        &state.user.wanted_timeunit,
+        &state.get_time_format(),
+    );
+    assert_eq!(formatter.format(&time), time_text);
+}
+
+#[test]
+fn signal_change_list_model_missing_field_path_uses_dash() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = load_counter_state_with_variable("tb.dut.counter");
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::SignalChangeList {
+        variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+        field: vec!["missing".to_string()],
+    };
+    let model = spec.create_model(&ctx).expect("model");
+    let row_id = model.row_id_at(0).expect("row");
+    let value_text = match model.cell(row_id, 1) {
+        TableCell::Text(text) => text,
+        TableCell::RichText(text) => text.text().to_string(),
+    };
+    assert_eq!(value_text, "-");
+}
+
+#[test]
+fn signal_change_list_model_errors() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = SystemState::new_default_config().expect("state");
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::SignalChangeList {
+        variable: VariableRef::from_hierarchy_string("tb.clk"),
+        field: vec![],
+    };
+    assert!(matches!(
+        spec.create_model(&ctx),
+        Err(TableCacheError::DataUnavailable)
+    ));
+
+    let state = load_counter_state();
+    let ctx = state.table_model_context();
+    let missing_spec = TableModelSpec::SignalChangeList {
+        variable: VariableRef::from_hierarchy_string("tb.nope"),
+        field: vec![],
+    };
+    assert!(matches!(
+        missing_spec.create_model(&ctx),
+        Err(TableCacheError::ModelNotFound { .. })
+    ));
+
+    let state = load_counter_state();
+    let ctx = state.table_model_context();
+    assert!(matches!(
+        spec.create_model(&ctx),
+        Err(TableCacheError::DataUnavailable)
+    ));
+}
+
+#[test]
+fn open_signal_change_list_adds_table_tile_for_focused_item() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state_with_variable("tb.clk");
+    let variable = VariableRef::from_hierarchy_string("tb.clk");
+    let waves = state.user.waves.as_ref().expect("waves");
+    let vidx = find_visible_index_for_variable(waves, &variable).expect("visible");
+    state.update(Message::FocusItem(vidx));
+    state.update(Message::OpenSignalChangeList {
+        target: MessageTarget::CurrentSelection,
+    });
+
+    assert_eq!(state.user.table_tiles.len(), 1);
+    let tile_state = state.user.table_tiles.values().next().expect("tile state");
+    match &tile_state.spec {
+        TableModelSpec::SignalChangeList { variable, field } => {
+            assert_eq!(
+                variable.full_path_string(),
+                VariableRef::from_hierarchy_string("tb.clk").full_path_string()
+            );
+            assert!(field.is_empty());
+        }
+        _ => panic!("expected signal change list"),
+    }
+}
+
+#[test]
+fn table_view_command_opens_table_for_focused_item() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state_with_variable("tb.clk");
+    let variable = VariableRef::from_hierarchy_string("tb.clk");
+    let waves = state.user.waves.as_ref().expect("waves");
+    let vidx = find_visible_index_for_variable(waves, &variable).expect("visible");
+    state.update(Message::FocusItem(vidx));
+
+    let parser = crate::command_parser::get_parser(&state);
+    let msg = crate::fzcmd::parse_command("table_view", parser).expect("command");
+    state.update(msg);
+
+    assert_eq!(state.user.table_tiles.len(), 1);
+}
+
+#[test]
+fn table_activate_selection_moves_cursor() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state_with_variable("tb.clk");
+    let spec = TableModelSpec::SignalChangeList {
+        variable: VariableRef::from_hierarchy_string("tb.clk"),
+        field: vec![],
+    };
+    state.update(Message::AddTableTile { spec: spec.clone() });
+
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile");
+    let ctx = state.table_model_context();
+    let model = spec.create_model(&ctx).expect("model");
+    let row_id = model.row_id_at(0).expect("row");
+    let expected_time = match model.on_activate(row_id) {
+        TableAction::CursorSet(time) => time,
+        _ => panic!("expected cursor set"),
+    };
+
+    let runtime = state.table_runtime.entry(tile_id).or_default();
+    let mut selection = TableSelection::new();
+    selection.rows.insert(row_id);
+    selection.anchor = Some(row_id);
+    runtime.selection = selection;
+
+    state.update(Message::TableActivateSelection { tile_id });
+    let cursor = state.user.waves.as_ref().expect("waves").cursor.clone();
+    assert_eq!(cursor, Some(expected_time));
 }

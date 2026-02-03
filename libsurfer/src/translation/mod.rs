@@ -336,7 +336,7 @@ pub fn all_translators() -> TranslatorList {
     )
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct TranslatorList {
     inner: HashMap<String, AnyTranslator>,
     #[cfg(feature = "python")]

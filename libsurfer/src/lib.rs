@@ -2236,38 +2236,45 @@ impl SystemState {
                 );
             }
             Message::BuildTableCache { tile_id, cache_key } => {
-                let runtime = self.table_runtime.entry(tile_id).or_default();
-
-                if runtime.cache.as_ref().is_some_and(|entry| {
-                    entry.cache_key == cache_key && entry.generation == cache_key.generation
-                }) {
-                    return None;
-                }
-
-                if let Some(entry) = self.table_inflight.get(&cache_key)
-                    && entry.generation == cache_key.generation
                 {
-                    runtime.cache_key = Some(cache_key.clone());
-                    runtime.cache = Some(entry.clone());
-                    return None;
+                    let runtime = self.table_runtime.entry(tile_id).or_default();
+
+                    if runtime.cache.as_ref().is_some_and(|entry| {
+                        entry.cache_key == cache_key && entry.generation == cache_key.generation
+                    }) {
+                        return None;
+                    }
+
+                    if let Some(entry) = self.table_inflight.get(&cache_key)
+                        && entry.generation == cache_key.generation
+                    {
+                        runtime.cache_key = Some(cache_key.clone());
+                        runtime.cache = Some(entry.clone());
+                        return None;
+                    }
                 }
 
                 // Create model from table tile spec
                 let model = match self.user.table_tiles.get(&tile_id) {
-                    Some(tile_state) => match tile_state.spec.create_model() {
-                        Some(model) => model,
-                        None => {
+                    Some(tile_state) => {
+                        let model_ctx = self.table_model_context();
+                        match tile_state.spec.create_model(&model_ctx) {
+                            Ok(model) => model,
+                            Err(err) => {
+                                if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
+                                    runtime.last_error = Some(err);
+                                }
+                                return None;
+                            }
+                        }
+                    }
+                    None => {
+                        if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
                             runtime.last_error =
                                 Some(crate::table::TableCacheError::ModelNotFound {
-                                    description: "Model type not yet implemented".to_string(),
+                                    description: "Table tile not found".to_string(),
                                 });
-                            return None;
                         }
-                    },
-                    None => {
-                        runtime.last_error = Some(crate::table::TableCacheError::ModelNotFound {
-                            description: "Table tile not found".to_string(),
-                        });
                         return None;
                     }
                 };
@@ -2277,9 +2284,11 @@ impl SystemState {
                     cache_key.generation,
                 ));
 
-                runtime.cache_key = Some(cache_key.clone());
-                runtime.cache = Some(entry.clone());
-                runtime.last_error = None;
+                if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
+                    runtime.cache_key = Some(cache_key.clone());
+                    runtime.cache = Some(entry.clone());
+                    runtime.last_error = None;
+                }
 
                 self.table_inflight.insert(cache_key.clone(), entry.clone());
 
@@ -2371,11 +2380,37 @@ impl SystemState {
             }
             Message::AddTableTile { spec } => {
                 let table_tile_id = self.user.tile_tree.next_table_id();
-                let config = crate::table::TableViewConfig::default();
+                let model_ctx = self.table_model_context();
+                let config = spec.default_view_config(&model_ctx);
                 let state = crate::table::TableTileState { spec, config };
                 self.user.table_tiles.insert(table_tile_id, state);
                 self.user.tile_tree.add_table_tile(table_tile_id);
                 self.invalidate_draw_commands();
+            }
+            Message::OpenSignalChangeList { target } => {
+                let waves = self.user.waves.as_ref()?;
+                let vidx = match target {
+                    MessageTarget::Explicit(vidx) => vidx,
+                    MessageTarget::CurrentSelection => waves.focused_item?,
+                };
+                let item_ref = waves
+                    .items_tree
+                    .get_visible(vidx)
+                    .map(|node| node.item_ref)?;
+                let item = waves.displayed_items.get(&item_ref)?;
+                if let DisplayedItem::Variable(variable) = item {
+                    let spec = crate::table::TableModelSpec::SignalChangeList {
+                        variable: variable.variable_ref.clone(),
+                        field: Vec::new(),
+                    };
+                    let table_tile_id = self.user.tile_tree.next_table_id();
+                    let model_ctx = self.table_model_context();
+                    let config = spec.default_view_config(&model_ctx);
+                    let state = crate::table::TableTileState { spec, config };
+                    self.user.table_tiles.insert(table_tile_id, state);
+                    self.user.tile_tree.add_table_tile(table_tile_id);
+                    self.invalidate_draw_commands();
+                }
             }
             Message::RemoveTableTile { tile_id } => {
                 self.user.table_tiles.remove(&tile_id);
@@ -2425,7 +2460,8 @@ impl SystemState {
             Message::TableActivateSelection { tile_id } => {
                 // Get the selected rows and call model.on_activate() for each
                 let tile_state = self.user.table_tiles.get(&tile_id)?;
-                let model = tile_state.spec.create_model()?;
+                let model_ctx = self.table_model_context();
+                let model = tile_state.spec.create_model(&model_ctx).ok()?;
                 let runtime = self.table_runtime.get(&tile_id)?;
 
                 // For now, activate the anchor row if set
@@ -2433,8 +2469,8 @@ impl SystemState {
                     let action = model.on_activate(anchor);
                     match action {
                         table::TableAction::CursorSet(time) => {
-                            // Use viewport 0 for now
-                            self.update(Message::GoToTime(Some(time), 0));
+                            self.update(Message::CursorSet(time));
+                            self.update(Message::GoToCursorIfNotInView);
                         }
                         table::TableAction::FocusTransaction(_)
                         | table::TableAction::SelectSignal(_)
@@ -2449,7 +2485,8 @@ impl SystemState {
                 include_header,
             } => {
                 let tile_state = self.user.table_tiles.get(&tile_id)?;
-                let model = tile_state.spec.create_model()?;
+                let model_ctx = self.table_model_context();
+                let model = tile_state.spec.create_model(&model_ctx).ok()?;
                 let runtime = self.table_runtime.get(&tile_id)?;
 
                 if runtime.selection.is_empty() {
@@ -2669,6 +2706,24 @@ impl SystemState {
             && let Some(ctx) = &self.context
         {
             ctx.copy_text(text);
+        }
+    }
+}
+
+impl SystemState {
+    fn table_model_context(&self) -> crate::table::TableModelContext<'_> {
+        let cache_generation = self
+            .user
+            .waves
+            .as_ref()
+            .map_or(0, |waves| waves.cache_generation);
+        crate::table::TableModelContext {
+            waves: self.user.waves.as_ref(),
+            translators: &self.translators,
+            wanted_timeunit: self.user.wanted_timeunit,
+            time_format: self.get_time_format(),
+            theme: &self.user.config.theme,
+            cache_generation,
         }
     }
 }

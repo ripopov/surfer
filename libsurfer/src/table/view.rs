@@ -50,8 +50,9 @@ pub fn draw_table_tile(
     let dense_rows = tile_state.config.dense_rows;
     let sticky_header = tile_state.config.sticky_header;
 
+    let model_ctx = state.table_model_context();
     // Get the model for schema access
-    let model = tile_state.spec.create_model();
+    let model = tile_state.spec.create_model(&model_ctx).ok();
 
     // Get or create runtime state
     let runtime = state.table_runtime.entry(tile_id).or_default();
@@ -98,9 +99,6 @@ pub fn draw_table_tile(
     // Get selection mode from config
     let selection_mode = tile_state.config.selection_mode;
 
-    // Get total row count from model (unfiltered)
-    let total_rows = model.as_ref().map_or(0, |m| m.row_count());
-
     // Create a unique ID for the table area to track focus
     let table_area_id = egui::Id::new(("table_area", tile_id.0));
 
@@ -146,6 +144,7 @@ pub fn draw_table_tile(
                                 });
 
                             // Render filter bar above the table
+                            let total_rows = model.row_count();
                             render_filter_bar(
                                 ui,
                                 msgs,

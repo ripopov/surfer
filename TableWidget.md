@@ -1423,14 +1423,14 @@ Stage 10 is complete when:
   - Ensure `Message::AddTableTile` or a new `AddTableTileWithConfig` message sets the title/sort defaults for this model.
 
 **Acceptance tests:**
-- [ ] Unit tests for `SignalChangeListModel`: `row_count`, `row_id_at`, `cell` formatting (time/value), `sort_key` (time/value), `search_text`, `on_activate`.
-- [ ] Unit tests for field path handling (root vs subfield) using real translation formatting.
-- [ ] Unit tests for error paths: no wave data, variable not found, signal not loaded -> correct `TableCacheError`.
-- [ ] Integration test: context menu action creates a table tile for a variable in a loaded VCD.
-- [ ] Integration test: `table_view` command opens a table for the focused item (`item_focus` -> `table_view`).
-- [ ] Integration test: activating a selected row moves the cursor to that time.
-- [ ] Snapshot test: SignalChangeList table renders Time/Value columns for `examples/counter.vcd`.
-- [ ] Coverage: all new branches in SignalChangeList model + UI wiring covered; `cargo test` passes.
+- [x] Unit tests for `SignalChangeListModel`: `row_count`, `row_id_at`, `cell` formatting (time/value), `sort_key` (time/value), `search_text`, `on_activate`.
+- [x] Unit tests for field path handling (root vs subfield) using real translation formatting.
+- [x] Unit tests for error paths: no wave data, variable not found, signal not loaded -> correct `TableCacheError`.
+- [x] Integration test: context menu action creates a table tile for a variable in a loaded VCD.
+- [x] Integration test: `table_view` command opens a table for the focused item (`item_focus` -> `table_view`).
+- [x] Integration test: activating a selected row moves the cursor to that time.
+- [x] Snapshot test: SignalChangeList table renders Time/Value columns for `examples/counter.vcd`.
+- [x] Coverage: all new branches in SignalChangeList model + UI wiring covered; `cargo test` passes.
 
 ---
 
@@ -1548,4 +1548,5 @@ v2 (deferred):
 - Stage 10 implemented: scroll behavior, column resize/visibility, generation tracking
   - 45 new tests (35 unit + 7 integration + 3 snapshot tests updated)
   - All 198 table tests passing
-- Stage 11+ pending implementation
+- Stage 11 implemented: SignalChangeList model + UI wiring + tests + snapshot
+- Stage 12+ pending implementation

@@ -249,6 +249,7 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
             "variable_add",
             "generator_add",
             "item_focus",
+            "table_view",
             "item_set_color",
             "item_set_background_color",
             "item_set_format",
@@ -663,6 +664,24 @@ pub fn get_parser(state: &SystemState) -> Command<Message> {
                         let alpha_idx: String = word.chars().take_while(|c| *c != '_').collect();
                         alpha_idx_to_uint_idx(&alpha_idx)
                             .map(|idx| Command::Terminal(Message::FocusItem(idx)))
+                    }),
+                ),
+                "table_view" => optional_single_word(
+                    displayed_items.clone(),
+                    Box::new(|word| {
+                        let trimmed = word.trim();
+                        if trimmed.is_empty() {
+                            return Some(Command::Terminal(Message::OpenSignalChangeList {
+                                target: MessageTarget::CurrentSelection,
+                            }));
+                        }
+
+                        let alpha_idx: String = trimmed.chars().take_while(|c| *c != '_').collect();
+                        alpha_idx_to_uint_idx(&alpha_idx).map(|idx| {
+                            Command::Terminal(Message::OpenSignalChangeList {
+                                target: MessageTarget::Explicit(idx),
+                            })
+                        })
                     }),
                 ),
                 "transition_next" => single_word(

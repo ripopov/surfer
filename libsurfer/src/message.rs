@@ -422,6 +422,10 @@ pub enum Message {
     AddTableTile {
         spec: TableModelSpec,
     },
+    /// Open a signal change list table for a variable
+    OpenSignalChangeList {
+        target: MessageTarget<VisibleItemIndex>,
+    },
     /// Remove a table tile from the tile tree
     RemoveTableTile {
         tile_id: TableTileId,

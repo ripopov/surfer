@@ -1,6 +1,11 @@
-use crate::table::sources::VirtualTableModel;
+use super::cache::TableCacheError;
+use crate::config::SurferTheme;
+use crate::table::sources::{SignalChangeListModel, VirtualTableModel};
+use crate::time::{TimeFormat, TimeUnit};
 use crate::transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef};
-use crate::wave_container::VariableRef;
+use crate::translation::TranslatorList;
+use crate::wave_container::{VariableRef, VariableRefExt};
+use crate::wave_data::WaveData;
 use egui::RichText;
 use num::BigInt;
 use serde::{Deserialize, Serialize};
@@ -49,24 +54,62 @@ pub enum TableModelSpec {
 
 impl TableModelSpec {
     /// Create a table model instance from this specification.
-    ///
-    /// Returns `Some(model)` if the model can be created, `None` otherwise.
-    /// Currently only `Virtual` is implemented; other variants will be added in later stages.
-    pub fn create_model(&self) -> Option<Arc<dyn TableModel>> {
+    pub fn create_model(
+        &self,
+        ctx: &TableModelContext<'_>,
+    ) -> Result<Arc<dyn TableModel>, TableCacheError> {
         match self {
             Self::Virtual {
                 rows,
                 columns,
                 seed,
-            } => Some(Arc::new(VirtualTableModel::new(*rows, *columns, *seed))),
+            } => Ok(Arc::new(VirtualTableModel::new(*rows, *columns, *seed))),
+            Self::SignalChangeList { variable, field } => {
+                SignalChangeListModel::new(variable.clone(), field.clone(), ctx)
+                    .map(|model| Arc::new(model) as Arc<dyn TableModel>)
+            }
             // Other model types will be implemented in later stages
-            Self::SignalChangeList { .. }
-            | Self::TransactionTrace { .. }
+            Self::TransactionTrace { .. }
             | Self::SearchResults { .. }
             | Self::AnalysisResults { .. }
-            | Self::Custom { .. } => None,
+            | Self::Custom { .. } => Err(TableCacheError::ModelNotFound {
+                description: "Model type not yet implemented".to_string(),
+            }),
         }
     }
+
+    /// Returns a default view configuration for this model type.
+    #[must_use]
+    pub fn default_view_config(&self, _ctx: &TableModelContext<'_>) -> TableViewConfig {
+        match self {
+            Self::SignalChangeList { variable, field } => {
+                let mut config = TableViewConfig::default();
+                let mut title = variable.full_path_string();
+                if !field.is_empty() {
+                    title.push('.');
+                    title.push_str(&field.join("."));
+                }
+                config.title = format!("Signal change list: {title}");
+                config.sort = vec![TableSortSpec {
+                    key: TableColumnKey::Str("time".to_string()),
+                    direction: TableSortDirection::Ascending,
+                }];
+                config.selection_mode = TableSelectionMode::Single;
+                config
+            }
+            _ => TableViewConfig::default(),
+        }
+    }
+}
+
+/// Context for building table models from specifications.
+pub struct TableModelContext<'a> {
+    pub waves: Option<&'a WaveData>,
+    pub translators: &'a TranslatorList,
+    pub wanted_timeunit: TimeUnit,
+    pub time_format: TimeFormat,
+    pub theme: &'a SurferTheme,
+    pub cache_generation: u64,
 }
 
 /// Serializable view configuration.

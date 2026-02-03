@@ -206,6 +206,7 @@ fn key_listing(ui: &mut Ui, shortcuts: &SurferShortcuts) {
     let toggle_toolbar = shortcuts.format_shortcut(ShortcutAction::ToggleToolbar);
     let reload_waveform = shortcuts.format_shortcut(ShortcutAction::ReloadWaveform);
     let focus_item = shortcuts.format_shortcut(ShortcutAction::ItemFocus);
+    let table_view = shortcuts.format_shortcut(ShortcutAction::TableView);
     let goto_end = shortcuts.format_shortcut(ShortcutAction::GoToEnd);
     let goto_start = shortcuts.format_shortcut(ShortcutAction::GoToStart);
     let zoom_in = shortcuts.format_shortcut(ShortcutAction::ZoomIn);
@@ -254,6 +255,11 @@ fn key_listing(ui: &mut Ui, shortcuts: &SurferShortcuts) {
         ("", &undo, "Undo last change"),
         ("", &redo, "Redo last change"),
         ("", &focus_item, "Fast focus a variable"),
+        (
+            "",
+            &table_view,
+            "Open signal change list for focused variable",
+        ),
         ("", &add_marker, "Add marker at current cursor"),
         ("", "Ctrl+0-9", "Add numbered marker"),
         ("", "0-9", "Center view at numbered marker"),

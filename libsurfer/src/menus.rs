@@ -11,6 +11,7 @@ use crate::displayed_item_tree::VisibleItemIndex;
 use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation, ScopeExpandType};
 use crate::keyboard_shortcuts::ShortcutAction;
 use crate::message::MessageTarget;
+use crate::table::TableModelSpec;
 use crate::wave_container::{FieldRef, VariableRefExt};
 use crate::wave_data::ScopeType;
 use crate::wave_source::LoadOptions;
@@ -587,6 +588,20 @@ impl SystemState {
                         });
                 }
             });
+
+            if ui.button("Signal change list").clicked() {
+                let (variable_ref, field) = path
+                    .map(|path| (path.root.clone(), path.field.clone()))
+                    .unwrap_or_else(|| (variable.variable_ref.clone(), Vec::new()));
+
+                msgs.push(Message::AddTableTile {
+                    spec: TableModelSpec::SignalChangeList {
+                        variable: variable_ref,
+                        field,
+                    },
+                });
+                ui.close();
+            }
 
             if self.wcp_greeted_signal.load(Ordering::Relaxed) {
                 if self.wcp_client_capabilities.goto_declaration
