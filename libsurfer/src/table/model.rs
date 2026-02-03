@@ -1,9 +1,11 @@
+use crate::table::sources::VirtualTableModel;
 use crate::transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef};
 use crate::wave_container::VariableRef;
 use egui::RichText;
 use num::BigInt;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 /// Unique identifier for a table tile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -43,6 +45,28 @@ pub enum TableModelSpec {
         key: String,
         payload: String,
     },
+}
+
+impl TableModelSpec {
+    /// Create a table model instance from this specification.
+    ///
+    /// Returns `Some(model)` if the model can be created, `None` otherwise.
+    /// Currently only `Virtual` is implemented; other variants will be added in later stages.
+    pub fn create_model(&self) -> Option<Arc<dyn TableModel>> {
+        match self {
+            Self::Virtual {
+                rows,
+                columns,
+                seed,
+            } => Some(Arc::new(VirtualTableModel::new(*rows, *columns, *seed))),
+            // Other model types will be implemented in later stages
+            Self::SignalChangeList { .. }
+            | Self::TransactionTrace { .. }
+            | Self::SearchResults { .. }
+            | Self::AnalysisResults { .. }
+            | Self::Custom { .. } => None,
+        }
+    }
 }
 
 /// Serializable view configuration.

@@ -382,6 +382,9 @@ The implementation is divided into stages. Stages 1-10 use only the Virtual mode
   - `TableCacheBuilt`: apply result only if cache_key matches current state.
 - Add in-flight tracking to prevent duplicate builds.
 
+**Note on factory function evolution:**
+The current `TableModelSpec::create_model(&self) -> Option<Arc<dyn TableModel>>` works for the Virtual model which requires no external context. In Stages 11-14, this will be extended to `create_model(&self, ctx: &TableModelContext) -> Result<Arc<dyn TableModel>, TableCacheError>` where `TableModelContext` provides access to `WaveData`, `TransactionContainer`, formatters, and other runtime dependencies. The Virtual model will ignore the context, while real models will use it to access waveform data.
+
 **Acceptance tests:**
 - [ ] Unit test: `TableCacheEntry` starts not ready, becomes ready after `set()`.
 - [ ] Unit test: Cache builder produces correct row_ids for unfiltered, unsorted input.
@@ -585,6 +588,14 @@ The implementation is divided into stages. Stages 1-10 use only the Virtual mode
 **Prerequisites:** Stages 1-10 complete.
 
 **Deliverables:**
+- Define `TableModelContext` struct providing:
+  - `wave_data: Option<&WaveData>` - access to waveform data
+  - `transaction_container: Option<&TransactionContainer>` - access to FTR transactions
+  - `time_format: &TimeStringFormatting` - for consistent time display
+  - `time_unit: TimeUnit` - current time unit for display
+- Extend `TableModelSpec::create_model(&self, ctx: &TableModelContext) -> Result<Arc<dyn TableModel>, TableCacheError>`
+  - Virtual model ignores context (returns Ok)
+  - SignalChangeList returns `Err(ModelNotFound)` if wave_data is None or variable not found
 - Implement `SignalChangeListModel` in `sources/signal_change_list.rs`:
   - Constructor: takes `VariableRef`, `field: Vec<String>`, wave data reference.
   - Schema: columns for "Time", "Value", optional "Duration".
@@ -592,7 +603,6 @@ The implementation is divided into stages. Stages 1-10 use only the Virtual mode
   - `cell()`: format time using `TimeStringFormatting`, value using translator.
   - `sort_key()`: numeric timestamp for Time, formatted value for Value.
   - `on_activate(row)`: return `TableAction::CursorSet(timestamp)`.
-- Wire up `TableModelSpec::SignalChangeList` in factory.
 - Handle missing variable gracefully (`TableCacheError::ModelNotFound`).
 - Invalidate cache on waveform reload (generation change).
 
