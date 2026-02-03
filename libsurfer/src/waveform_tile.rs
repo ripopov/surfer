@@ -34,6 +34,16 @@ use crate::view::{
 };
 use crate::wave_container::{FieldRef, FieldRefExt, VariableMeta};
 
+/// Info about a visible item needed for drawing.
+struct VisibleItemInfo {
+    item_ref: DisplayedItemRef,
+    level: u8,
+    unfolded: bool,
+    vidx: VisibleItemIndex,
+    has_children: bool,
+    last: bool,
+}
+
 impl SystemState {
     /// Draws waveform tile contents (variable list + values + canvas).
     /// Uses show_inside() to render panels within the tile's UI area.
@@ -43,123 +53,168 @@ impl SystemState {
         ui: &mut Ui,
         msgs: &mut Vec<Message>,
     ) {
-        // Use tile's max_rect as clip boundary - child UIs from SidePanel/CentralPanel don't inherit clip.
         let tile_clip = ui.max_rect();
-
         let max_width = ui.available_width();
         let max_height = ui.available_height();
 
-        if self.user.waves.is_some()
-            && self
-                .user
-                .waves
-                .as_ref()
-                .is_some_and(|waves| waves.any_displayed())
-        {
-            let scroll_offset = self.user.waves.as_ref().unwrap().scroll_offset;
-            let draw_focus_ids = self.command_prompt.visible
-                && expand_command(&self.command_prompt_text.borrow(), get_parser(self))
-                    .expanded
-                    .starts_with("item_focus");
-            if draw_focus_ids {
-                SidePanel::left(ui.id().with("focus id list"))
-                    .default_width(40.)
-                    .width_range(40.0..=max_width)
-                    .show_inside(ui, |ui| {
-                        self.handle_pointer_in_ui(ui, msgs);
-                        let response = ScrollArea::both()
-                            .vertical_scroll_offset(scroll_offset)
-                            .show(ui, |ui| {
-                                self.draw_item_focus_list(ui);
-                            });
-                        self.user.waves.as_mut().unwrap().top_item_draw_offset =
-                            response.inner_rect.min.y;
-                        self.user.waves.as_mut().unwrap().total_height =
-                            response.inner_rect.height();
-                        if (scroll_offset - response.state.offset.y).abs() > 5. {
-                            msgs.push(Message::SetScrollOffset(response.state.offset.y));
-                        }
+        let has_waves = self
+            .user
+            .waves
+            .as_ref()
+            .is_some_and(|waves| waves.any_displayed());
+
+        if has_waves {
+            self.draw_waveform_panels(ctx, ui, msgs, tile_clip, max_width);
+        } else {
+            self.draw_welcome_screen(ui, max_width, max_height);
+        }
+    }
+
+    /// Draws all waveform panels when waves are loaded.
+    fn draw_waveform_panels(
+        &mut self,
+        ctx: &egui::Context,
+        ui: &mut Ui,
+        msgs: &mut Vec<Message>,
+        tile_clip: Rect,
+        max_width: f32,
+    ) {
+        let scroll_offset = self.user.waves.as_ref().unwrap().scroll_offset;
+
+        self.draw_focus_id_panel(ui, msgs, scroll_offset, max_width);
+        self.draw_variable_list_panel(ctx, ui, msgs, tile_clip, scroll_offset, max_width);
+        self.draw_transaction_detail_panel(ui, max_width, msgs);
+        self.draw_variable_values_panel(ui, msgs, tile_clip, scroll_offset, max_width);
+        self.draw_additional_viewports(ctx, ui, msgs, tile_clip);
+        self.draw_main_canvas_panel(ctx, ui, msgs, tile_clip);
+    }
+
+    /// Draws the focus ID panel for keyboard-based item selection commands.
+    fn draw_focus_id_panel(
+        &mut self,
+        ui: &mut Ui,
+        msgs: &mut Vec<Message>,
+        scroll_offset: f32,
+        max_width: f32,
+    ) {
+        let draw_focus_ids = self.command_prompt.visible
+            && expand_command(&self.command_prompt_text.borrow(), get_parser(self))
+                .expanded
+                .starts_with("item_focus");
+
+        if !draw_focus_ids {
+            return;
+        }
+
+        SidePanel::left(ui.id().with("focus id list"))
+            .default_width(40.)
+            .width_range(40.0..=max_width)
+            .show_inside(ui, |ui| {
+                self.handle_pointer_in_ui(ui, msgs);
+                let response = ScrollArea::both()
+                    .vertical_scroll_offset(scroll_offset)
+                    .show(ui, |ui| {
+                        self.draw_item_focus_list(ui);
                     });
-            }
-
-            SidePanel::left(ui.id().with("variable list"))
-                .default_width(100.)
-                .width_range(100.0..=max_width)
-                .show_inside(ui, |ui| {
-                    ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
-                    ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-                    self.handle_pointer_in_ui(ui, msgs);
-                    if self.show_default_timeline() {
-                        ui.label(RichText::new("Time").italics());
-                    }
-
-                    let response = ScrollArea::both()
-                        .auto_shrink([false; 2])
-                        .vertical_scroll_offset(scroll_offset)
-                        .show(ui, |ui| {
-                            self.draw_item_list(msgs, ui, ctx);
-                        });
-                    self.user.waves.as_mut().unwrap().top_item_draw_offset =
-                        response.inner_rect.min.y;
-                    self.user.waves.as_mut().unwrap().total_height = response.inner_rect.height();
-                    if (scroll_offset - response.state.offset.y).abs() > 5. {
-                        msgs.push(Message::SetScrollOffset(response.state.offset.y));
-                    }
-                });
-
-            // Will only draw if a transaction is focused
-            self.draw_transaction_detail_panel(ui, max_width, msgs);
-
-            SidePanel::left(ui.id().with("variable values"))
-                .frame(egui::Frame::default().inner_margin(0).outer_margin(0))
-                .default_width(100.)
-                .width_range(10.0..=max_width)
-                .show_inside(ui, |ui| {
-                    ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
-                    // Draw background manually; Frame::fill draws before we can clamp.
-                    ui.painter().with_clip_rect(ui.clip_rect()).rect_filled(
-                        ui.max_rect(),
-                        0.0,
-                        self.user.config.theme.secondary_ui_color.background,
-                    );
-                    ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-                    self.handle_pointer_in_ui(ui, msgs);
-                    let response = ScrollArea::both()
-                        .auto_shrink([false; 2])
-                        .vertical_scroll_offset(scroll_offset)
-                        .show(ui, |ui| self.draw_var_values(ui, msgs));
-                    if (scroll_offset - response.state.offset.y).abs() > 5. {
-                        msgs.push(Message::SetScrollOffset(response.state.offset.y));
-                    }
-                });
-
-            let number_of_viewports = self.user.waves.as_ref().unwrap().viewports.len();
-            if number_of_viewports > 1 {
-                // Draw additional viewports with custom separator style
-                let available_width = ui.available_width();
-                let default_width = available_width / (number_of_viewports as f32);
-                let viewport_stroke = Stroke::from(&self.user.config.theme.viewport_separator);
-                // Apply separator stroke style to the UI
-                let std_stroke = ui.style().visuals.widgets.noninteractive.bg_stroke;
-                ui.style_mut().visuals.widgets.noninteractive.bg_stroke = viewport_stroke;
-                for viewport_idx in 1..number_of_viewports {
-                    SidePanel::right(ui.id().with(format!("view port {viewport_idx}")))
-                        .default_width(default_width)
-                        .width_range(30.0..=available_width)
-                        .frame(Frame {
-                            inner_margin: Margin::ZERO,
-                            outer_margin: Margin::ZERO,
-                            ..Default::default()
-                        })
-                        .show_inside(ui, |ui| {
-                            ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
-                            self.draw_items(ctx, msgs, ui, viewport_idx);
-                        });
+                self.user.waves.as_mut().unwrap().top_item_draw_offset = response.inner_rect.min.y;
+                self.user.waves.as_mut().unwrap().total_height = response.inner_rect.height();
+                if (scroll_offset - response.state.offset.y).abs() > 5. {
+                    msgs.push(Message::SetScrollOffset(response.state.offset.y));
                 }
-                ui.style_mut().visuals.widgets.noninteractive.bg_stroke = std_stroke;
-            }
+            });
+    }
 
-            CentralPanel::default()
+    /// Draws the variable list panel showing displayed waveform items.
+    fn draw_variable_list_panel(
+        &mut self,
+        ctx: &egui::Context,
+        ui: &mut Ui,
+        msgs: &mut Vec<Message>,
+        tile_clip: Rect,
+        scroll_offset: f32,
+        max_width: f32,
+    ) {
+        SidePanel::left(ui.id().with("variable list"))
+            .default_width(100.)
+            .width_range(100.0..=max_width)
+            .show_inside(ui, |ui| {
+                ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
+                ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+                self.handle_pointer_in_ui(ui, msgs);
+                if self.show_default_timeline() {
+                    ui.label(RichText::new("Time").italics());
+                }
+
+                let response = ScrollArea::both()
+                    .auto_shrink([false; 2])
+                    .vertical_scroll_offset(scroll_offset)
+                    .show(ui, |ui| {
+                        self.draw_item_list(msgs, ui, ctx);
+                    });
+                self.user.waves.as_mut().unwrap().top_item_draw_offset = response.inner_rect.min.y;
+                self.user.waves.as_mut().unwrap().total_height = response.inner_rect.height();
+                if (scroll_offset - response.state.offset.y).abs() > 5. {
+                    msgs.push(Message::SetScrollOffset(response.state.offset.y));
+                }
+            });
+    }
+
+    /// Draws the variable values panel showing current values at cursor position.
+    fn draw_variable_values_panel(
+        &mut self,
+        ui: &mut Ui,
+        msgs: &mut Vec<Message>,
+        tile_clip: Rect,
+        scroll_offset: f32,
+        max_width: f32,
+    ) {
+        SidePanel::left(ui.id().with("variable values"))
+            .frame(egui::Frame::default().inner_margin(0).outer_margin(0))
+            .default_width(100.)
+            .width_range(10.0..=max_width)
+            .show_inside(ui, |ui| {
+                ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
+                // Draw background manually; Frame::fill draws before we can clamp.
+                ui.painter().with_clip_rect(ui.clip_rect()).rect_filled(
+                    ui.max_rect(),
+                    0.0,
+                    self.user.config.theme.secondary_ui_color.background,
+                );
+                ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+                self.handle_pointer_in_ui(ui, msgs);
+                let response = ScrollArea::both()
+                    .auto_shrink([false; 2])
+                    .vertical_scroll_offset(scroll_offset)
+                    .show(ui, |ui| self.draw_var_values(ui, msgs));
+                if (scroll_offset - response.state.offset.y).abs() > 5. {
+                    msgs.push(Message::SetScrollOffset(response.state.offset.y));
+                }
+            });
+    }
+
+    /// Draws additional viewports when multiple viewports are configured.
+    fn draw_additional_viewports(
+        &mut self,
+        ctx: &egui::Context,
+        ui: &mut Ui,
+        msgs: &mut Vec<Message>,
+        tile_clip: Rect,
+    ) {
+        let number_of_viewports = self.user.waves.as_ref().unwrap().viewports.len();
+        if number_of_viewports <= 1 {
+            return;
+        }
+
+        let available_width = ui.available_width();
+        let default_width = available_width / (number_of_viewports as f32);
+        let viewport_stroke = Stroke::from(&self.user.config.theme.viewport_separator);
+        let std_stroke = ui.style().visuals.widgets.noninteractive.bg_stroke;
+        ui.style_mut().visuals.widgets.noninteractive.bg_stroke = viewport_stroke;
+
+        for viewport_idx in 1..number_of_viewports {
+            SidePanel::right(ui.id().with(format!("view port {viewport_idx}")))
+                .default_width(default_width)
+                .width_range(30.0..=available_width)
                 .frame(Frame {
                     inner_margin: Margin::ZERO,
                     outer_margin: Margin::ZERO,
@@ -167,29 +222,53 @@ impl SystemState {
                 })
                 .show_inside(ui, |ui| {
                     ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
-                    self.draw_items(ctx, msgs, ui, 0);
-                });
-        } else {
-            // Show welcome screen when no waves or nothing displayed
-            CentralPanel::default()
-                .frame(Frame::NONE.fill(self.user.config.theme.canvas_colors.background))
-                .show_inside(ui, |ui| {
-                    ui.add_space(max_height * 0.1);
-                    ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("🏄 Surfer").monospace().size(24.));
-                        ui.add_space(20.);
-                        let layout = Layout::top_down(Align::LEFT);
-                        ui.allocate_ui_with_layout(
-                            Vec2 {
-                                x: max_width * 0.35,
-                                y: max_height * 0.5,
-                            },
-                            layout,
-                            |ui| self.help_message(ui),
-                        );
-                    });
+                    self.draw_items(ctx, msgs, ui, viewport_idx);
                 });
         }
+
+        ui.style_mut().visuals.widgets.noninteractive.bg_stroke = std_stroke;
+    }
+
+    /// Draws the main waveform canvas panel.
+    fn draw_main_canvas_panel(
+        &mut self,
+        ctx: &egui::Context,
+        ui: &mut Ui,
+        msgs: &mut Vec<Message>,
+        tile_clip: Rect,
+    ) {
+        CentralPanel::default()
+            .frame(Frame {
+                inner_margin: Margin::ZERO,
+                outer_margin: Margin::ZERO,
+                ..Default::default()
+            })
+            .show_inside(ui, |ui| {
+                ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
+                self.draw_items(ctx, msgs, ui, 0);
+            });
+    }
+
+    /// Draws the welcome screen when no waves are loaded.
+    fn draw_welcome_screen(&mut self, ui: &mut Ui, max_width: f32, max_height: f32) {
+        CentralPanel::default()
+            .frame(Frame::NONE.fill(self.user.config.theme.canvas_colors.background))
+            .show_inside(ui, |ui| {
+                ui.add_space(max_height * 0.1);
+                ui.vertical_centered(|ui| {
+                    ui.label(RichText::new("🏄 Surfer").monospace().size(24.));
+                    ui.add_space(20.);
+                    let layout = Layout::top_down(Align::LEFT);
+                    ui.allocate_ui_with_layout(
+                        Vec2 {
+                            x: max_width * 0.35,
+                            y: max_height * 0.5,
+                        },
+                        layout,
+                        |ui| self.help_message(ui),
+                    );
+                });
+            });
     }
 
     /// Add bottom padding so the last item isn't clipped or covered by the scrollbar.
@@ -249,131 +328,37 @@ impl SystemState {
     /// Draws the variable/item list panel showing all displayed waveform items.
     fn draw_item_list(&mut self, msgs: &mut Vec<Message>, ui: &mut Ui, ctx: &egui::Context) {
         let mut item_offsets = Vec::new();
-
-        let any_groups = self
-            .user
-            .waves
-            .as_ref()
-            .unwrap()
-            .items_tree
-            .iter()
-            .any(|node| node.level > 0);
+        let any_groups = self.has_any_groups();
         let alignment = self.get_name_alignment();
+
         ui.with_layout(Layout::top_down(alignment).with_cross_justify(true), |ui| {
             let available_rect = ui.available_rect_before_wrap();
-            for crate::displayed_item_tree::Info {
-                node:
-                    crate::displayed_item_tree::Node {
-                        item_ref,
-                        level,
-                        unfolded,
-                        ..
-                    },
-                vidx,
-                has_children,
-                last,
-                ..
-            } in self
-                .user
-                .waves
-                .as_ref()
-                .unwrap()
-                .items_tree
-                .iter_visible_extra()
-            {
+
+            for info in self.collect_visible_items() {
                 let Some(displayed_item) = self
                     .user
                     .waves
                     .as_ref()
                     .unwrap()
                     .displayed_items
-                    .get(item_ref)
+                    .get(&info.item_ref)
                 else {
                     continue;
                 };
 
-                ui.with_layout(
-                    if alignment == Align::LEFT {
-                        Layout::left_to_right(Align::TOP)
-                    } else {
-                        Layout::right_to_left(Align::TOP)
-                    },
-                    |ui| {
-                        ui.add_space(10.0 * f32::from(*level));
-                        if any_groups {
-                            let response =
-                                self.hierarchy_icon(ui, has_children, *unfolded, alignment);
-                            if response.clicked() {
-                                if *unfolded {
-                                    msgs.push(Message::GroupFold(Some(*item_ref)));
-                                } else {
-                                    msgs.push(Message::GroupUnfold(Some(*item_ref)));
-                                }
-                            }
-                        }
-
-                        let item_rect = match displayed_item {
-                            DisplayedItem::Variable(displayed_variable) => {
-                                let levels_to_force_expand =
-                                    self.items_to_expand.borrow().iter().find_map(
-                                        |(id, levels)| {
-                                            if item_ref == id { Some(*levels) } else { None }
-                                        },
-                                    );
-
-                                self.draw_variable(
-                                    msgs,
-                                    vidx,
-                                    displayed_item,
-                                    *item_ref,
-                                    FieldRef::without_fields(
-                                        displayed_variable.variable_ref.clone(),
-                                    ),
-                                    &mut item_offsets,
-                                    &displayed_variable.info,
-                                    ui,
-                                    ctx,
-                                    levels_to_force_expand,
-                                    alignment,
-                                )
-                            }
-                            DisplayedItem::Divider(_)
-                            | DisplayedItem::Marker(_)
-                            | DisplayedItem::Placeholder(_)
-                            | DisplayedItem::TimeLine(_)
-                            | DisplayedItem::Stream(_)
-                            | DisplayedItem::Group(_) => {
-                                ui.with_layout(
-                                    ui.layout()
-                                        .with_main_justify(true)
-                                        .with_main_align(alignment),
-                                    |ui| {
-                                        self.draw_plain_item(
-                                            msgs,
-                                            vidx,
-                                            *item_ref,
-                                            displayed_item,
-                                            &mut item_offsets,
-                                            ui,
-                                            ctx,
-                                        )
-                                    },
-                                )
-                                .inner
-                            }
-                        };
-                        // expand to the left, but not over the icon size
-                        let mut expanded_rect = item_rect;
-                        expanded_rect.set_left(
-                            available_rect.left()
-                                + self.user.config.layout.waveforms_text_size
-                                + ui.spacing().item_spacing.x,
-                        );
-                        expanded_rect.set_right(available_rect.right());
-                        self.draw_drag_target(msgs, vidx, expanded_rect, available_rect, ui, last);
-                    },
+                self.draw_item_row(
+                    ui,
+                    ctx,
+                    msgs,
+                    &mut item_offsets,
+                    &info,
+                    displayed_item,
+                    alignment,
+                    any_groups,
+                    available_rect,
                 );
             }
+
             Self::add_padding_for_last_item(
                 ui,
                 item_offsets.last(),
@@ -383,9 +368,189 @@ impl SystemState {
 
         self.user.waves.as_mut().unwrap().drawing_infos = item_offsets;
 
-        // Context menu for the unused part
         let response = ui.allocate_response(ui.available_size(), Sense::click());
         generic_context_menu(msgs, &response);
+    }
+
+    /// Checks if there are any grouped items in the tree.
+    fn has_any_groups(&self) -> bool {
+        self.user
+            .waves
+            .as_ref()
+            .unwrap()
+            .items_tree
+            .iter()
+            .any(|node| node.level > 0)
+    }
+
+    /// Collects visible item info for iteration.
+    fn collect_visible_items(&self) -> Vec<VisibleItemInfo> {
+        self.user
+            .waves
+            .as_ref()
+            .unwrap()
+            .items_tree
+            .iter_visible_extra()
+            .map(|info| VisibleItemInfo {
+                item_ref: info.node.item_ref,
+                level: info.node.level,
+                unfolded: info.node.unfolded,
+                vidx: info.vidx,
+                has_children: info.has_children,
+                last: info.last,
+            })
+            .collect()
+    }
+
+    /// Draws a single item row including hierarchy icon and content.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_item_row(
+        &self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        msgs: &mut Vec<Message>,
+        item_offsets: &mut Vec<ItemDrawingInfo>,
+        info: &VisibleItemInfo,
+        displayed_item: &DisplayedItem,
+        alignment: Align,
+        any_groups: bool,
+        available_rect: Rect,
+    ) {
+        let row_layout = if alignment == Align::LEFT {
+            Layout::left_to_right(Align::TOP)
+        } else {
+            Layout::right_to_left(Align::TOP)
+        };
+
+        ui.with_layout(row_layout, |ui| {
+            ui.add_space(10.0 * f32::from(info.level));
+
+            self.draw_hierarchy_icon_with_action(ui, msgs, info, any_groups, alignment);
+
+            let item_rect = self.draw_item_content(
+                ui,
+                ctx,
+                msgs,
+                item_offsets,
+                info,
+                displayed_item,
+                alignment,
+            );
+
+            self.draw_item_drag_target(ui, msgs, info, item_rect, available_rect);
+        });
+    }
+
+    /// Draws hierarchy icon and handles fold/unfold clicks.
+    fn draw_hierarchy_icon_with_action(
+        &self,
+        ui: &mut Ui,
+        msgs: &mut Vec<Message>,
+        info: &VisibleItemInfo,
+        any_groups: bool,
+        alignment: Align,
+    ) {
+        if !any_groups {
+            return;
+        }
+
+        let response = self.hierarchy_icon(ui, info.has_children, info.unfolded, alignment);
+        if response.clicked() {
+            let msg = if info.unfolded {
+                Message::GroupFold(Some(info.item_ref))
+            } else {
+                Message::GroupUnfold(Some(info.item_ref))
+            };
+            msgs.push(msg);
+        }
+    }
+
+    /// Draws the item content based on its type.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_item_content(
+        &self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        msgs: &mut Vec<Message>,
+        item_offsets: &mut Vec<ItemDrawingInfo>,
+        info: &VisibleItemInfo,
+        displayed_item: &DisplayedItem,
+        alignment: Align,
+    ) -> Rect {
+        match displayed_item {
+            DisplayedItem::Variable(displayed_variable) => {
+                let levels_to_force_expand =
+                    self.items_to_expand
+                        .borrow()
+                        .iter()
+                        .find_map(|(id, levels)| {
+                            if info.item_ref == *id {
+                                Some(*levels)
+                            } else {
+                                None
+                            }
+                        });
+
+                self.draw_variable(
+                    msgs,
+                    info.vidx,
+                    displayed_item,
+                    info.item_ref,
+                    FieldRef::without_fields(displayed_variable.variable_ref.clone()),
+                    item_offsets,
+                    &displayed_variable.info,
+                    ui,
+                    ctx,
+                    levels_to_force_expand,
+                    alignment,
+                )
+            }
+            _ => {
+                ui.with_layout(
+                    ui.layout()
+                        .with_main_justify(true)
+                        .with_main_align(alignment),
+                    |ui| {
+                        self.draw_plain_item(
+                            msgs,
+                            info.vidx,
+                            info.item_ref,
+                            displayed_item,
+                            item_offsets,
+                            ui,
+                            ctx,
+                        )
+                    },
+                )
+                .inner
+            }
+        }
+    }
+
+    /// Draws drag target indicator for item reordering.
+    fn draw_item_drag_target(
+        &self,
+        ui: &mut Ui,
+        msgs: &mut Vec<Message>,
+        info: &VisibleItemInfo,
+        item_rect: Rect,
+        available_rect: Rect,
+    ) {
+        let mut expanded_rect = item_rect;
+        expanded_rect.set_left(
+            available_rect.left()
+                + self.user.config.layout.waveforms_text_size
+                + ui.spacing().item_spacing.x,
+        );
+        expanded_rect.set_right(available_rect.right());
+        self.draw_drag_target(
+            msgs,
+            info.vidx,
+            expanded_rect,
+            available_rect,
+            ui,
+            info.last,
+        );
     }
 
     /// Draws the variable values panel showing current values at cursor position.
