@@ -1436,27 +1436,504 @@ Stage 10 is complete when:
 
 ### Stage 12: TransactionTrace model
 
-**Goal:** Implement table model for FTR transaction traces.
+**Goal:** Implement the TransactionTrace table model for FTR transaction traces and wire it into the Surfer UI (context menu + keyboard command) while keeping cache builds async and consistent with existing table infrastructure.
 
-**Prerequisites:** Stages 1-10 complete.
+**Prerequisites:** Stages 1-10 complete, Stage 11 patterns established.
+
+**User experience:**
+- Right-click a transaction stream or generator in the transaction hierarchy and choose "Transaction list" to open a new table tile.
+- Right-click a focused transaction in the waveform view and choose "Show in table" to open a table filtered to that generator.
+- Keyboard command `transaction_table` opens a transaction list for the currently focused transaction's generator.
+- Table shows columns for ID, Type, Start, End, Duration, and dynamic attribute columns.
+- Activating a row (Enter/double-click) focuses the transaction in the waveform view.
+- On waveform reload, the table shows a loading state, cache is rebuilt, and selection clears.
 
 **Deliverables:**
-- Implement `TransactionTraceModel` in `sources/transaction_trace.rs`:
-  - Constructor: takes `StreamScopeRef`, optional `TransactionStreamRef`.
-  - Schema: columns for "Type", "Start", "End", "Duration", "Generator", plus attribute columns.
-  - `row_id_at(index)`: transaction ID from FTR.
-  - `cell()`: format times, extract attributes.
-  - `on_activate(row)`: return `TableAction::FocusTransaction(tx_ref)`.
-- Wire up `TableModelSpec::TransactionTrace` in factory.
-- Handle missing stream gracefully.
-- Dynamic schema: attribute columns derived from transaction data.
 
-**Acceptance tests:**
-- [ ] Unit test: Model extracts transactions from test FTR data.
-- [ ] Unit test: Duration calculated correctly from start/end.
-- [ ] Unit test: Attribute columns appear in schema.
-- [ ] Integration test: Activating row focuses transaction in viewer.
-- [ ] UI snapshot test: TransactionTrace renders for sample FTR.
+1. **Add `libsurfer/src/table/sources/transaction_trace.rs` with `TransactionTraceModel` implementing `TableModel`:**
+
+   ```rust
+   pub struct TransactionTraceModel {
+       stream_scope: StreamScopeRef,
+       generator_filter: Option<TransactionStreamRef>,
+       time_formatter: TimeFormatter,
+       rows: OnceLock<TransactionRows>,
+       // Cached schema derived from transaction attributes
+       attribute_columns: Vec<String>,
+   }
+
+   struct TransactionRows {
+       rows: Vec<TransactionRow>,
+       index: HashMap<TableRowId, usize>,
+   }
+
+   struct TransactionRow {
+       tx_id: usize,
+       tx_ref: TransactionRef,
+       gen_id: usize,
+       gen_name: String,
+       start_time: BigUint,
+       end_time: BigUint,
+       duration: BigUint,
+       attributes: Vec<(String, String)>,
+       // Pre-formatted for display
+       start_time_text: String,
+       end_time_text: String,
+       duration_text: String,
+       search_text: String,
+   }
+   ```
+
+2. **Extend `libsurfer/src/table/sources/mod.rs` to export the model.**
+
+3. **Implement TransactionTraceModel constructor with validation chain:**
+
+   ```rust
+   impl TransactionTraceModel {
+       pub fn new(
+           stream: StreamScopeRef,
+           generator: Option<TransactionStreamRef>,
+           ctx: &TableModelContext,
+       ) -> Result<Self, TableCacheError> {
+           // 1. Check data availability
+           let waves = ctx.waves.ok_or(TableCacheError::DataUnavailable)?;
+           let tx_container = waves.inner.as_transactions()
+               .ok_or(TableCacheError::DataUnavailable)?;
+
+           // 2. Validate stream scope exists
+           match &stream {
+               StreamScopeRef::Root => { /* Always valid */ }
+               StreamScopeRef::Stream(stream_ref) => {
+                   if stream_ref.is_stream() {
+                       tx_container.get_stream(stream_ref.stream_id)
+                           .ok_or_else(|| TableCacheError::ModelNotFound {
+                               description: format!("Stream not found: {}", stream_ref.name),
+                           })?;
+                   } else {
+                       tx_container.get_generator(stream_ref.gen_id.unwrap())
+                           .ok_or_else(|| TableCacheError::ModelNotFound {
+                               description: format!("Generator not found: {}", stream_ref.name),
+                           })?;
+                   }
+               }
+               StreamScopeRef::Empty(name) => {
+                   return Err(TableCacheError::ModelNotFound {
+                       description: format!("Empty scope: {}", name),
+                   });
+               }
+           }
+
+           // 3. Validate optional generator filter
+           if let Some(ref gen_ref) = generator {
+               tx_container.get_generator(gen_ref.gen_id.unwrap_or(0))
+                   .ok_or_else(|| TableCacheError::ModelNotFound {
+                       description: format!("Generator not found: {}", gen_ref.name),
+                   })?;
+           }
+
+           // 4. Scan for attribute columns (deferred to build_rows for laziness)
+           Ok(Self {
+               stream_scope: stream,
+               generator_filter: generator,
+               time_formatter: TimeFormatter::new(ctx.wanted_timeunit, ctx.time_format),
+               rows: OnceLock::new(),
+               attribute_columns: Vec::new(), // Populated in build_rows
+           })
+       }
+   }
+   ```
+
+4. **Implement lazy row building (similar to SignalChangeListModel):**
+
+   ```rust
+   fn build_rows(&self, tx_container: &TransactionContainer) -> TransactionRows {
+       let mut rows = Vec::new();
+       let mut attribute_set = IndexSet::new(); // Preserve order, deduplicate
+
+       // Collect transactions based on scope
+       let tx_ids: Vec<usize> = match &self.stream_scope {
+           StreamScopeRef::Root => {
+               // All transactions from all streams
+               tx_container.get_streams()
+                   .flat_map(|s| tx_container.get_transactions_from_stream(s.id))
+                   .collect()
+           }
+           StreamScopeRef::Stream(stream_ref) => {
+               if stream_ref.is_generator() {
+                   tx_container.get_transactions_from_generator(stream_ref.gen_id.unwrap())
+               } else {
+                   tx_container.get_transactions_from_stream(stream_ref.stream_id)
+               }
+           }
+           StreamScopeRef::Empty(_) => Vec::new(),
+       };
+
+       // Apply generator filter if specified
+       let tx_ids = if let Some(ref gen_filter) = self.generator_filter {
+           tx_ids.into_iter()
+               .filter(|&id| {
+                   tx_container.get_transaction(TransactionRef { id })
+                       .map(|tx| tx.get_gen_id() == gen_filter.gen_id.unwrap_or(0))
+                       .unwrap_or(false)
+               })
+               .collect()
+       } else {
+           tx_ids
+       };
+
+       for tx_id in tx_ids {
+           let tx_ref = TransactionRef { id: tx_id };
+           if let Some(tx) = tx_container.get_transaction(tx_ref.clone()) {
+               let gen_id = tx.get_gen_id();
+               let gen_name = tx_container.get_generator(gen_id)
+                   .map(|g| g.name.clone())
+                   .unwrap_or_else(|| format!("gen_{}", gen_id));
+
+               let start_time = tx.get_start_time();
+               let end_time = tx.get_end_time();
+               let duration = &end_time - &start_time;
+
+               // Collect attributes
+               let attributes: Vec<(String, String)> = tx.attributes.iter()
+                   .map(|attr| {
+                       attribute_set.insert(attr.name.clone());
+                       (attr.name.clone(), attr.value().to_string())
+                   })
+                   .collect();
+
+               // Format times
+               let start_text = self.time_formatter.format(&start_time);
+               let end_text = self.time_formatter.format(&end_time);
+               let duration_text = self.time_formatter.format(&duration);
+
+               // Build search text
+               let search_text = format!(
+                   "{} {} {} {} {} {}",
+                   tx_id, gen_name, start_text, end_text, duration_text,
+                   attributes.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>().join(" ")
+               );
+
+               rows.push(TransactionRow {
+                   tx_id,
+                   tx_ref,
+                   gen_id,
+                   gen_name,
+                   start_time,
+                   end_time,
+                   duration,
+                   attributes,
+                   start_time_text: start_text,
+                   end_time_text: end_text,
+                   duration_text: duration_text,
+                   search_text,
+               });
+           }
+       }
+
+       // Sort by start time by default (model base order)
+       rows.sort_by(|a, b| a.start_time.cmp(&b.start_time));
+
+       // Build index
+       let index = rows.iter().enumerate()
+           .map(|(i, row)| (TableRowId(row.tx_id as u64), i))
+           .collect();
+
+       TransactionRows { rows, index }
+   }
+   ```
+
+5. **Schema and TableModel trait implementation:**
+
+   ```rust
+   impl TableModel for TransactionTraceModel {
+       fn schema(&self) -> TableSchema {
+           let mut columns = vec![
+               TableColumnDef {
+                   key: TableColumnKey::String("tx_id".to_string()),
+                   label: "ID".to_string(),
+                   default_width: 60.0,
+                   resizable: true,
+                   visible: true,
+               },
+               TableColumnDef {
+                   key: TableColumnKey::String("type".to_string()),
+                   label: "Type".to_string(),
+                   default_width: 100.0,
+                   resizable: true,
+                   visible: true,
+               },
+               TableColumnDef {
+                   key: TableColumnKey::String("start".to_string()),
+                   label: "Start".to_string(),
+                   default_width: 100.0,
+                   resizable: true,
+                   visible: true,
+               },
+               TableColumnDef {
+                   key: TableColumnKey::String("end".to_string()),
+                   label: "End".to_string(),
+                   default_width: 100.0,
+                   resizable: true,
+                   visible: true,
+               },
+               TableColumnDef {
+                   key: TableColumnKey::String("duration".to_string()),
+                   label: "Duration".to_string(),
+                   default_width: 80.0,
+                   resizable: true,
+                   visible: true,
+               },
+           ];
+
+           // Add dynamic attribute columns
+           for attr_name in &self.attribute_columns {
+               columns.push(TableColumnDef {
+                   key: TableColumnKey::String(format!("attr_{}", attr_name)),
+                   label: attr_name.clone(),
+                   default_width: 80.0,
+                   resizable: true,
+                   visible: true,
+               });
+           }
+
+           TableSchema { columns }
+       }
+
+       fn row_count(&self) -> usize {
+           self.rows().rows.len()
+       }
+
+       fn row_id_at(&self, index: usize) -> Option<TableRowId> {
+           self.rows().rows.get(index).map(|r| TableRowId(r.tx_id as u64))
+       }
+
+       fn cell(&self, row: TableRowId, col: usize) -> TableCell {
+           let rows = self.rows();
+           let Some(&idx) = rows.index.get(&row) else {
+               return TableCell::Text("-".to_string());
+           };
+           let tx_row = &rows.rows[idx];
+
+           match col {
+               0 => TableCell::Text(tx_row.tx_id.to_string()),
+               1 => TableCell::Text(tx_row.gen_name.clone()),
+               2 => TableCell::Text(tx_row.start_time_text.clone()),
+               3 => TableCell::Text(tx_row.end_time_text.clone()),
+               4 => TableCell::Text(tx_row.duration_text.clone()),
+               _ => {
+                   // Attribute columns (col - 5)
+                   let attr_idx = col - 5;
+                   if attr_idx < self.attribute_columns.len() {
+                       let attr_name = &self.attribute_columns[attr_idx];
+                       tx_row.attributes.iter()
+                           .find(|(name, _)| name == attr_name)
+                           .map(|(_, value)| TableCell::Text(value.clone()))
+                           .unwrap_or(TableCell::Text("-".to_string()))
+                   } else {
+                       TableCell::Text("-".to_string())
+                   }
+               }
+           }
+       }
+
+       fn sort_key(&self, row: TableRowId, col: usize) -> TableSortKey {
+           let rows = self.rows();
+           let Some(&idx) = rows.index.get(&row) else {
+               return TableSortKey::Text(String::new());
+           };
+           let tx_row = &rows.rows[idx];
+
+           match col {
+               0 => TableSortKey::Numeric(tx_row.tx_id as f64),
+               1 => TableSortKey::Text(tx_row.gen_name.clone()),
+               2 => TableSortKey::BigInt(tx_row.start_time.clone().into()),
+               3 => TableSortKey::BigInt(tx_row.end_time.clone().into()),
+               4 => TableSortKey::BigInt(tx_row.duration.clone().into()),
+               _ => {
+                   // Attribute columns - try numeric, fallback to text
+                   let attr_idx = col - 5;
+                   if attr_idx < self.attribute_columns.len() {
+                       let attr_name = &self.attribute_columns[attr_idx];
+                       tx_row.attributes.iter()
+                           .find(|(name, _)| name == attr_name)
+                           .map(|(_, value)| {
+                               value.parse::<f64>()
+                                   .map(TableSortKey::Numeric)
+                                   .unwrap_or_else(|_| TableSortKey::Text(value.clone()))
+                           })
+                           .unwrap_or(TableSortKey::Text(String::new()))
+                   } else {
+                       TableSortKey::Text(String::new())
+                   }
+               }
+           }
+       }
+
+       fn search_text(&self, row: TableRowId) -> String {
+           let rows = self.rows();
+           rows.index.get(&row)
+               .and_then(|&idx| rows.rows.get(idx))
+               .map(|r| r.search_text.clone())
+               .unwrap_or_default()
+       }
+
+       fn on_activate(&self, row: TableRowId) -> TableAction {
+           let rows = self.rows();
+           rows.index.get(&row)
+               .and_then(|&idx| rows.rows.get(idx))
+               .map(|r| TableAction::FocusTransaction(r.tx_ref.clone()))
+               .unwrap_or(TableAction::None)
+       }
+   }
+   ```
+
+6. **Wire up `TableModelSpec::TransactionTrace` in factory (model.rs):**
+
+   Update `TableModelSpec::create_model()` to handle TransactionTrace:
+   ```rust
+   TableModelSpec::TransactionTrace { stream, generator } => {
+       Ok(Arc::new(TransactionTraceModel::new(
+           stream.clone(),
+           generator.clone(),
+           ctx,
+       )?))
+   }
+   ```
+
+7. **Add default_view_config for TransactionTrace:**
+
+   ```rust
+   impl TableModelSpec {
+       pub fn default_view_config(&self, ctx: &TableModelContext) -> TableViewConfig {
+           match self {
+               // ... existing cases ...
+               TableModelSpec::TransactionTrace { stream, generator } => {
+                   let title = match (stream, generator) {
+                       (StreamScopeRef::Root, None) => "All transactions".to_string(),
+                       (StreamScopeRef::Stream(s), None) => format!("Transactions: {}", s.name),
+                       (_, Some(g)) => format!("Transactions: {}", g.name),
+                       (StreamScopeRef::Empty(name), _) => format!("Transactions: {}", name),
+                   };
+                   TableViewConfig {
+                       title,
+                       columns: Vec::new(), // Use schema defaults
+                       sort: vec![TableSortSpec {
+                           column: TableColumnKey::String("start".to_string()),
+                           direction: SortDirection::Ascending,
+                       }],
+                       display_filter: TableSearchSpec::default(),
+                       selection_mode: TableSelectionMode::Single,
+                       dense_rows: false,
+                       sticky_header: true,
+                   }
+               }
+           }
+       }
+   }
+   ```
+
+8. **UI integration:**
+
+   - **Context menu in `transactions.rs`:** Add "Transaction list" option when right-clicking a stream/generator in the transaction hierarchy panel.
+   - **Context menu for focused transaction:** Add "Show in table" option in transaction tooltip/context menu (drawing_canvas.rs or tooltips.rs).
+   - **Add `Message::OpenTransactionTable` message:**
+     ```rust
+     OpenTransactionTable {
+         stream: StreamScopeRef,
+         generator: Option<TransactionStreamRef>,
+     }
+     ```
+   - **Add `transaction_table` command in `command_parser.rs`:** Opens table for focused transaction's generator, or optionally specify stream/generator name.
+   - **Handler in lib.rs:** Similar to `OpenSignalChangeList`, creates tile with spec and default config.
+
+9. **Handle `TableAction::FocusTransaction` in message handler:**
+
+   ```rust
+   Message::TableActivateSelection { tile_id } => {
+       // ... existing code ...
+       match action {
+           TableAction::FocusTransaction(tx_ref) => {
+               self.update(Message::FocusTransaction(Some(tx_ref), None));
+           }
+           // ... other cases ...
+       }
+   }
+   ```
+
+**Test Checklist**
+
+Unit tests (TransactionTraceModel methods - 10 tests):
+- [ ] `transaction_trace_model_row_count`
+- [ ] `transaction_trace_model_row_id_at`
+- [ ] `transaction_trace_model_cell_formatting_id`
+- [ ] `transaction_trace_model_cell_formatting_type`
+- [ ] `transaction_trace_model_cell_formatting_times`
+- [ ] `transaction_trace_model_cell_formatting_duration`
+- [ ] `transaction_trace_model_cell_formatting_attributes`
+- [ ] `transaction_trace_model_sort_key_numeric_for_times`
+- [ ] `transaction_trace_model_search_text_includes_all_fields`
+- [ ] `transaction_trace_model_on_activate_returns_focus_transaction`
+
+Unit tests (Error handling - 4 tests):
+- [ ] `transaction_trace_model_no_wave_data_returns_data_unavailable`
+- [ ] `transaction_trace_model_no_transaction_data_returns_data_unavailable`
+- [ ] `transaction_trace_model_stream_not_found_returns_model_not_found`
+- [ ] `transaction_trace_model_generator_not_found_returns_model_not_found`
+
+Unit tests (Scope filtering - 5 tests):
+- [ ] `transaction_trace_model_root_scope_includes_all_transactions`
+- [ ] `transaction_trace_model_stream_scope_filters_to_stream`
+- [ ] `transaction_trace_model_generator_scope_filters_to_generator`
+- [ ] `transaction_trace_model_generator_filter_applies_within_stream`
+- [ ] `transaction_trace_model_empty_scope_returns_empty`
+
+Unit tests (Dynamic schema - 3 tests):
+- [ ] `transaction_trace_model_schema_includes_fixed_columns`
+- [ ] `transaction_trace_model_schema_includes_attribute_columns`
+- [ ] `transaction_trace_model_schema_deduplicates_attribute_names`
+
+Unit tests (Duration calculation - 2 tests):
+- [ ] `transaction_trace_duration_calculated_correctly`
+- [ ] `transaction_trace_duration_zero_when_start_equals_end`
+
+Integration tests (Message handling - 6 tests):
+- [ ] `open_transaction_table_creates_tile_for_stream`
+- [ ] `open_transaction_table_creates_tile_for_generator`
+- [ ] `transaction_table_command_opens_table_for_focused_transaction`
+- [ ] `transaction_table_activate_focuses_transaction`
+- [ ] `transaction_table_tile_removed_on_close`
+- [ ] `transaction_table_cache_rebuilds_on_reload`
+
+Snapshot tests (visual verification - 3 tests):
+- [ ] `table_transaction_trace_renders_columns` - Table shows ID/Type/Start/End/Duration columns
+- [ ] `table_transaction_trace_with_attributes` - Attribute columns appear in table
+- [ ] `table_transaction_trace_empty_stream` - Empty state for stream with no transactions
+
+**Total new tests: 33** (24 unit + 6 integration + 3 snapshot)
+
+**Acceptance Criteria**
+
+Stage 12 is complete when:
+1. All 10 TransactionTraceModel method unit tests pass
+2. All 4 error handling unit tests pass
+3. All 5 scope filtering unit tests pass
+4. All 3 dynamic schema unit tests pass
+5. All 2 duration calculation unit tests pass
+6. All 6 integration tests pass
+7. All 3 snapshot tests pass
+8. `cargo clippy --no-deps` reports no warnings for new code
+9. `cargo fmt` produces no changes
+
+**Implementation notes:**
+- `TransactionTraceModel` uses `OnceLock<TransactionRows>` for lazy row building (same pattern as SignalChangeListModel)
+- Constructor validates stream/generator existence but defers row building to first access
+- Attribute columns are discovered during row building by scanning all transactions
+- Time formatting uses `TimeFormatter` from context (same as SignalChangeListModel)
+- Row ID is `TableRowId(tx_id as u64)` - transaction IDs are unique within FTR data
+- `TableAction::FocusTransaction` already exists in model.rs (line 437)
+- Existing `Message::FocusTransaction(Option<TransactionRef>, Option<Transaction>)` handles activation
+- Dynamic schema requires rebuilding column config when attributes change between transactions
+- Test data: Use `examples/` FTR files or create minimal test FTR data
 
 ---
 
@@ -1549,4 +2026,8 @@ v2 (deferred):
   - 45 new tests (35 unit + 7 integration + 3 snapshot tests updated)
   - All 198 table tests passing
 - Stage 11 implemented: SignalChangeList model + UI wiring + tests + snapshot
-- Stage 12+ pending implementation
+- Stage 12 design updated: TransactionTrace model with detailed implementation plan
+  - Follows Stage 11 patterns (TableModelContext, lazy row building, error handling)
+  - Dynamic attribute columns, scope filtering, duration calculation
+  - 33 planned tests (24 unit + 6 integration + 3 snapshot)
+- Stage 13+ pending implementation
