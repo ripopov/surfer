@@ -3792,3 +3792,30 @@ snapshot_ui!(table_home_end_selection, || {
 
     state
 });
+
+// ========================
+// Table Widget Snapshot Tests (Stage 12 - TransactionTrace)
+// ========================
+
+snapshot_ui_with_file_and_msgs! {table_transaction_trace_renders_columns, "examples/my_db.ftr", [
+    // Add streams to trigger transaction loading (FTR lazy loads transactions)
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_stream(1, "pipelined_stream".to_string())),
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_stream(2, "addr_stream".to_string())),
+    // Open transaction table for 'read' generator - shows Start/End/Duration/Type columns plus attributes
+    Message::AddTableTile {
+        spec: crate::table::TableModelSpec::TransactionTrace {
+            generator: TransactionStreamRef::new_gen(1, 4, "read".to_string()),
+        },
+    },
+]}
+
+snapshot_ui_with_file_and_msgs! {table_transaction_trace_for_write_generator, "examples/my_db.ftr", [
+    // Add stream to trigger transaction loading
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_stream(1, "pipelined_stream".to_string())),
+    // Open transaction table for the 'write' generator to show different attributes
+    Message::AddTableTile {
+        spec: crate::table::TableModelSpec::TransactionTrace {
+            generator: TransactionStreamRef::new_gen(1, 5, "write".to_string()),
+        },
+    },
+]}

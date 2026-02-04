@@ -2412,6 +2412,16 @@ impl SystemState {
                     self.invalidate_draw_commands();
                 }
             }
+            Message::OpenTransactionTable { generator } => {
+                let spec = crate::table::TableModelSpec::TransactionTrace { generator };
+                let table_tile_id = self.user.tile_tree.next_table_id();
+                let model_ctx = self.table_model_context();
+                let config = spec.default_view_config(&model_ctx);
+                let state = crate::table::TableTileState { spec, config };
+                self.user.table_tiles.insert(table_tile_id, state);
+                self.user.tile_tree.add_table_tile(table_tile_id);
+                self.invalidate_draw_commands();
+            }
             Message::RemoveTableTile { tile_id } => {
                 self.user.table_tiles.remove(&tile_id);
                 self.table_runtime.remove(&tile_id);
@@ -2467,9 +2477,20 @@ impl SystemState {
                                 self.update(Message::CursorSet(time));
                                 self.update(Message::GoToCursorIfNotInView);
                             }
-                            table::TableAction::FocusTransaction(_)
-                            | table::TableAction::SelectSignal(_)
-                            | table::TableAction::None => {
+                            table::TableAction::FocusTransaction(tx_ref) => {
+                                // Focus the transaction and set cursor to its start time
+                                self.update(Message::FocusTransaction(Some(tx_ref.clone()), None));
+                                // Get the transaction's start time
+                                if let Some(waves) = &self.user.waves
+                                    && let Some(transactions) = waves.inner.as_transactions()
+                                    && let Some(tx) = transactions.get_transaction(&tx_ref)
+                                {
+                                    let start_time = BigInt::from(tx.get_start_time());
+                                    self.update(Message::CursorSet(start_time));
+                                    self.update(Message::GoToCursorIfNotInView);
+                                }
+                            }
+                            table::TableAction::SelectSignal(_) | table::TableAction::None => {
                                 // No action or not yet implemented
                             }
                         }
@@ -2497,9 +2518,20 @@ impl SystemState {
                             self.update(Message::CursorSet(time));
                             self.update(Message::GoToCursorIfNotInView);
                         }
-                        table::TableAction::FocusTransaction(_)
-                        | table::TableAction::SelectSignal(_)
-                        | table::TableAction::None => {
+                        table::TableAction::FocusTransaction(tx_ref) => {
+                            // Focus the transaction and set cursor to its start time
+                            self.update(Message::FocusTransaction(Some(tx_ref.clone()), None));
+                            // Get the transaction's start time
+                            if let Some(waves) = &self.user.waves
+                                && let Some(transactions) = waves.inner.as_transactions()
+                                && let Some(tx) = transactions.get_transaction(&tx_ref)
+                            {
+                                let start_time = BigInt::from(tx.get_start_time());
+                                self.update(Message::CursorSet(start_time));
+                                self.update(Message::GoToCursorIfNotInView);
+                            }
+                        }
+                        table::TableAction::SelectSignal(_) | table::TableAction::None => {
                             // No action or not yet implemented
                         }
                     }

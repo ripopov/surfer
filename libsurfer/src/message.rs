@@ -426,6 +426,10 @@ pub enum Message {
     OpenSignalChangeList {
         target: MessageTarget<VisibleItemIndex>,
     },
+    /// Open a transaction trace table for a specific generator
+    OpenTransactionTable {
+        generator: TransactionStreamRef,
+    },
     /// Remove a table tile from the tile tree
     RemoveTableTile {
         tile_id: TableTileId,

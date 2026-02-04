@@ -1,8 +1,10 @@
 use super::cache::TableCacheError;
 use crate::config::SurferTheme;
-use crate::table::sources::{SignalChangeListModel, VirtualTableModel};
+use crate::table::sources::{
+    SignalChangeListModel, TransactionTraceModelWithData, VirtualTableModel,
+};
 use crate::time::{TimeFormat, TimeUnit};
-use crate::transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef};
+use crate::transaction_container::{TransactionRef, TransactionStreamRef};
 use crate::translation::TranslatorList;
 use crate::wave_container::{VariableRef, VariableRefExt};
 use crate::wave_data::WaveData;
@@ -27,9 +29,10 @@ pub enum TableModelSpec {
         variable: VariableRef,
         field: Vec<String>,
     },
+    /// Transaction trace table for a specific generator.
+    /// Each generator has its own attribute schema, so tables are per-generator.
     TransactionTrace {
-        stream: StreamScopeRef,
-        generator: Option<TransactionStreamRef>,
+        generator: TransactionStreamRef,
     },
     /// Source-level search that produces a derived table model from waveform data.
     /// Named `source_query` to distinguish from view-level `display_filter`.
@@ -68,13 +71,16 @@ impl TableModelSpec {
                 SignalChangeListModel::new(variable.clone(), field.clone(), ctx)
                     .map(|model| Arc::new(model) as Arc<dyn TableModel>)
             }
+            Self::TransactionTrace { generator } => {
+                TransactionTraceModelWithData::new(generator.clone(), ctx)
+                    .map(|model| Arc::new(model) as Arc<dyn TableModel>)
+            }
             // Other model types will be implemented in later stages
-            Self::TransactionTrace { .. }
-            | Self::SearchResults { .. }
-            | Self::AnalysisResults { .. }
-            | Self::Custom { .. } => Err(TableCacheError::ModelNotFound {
-                description: "Model type not yet implemented".to_string(),
-            }),
+            Self::SearchResults { .. } | Self::AnalysisResults { .. } | Self::Custom { .. } => {
+                Err(TableCacheError::ModelNotFound {
+                    description: "Model type not yet implemented".to_string(),
+                })
+            }
         }
     }
 
@@ -98,6 +104,17 @@ impl TableModelSpec {
                 config.activate_on_select = true;
                 config
             }
+            Self::TransactionTrace { generator } => TableViewConfig {
+                title: format!("Transactions: {}", generator.name),
+                // Default sort: ascending by start time
+                sort: vec![TableSortSpec {
+                    key: TableColumnKey::Str("start".to_string()),
+                    direction: TableSortDirection::Ascending,
+                }],
+                selection_mode: TableSelectionMode::Single,
+                activate_on_select: true,
+                ..Default::default()
+            },
             _ => TableViewConfig::default(),
         }
     }

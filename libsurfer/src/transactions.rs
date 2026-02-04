@@ -265,7 +265,8 @@ fn draw_transaction_stream_variables(
             ui.with_layout(
                 Layout::top_down(Align::LEFT).with_cross_justify(true),
                 |ui| {
-                    if ui.selectable_label(false, &generator.name).clicked() {
+                    let response = ui.selectable_label(false, &generator.name);
+                    if response.clicked() {
                         msgs.push(Message::AddStreamOrGenerator(
                             TransactionStreamRef::new_gen(
                                 stream_ref.stream_id,
@@ -274,6 +275,28 @@ fn draw_transaction_stream_variables(
                             ),
                         ));
                     }
+                    // Context menu for generator
+                    response.context_menu(|ui| {
+                        if ui.button("Show transactions in table").clicked() {
+                            let gen_ref = TransactionStreamRef::new_gen(
+                                stream_ref.stream_id,
+                                gen_id,
+                                generator.name.clone(),
+                            );
+                            msgs.push(Message::OpenTransactionTable { generator: gen_ref });
+                            ui.close();
+                        }
+                        if ui.button("Add to waveform view").clicked() {
+                            msgs.push(Message::AddStreamOrGenerator(
+                                TransactionStreamRef::new_gen(
+                                    stream_ref.stream_id,
+                                    gen_id,
+                                    generator.name.clone(),
+                                ),
+                            ));
+                            ui.close();
+                        }
+                    });
                 },
             );
         }
@@ -305,6 +328,15 @@ fn draw_transaction_root_variables(
                         TransactionStreamRef::new_stream(stream.id, stream.name.clone()),
                     ));
                 }
+                // Context menu for stream (no table option - tables are per-generator)
+                response.context_menu(|ui| {
+                    if ui.button("Add to waveform view").clicked() {
+                        msgs.push(Message::AddStreamOrGenerator(
+                            TransactionStreamRef::new_stream(stream.id, stream.name.clone()),
+                        ));
+                        ui.close();
+                    }
+                });
             },
         );
     }

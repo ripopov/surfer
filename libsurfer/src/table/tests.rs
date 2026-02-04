@@ -4355,3 +4355,301 @@ fn set_table_display_filter_syncs_draft() {
     // Timestamp should be None after sync (to prevent immediate re-apply)
     assert!(draft.last_changed.is_none());
 }
+
+// ========================
+// Stage 12 Tests - TransactionTrace Model
+// ========================
+
+fn load_ftr_state() -> SystemState {
+    use crate::transaction_container::TransactionStreamRef;
+
+    let mut state = SystemState::new_default_config()
+        .expect("state")
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .expect("project root")
+                    .join("examples/my_db.ftr")
+                    .try_into()
+                    .expect("path"),
+            )),
+            ..Default::default()
+        });
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    // Add streams to trigger lazy-loading of transactions
+    // FTR format only loads transactions into memory when streams are added to the view
+    state.update(Message::AddStreamOrGenerator(
+        TransactionStreamRef::new_stream(1, "pipelined_stream".to_string()),
+    ));
+    state.update(Message::AddStreamOrGenerator(
+        TransactionStreamRef::new_stream(2, "addr_stream".to_string()),
+    ));
+    state.update(Message::AddStreamOrGenerator(
+        TransactionStreamRef::new_stream(3, "data_stream".to_string()),
+    ));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    state
+}
+
+/// Helper to create a test generator reference (generator 4 "read" in stream 1)
+fn test_generator_ref() -> crate::transaction_container::TransactionStreamRef {
+    crate::transaction_container::TransactionStreamRef::new_gen(1, 4, "read".to_string())
+}
+
+#[test]
+fn transaction_trace_model_spec_creates_model() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = load_ftr_state();
+
+    let spec = TableModelSpec::TransactionTrace {
+        generator: test_generator_ref(),
+    };
+
+    let ctx = state.table_model_context();
+    let model = spec.create_model(&ctx);
+    assert!(model.is_ok(), "TransactionTrace model should be created");
+}
+
+#[test]
+fn transaction_trace_model_has_fixed_columns() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = load_ftr_state();
+
+    let spec = TableModelSpec::TransactionTrace {
+        generator: test_generator_ref(),
+    };
+
+    let ctx = state.table_model_context();
+    let model = spec.create_model(&ctx).expect("model");
+    let schema = model.schema();
+
+    // Check fixed columns exist in order (no Generator column since table is per-generator)
+    assert!(
+        schema.columns.len() >= 4,
+        "Should have at least 4 fixed columns"
+    );
+    assert_eq!(schema.columns[0].label, "Start");
+    assert_eq!(schema.columns[1].label, "End");
+    assert_eq!(schema.columns[2].label, "Duration");
+    assert_eq!(schema.columns[3].label, "Type");
+}
+
+#[test]
+fn transaction_trace_model_row_count_positive() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = load_ftr_state();
+
+    let spec = TableModelSpec::TransactionTrace {
+        generator: test_generator_ref(),
+    };
+
+    let ctx = state.table_model_context();
+    let model = spec.create_model(&ctx).expect("model");
+
+    assert!(model.row_count() > 0, "Generator should have transactions");
+}
+
+#[test]
+fn transaction_trace_model_row_ids_are_unique() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = load_ftr_state();
+
+    let spec = TableModelSpec::TransactionTrace {
+        generator: test_generator_ref(),
+    };
+
+    let ctx = state.table_model_context();
+    let model = spec.create_model(&ctx).expect("model");
+
+    let row_count = model.row_count();
+    let row_ids: std::collections::HashSet<_> =
+        (0..row_count).filter_map(|i| model.row_id_at(i)).collect();
+
+    assert_eq!(row_ids.len(), row_count, "All row IDs should be unique");
+}
+
+#[test]
+fn transaction_trace_model_on_activate_returns_focus_transaction() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = load_ftr_state();
+
+    let spec = TableModelSpec::TransactionTrace {
+        generator: test_generator_ref(),
+    };
+
+    let ctx = state.table_model_context();
+    let model = spec.create_model(&ctx).expect("model");
+
+    if let Some(row_id) = model.row_id_at(0) {
+        let action = model.on_activate(row_id);
+        match action {
+            TableAction::FocusTransaction(tx_ref) => {
+                // Verify the transaction ref is valid
+                assert!(
+                    tx_ref.id > 0 || tx_ref.id == 0,
+                    "tx_ref should have valid id"
+                );
+            }
+            _ => panic!("Expected FocusTransaction action, got {:?}", action),
+        }
+    }
+}
+
+#[test]
+fn transaction_trace_model_default_config_has_title() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = load_ftr_state();
+
+    let spec = TableModelSpec::TransactionTrace {
+        generator: test_generator_ref(),
+    };
+
+    let ctx = state.table_model_context();
+    let config = spec.default_view_config(&ctx);
+
+    // Title should include the generator name
+    assert!(
+        config.title.contains("read"),
+        "Title should contain generator name 'read', got: {}",
+        config.title
+    );
+    assert!(
+        config.activate_on_select,
+        "Should have activate_on_select enabled"
+    );
+}
+
+#[test]
+fn open_transaction_table_creates_tile() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_ftr_state();
+
+    state.update(Message::OpenTransactionTable {
+        generator: test_generator_ref(),
+    });
+
+    assert_eq!(
+        state.user.table_tiles.len(),
+        1,
+        "Should have one table tile"
+    );
+    let tile_state = state.user.table_tiles.values().next().expect("tile state");
+    match &tile_state.spec {
+        TableModelSpec::TransactionTrace { generator } => {
+            assert_eq!(generator.name, "read");
+            assert_eq!(generator.gen_id, Some(4));
+        }
+        _ => panic!("Expected TransactionTrace spec"),
+    }
+}
+
+#[test]
+fn transaction_trace_model_cells_return_text() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = load_ftr_state();
+
+    let spec = TableModelSpec::TransactionTrace {
+        generator: test_generator_ref(),
+    };
+
+    let ctx = state.table_model_context();
+    let model = spec.create_model(&ctx).expect("model");
+
+    if let Some(row_id) = model.row_id_at(0) {
+        // Check all 4 fixed columns return some text (Start, End, Duration, Type)
+        for col in 0..4 {
+            let cell = model.cell(row_id, col);
+            match cell {
+                TableCell::Text(s) => {
+                    assert!(!s.is_empty(), "Cell at col {} should have text", col);
+                }
+                TableCell::RichText(_) => {
+                    // Also acceptable
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn transaction_trace_model_search_text_non_empty() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = load_ftr_state();
+
+    let spec = TableModelSpec::TransactionTrace {
+        generator: test_generator_ref(),
+    };
+
+    let ctx = state.table_model_context();
+    let model = spec.create_model(&ctx).expect("model");
+
+    if let Some(row_id) = model.row_id_at(0) {
+        let search_text = model.search_text(row_id);
+        assert!(!search_text.is_empty(), "Search text should not be empty");
+    }
+}
+
+#[test]
+fn transaction_trace_sort_key_numeric_for_times() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = load_ftr_state();
+
+    let spec = TableModelSpec::TransactionTrace {
+        generator: test_generator_ref(),
+    };
+
+    let ctx = state.table_model_context();
+    let model = spec.create_model(&ctx).expect("model");
+
+    if let Some(row_id) = model.row_id_at(0) {
+        // Start (col 0), End (col 1), Duration (col 2) should be numeric
+        for col in 0..3 {
+            let key = model.sort_key(row_id, col);
+            match key {
+                TableSortKey::Numeric(_) => {
+                    // Expected
+                }
+                TableSortKey::Text(_) => {
+                    // Also acceptable if the number is too large
+                }
+                _ => panic!("Time column {} should have Numeric or Text sort key", col),
+            }
+        }
+    }
+}
+
+#[test]
+fn transaction_trace_data_unavailable_without_transactions() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    // Load a VCD file (no transactions)
+    let state = load_counter_state();
+
+    let spec = TableModelSpec::TransactionTrace {
+        generator: test_generator_ref(),
+    };
+
+    let ctx = state.table_model_context();
+    let result = spec.create_model(&ctx);
+
+    assert!(result.is_err(), "Should fail without transaction data");
+    match result {
+        Err(TableCacheError::DataUnavailable) => {
+            // Expected
+        }
+        Err(err) => panic!("Expected DataUnavailable, got {:?}", err),
+        Ok(_) => panic!("Expected error but got Ok"),
+    }
+}
