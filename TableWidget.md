@@ -80,7 +80,7 @@ pub struct TableRowId(pub u64);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TableModelSpec {
     SignalChangeList { variable: VariableRef, field: Vec<String> },
-    TransactionTrace { stream: StreamScopeRef, generator: Option<TransactionStreamRef> },
+    TransactionTrace { scope: TransactionScopeRef },
     /// Source-level search that produces a derived table model from waveform data.
     /// Named `source_query` to distinguish from view-level `display_filter`.
     SearchResults { source_query: TableSearchSpec },
@@ -186,10 +186,11 @@ pub enum Message {
 - TableSelection: runtime selection state (set of TableRowId + anchor for range selection). Selection persists for filtered-out rows; when filter is cleared, previously selected rows become visible again.
 - TableCell: display-ready cell content (string or rich text), optional tooltip. Icons, badges, and progress indicators deferred to v2.
 - TableSortKey: sortable value (numeric/string/bytes) used for stable ordering.
-- TableCacheKey: { model_key, display_filter, view_sort, generation }. model_key is derived from TableModelSpec via Hash/Eq (SignalChangeList uses variable+field, TransactionTrace uses stream+generator, etc.).
+- TableCacheKey: { model_key, display_filter, view_sort, generation }. model_key is derived from TableModelSpec via Hash/Eq (SignalChangeList uses variable+field, TransactionTrace uses scope, etc.).
 - TableCache: cached row_ids in display order + per-row search text + per-row sort keys.
 - TableCacheError: structured error type for cache build failures (ModelNotFound, InvalidSearch, DataUnavailable, Cancelled).
 - TableAction: activation result (CursorSet, FocusTransaction, SelectSignal, None).
+- TransactionScopeRef: scope for transaction queries (Root | Stream(id) | Generator { stream_id, generator_id }). Serializable enum.
 - Row height: uniform height for all rows to enable virtualization. Variable row heights deferred to v2.
 
 ## Implementation details
@@ -414,11 +415,12 @@ The core table infrastructure and first real data model are fully implemented:
 **Prerequisites:** Stages 1-11 complete.
 
 **User experience:**
-- Right-click a transaction stream or generator in the transaction hierarchy and choose "Transaction list" to open a new table tile.
-- Right-click a focused transaction in the waveform view and choose "Show in table" to open a table filtered to that generator.
+- Right-click a transaction stream or generator in the transaction hierarchy and choose "Show transactions in table" to open a new table tile.
+- Right-click a focused transaction in the waveform view and choose "Show transaction in table" to open a table filtered to that generator, scrolled to the transaction.
+- Keyboard shortcut `Shift+T` (when transaction is focused) opens a transaction table for the focused transaction's generator.
 - Keyboard command `transaction_table` opens a transaction list for the currently focused transaction's generator.
-- Table shows columns for ID, Type, Start, End, Duration, and dynamic attribute columns.
-- Activating a row (Enter/double-click) focuses the transaction in the waveform view.
+- Table shows columns: Start, End, Duration, Type, Generator, and dynamic attribute columns (in that order).
+- Activating a row (Enter/double-click) focuses the transaction in the waveform view and moves cursor to transaction start time.
 - On waveform reload, the table shows a loading state, cache is rebuilt, and selection clears.
 
 **Deliverables:**
@@ -426,28 +428,43 @@ The core table infrastructure and first real data model are fully implemented:
 1. **Add `libsurfer/src/table/sources/transaction_trace.rs` with `TransactionTraceModel` implementing `TableModel`:**
 
    ```rust
+   /// Scope reference for transaction trace queries.
+   /// - Root: all transactions in the container
+   /// - Stream(id): transactions in a specific stream
+   /// - Generator(stream_id, gen_id): transactions from a specific generator
+   pub enum TransactionScopeRef {
+       Root,
+       Stream(usize),
+       Generator { stream_id: usize, generator_id: usize },
+   }
+
    pub struct TransactionTraceModel {
-       stream_scope: StreamScopeRef,
-       generator_filter: Option<TransactionStreamRef>,
-       time_formatter: TimeFormatter,
-       rows: OnceLock<TransactionRows>,
+       ctx: Arc<TableModelContext>,
+       scope: TransactionScopeRef,
+       /// Lazily built rows and schema (includes dynamic attribute columns)
+       data: OnceLock<TransactionData>,
+   }
+
+   struct TransactionData {
+       rows: Vec<TransactionRow>,
+       index: HashMap<TableRowId, usize>,
+       /// Attribute column names discovered from transactions
        attribute_columns: Vec<String>,
    }
 
-   struct TransactionRows {
-       rows: Vec<TransactionRow>,
-       index: HashMap<TableRowId, usize>,
-   }
-
    struct TransactionRow {
-       tx_id: usize,
+       /// Unique row ID: composite of (stream_id, generator_id, tx_index)
+       /// Encoded as: (stream_id << 40) | (generator_id << 20) | tx_index
+       row_id: TableRowId,
        tx_ref: TransactionRef,
-       gen_id: usize,
-       gen_name: String,
        start_time: BigUint,
        end_time: BigUint,
        duration: BigUint,
-       attributes: Vec<(String, String)>,
+       tx_type: String,
+       generator_name: String,
+       /// Attribute values in same order as TransactionData.attribute_columns
+       attribute_values: Vec<String>,
+       // Pre-formatted strings for display and search
        start_time_text: String,
        end_time_text: String,
        duration_text: String,
@@ -464,93 +481,133 @@ The core table infrastructure and first real data model are fully implemented:
    - Defer attribute column discovery to lazy row building
 
 4. **Implement lazy row building (same pattern as SignalChangeListModel):**
+   - Triggered on first `schema()`, `row_count()`, or `row_id_at()` call
    - Collect transactions based on scope (Root, Stream, Generator)
-   - Apply generator filter if specified
-   - Build TransactionRow with formatted times, search text
-   - Sort by start time (base order)
-   - Build row index for O(1) lookup
+   - For each transaction:
+     - Validate start/end times exist; skip with warning if malformed
+     - Compute composite row_id from (stream_id, generator_id, tx_index)
+     - Format times using `ctx.format_time()`
+     - Collect attribute names (for schema) and values
+     - Build search_text (capped at 1KB): type + generator + times + attribute values
+   - Discover attribute columns by collecting unique names across all transactions
+   - Sort rows by start time (base order for `row_id_at`)
+   - Build row index HashMap for O(1) lookup by TableRowId
 
 5. **Schema and TableModel trait implementation:**
-   - Fixed columns: ID, Type, Start, End, Duration
-   - Dynamic attribute columns discovered during row building
-   - `row_id_at`: `TableRowId(tx_id as u64)`
-   - `sort_key`: Numeric for ID/times, Text for type/attributes
-   - `on_activate`: `TableAction::FocusTransaction(tx_ref)`
+   - Fixed columns (in display order): Start, End, Duration, Type, Generator
+   - Dynamic attribute columns discovered during row building, appended after fixed columns
+   - Schema discovery: `schema()` triggers lazy row building if not already done, to discover attribute columns
+   - `row_id_at`: composite ID encoding (stream_id, generator_id, tx_index) for uniqueness across generators
+   - `sort_key`: Numeric for times/duration, Text for type/generator/attributes
+   - `on_activate`: `TableAction::FocusTransaction(tx_ref)` - focuses transaction in waveform and sets cursor to start time
+   - Error handling: skip individual malformed transactions with warning log, don't fail entire model
 
 6. **Wire up `TableModelSpec::TransactionTrace` in factory.**
 
 7. **Add default_view_config for TransactionTrace:**
-   - Title based on stream/generator name
-   - Default sort: ascending by start time
+   - Title based on stream/generator name (e.g., "Transactions: AXI_Master")
+   - Default sort: ascending by start time (primary), ascending by row_id (stable secondary)
    - Selection mode: Single
+   - Default column widths: Start/End/Duration auto-fit, Type 100px, Generator 120px
 
 8. **UI integration:**
-   - Context menu in transactions.rs: "Transaction list" for stream/generator
-   - Context menu for focused transaction: "Show in table"
-   - `Message::OpenTransactionTable` message
+   - Context menu in transactions.rs: "Show transactions in table" for stream/generator (consistent with "Show in table view" for signals)
+   - Context menu for focused transaction: "Show transaction in table" (opens table filtered to generator, scrolls to transaction)
+   - `Message::OpenTransactionTable { scope: TransactionScopeRef, scroll_to: Option<TransactionRef> }` message
    - `transaction_table` command in command_parser.rs
-   - Handler for `TableAction::FocusTransaction`
+   - Keyboard shortcut: `Shift+T` when transaction is focused (mirrors `Shift+V` for signal table_view)
+   - Handler for `TableAction::FocusTransaction` - calls existing `Message::FocusTransaction` and `Message::GoToTime`
 
 **Test Checklist**
 
-Unit tests (TransactionTraceModel methods - 10 tests):
+Unit tests (TransactionTraceModel methods - 11 tests):
 - [ ] `transaction_trace_model_row_count`
-- [ ] `transaction_trace_model_row_id_at`
-- [ ] `transaction_trace_model_cell_formatting_id`
+- [ ] `transaction_trace_model_row_id_at_unique_across_generators`
 - [ ] `transaction_trace_model_cell_formatting_type`
+- [ ] `transaction_trace_model_cell_formatting_generator`
 - [ ] `transaction_trace_model_cell_formatting_times`
 - [ ] `transaction_trace_model_cell_formatting_duration`
 - [ ] `transaction_trace_model_cell_formatting_attributes`
 - [ ] `transaction_trace_model_sort_key_numeric_for_times`
+- [ ] `transaction_trace_model_sort_key_numeric_for_duration`
 - [ ] `transaction_trace_model_search_text_includes_all_fields`
 - [ ] `transaction_trace_model_on_activate_returns_focus_transaction`
 
-Unit tests (Error handling - 4 tests):
+Unit tests (Error handling - 5 tests):
 - [ ] `transaction_trace_model_no_wave_data_returns_data_unavailable`
 - [ ] `transaction_trace_model_no_transaction_data_returns_data_unavailable`
 - [ ] `transaction_trace_model_stream_not_found_returns_model_not_found`
 - [ ] `transaction_trace_model_generator_not_found_returns_model_not_found`
+- [ ] `transaction_trace_model_skips_malformed_transaction_with_warning`
 
 Unit tests (Scope filtering - 5 tests):
 - [ ] `transaction_trace_model_root_scope_includes_all_transactions`
 - [ ] `transaction_trace_model_stream_scope_filters_to_stream`
 - [ ] `transaction_trace_model_generator_scope_filters_to_generator`
-- [ ] `transaction_trace_model_generator_filter_applies_within_stream`
+- [ ] `transaction_trace_model_multiple_generators_same_stream`
 - [ ] `transaction_trace_model_empty_scope_returns_empty`
 
-Unit tests (Dynamic schema - 3 tests):
-- [ ] `transaction_trace_model_schema_includes_fixed_columns`
+Unit tests (Dynamic schema - 5 tests):
+- [ ] `transaction_trace_model_schema_includes_fixed_columns_in_order`
 - [ ] `transaction_trace_model_schema_includes_attribute_columns`
 - [ ] `transaction_trace_model_schema_deduplicates_attribute_names`
+- [ ] `transaction_trace_model_schema_no_attributes_returns_fixed_only`
+- [ ] `transaction_trace_model_schema_triggers_lazy_row_build`
 
 Unit tests (Duration calculation - 2 tests):
 - [ ] `transaction_trace_duration_calculated_correctly`
 - [ ] `transaction_trace_duration_zero_when_start_equals_end`
 
-Integration tests (Message handling - 6 tests):
+Unit tests (Sorting - 4 tests):
+- [ ] `transaction_trace_sort_by_duration`
+- [ ] `transaction_trace_sort_by_type_text`
+- [ ] `transaction_trace_sort_by_generator_text`
+- [ ] `transaction_trace_sort_by_attribute_column`
+
+Unit tests (Filtering - 4 tests):
+- [ ] `transaction_trace_filter_by_type_contains`
+- [ ] `transaction_trace_filter_by_generator_exact`
+- [ ] `transaction_trace_filter_by_attribute_regex`
+- [ ] `transaction_trace_filter_special_chars_in_attribute`
+
+Unit tests (Attributes edge cases - 3 tests):
+- [ ] `transaction_trace_attributes_with_special_chars`
+- [ ] `transaction_trace_attributes_long_values_truncated_in_search`
+- [ ] `transaction_trace_transactions_with_no_attributes`
+
+Integration tests (Message handling - 8 tests):
 - [ ] `open_transaction_table_creates_tile_for_stream`
 - [ ] `open_transaction_table_creates_tile_for_generator`
+- [ ] `open_transaction_table_scrolls_to_transaction`
 - [ ] `transaction_table_command_opens_table_for_focused_transaction`
-- [ ] `transaction_table_activate_focuses_transaction`
+- [ ] `transaction_table_activate_focuses_transaction_and_sets_cursor`
+- [ ] `transaction_table_selection_persists_across_sort`
 - [ ] `transaction_table_tile_removed_on_close`
 - [ ] `transaction_table_cache_rebuilds_on_reload`
 
 Snapshot tests (visual verification - 3 tests):
-- [ ] `table_transaction_trace_renders_columns` - Table shows ID/Type/Start/End/Duration columns
-- [ ] `table_transaction_trace_with_attributes` - Attribute columns appear in table
+- [ ] `table_transaction_trace_renders_columns` - Table shows Start/End/Duration/Type/Generator columns in order
+- [ ] `table_transaction_trace_with_attributes` - Attribute columns appear after fixed columns
 - [ ] `table_transaction_trace_empty_stream` - Empty state for stream with no transactions
 
-**Total new tests: 33** (24 unit + 6 integration + 3 snapshot)
+Performance tests (1 test):
+- [ ] `transaction_trace_large_dataset_acceptable_fps` - 10k transactions: <500ms initial load, >30fps scroll
+
+**Total new tests: 51** (39 unit + 8 integration + 3 snapshot + 1 performance)
 
 **Implementation notes:**
-- `TransactionTraceModel` uses `OnceLock<TransactionRows>` for lazy row building (same pattern as SignalChangeListModel)
-- Constructor validates stream/generator existence but defers row building to first access
-- Attribute columns are discovered during row building by scanning all transactions
-- Time formatting uses `TimeFormatter` from context (same as SignalChangeListModel)
-- Row ID is `TableRowId(tx_id as u64)` - transaction IDs are unique within FTR data
-- `TableAction::FocusTransaction` already exists in model.rs
+- `TransactionTraceModel` uses `OnceLock<TransactionData>` for lazy row building (same pattern as SignalChangeListModel)
+- Constructor takes `Arc<TableModelContext>` (same as SignalChangeListModel) for WaveData and time formatting access
+- Constructor validates scope existence but defers row building to first `schema()` or data access
+- `schema()` triggers lazy row building to discover attribute columns; subsequent calls return cached schema
+- Attribute columns are discovered during row building by scanning all transactions and deduplicating names
+- Time formatting uses `ctx.format_time()` (same as SignalChangeListModel)
+- Row ID is composite: `(stream_id << 40) | (generator_id << 20) | tx_index` to ensure uniqueness across generators
+- `TableAction::FocusTransaction` already exists in model.rs; handler should also call `GoToTime(start_time)`
 - Existing `Message::FocusTransaction(Option<TransactionRef>, Option<Transaction>)` handles activation
-- Test data: Use `examples/` FTR files or create minimal test FTR data
+- Malformed transactions (missing times, invalid refs) are skipped with `tracing::warn!`, not fatal errors
+- Search text is capped at 1KB per row to avoid memory bloat with large attributes
+- Test data: Use `examples/` FTR files or create minimal test FTR data with `ftr` crate helpers
 
 ---
 
@@ -642,7 +699,12 @@ v2 (deferred):
   - Scroll behavior, column resize/visibility
   - SignalChangeList model with UI integration
 - **Stage 12 designed:** TransactionTrace model with detailed implementation plan
-  - Follows Stage 11 patterns (TableModelContext, lazy row building, error handling)
-  - Dynamic attribute columns, scope filtering, duration calculation
-  - 33 planned tests (24 unit + 6 integration + 3 snapshot)
+  - Follows Stage 11 patterns (Arc<TableModelContext>, lazy row building via OnceLock, error handling)
+  - Fixed columns: Start, End, Duration, Type, Generator (user-friendly temporal-first order)
+  - Dynamic attribute columns discovered during lazy row building, appended after fixed columns
+  - Composite row_id encoding for uniqueness across generators
+  - Keyboard shortcut Shift+T mirrors Shift+V for signal table_view
+  - FocusTransaction activation also sets cursor to transaction start time
+  - Malformed transactions skipped with warning, not fatal
+  - 51 planned tests (39 unit + 8 integration + 3 snapshot + 1 performance)
 - **Stages 13-15:** Pending implementation
