@@ -602,7 +602,7 @@ fn render_table(
                             let text = match cell {
                                 TableCell::Text(s) => s,
                                 TableCell::RichText(rt) => {
-                                    ui.label(rt);
+                                    ui.add(egui::Label::new(rt).selectable(false));
                                     return;
                                 }
                             };
@@ -611,7 +611,7 @@ fn render_table(
                             } else {
                                 egui::RichText::new(&text)
                             };
-                            ui.label(label);
+                            ui.add(egui::Label::new(label).selectable(false));
                         });
                     }
 
