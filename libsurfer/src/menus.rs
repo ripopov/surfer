@@ -629,6 +629,16 @@ impl SystemState {
             }
         }
 
+        if let DisplayedItem::Stream(stream) = clicked_item
+            && stream.transaction_stream_ref.gen_id.is_some()
+            && ui.button("Show transactions in table").clicked()
+        {
+            msgs.push(Message::OpenTransactionTable {
+                generator: stream.transaction_stream_ref.clone(),
+            });
+            ui.close();
+        }
+
         if let Some(path) = path {
             let wave_container = waves.inner.as_waves().unwrap();
             let meta = wave_container.variable_meta(&path.root).ok();
