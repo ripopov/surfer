@@ -7,7 +7,13 @@ use crate::wave_container::VariableRef;
 use crate::wave_container::VariableRefExt;
 use crate::{StartupParams, WaveSource};
 use project_root::get_project_root;
+use std::collections::HashMap;
 use std::sync::Arc;
+
+/// Helper to build a row_index HashMap from a slice of row IDs.
+fn build_row_index(rows: &[TableRowId]) -> HashMap<TableRowId, usize> {
+    rows.iter().enumerate().map(|(i, &id)| (id, i)).collect()
+}
 
 // ========================
 // Stage 1 Tests
@@ -207,7 +213,7 @@ fn table_cache_entry_ready_state() {
     entry.set(TableCache {
         row_ids: vec![],
         search_texts: vec![],
-        sort_keys: vec![],
+        row_index: HashMap::new(),
     });
     assert!(entry.is_ready());
 }
@@ -229,7 +235,7 @@ fn table_cache_builder_unfiltered_unsorted() {
     let expected: Vec<_> = (0..5).map(|idx| TableRowId(idx as u64)).collect();
     assert_eq!(cache.row_ids, expected);
     assert_eq!(cache.search_texts.len(), expected.len());
-    assert_eq!(cache.sort_keys.len(), expected.len());
+    assert_eq!(cache.row_index.len(), expected.len());
 }
 
 #[test]
@@ -371,7 +377,7 @@ fn table_cache_builder_empty_result() {
 
     assert!(cache.row_ids.is_empty());
     assert!(cache.search_texts.is_empty());
-    assert!(cache.sort_keys.is_empty());
+    assert!(cache.row_index.is_empty());
 }
 
 #[test]
@@ -431,6 +437,8 @@ fn table_cache_built_stale_key_ignored() {
             type_search: TypeSearchState::default(),
             scroll_state: TableScrollState::default(),
             filter_draft: None,
+            hidden_selection_count: 0,
+            model: None,
         },
     );
 
@@ -443,7 +451,7 @@ fn table_cache_built_stale_key_ignored() {
         result: Ok(TableCache {
             row_ids: vec![],
             search_texts: vec![],
-            sort_keys: vec![],
+            row_index: HashMap::new(),
         }),
     };
 
@@ -573,6 +581,8 @@ fn table_runtime_state_not_serialized() {
         type_search: TypeSearchState::default(),
         scroll_state: TableScrollState::default(),
         filter_draft: None,
+        hidden_selection_count: 0,
+        model: None,
     };
 
     // Verify the runtime state has the expected fields
@@ -1412,7 +1422,12 @@ fn selection_shift_click_range_forward() {
         TableRowId(5),
     ];
 
-    let result = selection_on_shift_click(&current, TableRowId(5), &visible);
+    let result = selection_on_shift_click(
+        &current,
+        TableRowId(5),
+        &visible,
+        &build_row_index(&visible),
+    );
 
     assert!(result.changed);
     // Should select rows 2, 3, 4, 5 (inclusive range)
@@ -1440,7 +1455,12 @@ fn selection_shift_click_range_backward() {
         TableRowId(5),
     ];
 
-    let result = selection_on_shift_click(&current, TableRowId(2), &visible);
+    let result = selection_on_shift_click(
+        &current,
+        TableRowId(2),
+        &visible,
+        &build_row_index(&visible),
+    );
 
     assert!(result.changed);
     // Should select rows 2, 3, 4, 5 (inclusive range backward)
@@ -1460,7 +1480,12 @@ fn selection_shift_click_single_row() {
 
     let visible = vec![TableRowId(0), TableRowId(1), TableRowId(2), TableRowId(3)];
 
-    let result = selection_on_shift_click(&current, TableRowId(3), &visible);
+    let result = selection_on_shift_click(
+        &current,
+        TableRowId(3),
+        &visible,
+        &build_row_index(&visible),
+    );
 
     // Shift+click on same row as anchor - just that row
     assert!(!result.changed); // Already selected
@@ -1473,7 +1498,12 @@ fn selection_shift_click_no_anchor_uses_clicked_as_anchor() {
     let current = TableSelection::new();
     let visible = vec![TableRowId(0), TableRowId(1), TableRowId(2), TableRowId(3)];
 
-    let result = selection_on_shift_click(&current, TableRowId(2), &visible);
+    let result = selection_on_shift_click(
+        &current,
+        TableRowId(2),
+        &visible,
+        &build_row_index(&visible),
+    );
 
     // No anchor means treat clicked row as both anchor and target
     assert!(result.changed);
@@ -1490,7 +1520,12 @@ fn selection_shift_click_anchor_not_visible_uses_clicked() {
 
     let visible = vec![TableRowId(0), TableRowId(1), TableRowId(2), TableRowId(3)];
 
-    let result = selection_on_shift_click(&current, TableRowId(2), &visible);
+    let result = selection_on_shift_click(
+        &current,
+        TableRowId(2),
+        &visible,
+        &build_row_index(&visible),
+    );
 
     // Anchor not in visible set - select just clicked row and set new anchor
     assert!(result.changed);
@@ -1516,7 +1551,12 @@ fn selection_shift_click_extends_from_anchor_replaces_selection() {
     ];
 
     // Shift+click at row 4 should select 0-4, replacing 0-2
-    let result = selection_on_shift_click(&current, TableRowId(4), &visible);
+    let result = selection_on_shift_click(
+        &current,
+        TableRowId(4),
+        &visible,
+        &build_row_index(&visible),
+    );
 
     assert!(result.changed);
     assert_eq!(result.selection.len(), 5);
@@ -1797,7 +1837,12 @@ fn selection_shift_click_sorted_order() {
         TableRowId(0),
     ];
 
-    let result = selection_on_shift_click(&current, TableRowId(4), &visible);
+    let result = selection_on_shift_click(
+        &current,
+        TableRowId(4),
+        &visible,
+        &build_row_index(&visible),
+    );
 
     // Should select rows 5, 3, 1, 4 (by display order)
     assert!(result.changed);
@@ -1835,7 +1880,7 @@ fn navigate_up_from_middle_row() {
         TableRowId(5),
     ];
 
-    let result = navigate_up(&sel, &visible);
+    let result = navigate_up(&sel, &visible, &build_row_index(&visible));
 
     assert!(result.selection_changed);
     assert_eq!(result.target_row, Some(TableRowId(2)));
@@ -1853,7 +1898,7 @@ fn navigate_up_from_first_row_stays() {
 
     let visible = vec![TableRowId(0), TableRowId(1), TableRowId(2)];
 
-    let result = navigate_up(&sel, &visible);
+    let result = navigate_up(&sel, &visible, &build_row_index(&visible));
 
     // Already at first row - no change
     assert!(!result.selection_changed);
@@ -1865,7 +1910,7 @@ fn navigate_up_empty_selection_selects_last() {
     let sel = TableSelection::new();
     let visible = vec![TableRowId(0), TableRowId(1), TableRowId(2)];
 
-    let result = navigate_up(&sel, &visible);
+    let result = navigate_up(&sel, &visible, &build_row_index(&visible));
 
     // No selection: Up selects last row (like most file managers)
     assert!(result.selection_changed);
@@ -1877,7 +1922,7 @@ fn navigate_up_empty_visible_no_change() {
     let sel = TableSelection::new();
     let visible: Vec<TableRowId> = vec![];
 
-    let result = navigate_up(&sel, &visible);
+    let result = navigate_up(&sel, &visible, &build_row_index(&visible));
 
     assert!(!result.selection_changed);
     assert_eq!(result.target_row, None);
@@ -1898,7 +1943,7 @@ fn navigate_down_from_middle_row() {
         TableRowId(5),
     ];
 
-    let result = navigate_down(&sel, &visible);
+    let result = navigate_down(&sel, &visible, &build_row_index(&visible));
 
     assert!(result.selection_changed);
     assert_eq!(result.target_row, Some(TableRowId(3)));
@@ -1919,7 +1964,7 @@ fn navigate_down_from_last_row_stays() {
         TableRowId(5),
     ];
 
-    let result = navigate_down(&sel, &visible);
+    let result = navigate_down(&sel, &visible, &build_row_index(&visible));
 
     assert!(!result.selection_changed);
     assert_eq!(result.target_row, Some(TableRowId(5)));
@@ -1930,7 +1975,7 @@ fn navigate_down_empty_selection_selects_first() {
     let sel = TableSelection::new();
     let visible = vec![TableRowId(0), TableRowId(1), TableRowId(2)];
 
-    let result = navigate_down(&sel, &visible);
+    let result = navigate_down(&sel, &visible, &build_row_index(&visible));
 
     // No selection: Down selects first row
     assert!(result.selection_changed);
@@ -1955,7 +2000,7 @@ fn navigate_up_multi_selection_uses_anchor() {
         TableRowId(5),
     ];
 
-    let result = navigate_up(&sel, &visible);
+    let result = navigate_up(&sel, &visible, &build_row_index(&visible));
 
     // Moves from anchor (3) to row 2, clears multi-selection
     assert!(result.selection_changed);
@@ -1978,7 +2023,7 @@ fn navigate_page_down_moves_by_page_size() {
     let visible: Vec<TableRowId> = (0..20).map(TableRowId).collect();
     let page_size = 5;
 
-    let result = navigate_page_down(&sel, &visible, page_size);
+    let result = navigate_page_down(&sel, &visible, &build_row_index(&visible), page_size);
 
     assert!(result.selection_changed);
     assert_eq!(result.target_row, Some(TableRowId(5)));
@@ -1993,7 +2038,7 @@ fn navigate_page_down_stops_at_end() {
     let visible: Vec<TableRowId> = (0..20).map(TableRowId).collect();
     let page_size = 5;
 
-    let result = navigate_page_down(&sel, &visible, page_size);
+    let result = navigate_page_down(&sel, &visible, &build_row_index(&visible), page_size);
 
     // Would go to 23, but stops at 19 (last row)
     assert!(result.selection_changed);
@@ -2009,7 +2054,7 @@ fn navigate_page_up_moves_by_page_size() {
     let visible: Vec<TableRowId> = (0..20).map(TableRowId).collect();
     let page_size = 5;
 
-    let result = navigate_page_up(&sel, &visible, page_size);
+    let result = navigate_page_up(&sel, &visible, &build_row_index(&visible), page_size);
 
     assert!(result.selection_changed);
     assert_eq!(result.target_row, Some(TableRowId(5)));
@@ -2024,7 +2069,7 @@ fn navigate_page_up_stops_at_start() {
     let visible: Vec<TableRowId> = (0..20).map(TableRowId).collect();
     let page_size = 5;
 
-    let result = navigate_page_up(&sel, &visible, page_size);
+    let result = navigate_page_up(&sel, &visible, &build_row_index(&visible), page_size);
 
     // Would go to -3, but stops at 0 (first row)
     assert!(result.selection_changed);
@@ -2036,10 +2081,10 @@ fn navigate_page_empty_selection() {
     let sel = TableSelection::new();
     let visible: Vec<TableRowId> = (0..20).map(TableRowId).collect();
 
-    let result_down = navigate_page_down(&sel, &visible, 5);
+    let result_down = navigate_page_down(&sel, &visible, &build_row_index(&visible), 5);
     assert_eq!(result_down.target_row, Some(TableRowId(0))); // Start from beginning
 
-    let result_up = navigate_page_up(&sel, &visible, 5);
+    let result_up = navigate_page_up(&sel, &visible, &build_row_index(&visible), 5);
     assert_eq!(result_up.target_row, Some(TableRowId(19))); // Start from end
 }
 
@@ -2134,7 +2179,8 @@ fn navigate_extend_selection_down() {
     ];
 
     // Shift+Down from row 2 to row 3
-    let result = navigate_extend_selection(&sel, TableRowId(3), &visible);
+    let result =
+        navigate_extend_selection(&sel, TableRowId(3), &visible, &build_row_index(&visible));
 
     assert!(result.selection_changed);
     let new_sel = result.new_selection.unwrap();
@@ -2161,7 +2207,8 @@ fn navigate_extend_selection_multiple_steps() {
     ];
 
     // Shift+Down multiple times: anchor at 2, extend to 5
-    let result = navigate_extend_selection(&sel, TableRowId(5), &visible);
+    let result =
+        navigate_extend_selection(&sel, TableRowId(5), &visible, &build_row_index(&visible));
 
     let new_sel = result.new_selection.unwrap();
     assert_eq!(new_sel.len(), 4); // Rows 2, 3, 4, 5
@@ -2187,7 +2234,8 @@ fn navigate_extend_selection_backward() {
     ];
 
     // Shift+Up from row 4 to row 2
-    let result = navigate_extend_selection(&sel, TableRowId(2), &visible);
+    let result =
+        navigate_extend_selection(&sel, TableRowId(2), &visible, &build_row_index(&visible));
 
     let new_sel = result.new_selection.unwrap();
     assert_eq!(new_sel.len(), 3); // Rows 2, 3, 4
@@ -2215,7 +2263,8 @@ fn navigate_extend_selection_contract() {
     ];
 
     // Was 2-4, now Shift to 3 (contract)
-    let result = navigate_extend_selection(&sel, TableRowId(3), &visible);
+    let result =
+        navigate_extend_selection(&sel, TableRowId(3), &visible, &build_row_index(&visible));
 
     let new_sel = result.new_selection.unwrap();
     assert_eq!(new_sel.len(), 2); // Rows 2, 3
@@ -2230,7 +2279,8 @@ fn navigate_extend_selection_no_anchor() {
 
     let visible = vec![TableRowId(0), TableRowId(1), TableRowId(2)];
 
-    let result = navigate_extend_selection(&sel, TableRowId(1), &visible);
+    let result =
+        navigate_extend_selection(&sel, TableRowId(1), &visible, &build_row_index(&visible));
 
     // No anchor - just select the target and set as anchor
     let new_sel = result.new_selection.unwrap();
@@ -2254,7 +2304,13 @@ fn type_search_finds_prefix_match() {
     ];
     let sel = TableSelection::new();
 
-    let result = find_type_search_match("gam", &sel, &visible, &search_texts);
+    let result = find_type_search_match(
+        "gam",
+        &sel,
+        &visible,
+        &search_texts,
+        &build_row_index(&visible),
+    );
 
     assert_eq!(result, Some(TableRowId(2))); // "gamma" starts with "gam"
 }
@@ -2269,7 +2325,13 @@ fn type_search_finds_contains_match() {
     ];
     let sel = TableSelection::new();
 
-    let result = find_type_search_match("bar", &sel, &visible, &search_texts);
+    let result = find_type_search_match(
+        "bar",
+        &sel,
+        &visible,
+        &search_texts,
+        &build_row_index(&visible),
+    );
 
     assert_eq!(result, Some(TableRowId(1))); // "foo bar" contains "bar"
 }
@@ -2280,10 +2342,22 @@ fn type_search_case_insensitive() {
     let search_texts = vec!["UPPERCASE".to_string(), "lowercase".to_string()];
     let sel = TableSelection::new();
 
-    let result = find_type_search_match("upper", &sel, &visible, &search_texts);
+    let result = find_type_search_match(
+        "upper",
+        &sel,
+        &visible,
+        &search_texts,
+        &build_row_index(&visible),
+    );
     assert_eq!(result, Some(TableRowId(0)));
 
-    let result2 = find_type_search_match("LOWER", &sel, &visible, &search_texts);
+    let result2 = find_type_search_match(
+        "LOWER",
+        &sel,
+        &visible,
+        &search_texts,
+        &build_row_index(&visible),
+    );
     assert_eq!(result2, Some(TableRowId(1)));
 }
 
@@ -2302,7 +2376,13 @@ fn type_search_wraps_from_selection() {
     sel.anchor = Some(TableRowId(0));
 
     // Searching "apr" should find next match after current selection
-    let result = find_type_search_match("apr", &sel, &visible, &search_texts);
+    let result = find_type_search_match(
+        "apr",
+        &sel,
+        &visible,
+        &search_texts,
+        &build_row_index(&visible),
+    );
 
     assert_eq!(result, Some(TableRowId(1))); // "apricot" is next match
 }
@@ -2313,7 +2393,13 @@ fn type_search_no_match() {
     let search_texts = vec!["alpha".to_string(), "beta".to_string()];
     let sel = TableSelection::new();
 
-    let result = find_type_search_match("xyz", &sel, &visible, &search_texts);
+    let result = find_type_search_match(
+        "xyz",
+        &sel,
+        &visible,
+        &search_texts,
+        &build_row_index(&visible),
+    );
 
     assert_eq!(result, None);
 }
@@ -2324,7 +2410,13 @@ fn type_search_empty_query() {
     let search_texts = vec!["alpha".to_string(), "beta".to_string()];
     let sel = TableSelection::new();
 
-    let result = find_type_search_match("", &sel, &visible, &search_texts);
+    let result = find_type_search_match(
+        "",
+        &sel,
+        &visible,
+        &search_texts,
+        &build_row_index(&visible),
+    );
 
     assert_eq!(result, None); // Empty query matches nothing
 }
@@ -2335,7 +2427,13 @@ fn type_search_empty_table() {
     let search_texts: Vec<String> = vec![];
     let sel = TableSelection::new();
 
-    let result = find_type_search_match("test", &sel, &visible, &search_texts);
+    let result = find_type_search_match(
+        "test",
+        &sel,
+        &visible,
+        &search_texts,
+        &build_row_index(&visible),
+    );
 
     assert_eq!(result, None);
 }
@@ -2563,7 +2661,7 @@ fn table_navigate_down_updates_selection() {
     // Simulate Down key navigation
     let visible: Vec<_> = (0..10).map(TableRowId).collect();
     let current_sel = &state.table_runtime[&tile_id].selection;
-    let result = navigate_down(current_sel, &visible);
+    let result = navigate_down(current_sel, &visible, &build_row_index(&visible));
 
     if let Some(new_sel) = result.new_selection {
         state.update(Message::SetTableSelection {
@@ -2613,7 +2711,7 @@ fn table_navigate_up_updates_selection() {
 
     let visible: Vec<_> = (0..10).map(TableRowId).collect();
     let current_sel = &state.table_runtime[&tile_id].selection;
-    let result = navigate_up(current_sel, &visible);
+    let result = navigate_up(current_sel, &visible, &build_row_index(&visible));
 
     if let Some(new_sel) = result.new_selection {
         state.update(Message::SetTableSelection {
@@ -3023,9 +3121,11 @@ fn table_page_navigation_respects_page_size() {
     let page_size = 20; // Typical visible rows
 
     // Page Down
+    let row_index = build_row_index(&visible);
     let result = navigate_page_down(
         &state.table_runtime[&tile_id].selection,
         &visible,
+        &row_index,
         page_size,
     );
     assert_eq!(result.target_row, Some(TableRowId(70)));
@@ -3034,6 +3134,7 @@ fn table_page_navigation_respects_page_size() {
     let result = navigate_page_up(
         &state.table_runtime[&tile_id].selection,
         &visible,
+        &row_index,
         page_size,
     );
     assert_eq!(result.target_row, Some(TableRowId(30)));
@@ -3075,6 +3176,7 @@ fn type_search_integration() {
         &runtime.selection,
         &visible,
         &search_texts,
+        &build_row_index(&visible),
     );
 
     assert_eq!(match_row, Some(TableRowId(5)));
@@ -3099,7 +3201,7 @@ fn scroll_target_after_sort_with_selection_finds_row() {
         TableRowId(2),
     ];
 
-    let result = scroll_target_after_sort(&selection, &new_visible);
+    let result = scroll_target_after_sort(&selection, &new_visible, &build_row_index(&new_visible));
     assert_eq!(result, ScrollTarget::ToRow(TableRowId(5)));
 }
 
@@ -3111,7 +3213,7 @@ fn scroll_target_after_sort_selection_at_top() {
 
     let new_visible = vec![TableRowId(0), TableRowId(1), TableRowId(2)];
 
-    let result = scroll_target_after_sort(&selection, &new_visible);
+    let result = scroll_target_after_sort(&selection, &new_visible, &build_row_index(&new_visible));
     assert_eq!(result, ScrollTarget::ToRow(TableRowId(0)));
 }
 
@@ -3123,7 +3225,7 @@ fn scroll_target_after_sort_selection_at_bottom() {
 
     let new_visible = vec![TableRowId(0), TableRowId(1), TableRowId(2)];
 
-    let result = scroll_target_after_sort(&selection, &new_visible);
+    let result = scroll_target_after_sort(&selection, &new_visible, &build_row_index(&new_visible));
     assert_eq!(result, ScrollTarget::ToRow(TableRowId(2)));
 }
 
@@ -3132,7 +3234,7 @@ fn scroll_target_after_sort_no_selection_preserves() {
     let selection = TableSelection::new();
     let new_visible = vec![TableRowId(0), TableRowId(1), TableRowId(2)];
 
-    let result = scroll_target_after_sort(&selection, &new_visible);
+    let result = scroll_target_after_sort(&selection, &new_visible, &build_row_index(&new_visible));
     assert_eq!(result, ScrollTarget::Preserve);
 }
 
@@ -3153,7 +3255,7 @@ fn scroll_target_after_sort_multi_selection_uses_first() {
         TableRowId(9),
     ];
 
-    let result = scroll_target_after_sort(&selection, &new_visible);
+    let result = scroll_target_after_sort(&selection, &new_visible, &build_row_index(&new_visible));
     assert_eq!(result, ScrollTarget::ToRow(TableRowId(3)));
 }
 
@@ -3165,7 +3267,8 @@ fn scroll_target_after_filter_selected_row_visible() {
 
     let new_visible = vec![TableRowId(0), TableRowId(2), TableRowId(4)];
 
-    let result = scroll_target_after_filter(&selection, &new_visible);
+    let result =
+        scroll_target_after_filter(&selection, &new_visible, &build_row_index(&new_visible));
     assert_eq!(result, ScrollTarget::ToRow(TableRowId(2)));
 }
 
@@ -3177,7 +3280,8 @@ fn scroll_target_after_filter_selected_row_hidden() {
 
     let new_visible = vec![TableRowId(0), TableRowId(2), TableRowId(4)]; // Row 3 not in list
 
-    let result = scroll_target_after_filter(&selection, &new_visible);
+    let result =
+        scroll_target_after_filter(&selection, &new_visible, &build_row_index(&new_visible));
     assert_eq!(result, ScrollTarget::ToTop);
 }
 
@@ -3186,7 +3290,8 @@ fn scroll_target_after_filter_no_selection() {
     let selection = TableSelection::new();
     let new_visible = vec![TableRowId(0), TableRowId(1)];
 
-    let result = scroll_target_after_filter(&selection, &new_visible);
+    let result =
+        scroll_target_after_filter(&selection, &new_visible, &build_row_index(&new_visible));
     assert_eq!(result, ScrollTarget::Preserve);
 }
 
@@ -3198,7 +3303,8 @@ fn scroll_target_after_filter_all_selected_hidden() {
 
     let new_visible = vec![TableRowId(0), TableRowId(2), TableRowId(4)];
 
-    let result = scroll_target_after_filter(&selection, &new_visible);
+    let result =
+        scroll_target_after_filter(&selection, &new_visible, &build_row_index(&new_visible));
     assert_eq!(result, ScrollTarget::ToTop);
 }
 
@@ -4110,6 +4216,7 @@ fn table_activate_selection_moves_cursor() {
     };
 
     let runtime = state.table_runtime.entry(tile_id).or_default();
+    runtime.model = Some(model);
     let mut selection = TableSelection::new();
     selection.rows.insert(row_id);
     selection.anchor = Some(row_id);
@@ -4148,6 +4255,10 @@ fn signal_change_selection_moves_cursor() {
         tile_state.config.activate_on_select,
         "SignalChangeList should have activate_on_select=true"
     );
+
+    // Set cached model in runtime so activation works
+    let runtime = state.table_runtime.entry(tile_id).or_default();
+    runtime.model = Some(model);
 
     // Select row via SetTableSelection - should trigger activation
     let mut selection = TableSelection::new();
@@ -4699,5 +4810,100 @@ fn open_transaction_table_for_stream_creates_multiple_tiles() {
             }
             _ => panic!("Expected TransactionTrace spec"),
         }
+    }
+}
+
+// ========================
+// Performance Optimization Safety Tests
+// ========================
+
+#[test]
+fn test_row_index_lookup_consistency() {
+    // Build cache via build_table_cache and verify row_index matches row_ids positions
+    let model = Arc::new(VirtualTableModel::new(50, 3, 42));
+    let cache = build_table_cache(
+        model,
+        TableSearchSpec::default(),
+        vec![TableSortSpec {
+            key: TableColumnKey::Str("col_0".to_string()),
+            direction: TableSortDirection::Descending,
+        }],
+    )
+    .expect("cache build should succeed");
+
+    assert_eq!(cache.row_index.len(), cache.row_ids.len());
+
+    for (expected_pos, &row_id) in cache.row_ids.iter().enumerate() {
+        let indexed_pos = cache
+            .row_index
+            .get(&row_id)
+            .copied()
+            .unwrap_or_else(|| panic!("row_id {row_id:?} missing from row_index"));
+        assert_eq!(
+            indexed_pos, expected_pos,
+            "row_index[{row_id:?}] = {indexed_pos}, expected {expected_pos}"
+        );
+    }
+}
+
+#[test]
+fn test_hidden_count_consistency() {
+    // Create runtime with cache and selection mixing visible/hidden rows
+    let model = Arc::new(VirtualTableModel::new(10, 2, 0));
+    let cache = build_table_cache(model, TableSearchSpec::default(), vec![])
+        .expect("cache build should succeed");
+
+    let cache_key = TableCacheKey {
+        model_key: TableModelKey(1),
+        display_filter: TableSearchSpec::default(),
+        view_sort: vec![],
+        generation: 0,
+    };
+    let entry = Arc::new(TableCacheEntry::new(cache_key.clone(), 0));
+    entry.set(cache);
+
+    let mut runtime = TableRuntimeState {
+        cache: Some(entry),
+        cache_key: Some(cache_key),
+        ..Default::default()
+    };
+
+    // Select rows 3, 5, 7, 99 (99 is not visible)
+    runtime.selection.rows.insert(TableRowId(3));
+    runtime.selection.rows.insert(TableRowId(5));
+    runtime.selection.rows.insert(TableRowId(7));
+    runtime.selection.rows.insert(TableRowId(99)); // hidden
+
+    runtime.update_hidden_count();
+
+    // Manual count: 3, 5, 7 are visible (in 0..10), 99 is hidden
+    assert_eq!(runtime.hidden_selection_count, 1);
+
+    // After clearing selection, hidden count should be 0
+    runtime.selection.clear();
+    runtime.hidden_selection_count = 0;
+    runtime.update_hidden_count();
+    assert_eq!(runtime.hidden_selection_count, 0);
+}
+
+#[test]
+fn test_row_index_after_filter() {
+    // Verify row_index is correct after filtering reduces visible rows
+    let model = Arc::new(VirtualTableModel::new(20, 2, 0));
+    let cache = build_table_cache(
+        model,
+        TableSearchSpec {
+            mode: TableSearchMode::Contains,
+            case_sensitive: false,
+            text: "r1".to_string(), // Matches rows 1, 10-19
+        },
+        vec![],
+    )
+    .expect("cache build should succeed");
+
+    assert_eq!(cache.row_index.len(), cache.row_ids.len());
+
+    for (pos, &row_id) in cache.row_ids.iter().enumerate() {
+        assert_eq!(cache.row_index[&row_id], pos);
     }
 }

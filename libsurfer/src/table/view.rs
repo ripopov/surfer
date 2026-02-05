@@ -2,14 +2,14 @@ use crate::SystemState;
 use crate::message::Message;
 use crate::table::{
     FilterDraft, PendingScrollOp, ScrollTarget, TableCache, TableCacheKey, TableCell,
-    TableColumnKey, TableModel, TableModelKey, TableRowId, TableRuntimeState, TableSearchMode,
-    TableSearchSpec, TableSelection, TableSelectionMode, TableSortSpec, TableTileId,
-    TableTileState, TableViewConfig, find_type_search_match, format_selection_count,
-    hidden_columns, navigate_down, navigate_end, navigate_extend_selection, navigate_home,
-    navigate_page_down, navigate_page_up, navigate_up, scroll_target_after_filter,
-    scroll_target_after_sort, selection_on_click_multi, selection_on_click_single,
-    selection_on_ctrl_click, selection_on_shift_click, should_clear_selection_on_generation_change,
-    sort_indicator, sort_spec_on_click, sort_spec_on_shift_click, visible_columns,
+    TableColumnKey, TableModel, TableModelKey, TableRuntimeState, TableSearchMode, TableSearchSpec,
+    TableSelection, TableSelectionMode, TableSortSpec, TableTileId, TableTileState,
+    TableViewConfig, find_type_search_match, format_selection_count, hidden_columns, navigate_down,
+    navigate_end, navigate_extend_selection, navigate_home, navigate_page_down, navigate_page_up,
+    navigate_up, scroll_target_after_filter, scroll_target_after_sort, selection_on_click_multi,
+    selection_on_click_single, selection_on_ctrl_click, selection_on_shift_click,
+    should_clear_selection_on_generation_change, sort_indicator, sort_spec_on_click,
+    sort_spec_on_shift_click, visible_columns,
 };
 use egui_extras::{Column, TableBuilder};
 use std::collections::HashMap;
@@ -52,20 +52,18 @@ pub fn draw_table_tile(
     let dense_rows = tile_state.config.dense_rows;
     let sticky_header = tile_state.config.sticky_header;
 
-    let model_ctx = state.table_model_context();
-    // Get the model for schema access
-    let model = tile_state.spec.create_model(&model_ctx).ok();
-
     // Get or create runtime state
     let runtime = state.table_runtime.entry(tile_id).or_default();
 
     // Get current generation from wave data (0 if no wave data loaded)
     let current_generation = state.user.waves.as_ref().map_or(0, |w| w.cache_generation);
 
-    // Check if generation changed and clear selection if so
+    // Check if generation changed and clear selection/model if so
     let last_generation = runtime.scroll_state.last_generation;
     if should_clear_selection_on_generation_change(current_generation, last_generation) {
         runtime.selection.clear();
+        runtime.model = None;
+        runtime.hidden_selection_count = 0;
         runtime.scroll_state.last_generation = current_generation;
     }
 
@@ -140,7 +138,7 @@ pub fn draw_table_tile(
                 {
                     // Cache is ready - render the table
                     if let Some(cache) = cache_entry.get() {
-                        if let Some(ref model) = model {
+                        if let Some(model) = runtime.model.clone() {
                             // Get current selection for rendering
                             let selection = runtime.selection.clone();
                             let type_search_buffer = runtime.type_search.buffer.clone();
@@ -150,12 +148,16 @@ pub fn draw_table_tile(
                             let scroll_target =
                                 runtime.scroll_state.scroll_target.clone().or_else(|| {
                                     pending_op.map(|op| match op {
-                                        PendingScrollOp::AfterSort => {
-                                            scroll_target_after_sort(&selection, &cache.row_ids)
-                                        }
-                                        PendingScrollOp::AfterFilter => {
-                                            scroll_target_after_filter(&selection, &cache.row_ids)
-                                        }
+                                        PendingScrollOp::AfterSort => scroll_target_after_sort(
+                                            &selection,
+                                            &cache.row_ids,
+                                            &cache.row_index,
+                                        ),
+                                        PendingScrollOp::AfterFilter => scroll_target_after_filter(
+                                            &selection,
+                                            &cache.row_ids,
+                                            &cache.row_index,
+                                        ),
                                         PendingScrollOp::AfterActivation(row) => {
                                             ScrollTarget::ToRow(row)
                                         }
@@ -186,7 +188,7 @@ pub fn draw_table_tile(
                                 ui,
                                 msgs,
                                 tile_id,
-                                model.clone(),
+                                model,
                                 cache,
                                 &tile_state.config.sort,
                                 &tile_state.config.columns,
@@ -244,29 +246,10 @@ fn handle_keyboard_navigation(
     selection_mode: TableSelectionMode,
     _table_tiles: &HashMap<TableTileId, TableTileState>,
 ) {
-    // Clone data we need from runtime to avoid borrow conflicts
-    let (visible_rows, search_texts, selection) = {
-        let Some(runtime) = state.table_runtime.get(&tile_id) else {
-            return;
-        };
-        let Some(cache_entry) = &runtime.cache else {
-            return;
-        };
-        let Some(cache) = cache_entry.get() else {
-            return;
-        };
-
-        (
-            cache.row_ids.clone(),
-            cache.search_texts.clone(),
-            runtime.selection.clone(),
-        )
-    };
-
     // Calculate page size based on visible area (approximate)
     let page_size = 20; // Default page size; could be calculated from UI height
 
-    // Collect keyboard input
+    // Collect keyboard input (does not borrow state)
     let input = ui.input(|i| {
         (
             i.modifiers,
@@ -314,42 +297,68 @@ fn handle_keyboard_navigation(
         return;
     }
 
-    // Handle navigation keys
-    let nav_result = if modifiers.shift {
-        // Shift+navigation extends selection
-        let target = if up {
-            navigate_up(&selection, &visible_rows).target_row
+    // PHASE 1: Read-only navigation (immutable borrow of state)
+    let nav_result = {
+        let Some(runtime) = state.table_runtime.get(&tile_id) else {
+            return;
+        };
+        let Some(cache_entry) = &runtime.cache else {
+            return;
+        };
+        let Some(cache) = cache_entry.get() else {
+            return;
+        };
+        let visible_rows = &cache.row_ids;
+        let row_index = &cache.row_index;
+        let selection = &runtime.selection;
+
+        if modifiers.shift {
+            // Shift+navigation extends selection
+            let target = if up {
+                navigate_up(selection, visible_rows, row_index).target_row
+            } else if down {
+                navigate_down(selection, visible_rows, row_index).target_row
+            } else if page_up {
+                navigate_page_up(selection, visible_rows, row_index, page_size).target_row
+            } else if page_down {
+                navigate_page_down(selection, visible_rows, row_index, page_size).target_row
+            } else if home {
+                navigate_home(visible_rows).target_row
+            } else if end {
+                navigate_end(visible_rows).target_row
+            } else {
+                None
+            };
+
+            target.map(|t| navigate_extend_selection(selection, t, visible_rows, row_index))
+        } else if up {
+            Some(navigate_up(selection, visible_rows, row_index))
         } else if down {
-            navigate_down(&selection, &visible_rows).target_row
+            Some(navigate_down(selection, visible_rows, row_index))
         } else if page_up {
-            navigate_page_up(&selection, &visible_rows, page_size).target_row
+            Some(navigate_page_up(
+                selection,
+                visible_rows,
+                row_index,
+                page_size,
+            ))
         } else if page_down {
-            navigate_page_down(&selection, &visible_rows, page_size).target_row
-        } else if home {
-            navigate_home(&visible_rows).target_row
-        } else if end {
-            navigate_end(&visible_rows).target_row
+            Some(navigate_page_down(
+                selection,
+                visible_rows,
+                row_index,
+                page_size,
+            ))
+        } else if home || (modifiers.command && up) {
+            Some(navigate_home(visible_rows))
+        } else if end || (modifiers.command && down) {
+            Some(navigate_end(visible_rows))
         } else {
             None
-        };
-
-        target.map(|t| navigate_extend_selection(&selection, t, &visible_rows))
-    } else if up {
-        Some(navigate_up(&selection, &visible_rows))
-    } else if down {
-        Some(navigate_down(&selection, &visible_rows))
-    } else if page_up {
-        Some(navigate_page_up(&selection, &visible_rows, page_size))
-    } else if page_down {
-        Some(navigate_page_down(&selection, &visible_rows, page_size))
-    } else if home || (modifiers.command && up) {
-        Some(navigate_home(&visible_rows))
-    } else if end || (modifiers.command && down) {
-        Some(navigate_end(&visible_rows))
-    } else {
-        None
+        }
     };
 
+    // PHASE 2: Apply navigation result
     if let Some(result) = nav_result {
         if result.selection_changed
             && let Some(new_selection) = result.new_selection
@@ -363,25 +372,31 @@ fn handle_keyboard_navigation(
     }
 
     // Handle type-to-search for printable characters
-    // Check for text input events
     for event in &events {
         if let egui::Event::Text(text) = event {
             // Only process single characters for type-to-search
             if text.len() == 1 && !modifiers.command && !modifiers.ctrl && !modifiers.alt {
                 let c = text.chars().next().unwrap();
                 if c.is_alphanumeric() || c.is_whitespace() || c == '_' || c == '-' {
-                    // Update type search state
+                    // Update type search state (mutable borrow)
                     let now = std::time::Instant::now();
-
-                    // Get mutable reference to runtime for type_search update
                     if let Some(runtime) = state.table_runtime.get_mut(&tile_id) {
                         let _buffer = runtime.type_search.push_char(c, now);
-                        let query = runtime.type_search.buffer.clone();
+                    }
 
-                        // Find matching row
-                        if let Some(match_row) =
-                            find_type_search_match(&query, &selection, &visible_rows, &search_texts)
-                        {
+                    // Re-borrow immutably for search match
+                    if let Some(runtime) = state.table_runtime.get(&tile_id)
+                        && let Some(cache_entry) = &runtime.cache
+                        && let Some(cache) = cache_entry.get()
+                    {
+                        let query = runtime.type_search.buffer.clone();
+                        if let Some(match_row) = find_type_search_match(
+                            &query,
+                            &runtime.selection,
+                            &cache.row_ids,
+                            &cache.search_texts,
+                            &cache.row_index,
+                        ) {
                             let mut new_selection = TableSelection::new();
                             new_selection.rows.insert(match_row);
                             new_selection.anchor = Some(match_row);
@@ -481,7 +496,7 @@ fn render_table(
 
     // Determine scroll-to row index if scroll target specified
     let scroll_to_row = scroll_target.and_then(|target| match target {
-        ScrollTarget::ToRow(row_id) => cache.row_ids.iter().position(|&r| r == *row_id),
+        ScrollTarget::ToRow(row_id) => cache.row_index.get(row_id).copied(),
         ScrollTarget::ToTop => Some(0),
         ScrollTarget::ToBottom if !cache.row_ids.is_empty() => Some(cache.row_ids.len() - 1),
         _ => None,
@@ -497,9 +512,10 @@ fn render_table(
     let mut new_selection: Option<TableSelection> = None;
     let mut new_visibility_toggle: Option<TableColumnKey> = None;
 
-    // Clone data needed inside closures
+    // Use references to cache data — cache outlives the closures
     let selection_clone = selection.clone();
-    let visible_rows: Vec<TableRowId> = cache.row_ids.clone();
+    let visible_rows = &cache.row_ids;
+    let row_index = &cache.row_index;
 
     // Track column keys and indices for context menu and rendering
     let column_keys: Vec<TableColumnKey> = visible_col_info
@@ -634,7 +650,8 @@ fn render_table(
                                         Some(selection_on_shift_click(
                                             &selection_clone,
                                             row_id,
-                                            &visible_rows,
+                                            visible_rows,
+                                            row_index,
                                         ))
                                     } else {
                                         // Plain click: select single
@@ -818,13 +835,7 @@ fn render_filter_bar(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Selection count (displayed on the right)
             let selection = &runtime.selection;
-            let visible_rows: Vec<_> = runtime
-                .cache
-                .as_ref()
-                .and_then(|c| c.get())
-                .map(|c| c.row_ids.clone())
-                .unwrap_or_default();
-            let hidden_count = selection.count_hidden(&visible_rows);
+            let hidden_count = runtime.hidden_selection_count;
             let selection_text = format_selection_count(selection.len(), hidden_count);
             if !selection_text.is_empty() {
                 ui.label(egui::RichText::new(&selection_text).italics());

@@ -4,6 +4,7 @@ use super::model::{
 };
 use regex::RegexBuilder;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -124,7 +125,7 @@ pub struct TableCacheKey {
 pub struct TableCache {
     pub row_ids: Vec<TableRowId>,
     pub search_texts: Vec<String>,
-    pub sort_keys: Vec<Vec<TableSortKey>>,
+    pub row_index: HashMap<TableRowId, usize>,
 }
 
 /// Runtime, non-serialized cache handle.
@@ -254,7 +255,7 @@ impl TableScrollState {
 }
 
 /// Runtime state for a table tile (non-serialized).
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct TableRuntimeState {
     pub cache_key: Option<TableCacheKey>,
     pub cache: Option<Arc<TableCacheEntry>>,
@@ -269,6 +270,45 @@ pub struct TableRuntimeState {
     pub scroll_state: TableScrollState,
     /// Draft filter state for debounced live search.
     pub filter_draft: Option<FilterDraft>,
+    /// Cached count of selected rows not in the current visible set.
+    pub hidden_selection_count: usize,
+    /// Cached table model (Arc clone is O(1), avoids per-frame recreation).
+    pub model: Option<Arc<dyn super::model::TableModel>>,
+}
+
+impl std::fmt::Debug for TableRuntimeState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TableRuntimeState")
+            .field("cache_key", &self.cache_key)
+            .field("cache", &self.cache)
+            .field("last_error", &self.last_error)
+            .field("selection", &self.selection)
+            .field("scroll_offset", &self.scroll_offset)
+            .field("type_search", &self.type_search)
+            .field("scroll_state", &self.scroll_state)
+            .field("filter_draft", &self.filter_draft)
+            .field("hidden_selection_count", &self.hidden_selection_count)
+            .field("model", &self.model.as_ref().map(|_| "..."))
+            .finish()
+    }
+}
+
+impl TableRuntimeState {
+    /// Recomputes `hidden_selection_count` from current selection and cache.
+    pub fn update_hidden_count(&mut self) {
+        self.hidden_selection_count = self
+            .cache
+            .as_ref()
+            .and_then(|entry| entry.get())
+            .map(|cache| {
+                self.selection
+                    .rows
+                    .iter()
+                    .filter(|id| !cache.row_index.contains_key(id))
+                    .count()
+            })
+            .unwrap_or(0);
+    }
 }
 
 struct TableFilter {
@@ -428,10 +468,12 @@ pub fn build_table_cache(
         });
     }
 
+    let row_ids: Vec<TableRowId> = rows.iter().map(|row| row.row_id).collect();
+    let row_index = row_ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
     Ok(TableCache {
-        row_ids: rows.iter().map(|row| row.row_id).collect(),
+        row_ids,
         search_texts: rows.iter().map(|row| row.search_text.clone()).collect(),
-        sort_keys: rows.iter().map(|row| row.sort_keys.clone()).collect(),
+        row_index,
     })
 }
 

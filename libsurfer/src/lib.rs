@@ -2288,6 +2288,7 @@ impl SystemState {
                     runtime.cache_key = Some(cache_key.clone());
                     runtime.cache = Some(entry.clone());
                     runtime.last_error = None;
+                    runtime.model = Some(model.clone());
                 }
 
                 self.table_inflight.insert(cache_key.clone(), entry.clone());
@@ -2358,6 +2359,7 @@ impl SystemState {
                     }
                 }
 
+                runtime.update_hidden_count();
                 self.invalidate_draw_commands();
             }
             Message::Exit | Message::ToggleFullscreen => {} // Handled in eframe::update
@@ -2460,6 +2462,7 @@ impl SystemState {
             Message::SetTableSelection { tile_id, selection } => {
                 if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
                     runtime.selection = selection.clone();
+                    runtime.update_hidden_count();
                     self.invalidate_draw_commands();
                 }
 
@@ -2468,31 +2471,30 @@ impl SystemState {
                     && tile_state.config.activate_on_select
                     && tile_state.config.selection_mode == table::TableSelectionMode::Single
                     && let Some(anchor) = selection.anchor
+                    && let Some(runtime) = self.table_runtime.get(&tile_id)
+                    && let Some(model) = &runtime.model
                 {
-                    let model_ctx = self.table_model_context();
-                    if let Ok(model) = tile_state.spec.create_model(&model_ctx) {
-                        let action = model.on_activate(anchor);
-                        match action {
-                            table::TableAction::CursorSet(time) => {
-                                self.update(Message::CursorSet(time));
+                    let action = model.on_activate(anchor);
+                    match action {
+                        table::TableAction::CursorSet(time) => {
+                            self.update(Message::CursorSet(time));
+                            self.update(Message::GoToCursorIfNotInView);
+                        }
+                        table::TableAction::FocusTransaction(tx_ref) => {
+                            // Focus the transaction and set cursor to its start time
+                            self.update(Message::FocusTransaction(Some(tx_ref.clone()), None));
+                            // Get the transaction's start time
+                            if let Some(waves) = &self.user.waves
+                                && let Some(transactions) = waves.inner.as_transactions()
+                                && let Some(tx) = transactions.get_transaction(&tx_ref)
+                            {
+                                let start_time = BigInt::from(tx.get_start_time());
+                                self.update(Message::CursorSet(start_time));
                                 self.update(Message::GoToCursorIfNotInView);
                             }
-                            table::TableAction::FocusTransaction(tx_ref) => {
-                                // Focus the transaction and set cursor to its start time
-                                self.update(Message::FocusTransaction(Some(tx_ref.clone()), None));
-                                // Get the transaction's start time
-                                if let Some(waves) = &self.user.waves
-                                    && let Some(transactions) = waves.inner.as_transactions()
-                                    && let Some(tx) = transactions.get_transaction(&tx_ref)
-                                {
-                                    let start_time = BigInt::from(tx.get_start_time());
-                                    self.update(Message::CursorSet(start_time));
-                                    self.update(Message::GoToCursorIfNotInView);
-                                }
-                            }
-                            table::TableAction::SelectSignal(_) | table::TableAction::None => {
-                                // No action or not yet implemented
-                            }
+                        }
+                        table::TableAction::SelectSignal(_) | table::TableAction::None => {
+                            // No action or not yet implemented
                         }
                     }
                 }
@@ -2500,15 +2502,14 @@ impl SystemState {
             Message::ClearTableSelection { tile_id } => {
                 if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
                     runtime.selection.clear();
+                    runtime.hidden_selection_count = 0;
                     self.invalidate_draw_commands();
                 }
             }
             Message::TableActivateSelection { tile_id } => {
                 // Get the selected rows and call model.on_activate() for each
-                let tile_state = self.user.table_tiles.get(&tile_id)?;
-                let model_ctx = self.table_model_context();
-                let model = tile_state.spec.create_model(&model_ctx).ok()?;
                 let runtime = self.table_runtime.get(&tile_id)?;
+                let model = runtime.model.clone()?;
 
                 // For now, activate the anchor row if set
                 if let Some(anchor) = runtime.selection.anchor {
@@ -2541,10 +2542,8 @@ impl SystemState {
                 tile_id,
                 include_header,
             } => {
-                let tile_state = self.user.table_tiles.get(&tile_id)?;
-                let model_ctx = self.table_model_context();
-                let model = tile_state.spec.create_model(&model_ctx).ok()?;
                 let runtime = self.table_runtime.get(&tile_id)?;
+                let model = runtime.model.clone()?;
 
                 if runtime.selection.is_empty() {
                     return Some(());
@@ -2602,6 +2601,7 @@ impl SystemState {
 
                 if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
                     runtime.selection = new_selection;
+                    runtime.hidden_selection_count = 0; // All visible rows selected
                     self.invalidate_draw_commands();
                 }
             }

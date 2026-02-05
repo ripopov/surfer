@@ -11,7 +11,7 @@ use crate::wave_data::WaveData;
 use egui::RichText;
 use num::BigInt;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 /// Unique identifier for a table tile.
@@ -379,13 +379,13 @@ pub fn selection_on_shift_click(
     current: &TableSelection,
     clicked: TableRowId,
     visible_rows: &[TableRowId],
+    row_index: &HashMap<TableRowId, usize>,
 ) -> SelectionUpdate {
     // Find positions in visible order
-    let clicked_pos = visible_rows.iter().position(|&r| r == clicked);
     let anchor = current.anchor;
 
     // If clicked row is not visible, do nothing
-    let Some(clicked_idx) = clicked_pos else {
+    let Some(&clicked_idx) = row_index.get(&clicked) else {
         return SelectionUpdate {
             selection: current.clone(),
             changed: false,
@@ -393,7 +393,7 @@ pub fn selection_on_shift_click(
     };
 
     // Find anchor position, or use clicked as anchor if not found/visible
-    let anchor_idx = anchor.and_then(|a| visible_rows.iter().position(|&r| r == a));
+    let anchor_idx = anchor.and_then(|a| row_index.get(&a).copied());
 
     let (start_idx, end_idx, final_anchor) = match anchor_idx {
         Some(a_idx) => {
@@ -597,10 +597,14 @@ pub struct NavigationResult {
 }
 
 /// Helper to find the position of the anchor or last selected row in visible rows.
-fn find_anchor_position(selection: &TableSelection, visible_rows: &[TableRowId]) -> Option<usize> {
+fn find_anchor_position(
+    selection: &TableSelection,
+    _visible_rows: &[TableRowId],
+    row_index: &HashMap<TableRowId, usize>,
+) -> Option<usize> {
     // First try anchor
     if let Some(anchor) = selection.anchor
-        && let Some(pos) = visible_rows.iter().position(|&r| r == anchor)
+        && let Some(&pos) = row_index.get(&anchor)
     {
         return Some(pos);
     }
@@ -609,7 +613,7 @@ fn find_anchor_position(selection: &TableSelection, visible_rows: &[TableRowId])
         .rows
         .iter()
         .rev()
-        .find_map(|&r| visible_rows.iter().position(|&v| v == r))
+        .find_map(|r| row_index.get(r).copied())
 }
 
 /// Computes the target row when pressing Up arrow.
@@ -619,6 +623,7 @@ fn find_anchor_position(selection: &TableSelection, visible_rows: &[TableRowId])
 pub fn navigate_up(
     current_selection: &TableSelection,
     visible_rows: &[TableRowId],
+    row_index: &HashMap<TableRowId, usize>,
 ) -> NavigationResult {
     if visible_rows.is_empty() {
         return NavigationResult {
@@ -628,7 +633,7 @@ pub fn navigate_up(
         };
     }
 
-    let current_pos = find_anchor_position(current_selection, visible_rows);
+    let current_pos = find_anchor_position(current_selection, visible_rows, row_index);
 
     let target_idx = match current_pos {
         Some(0) => 0, // Already at first row, stay there
@@ -668,6 +673,7 @@ pub fn navigate_up(
 pub fn navigate_down(
     current_selection: &TableSelection,
     visible_rows: &[TableRowId],
+    row_index: &HashMap<TableRowId, usize>,
 ) -> NavigationResult {
     if visible_rows.is_empty() {
         return NavigationResult {
@@ -677,7 +683,7 @@ pub fn navigate_down(
         };
     }
 
-    let current_pos = find_anchor_position(current_selection, visible_rows);
+    let current_pos = find_anchor_position(current_selection, visible_rows, row_index);
 
     let target_idx = match current_pos {
         Some(pos) if pos >= visible_rows.len() - 1 => visible_rows.len() - 1, // At last row, stay
@@ -716,6 +722,7 @@ pub fn navigate_down(
 pub fn navigate_page_up(
     current_selection: &TableSelection,
     visible_rows: &[TableRowId],
+    row_index: &HashMap<TableRowId, usize>,
     page_size: usize,
 ) -> NavigationResult {
     if visible_rows.is_empty() {
@@ -726,7 +733,7 @@ pub fn navigate_page_up(
         };
     }
 
-    let current_pos = find_anchor_position(current_selection, visible_rows);
+    let current_pos = find_anchor_position(current_selection, visible_rows, row_index);
 
     let target_idx = match current_pos {
         Some(pos) => pos.saturating_sub(page_size),
@@ -752,6 +759,7 @@ pub fn navigate_page_up(
 pub fn navigate_page_down(
     current_selection: &TableSelection,
     visible_rows: &[TableRowId],
+    row_index: &HashMap<TableRowId, usize>,
     page_size: usize,
 ) -> NavigationResult {
     if visible_rows.is_empty() {
@@ -762,7 +770,7 @@ pub fn navigate_page_down(
         };
     }
 
-    let current_pos = find_anchor_position(current_selection, visible_rows);
+    let current_pos = find_anchor_position(current_selection, visible_rows, row_index);
 
     let target_idx = match current_pos {
         Some(pos) => (pos + page_size).min(visible_rows.len() - 1),
@@ -840,9 +848,9 @@ pub fn navigate_extend_selection(
     current_selection: &TableSelection,
     target_row: TableRowId,
     visible_rows: &[TableRowId],
+    row_index: &HashMap<TableRowId, usize>,
 ) -> NavigationResult {
-    let target_pos = visible_rows.iter().position(|&r| r == target_row);
-    let Some(target_idx) = target_pos else {
+    let Some(&target_idx) = row_index.get(&target_row) else {
         return NavigationResult {
             target_row: None,
             selection_changed: false,
@@ -852,7 +860,7 @@ pub fn navigate_extend_selection(
 
     // Get anchor position, or use target as anchor if no anchor exists
     let anchor = current_selection.anchor;
-    let anchor_idx = anchor.and_then(|a| visible_rows.iter().position(|&r| r == a));
+    let anchor_idx = anchor.and_then(|a| row_index.get(&a).copied());
 
     let (start_idx, end_idx, final_anchor) = match anchor_idx {
         Some(a_idx) => {
@@ -891,6 +899,7 @@ pub fn find_type_search_match(
     current_selection: &TableSelection,
     visible_rows: &[TableRowId],
     search_texts: &[String],
+    row_index: &HashMap<TableRowId, usize>,
 ) -> Option<TableRowId> {
     if query.is_empty() || visible_rows.is_empty() {
         return None;
@@ -901,7 +910,7 @@ pub fn find_type_search_match(
     // Find current selection position to start search from
     let start_idx = current_selection
         .anchor
-        .and_then(|a| visible_rows.iter().position(|&r| r == a))
+        .and_then(|a| row_index.get(&a).copied())
         .map(|pos| (pos + 1) % visible_rows.len())
         .unwrap_or(0);
 
@@ -945,17 +954,22 @@ pub enum ScrollTarget {
 #[must_use]
 pub fn scroll_target_after_sort(
     selection: &TableSelection,
-    new_visible_rows: &[TableRowId],
+    _new_visible_rows: &[TableRowId],
+    row_index: &HashMap<TableRowId, usize>,
 ) -> ScrollTarget {
     if selection.is_empty() {
         return ScrollTarget::Preserve;
     }
 
-    // Find first selected row in new visible order
-    for &row_id in new_visible_rows {
-        if selection.contains(row_id) {
-            return ScrollTarget::ToRow(row_id);
-        }
+    // Find first selected row in new visible order using index
+    let first_selected = selection
+        .rows
+        .iter()
+        .filter_map(|r| row_index.get(r).map(|&idx| (idx, *r)))
+        .min_by_key(|&(idx, _)| idx);
+
+    if let Some((_, row_id)) = first_selected {
+        return ScrollTarget::ToRow(row_id);
     }
 
     // Selected rows not in visible set (should not happen unless filter hid them)
@@ -969,21 +983,22 @@ pub fn scroll_target_after_sort(
 #[must_use]
 pub fn scroll_target_after_filter(
     selection: &TableSelection,
-    new_visible_rows: &[TableRowId],
+    _new_visible_rows: &[TableRowId],
+    row_index: &HashMap<TableRowId, usize>,
 ) -> ScrollTarget {
     if selection.is_empty() {
         return ScrollTarget::Preserve;
     }
 
-    // Check if any selected row is visible
-    let visible_selected = selection.count_visible(new_visible_rows);
-    if visible_selected > 0 {
-        // Find first visible selected row
-        for &row_id in new_visible_rows {
-            if selection.contains(row_id) {
-                return ScrollTarget::ToRow(row_id);
-            }
-        }
+    // Find first visible selected row using index
+    let first_visible_selected = selection
+        .rows
+        .iter()
+        .filter_map(|r| row_index.get(r).map(|&idx| (idx, *r)))
+        .min_by_key(|&(idx, _)| idx);
+
+    if let Some((_, row_id)) = first_visible_selected {
+        return ScrollTarget::ToRow(row_id);
     }
 
     // All selected rows are hidden - scroll to top
