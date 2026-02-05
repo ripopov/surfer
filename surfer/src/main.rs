@@ -9,8 +9,7 @@ mod main_impl {
     use eyre::Context;
     use eyre::Result;
     use libsurfer::{
-        StartupParams, SystemState,
-        EGUI_CONTEXT,
+        EGUI_CONTEXT, StartupParams, SystemState,
         batch_commands::read_command_file,
         file_watcher::FileWatcher,
         logs,
