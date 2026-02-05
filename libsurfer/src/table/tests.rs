@@ -4653,3 +4653,51 @@ fn transaction_trace_data_unavailable_without_transactions() {
         Ok(_) => panic!("Expected error but got Ok"),
     }
 }
+
+// ========================
+// Stage 12b Tests - Stream-level "Show transactions in table"
+// ========================
+
+#[test]
+fn open_transaction_table_for_stream_creates_multiple_tiles() {
+    use crate::transaction_container::{StreamScopeRef, TransactionStreamRef};
+
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_ftr_state();
+
+    // Enumerate generators for stream 1 (pipelined_stream)
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    let tc = waves
+        .inner
+        .as_transactions()
+        .expect("transaction container");
+    let stream_ref = TransactionStreamRef::new_stream(1, "pipelined_stream".to_string());
+    let generators = tc.generators_in_stream(&StreamScopeRef::Stream(stream_ref));
+    let gen_count = generators.len();
+    assert!(gen_count >= 2, "Stream 1 should have at least 2 generators");
+
+    // Emit one OpenTransactionTable per generator (simulates stream-level menu click)
+    for gen_ref in generators {
+        state.update(Message::OpenTransactionTable { generator: gen_ref });
+    }
+
+    assert_eq!(
+        state.user.table_tiles.len(),
+        gen_count,
+        "Should have one table tile per generator"
+    );
+
+    // Verify each tile has gen_id set
+    for tile_state in state.user.table_tiles.values() {
+        match &tile_state.spec {
+            TableModelSpec::TransactionTrace { generator } => {
+                assert!(
+                    generator.gen_id.is_some(),
+                    "Each tile should reference a specific generator"
+                );
+            }
+            _ => panic!("Expected TransactionTrace spec"),
+        }
+    }
+}

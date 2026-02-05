@@ -12,6 +12,7 @@ use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation, ScopeExpandType
 use crate::keyboard_shortcuts::ShortcutAction;
 use crate::message::MessageTarget;
 use crate::table::TableModelSpec;
+use crate::transaction_container::StreamScopeRef;
 use crate::wave_container::{FieldRef, VariableRefExt};
 use crate::wave_data::ScopeType;
 use crate::wave_source::LoadOptions;
@@ -629,14 +630,26 @@ impl SystemState {
             }
         }
 
-        if let DisplayedItem::Stream(stream) = clicked_item
-            && stream.transaction_stream_ref.gen_id.is_some()
-            && ui.button("Show transactions in table").clicked()
-        {
-            msgs.push(Message::OpenTransactionTable {
-                generator: stream.transaction_stream_ref.clone(),
-            });
-            ui.close();
+        if let DisplayedItem::Stream(stream) = clicked_item {
+            if stream.transaction_stream_ref.gen_id.is_some() {
+                // Single generator — open one table
+                if ui.button("Show transactions in table").clicked() {
+                    msgs.push(Message::OpenTransactionTable {
+                        generator: stream.transaction_stream_ref.clone(),
+                    });
+                    ui.close();
+                }
+            } else if let Some(tc) = waves.inner.as_transactions() {
+                // Stream — open one table per generator
+                let scope = StreamScopeRef::Stream(stream.transaction_stream_ref.clone());
+                let generators = tc.generators_in_stream(&scope);
+                if !generators.is_empty() && ui.button("Show transactions in table").clicked() {
+                    for gen_ref in generators {
+                        msgs.push(Message::OpenTransactionTable { generator: gen_ref });
+                    }
+                    ui.close();
+                }
+            }
         }
 
         if let Some(path) = path {

@@ -328,12 +328,21 @@ fn draw_transaction_root_variables(
                         TransactionStreamRef::new_stream(stream.id, stream.name.clone()),
                     ));
                 }
-                // Context menu for stream (no table option - tables are per-generator)
                 response.context_menu(|ui| {
                     if ui.button("Add to waveform view").clicked() {
                         msgs.push(Message::AddStreamOrGenerator(
                             TransactionStreamRef::new_stream(stream.id, stream.name.clone()),
                         ));
+                        ui.close();
+                    }
+                    let stream_ref =
+                        TransactionStreamRef::new_stream(stream.id, stream.name.clone());
+                    let generators =
+                        inner.generators_in_stream(&StreamScopeRef::Stream(stream_ref));
+                    if !generators.is_empty() && ui.button("Show transactions in table").clicked() {
+                        for gen_ref in generators {
+                            msgs.push(Message::OpenTransactionTable { generator: gen_ref });
+                        }
                         ui.close();
                     }
                 });

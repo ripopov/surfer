@@ -3819,3 +3819,16 @@ snapshot_ui_with_file_and_msgs! {table_transaction_trace_for_write_generator, "e
         },
     },
 ]}
+
+// Stage 12b: Stream-level "Show transactions in table" opens one table per generator
+snapshot_ui_with_file_and_msgs! {table_transaction_trace_stream_opens_all_generators, "examples/my_db.ftr", [
+    // Add stream to trigger transaction loading
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_stream(1, "pipelined_stream".to_string())),
+    // Open transaction tables for both generators in stream 1 (read + write)
+    Message::OpenTransactionTable {
+        generator: TransactionStreamRef::new_gen(1, 4, "read".to_string()),
+    },
+    Message::OpenTransactionTable {
+        generator: TransactionStreamRef::new_gen(1, 5, "write".to_string()),
+    },
+]}
