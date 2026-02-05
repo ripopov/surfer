@@ -14,7 +14,9 @@ use crate::displayed_item::{
 };
 use crate::displayed_item_tree::{DisplayedItemTree, ItemIndex, TargetPosition, VisibleItemIndex};
 use crate::graphics::{Graphic, GraphicId};
-use crate::transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef};
+use crate::transaction_container::{
+    StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
+};
 use crate::transactions::calculate_rows_of_stream;
 use crate::translation::{DynTranslator, TranslatorList, VariableInfoExt};
 use crate::variable_name_type::VariableNameType;
@@ -210,6 +212,70 @@ impl WaveData {
         (new_wavedata, load_commands)
     }
 
+    /// Merge a newly loaded transaction container into a previous WaveData (from a state file),
+    /// preserving displayed items, viewports, cursors, etc.
+    pub fn update_with_transactions(
+        mut self,
+        new_ftr: TransactionContainer,
+        source: WaveSource,
+        format: WaveFormat,
+        translators: &TranslatorList,
+    ) -> WaveData {
+        let mut new_wavedata = WaveData {
+            inner: DataContainer::Transactions(new_ftr),
+            source,
+            format,
+            active_scope: self.active_scope.take(),
+            items_tree: self.items_tree,
+            displayed_items: self.displayed_items.clone(),
+            display_item_ref_counter: self.display_item_ref_counter,
+            viewports: self.viewports,
+            cursor: self.cursor.clone(),
+            markers: self.markers.clone(),
+            focused_item: self.focused_item,
+            focused_transaction: self.focused_transaction,
+            default_variable_name_type: self.default_variable_name_type,
+            display_variable_indices: self.display_variable_indices,
+            scroll_offset: self.scroll_offset,
+            drawing_infos: vec![],
+            top_item_draw_offset: 0.,
+            graphics: HashMap::new(),
+            total_height: 0.,
+            old_num_timestamps: None,
+            cache_generation: 0,
+            inflight_caches: HashMap::new(),
+        };
+
+        // Lazy-load transaction streams referenced by displayed items
+        if let Some(transactions) = new_wavedata.inner.as_transactions_mut() {
+            let stream_ids: Vec<usize> = new_wavedata
+                .displayed_items
+                .values()
+                .filter_map(|item| match item {
+                    DisplayedItem::Stream(s) => Some(s.transaction_stream_ref.stream_id),
+                    _ => None,
+                })
+                .collect();
+            for stream_id in stream_ids {
+                let needs_load = transactions
+                    .get_stream(stream_id)
+                    .is_some_and(|s| !s.transactions_loaded);
+                if needs_load {
+                    info!("(Stream) Loading transactions into memory!");
+                    match transactions.inner.load_stream_into_memory(stream_id) {
+                        Ok(()) => info!("(Stream {stream_id}) Finished loading transactions!"),
+                        Err(e) => {
+                            warn!("Failed to load transactions for stream {stream_id}: {e:?}")
+                        }
+                    }
+                }
+            }
+        }
+
+        new_wavedata.update_metadata(translators);
+        new_wavedata
+    }
+
     pub fn update_with_items(
         &mut self,
         new_items: &HashMap<DisplayedItemRef, DisplayedItem>,
@@ -217,12 +283,39 @@ impl WaveData {
         translators: &TranslatorList,
     ) -> Option<LoadSignalsCmd> {
         self.items_tree = items_tree;
-        self.displayed_items = self.update_displayed_items(
-            self.inner.as_waves().unwrap(),
-            new_items,
-            true,
-            translators,
-        );
+        self.displayed_items = if let Some(waves) = self.inner.as_waves() {
+            self.update_displayed_items(waves, new_items, true, translators)
+        } else {
+            // For transaction-only data, keep all items as-is since there's no
+            // WaveContainer to reconcile variable references against.
+            // Ensure lazy-loaded transaction streams are loaded into memory.
+            if let Some(transactions) = self.inner.as_transactions_mut() {
+                let stream_ids: Vec<usize> = new_items
+                    .values()
+                    .filter_map(|item| match item {
+                        DisplayedItem::Stream(s) => Some(s.transaction_stream_ref.stream_id),
+                        _ => None,
+                    })
+                    .collect();
+                for stream_id in stream_ids {
+                    let needs_load = transactions
+                        .get_stream(stream_id)
+                        .is_some_and(|s| !s.transactions_loaded);
+                    if needs_load {
+                        info!("(Stream) Loading transactions into memory!");
+                        match transactions.inner.load_stream_into_memory(stream_id) {
+                            Ok(()) => {
+                                info!("(Stream {stream_id}) Finished loading transactions!")
+                            }
+                            Err(e) => {
+                                warn!("Failed to load transactions for stream {stream_id}: {e:?}")
+                            }
+                        }
+                    }
+                }
+            }
+            new_items.clone()
+        };
         self.display_item_ref_counter = self
             .displayed_items
             .keys()
@@ -238,15 +331,15 @@ impl WaveData {
     ///
     /// Used after loading new waves, signals or switching a bunch of translators
     fn update_metadata(&mut self, translators: &TranslatorList) {
+        let Some(waves) = self.inner.as_waves() else {
+            return;
+        };
         for di in self.displayed_items.values_mut() {
             let DisplayedItem::Variable(displayed_variable) = di else {
                 continue;
             };
 
-            let meta = self
-                .inner
-                .as_waves()
-                .unwrap()
+            let meta = waves
                 .variable_meta(&displayed_variable.variable_ref.clone())
                 .unwrap();
             let translator =
@@ -268,13 +361,12 @@ impl WaveData {
     ///
     /// This is needed for wave containers that lazy-load signals.
     fn load_waves(&mut self) -> Option<LoadSignalsCmd> {
+        let waves = self.inner.as_waves_mut()?;
         let variables = self.displayed_items.values().filter_map(|item| match item {
             DisplayedItem::Variable(r) => Some(&r.variable_ref),
             _ => None,
         });
-        self.inner
-            .as_waves_mut()
-            .unwrap()
+        waves
             .load_variables(variables)
             .expect("internal error: failed to load variables")
     }

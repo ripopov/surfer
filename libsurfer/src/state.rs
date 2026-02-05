@@ -386,43 +386,67 @@ impl SystemState {
         filename: WaveSource,
         format: WaveFormat,
         new_ftr: TransactionContainer,
-        _loaded_options: LoadOptions,
+        load_options: LoadOptions,
     ) {
         info!("Transaction streams are loaded.");
 
         let viewport = Viewport::new();
         let viewports = [viewport].to_vec();
 
-        let new_transaction_streams = WaveData {
-            inner: DataContainer::Transactions(new_ftr),
-            source: filename,
-            format,
-            active_scope: None,
-            items_tree: DisplayedItemTree::default(),
-            displayed_items: HashMap::new(),
-            viewports,
-            cursor: None,
-            markers: HashMap::new(),
-            focused_item: None,
-            focused_transaction: (None, None),
-            default_variable_name_type: self.user.config.default_variable_name_type,
-            display_variable_indices: self.show_variable_indices(),
-            scroll_offset: 0.,
-            drawing_infos: vec![],
-            top_item_draw_offset: 0.,
-            total_height: 0.,
-            display_item_ref_counter: 0,
-            old_num_timestamps: None,
-            graphics: HashMap::new(),
-            cache_generation: 0,
-            inflight_caches: HashMap::new(),
-        };
+        let (new_transaction_streams, is_reload) =
+            if load_options != LoadOptions::Clear && self.user.waves.is_some() {
+                let old = self.user.waves.take().unwrap();
+                (
+                    old.update_with_transactions(new_ftr, filename, format, &self.translators),
+                    true,
+                )
+            } else if let Some(old) = self.user.previous_waves.take() {
+                (
+                    old.update_with_transactions(new_ftr, filename, format, &self.translators),
+                    true,
+                )
+            } else {
+                (
+                    WaveData {
+                        inner: DataContainer::Transactions(new_ftr),
+                        source: filename,
+                        format,
+                        active_scope: None,
+                        items_tree: DisplayedItemTree::default(),
+                        displayed_items: HashMap::new(),
+                        viewports,
+                        cursor: None,
+                        markers: HashMap::new(),
+                        focused_item: None,
+                        focused_transaction: (None, None),
+                        default_variable_name_type: self.user.config.default_variable_name_type,
+                        display_variable_indices: self.show_variable_indices(),
+                        scroll_offset: 0.,
+                        drawing_infos: vec![],
+                        top_item_draw_offset: 0.,
+                        total_height: 0.,
+                        display_item_ref_counter: 0,
+                        old_num_timestamps: None,
+                        graphics: HashMap::new(),
+                        cache_generation: 0,
+                        inflight_caches: HashMap::new(),
+                    },
+                    false,
+                )
+            };
 
         self.invalidate_draw_commands();
 
         self.user.config.theme.alt_frequency = 0;
         self.user.wanted_timeunit = new_transaction_streams.inner.metadata().timescale.unit;
         self.user.waves = Some(new_transaction_streams);
+
+        if !is_reload && let Some(waves) = &mut self.user.waves {
+            self.user.tile_tree = SurferTileTree::default();
+            if waves.source.sibling_state_file().is_some() {
+                self.update(Message::SuggestOpenSiblingStateFile);
+            }
+        }
     }
 
     #[cfg(test)]

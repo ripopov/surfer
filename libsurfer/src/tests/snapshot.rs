@@ -3832,3 +3832,91 @@ snapshot_ui_with_file_and_msgs! {table_transaction_trace_stream_opens_all_genera
         generator: TransactionStreamRef::new_gen(1, 5, "write".to_string()),
     },
 ]}
+
+// Test that transaction table layout with streams is correctly restored from a .ron state file
+snapshot_ui!(table_transaction_tables_restored_from_state_file, || {
+    let save_file =
+        env::temp_dir().join(format!("transaction_tables_state.{STATE_FILE_EXTENSION}"));
+
+    // First: create state with transaction tables and save it
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/my_db.ftr")
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::CloseOpenSiblingStateFileDialog {
+        load_state: false,
+        do_not_show_again: true,
+    });
+
+    // Add stream and open transaction tables (same as table_transaction_trace_stream_opens_all_generators)
+    state.update(Message::AddStreamOrGenerator(
+        TransactionStreamRef::new_stream(1, "pipelined_stream".to_string()),
+    ));
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    state.update(Message::OpenTransactionTable {
+        generator: TransactionStreamRef::new_gen(1, 4, "read".to_string()),
+    });
+    state.update(Message::OpenTransactionTable {
+        generator: TransactionStreamRef::new_gen(1, 5, "write".to_string()),
+    });
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    // Save state to file
+    state.update(Message::SaveStateFile(Some(save_file.clone())));
+
+    handle_messages_until(
+        &mut state,
+        |msg| matches!(&msg, Message::AsyncDone(AsyncJob::SaveState)),
+        10,
+    );
+
+    // Second: restore state from file using the same path as the -s CLI flag:
+    // deserialize UserState → set on SystemState → with_params (triggers LoadFile)
+    let state_content = std::fs::read_to_string(&save_file).unwrap();
+    let user_state: UserState = ron::from_str(&state_content).unwrap();
+    let mut state = SystemState::new_default_config().unwrap();
+    state.user = user_state;
+    let mut state = state.with_params(StartupParams {
+        waves: Some(WaveSource::File(
+            get_project_root()
+                .unwrap()
+                .join("examples/my_db.ftr")
+                .try_into()
+                .unwrap(),
+        )),
+        ..Default::default()
+    });
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    std::fs::remove_file(save_file).unwrap();
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::CloseOpenSiblingStateFileDialog {
+        load_state: false,
+        do_not_show_again: true,
+    });
+
+    state
+});
