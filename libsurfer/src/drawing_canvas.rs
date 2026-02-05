@@ -879,7 +879,6 @@ impl SystemState {
                     draw_data,
                     viewport_idx,
                     frame_width,
-                    &cfg,
                     ui,
                     msgs,
                     &mut ctx,
@@ -930,7 +929,7 @@ impl SystemState {
             };
             ctx.painter
                 .rect_filled(rect, 0.0, self.user.config.theme.canvas_colors.background);
-            self.draw_default_timeline(waves, &ctx, viewport_idx, frame_width, &cfg);
+            self.draw_default_timeline(waves, &ctx, viewport_idx, frame_width);
         }
 
         self.draw_mouse_gesture_widget(
@@ -1153,7 +1152,6 @@ impl SystemState {
         draw_data: &CachedTransactionDrawData,
         viewport_idx: usize,
         frame_width: f32,
-        cfg: &DrawConfig,
         ui: &mut Ui,
         msgs: &mut Vec<Message>,
         ctx: &mut DrawingContext,
@@ -1171,7 +1169,7 @@ impl SystemState {
             &waves.viewports[viewport_idx],
             &waves.inner.metadata().timescale,
             frame_width,
-            cfg.text_size,
+            ctx.cfg.text_size,
             &self.user.wanted_timeunit,
             &self.get_time_format(),
             &self.user.config,
