@@ -3920,3 +3920,118 @@ snapshot_ui!(table_transaction_tables_restored_from_state_file, || {
 
     state
 });
+
+// ========================
+// MultiSignalChangeList Snapshot Tests
+// ========================
+
+// Test 1: Basic multi-signal change list with two signals (clk + counter)
+snapshot_ui_with_file_and_msgs! {table_multi_signal_change_list_basic, "examples/counter.vcd", [
+    Message::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"])))),
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]),
+    Message::AddTableTile {
+        spec: crate::table::TableModelSpec::MultiSignalChangeList {
+            variables: vec![
+                crate::table::MultiSignalEntry {
+                    variable: VariableRef::from_hierarchy_string("tb.clk"),
+                    field: vec![],
+                },
+                crate::table::MultiSignalEntry {
+                    variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                    field: vec![],
+                },
+            ],
+        },
+    },
+]}
+
+// Test 2: Multi-signal change list with three signals and descending time sort
+snapshot_ui_with_file_and_msgs! {table_multi_signal_change_list_three_signals, "examples/counter.vcd", [
+    Message::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"])))),
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+        VariableRef::from_hierarchy_string("tb.reset"),
+    ]),
+    Message::AddTableTile {
+        spec: crate::table::TableModelSpec::MultiSignalChangeList {
+            variables: vec![
+                crate::table::MultiSignalEntry {
+                    variable: VariableRef::from_hierarchy_string("tb.clk"),
+                    field: vec![],
+                },
+                crate::table::MultiSignalEntry {
+                    variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                    field: vec![],
+                },
+                crate::table::MultiSignalEntry {
+                    variable: VariableRef::from_hierarchy_string("tb.reset"),
+                    field: vec![],
+                },
+            ],
+        },
+    },
+]}
+
+// Test 3: Multi-signal change list with dense row mode
+snapshot_ui!(table_multi_signal_change_list_dense, || {
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/counter.vcd")
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::CloseOpenSiblingStateFileDialog {
+        load_state: false,
+        do_not_show_again: true,
+    });
+
+    state.update(Message::SetActiveScope(Some(ScopeType::WaveScope(
+        ScopeRef::from_strs(&["tb"]),
+    ))));
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    state.update(Message::AddTableTile {
+        spec: crate::table::TableModelSpec::MultiSignalChangeList {
+            variables: vec![
+                crate::table::MultiSignalEntry {
+                    variable: VariableRef::from_hierarchy_string("tb.clk"),
+                    field: vec![],
+                },
+                crate::table::MultiSignalEntry {
+                    variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                    field: vec![],
+                },
+            ],
+        },
+    });
+
+    // Enable dense rows on the table tile that was just created
+    for tile_state in state.user.table_tiles.values_mut() {
+        tile_state.config.dense_rows = true;
+        tile_state.config.title = "Dense multi-signal".to_string();
+    }
+
+    state
+});
