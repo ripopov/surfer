@@ -1,24 +1,56 @@
-# Multi-Signal Change List — Requirements & UX Specification
+# Multi-Signal Change List — Sparse/On-Demand Requirements & UX Specification
 
 ## 1. Feature Overview
 
-The Multi-Signal Change List is a new table model for Surfer's tile-based UI that displays a merged timeline of value transitions across multiple selected signals. Each row represents a timestamp where at least one signal changes, with all signals' values shown side by side. This enables cross-signal analysis of timing relationships, protocol handshakes, and state machine transitions.
+The Multi-Signal Change List is a table model for Surfer's tile-based UI that displays a merged timeline of value transitions across multiple selected signals.
 
-### Core Capabilities
+This specification mandates one implementation mode only:
 
-- **Merged timeline**: Combines transitions from all selected signals into a unified, time-ordered row set
-- **Per-signal value columns**: One column per signal showing its value at each timestamp
-- **Held-value display**: Signals that do not transition at a given timestamp show their most recent value (dimmed to distinguish from actual transitions)
-- **Multi-value indication**: When a signal has multiple transitions at the same timestamp, the last value is shown with a visual indicator that earlier transitions were collapsed
-- **Cursor navigation**: Activating a row sets the waveform cursor to that timestamp
-- **Async computation**: Row building runs on a background worker thread
-- **Persistent configuration**: Model spec serialized in `.surf.ron` state files via `TableModelSpec`
+- Sparse/index-only core
+- On-demand value materialization for visible rows only
+- No eager `O(T*S)` full-cell table construction
+
+Where:
+
+- `T` = total unique merged timestamps
+- `S` = number of selected signals
+
+The user experience remains unchanged versus the original UX goals:
+
+- merged timeline
+- per-signal columns
+- held values dimmed
+- collapsed same-timestamp transitions as `(+N)`
+- row activation sets waveform cursor
+- sorting/filtering/searching available
 
 ---
 
-## 2. Data Model
+## 2. Non-Negotiable Design Constraints
 
-### 2.1 Model Configuration
+1. Index-only persistent state.
+- Persistent model/cache state may contain transition indexes, row-id mappings, and lightweight metadata only.
+- Persistent state must not contain per-row-per-signal rendered cell strings.
+
+2. On-demand value rendering.
+- Cell text, dimming state, and collapsed indicators are computed only for rows currently needed by viewport rendering, clipboard export, or active operation.
+
+3. Async operations remain async.
+- Initial index build runs on background worker.
+- Filter/search/sort also run async and operate over index plus on-demand probes.
+
+4. No UX regressions.
+- Existing intended UX stays identical (titles, behavior, interactions, indicators).
+
+5. Runtime must not rescan transitions.
+- `iter_changes()` is allowed during index build only.
+- Rendering/sort/filter/search/copy must use index lookups and time queries, not transition re-iteration.
+
+---
+
+## 3. Data Model
+
+### 3.1 Model Configuration
 
 ```mermaid
 classDiagram
@@ -32,44 +64,49 @@ classDiagram
     MultiSignalChangeListSpec o-- "*" MultiSignalEntry
 ```
 
-### 2.2 Internal Data Structures
+### 3.2 Runtime Structures (Sparse)
 
 ```mermaid
 classDiagram
     class MultiSignalChangeListModel {
         entries: Vec~SignalEntry~
         time_formatter: TimeFormatter
-        rows: OnceLock~MergedRows~
+        index: OnceLock~MergedIndex~
+        window_cache: WindowCellCache
     }
     class SignalEntry {
+        variable: VariableRef
+        field: Vec~String~
         meta: VariableMeta
         accessor: SignalAccessor
         translator: AnyTranslator
         display_name: String
         root_format: Option~String~
         field_formats: Vec~FieldFormat~
+        column_key: String
     }
-    class MergedRows {
-        rows: Vec~MergedRow~
-        index_by_id: HashMap~TableRowId, usize~
+    class MergedIndex {
+        row_times: Vec~u64~
+        row_ids: Vec~TableRowId~
+        row_index: HashMap~TableRowId, usize~
+        signal_time_runs: Vec~SignalRuns~
     }
-    class MergedRow {
-        row_id: TableRowId
+    class SignalRuns {
+        transitions: Vec~TransitionAtTime~
+    }
+    class TransitionAtTime {
         time_u64: u64
-        time: BigInt
-        time_text: String
-        cells: Vec~MergedCell~
-        search_text: String
+        run_start: u32
+        run_len: u16
     }
-    MultiSignalChangeListModel o-- "*" SignalEntry
-    MultiSignalChangeListModel o-- "1" MergedRows : lazily built
-    MergedRows o-- "*" MergedRow
-    MergedRow o-- "*" MergedCell
+    class WindowCellCache {
+        lru: HashMap~WindowKey, Vec~RowCells~~
+    }
 ```
 
-### 2.3 Merged Cell States
+### 3.3 Materialized Cell (Ephemeral)
 
-Each cell in a row corresponds to one signal and is in one of three states:
+`MergedCell` is not persisted globally for all rows. It is computed only when needed.
 
 ```mermaid
 classDiagram
@@ -88,202 +125,208 @@ classDiagram
     class NoData {
         no value at or before this timestamp
     }
-    MergedCell <|-- Transition : signal changed at this time
-    MergedCell <|-- Held : carried from previous transition
-    MergedCell <|-- NoData : before first transition
+    MergedCell <|-- Transition
+    MergedCell <|-- Held
+    MergedCell <|-- NoData
 ```
-
-| Cell State | Meaning | Display |
-|------------|---------|---------|
-| **Transition** | Signal changed at this exact time | Normal text |
-| **Transition (collapsed)** | Signal changed multiple times at this time; showing last value | Normal text + collapse indicator |
-| **Held** | Signal did not change; value carried from previous transition | Dimmed text |
-| **NoData** | No value available at this timestamp | `"—"` |
-
-### 2.4 Multi-Value Collapsing
-
-When a single signal has multiple transitions at the same timestamp `T`:
-
-1. All transitions at `T` are collected in order
-2. Only the **last** value is stored in the cell
-3. The `collapsed_count` field records how many earlier transitions were folded (count = total transitions - 1)
-4. The display shows the last value with a superscript or suffix indicator (e.g., `"0xFF (+2)"` meaning two earlier transitions were hidden)
-
-This gives the user a correct final-state view while signaling that intermediate transitions exist. The user can open a single-signal change list for the specific signal to see all individual transitions.
 
 ---
 
-## 3. User Experience
+## 4. Index Build Algorithm (Async)
 
-### 3.1 Entry Point: Context Menu
+### 4.1 Inputs
 
-The multi-signal change list is initiated from the same context menu used for single-signal change lists, when multiple signals are selected.
+- `N` selected signals
+- each signal exposes iterator of `(time_u64, value)` changes
 
-```
-┌─────────────────────────────────┐
-│  Format                      >  │
-│  Color                       >  │
-│  ─────────────────────────────  │
-│  Signal change list             │  ← Single signal (1 selected)
-│  Multi-signal change list       │  ← Multiple signals (2+ selected)
-│  Analyze selected signals...    │
-│  ─────────────────────────────  │
-│  Copy value                     │
-│  ...                            │
-└─────────────────────────────────┘
-```
+### 4.2 Outputs (Index Only)
 
-**Visibility rules**:
-- **"Signal change list"**: Shown when exactly one `DisplayedVariable` is selected (existing behavior)
-- **"Multi-signal change list"**: Shown when two or more `DisplayedVariable` items are among the selected items
-- Non-variable items (dividers, markers, streams, groups) in the selection are silently ignored
-- If after filtering out non-variables fewer than two signals remain, the menu item is hidden
+1. Global merged timeline.
+- `row_times: Vec<u64>` sorted unique timestamps
+- `row_ids: Vec<TableRowId>` (timestamp-derived)
+- `row_index: HashMap<TableRowId, usize>`
 
-### 3.2 Result Table Tile
+2. Per-signal compressed runs.
+- For each signal, keep ordered unique `time_u64` entries.
+- For each unique time, store run metadata:
+- where run starts in signal transition stream
+- run length at same timestamp
+- This preserves collapsed-count semantics without storing every rendered cell.
 
-The result appears as a standard table tile with full table features.
+### 4.3 Complexity
 
-#### Column Layout
+- Build time: `O(total_transitions log T)` for timeline dedup plus per-signal grouping
+- Memory: `O(T + total_transitions)` (not `O(T*S)`)
 
-```
-┌──────────┬─────────────────┬─────────────────┬─────────────────┐
-│   Time   │   top.clk       │   top.data      │   top.valid     │
-├──────────┼─────────────────┼─────────────────┼─────────────────┤
-│  100 ns  │   1             │   0xFF (+2)     │   1             │
-│  150 ns  │   0             │   0xFF          │   1             │
-│  200 ns  │   1             │   0xAB          │   0             │
-│  250 ns  │   0             │   0xAB          │   0             │
-│  300 ns  │   1             │   0x42          │   1             │
-└──────────┴─────────────────┴─────────────────┴─────────────────┘
-```
+### 4.4 Runtime Lookup Guarantees
 
-**Fixed column**:
-- `Time` — timestamp of the transition event (formatted per user time settings)
+For each signal and timestamp, index lookup must provide in `O(log R)`:
 
-**Dynamic columns** (one per selected signal):
-- Column header: signal display name (e.g., `top.data` or `top.data.field_name` for struct fields)
-- Cell content: formatted signal value at that timestamp
+- whether there is a transition run exactly at `T`
+- transition run length at `T` (for `collapsed_count`)
+- previous transition timestamp `< T` if exact run does not exist
 
-#### Visual Indicators
-
-- **Transition cells**: Rendered in normal text color — the signal changed at this row's timestamp
-- **Held-value cells**: Rendered in dimmed/muted text color — the signal did not change; value is carried forward from the most recent transition
-- **Collapsed transitions**: Shown as `"<value> (+N)"` where N is the number of hidden earlier transitions at this timestamp
-- **No data**: Shown as `"—"` in muted text
-
-#### Table Title
-
-Format: `"Change list: <signal1>, <signal2>, ... (<count> signals)"`
-
-If the combined name is too long (over 60 characters), truncate:
-`"Change list: <signal1>, <signal2>, ... (+N more)"`
-
-Example: `"Change list: top.clk, top.data, top.valid (3 signals)"`
-
-#### Standard Table Features
-
-All standard table tile features apply:
-
-- **Sorting**: Click column headers to sort by time or any signal's values
-- **Filtering**: Use the filter bar to search across all cell values
-- **Column visibility**: Toggle signal columns on/off via column menu
-- **Copy**: Select rows and copy as TSV to clipboard
-- **Row activation**: Clicking a row moves the waveform cursor to that timestamp
-- **Selection mode**: Single-select with activate-on-select (clicking navigates the waveform)
-
-### 3.3 Interaction Patterns
-
-**Cross-signal timing analysis workflow**:
-1. Select multiple signals of interest in the waveform (shift-click or ctrl-click)
-2. Right-click → "Multi-signal change list"
-3. Table shows merged timeline — scan for patterns, protocol sequences, glitches
-4. Click a row to jump the waveform cursor to that timestamp
-5. Use column sorting to find value extremes or groupings
-6. Use filter to search for specific values across all signals
-
-**Drill-down to single signal**:
-When a collapsed indicator (e.g., `"+2"`) signals hidden transitions, the user can right-click the signal's column header and select "Open signal change list" to see the full transition history for that individual signal.
+Where `R` is per-signal count of unique transition timestamps.
 
 ---
 
-## 4. Merge Algorithm
+## 5. On-Demand Cell Materialization
 
-### 4.1 Timeline Construction
+### 5.1 Authoritative Value Source
 
-```
-Input: N signals with their transition iterators
-Output: sorted Vec<MergedRow> with unified timestamps
+Value retrieval at time `T` must use waveform time-query API (`query_variable`) with the signal's canonical `VariableRef`.
 
-1. Collect all unique transition timestamps from all signals:
-   all_times: BTreeSet<u64> = ∅
-   For each signal s in signals:
-       For each (time, _value) in s.accessor.iter_changes():
-           all_times.insert(time)
+Per-row cell state uses both sources:
 
-2. For each timestamp T in all_times (ascending order):
-   Create MergedRow with time = T
-   For each signal s at column index i:
-       transitions_at_T = collect all of s's transitions at time T
-       match transitions_at_T.len():
-           0 → cells[i] = Held { last known value of s before T }
-                          or NoData if s has no transitions ≤ T
-           1 → cells[i] = Transition { value = transitions_at_T[0] }
-           n → cells[i] = Transition {
-                   value = transitions_at_T[n-1],    // last value
-                   collapsed_count = n - 1
-               }
-   Build search_text from time_text + all cell value texts
-```
+- transition-exactness and `collapsed_count` from `signal_time_runs`
+- actual value at-or-before `T` from `query_variable(variable, T)`
 
-### 4.2 Held-Value Tracking
+This avoids re-iterating transitions and guarantees consistent held-value semantics.
 
-For each signal, maintain a running "last known value" as the algorithm iterates through timestamps:
+### 5.2 Visible Viewport Materialization
 
-```
-For each signal s:
-    last_value[s] = None
+For each visible row range `[r0, r1)` and each visible signal column:
 
-For each timestamp T in ascending order:
-    For each signal s:
-        if s has transitions at T:
-            process transitions → Transition cell
-            last_value[s] = final value at T
-        else:
-            if last_value[s] is Some(v):
-                cells[s] = Held { value = v }
-            else:
-                cells[s] = NoData
-```
+1. get row timestamp `T = row_times[r]`
+2. binary-search signal run index for `T`
+3. query value at `T` via `query_variable`
+4. derive cell:
+- exact run at `T` and value exists => `Transition`
+- no exact run and value exists => `Held`
+- no value exists => `NoData`
+5. if exact run length is `n > 1`, render `collapsed_count = n - 1`
 
-### 4.3 Row ID Assignment
+### 5.3 Formatting and Rendering
 
-```
-For each timestamp T:
-    row_id = TableRowId(T as u64)
-    // Timestamps are unique in the merged set (BTreeSet deduplication)
-    // No hash-based disambiguation needed (unlike single-signal model
-    // which must handle multiple transitions at same time as separate rows)
-```
+- Materialized cell is rendered immediately, then eligible for LRU window cache reuse.
+- Window cache key includes:
+- row-range bucket
+- visible column set
+- sort/filter revision
+- time-format revision
+- translator/format revision
+- data generation
 
-Since the merge algorithm collapses all transitions at the same timestamp into a single row, each row has a naturally unique timestamp-based ID.
+### 5.4 No Global Cell Table
 
-### 4.4 Performance Considerations
-
-- **Time complexity**: O(T * S) where T = total unique timestamps, S = number of signals. Each cell lookup is O(1) with pre-indexed transition data.
-- **Memory**: O(T * S) for the merged row table. For 10 signals with 100K transitions each, worst case ~1M cells. Each cell is a small enum (~40 bytes), so ~40 MB — acceptable.
-- **Large signal counts**: The table is practical for up to ~20-30 signals. Beyond that, column width makes the table less useful. No artificial limit is imposed.
-- **Lazy construction**: Rows are built on first access via `OnceLock`, same pattern as single-signal change list.
-- **Async worker**: Row building runs on background thread via `BuildTableCache` message. UI remains responsive with loading spinner.
+The implementation must never allocate full `Vec<MergedRow { cells: Vec<MergedCell> }>` over all rows.
 
 ---
 
-## 5. Serialization & State Persistence
+## 6. Search, Filter, and Sort (Async, Index-Driven)
 
-### 5.1 TableModelSpec Extension
+### 6.1 Filtering/Search
 
-Add a new variant to `TableModelSpec`:
+- Filtering/search runs async over candidate row IDs.
+- Search text is evaluated lazily from:
+- formatted time text for row
+- on-demand per-signal value text probes for that row
+- Optional short-lived per-task memoization is allowed.
+- No permanent full `search_text` vector for all rows.
 
-```
+### 6.2 Sorting
+
+- Time-column sort: direct from `row_times` index.
+- Signal-column sort:
+- async comparator probes on-demand sort keys (`Numeric` or `Text`) per row
+- task-local memoization allowed
+- no permanent full-table sort-key storage
+
+### 6.3 Required Table Infrastructure Changes
+
+To support sparse mode without UX compromise:
+
+1. Introduce a lazy search path for this model.
+- filtering and type-to-search must be able to request search text on demand for row chunks
+- the model must not be forced to prebuild `search_texts: Vec<String>` for all rows
+
+2. Keep table cache lightweight for this model.
+- cached output stores row ordering/index only (`row_ids`, `row_index`)
+- any search/sort probe data is task-local and dropped after task completion
+
+3. Preserve existing behavior.
+- filter UX and type-to-search UX remain functionally identical
+- implementation may compute incrementally under the hood
+
+### 6.4 Async Cancellation and Revisioning
+
+All async tasks must be revision-gated.
+
+- Maintain monotonic `table_revision` per tile.
+- Every async task captures revision and task kind (`build-index`, `filter`, `sort`, `search`, `materialize-window`).
+- Apply result only if `task.revision == current.table_revision`.
+- When a new request supersedes old work, increment revision and abandon stale task results.
+- Long tasks should check cancellation cooperatively at chunk boundaries.
+
+---
+
+## 7. UX Specification (No Compromise)
+
+### 7.1 Entry Point: Context Menu
+
+- When exactly one variable is selected: show existing `Signal change list`.
+- When two or more variables are selected: show `Multi-signal change list`.
+- Non-variable selected items are ignored.
+
+### 7.2 Table Layout
+
+- Fixed `Time` column.
+- One dynamic column per selected signal.
+- Same title behavior and truncation behavior as prior spec.
+
+### 7.3 Visual Semantics
+
+- `Transition`: normal text
+- `Held`: dimmed/muted text
+- `NoData`: `"—"` dimmed
+- Collapsed same-time transitions: `"<value> (+N)"`
+
+### 7.4 Interactions
+
+- Click row: set waveform cursor to row timestamp.
+- Sorting/filtering/copy/column visibility unchanged.
+- Drill-down action from signal column to single-signal change list remains available.
+
+---
+
+## 8. Cache and Invalidation Model
+
+### 8.1 Separate Revisions/Generations
+
+Maintain independent counters for:
+
+- waveform data generation
+- time formatting revision
+- translator/field-format revision for included signals
+- table view revision (sort/filter/column changes)
+
+### 8.2 Rebuild Rules
+
+1. Rebuild merged index when waveform generation changes or signal membership changes.
+2. Do not rebuild merged index for pure time-format change.
+3. Invalidate window materialization cache when time format or translator/field format changes.
+4. Recompute row ordering for sort/filter changes.
+5. Invalidate/ignore stale async tasks via revision checks.
+
+### 8.3 Snapshot Policy
+
+- Signal membership is snapshot-at-creation.
+- Formatting and translator changes still reflect in display by invalidating on-demand materialization caches.
+
+---
+
+## 9. Row Identity
+
+- One row per unique merged timestamp.
+- `TableRowId = TableRowId(time_u64)` is valid because merged timeline deduplicates timestamps.
+
+---
+
+## 10. Serialization
+
+`TableModelSpec` extension:
+
+```rust
 TableModelSpec::MultiSignalChangeList {
     variables: Vec<MultiSignalEntry>,
 }
@@ -294,214 +337,129 @@ MultiSignalEntry {
 }
 ```
 
-Both `MultiSignalEntry` and the spec variant derive `Serialize` and `Deserialize` for RON state file persistence.
+Only spec/config serialize. Runtime indexes/caches are rebuilt lazily.
 
-### 5.2 Default View Configuration
+---
+
+## 11. TableModel Contract
+
+### 11.1 `schema()` and Stable Column Keys
+
+- `time` column key remains fixed.
+- Signal column key must be deterministic and identity-based, not positional.
+- Required key format:
+
+```text
+sig:v1:<escaped-full-variable-path>#<escaped-field-path>
+```
+
+Rules:
+
+- `escaped-*` uses a reversible escaping (percent-encoding or equivalent)
+- empty field path is encoded as empty right side after `#`
+- same signal identity must always produce the same key across sessions
+
+### 11.2 `row_count()` / `row_id_at()`
+
+- backed by filtered/sorted row index list
+
+### 11.3 `materialize_window(...)` (Required Batch Contract)
+
+Implementation must expose a batch materialization path used by renderer and async tasks.
 
 ```rust
-config.title = format!("Change list: {} ({} signals)", signal_names_summary, count);
-config.sort = vec![TableSortSpec {
-    key: TableColumnKey::Str("time"),
-    direction: TableSortDirection::Ascending,
-}];
-config.selection_mode = TableSelectionMode::Single;
-config.activate_on_select = true;
+materialize_window(
+    row_ids: &[TableRowId],
+    visible_cols: &[usize],
+    purpose: MaterializePurpose,
+) -> MaterializedWindow
 ```
 
-### 5.3 Cache Invalidation
+`MaterializePurpose` includes at least:
 
-The table cache is rebuilt when:
-- Waveform data is reloaded (cache generation changes)
-- Time format changes (time column formatting)
-- Translator changes for any included signal
-- User explicitly triggers rebuild
+- `Render`
+- `SortProbe { col: usize }`
+- `SearchProbe`
+- `Clipboard`
+
+Requirements:
+
+- perform grouped lookups/translations for the requested window
+- use task-local memoization where helpful
+- do not allocate global all-row cell storage
+
+### 11.4 `cell(row, col)`
+
+- compatibility method only
+- delegates to one-row/one-col materialization path
+
+### 11.5 `sort_key(row, col)`
+
+- on-demand probe; may memoize within active sort task
+
+### 11.6 `search_text(row)`
+
+- on-demand probe; may memoize within active search/filter/type-search task
+
+### 11.7 `on_activate(row)`
+
+- `TableAction::CursorSet(row_time_bigint)`
 
 ---
 
-## 6. Message Flow
+## 12. Performance Targets
 
-### 6.1 New Message Variant
-
-```
-Message::AddTableTile {
-    spec: TableModelSpec::MultiSignalChangeList {
-        variables: Vec<MultiSignalEntry>,
-    }
-}
-```
-
-No new message variants are needed — the existing `AddTableTile` message handles all table creation uniformly.
-
-### 6.2 Interaction Sequence
-
-```mermaid
-sequenceDiagram
-    actor User
-    participant UI
-    participant SystemState
-
-    User->>UI: Multi-select signals (shift/ctrl click)
-    User->>UI: Right-click → context menu
-    User->>UI: Click "Multi-signal change list"
-    UI->>SystemState: AddTableTile(MultiSignalChangeList)
-
-    activate SystemState
-    Note right of SystemState: Create tile<br/>Insert state<br/>Add to tile tree
-    SystemState->>SystemState: BuildTableCache (async worker)
-    SystemState-->>UI: TableCacheBuilt
-    deactivate SystemState
-
-    UI-->>User: Table rendered
-```
+1. Open table with 10 signals × 100K transitions each without allocating full cell matrix.
+2. Peak memory scales with `O(T + total_transitions + viewport_window)`.
+3. Scrolling materializes only newly visible windows.
+4. Sorting/filtering remain async and cancel-safe when new requests supersede old ones.
+5. No memory growth from retained search/sort temporary data after async task completion.
 
 ---
 
-## 7. TableModel Trait Implementation
+## 13. Edge Cases
 
-### 7.1 Schema
-
-```
-schema() → TableSchema {
-    columns: [
-        TableColumn { key: "time",      label: "Time",           width: 120 },
-        TableColumn { key: "sig_0",     label: "<signal_0_name>", width: 150 },
-        TableColumn { key: "sig_1",     label: "<signal_1_name>", width: 150 },
-        ...
-        TableColumn { key: "sig_N-1",   label: "<signal_N-1_name>", width: 150 },
-    ]
-}
-```
-
-Column keys use positional indices (`sig_0`, `sig_1`, ...) to avoid ambiguity with signal names that might contain special characters.
-
-### 7.2 Cell Rendering
-
-```
-cell(row_id, col) → TableCell:
-    col 0 (Time):  TableCell::String(time_text)
-    col i (Signal): match cells[i-1]:
-        Transition { value_text, collapsed_count: 0 } →
-            TableCell::String(value_text)
-        Transition { value_text, collapsed_count: n } →
-            TableCell::String(format!("{value_text} (+{n})"))
-        Held { value_text } →
-            TableCell::Dimmed(value_text)
-        NoData →
-            TableCell::Dimmed("—")
-```
-
-Note: `TableCell::Dimmed` is a new variant that signals the table renderer to use muted text color. If adding a new variant is undesirable, an alternative is to use `TableCell::String` with a special prefix/metadata that the renderer interprets.
-
-### 7.3 Sort Keys
-
-```
-sort_key(row_id, col) → TableSortKey:
-    col 0 (Time):   Numeric(time_u64 as f64)
-    col i (Signal):
-        if cell has value_numeric: Numeric(value_numeric)
-        else:                      Text(value_text)
-```
-
-Held values sort the same as transition values — the sort key is the value itself regardless of whether it was a transition or held.
-
-### 7.4 Search Text
-
-```
-search_text(row_id) → String:
-    "{time_text} {value_text_0} {value_text_1} ... {value_text_N}"
-```
-
-All cell values are included in search text, allowing the user to filter for any signal's value.
-
-### 7.5 Row Activation
-
-```
-on_activate(row_id) → TableAction:
-    TableAction::CursorSet(row.time.clone())
-```
-
-Same behavior as single-signal change list: clicking a row navigates the waveform cursor to that timestamp.
+- Missing/unloaded signal at build time: skip with warning; fail only if no valid signals remain.
+- Duplicate selected signal: deduplicate by `(VariableRef, field)`.
+- Signal first transition after current row time: `NoData`.
+- Multiple transitions at same timestamp: render last value with `(+N)`.
+- Extremely large merged timeline: still bounded by index-only memory model.
+- Stale async completion after user changed filter/sort: result ignored by revision mismatch.
 
 ---
 
-## 8. Edge Cases & Validation
+## 14. Testing Strategy (Automated Only)
 
-### 8.1 Construction Errors
+### 14.1 Unit Tests
 
-| Condition | Behavior |
-|-----------|----------|
-| No wave data loaded | `TableCacheError::DataUnavailable` |
-| A signal in the list is not found | Skip that signal; include remaining signals. If all signals are missing, return `TableCacheError::ModelNotFound` |
-| A signal is not loaded | Skip that signal with warning; load is not triggered from model. Preflight loading happens before cache build |
-| Only one signal after filtering | Still creates a multi-signal table (functionally equivalent to single-signal but with held-value semantics) |
-| Duplicate signals in selection | Deduplicate by (VariableRef, field) before creating spec |
-| Signal with struct fields | Field path determines which sub-field is displayed; column label includes field path |
+- merged timeline index correctness
+- per-signal run grouping correctness
+- on-demand materialization: `Transition/Held/NoData`
+- value-source correctness vs `query_variable` at exact/held timestamps
+- collapsed count correctness for same-time runs
+- stable column key determinism and reversibility
+- cache/revision invalidation matrix (wave/time-format/translator/view changes)
 
-### 8.2 Runtime Edge Cases
+### 14.2 Integration Tests
 
-| Condition | Behavior |
-|-----------|----------|
-| All signals have zero transitions | Table shows zero rows |
-| Signal has transitions only outside visible range | Held values shown from nearest prior transition; or NoData if none |
-| Very large number of merged timestamps | Async worker handles computation; table virtualizes rendering (only visible rows drawn) |
-| Signal added/removed from waveform after table creation | Table is a snapshot — does not auto-update. User can close and re-create |
-| Same timestamp across signals | Single merged row with all signals showing their respective values |
-| Signals with different time domains | All signals queried against the same timeline; held values fill gaps naturally |
+- end-to-end `AddTableTile` -> async build -> render rows
+- async sort/filter correctness with on-demand probes
+- type-search correctness with lazy search provider
+- stale async task drop via revision mismatch
+- cursor navigation on row activation
+- RON round-trip for `MultiSignalChangeList` spec
 
-### 8.3 Display Edge Cases
+### 14.3 Snapshot Tests
 
-| Condition | Display |
-|-----------|---------|
-| Collapsed count = 0 | `"0xFF"` (normal, no indicator) |
-| Collapsed count = 1 | `"0xFF (+1)"` |
-| Collapsed count = 5 | `"0xFF (+5)"` |
-| Held value | `"0xFF"` in dimmed text |
-| No data | `"—"` in dimmed text |
-| Very long signal name in header | Column header truncated with ellipsis; tooltip shows full name |
+- held-value dimming
+- `(+N)` collapsed marker
+- large table scrolling visual correctness
 
 ---
 
-## 9. Testing Strategy
+## 15. Out of Scope
 
-All functionality must be verifiable through automated tests.
-
-### 9.1 Unit Tests (table/sources/multi_signal_change_list.rs)
-
-- **Basic merge**: Two signals with known transitions verify correct merged row count and cell values
-- **Held-value propagation**: Signal A changes at T=100, signal B at T=200 — verify B shows NoData at T=100 (if no prior value) and A shows Held at T=200
-- **Multi-value collapsing**: Signal with 3 transitions at same timestamp — verify last value shown with collapsed_count=2
-- **NoData cells**: Signal with first transition at T=500 — verify NoData in all rows before T=500
-- **Column schema**: Verify schema produces correct column count and labels for N signals
-- **Sort keys**: Verify numeric sort for time column, value-dependent sort for signal columns
-- **Search text**: Verify all cell values included in search text
-- **Row activation**: Verify on_activate returns CursorSet with correct timestamp
-- **TableModel trait compliance**: All trait methods return valid data for all rows
-
-### 9.2 Integration Tests
-
-- **Round-trip serialization**: `MultiSignalChangeList` spec survives RON serialize/deserialize
-- **Cache build flow**: End-to-end `BuildTableCache` → `TableCacheBuilt` with multi-signal spec
-- **Deduplication**: Selecting same signal twice produces single column
-- **Missing signal handling**: One of three signals missing — verify table creates with remaining two
-- **Context menu visibility**: Verify menu item shown only with 2+ selected variables
-- **Row activation navigates cursor**: Clicking row sets waveform cursor to correct time
-
-### 9.3 Snapshot Tests
-
-- **Table rendering**: Visual snapshot of a populated multi-signal change list table
-- **Dimmed held values**: Visual snapshot confirming held-value cells appear visually distinct
-- **Collapsed indicators**: Visual snapshot showing `"(+N)"` indicators
-
----
-
-## 10. Future Extensions (Out of Scope)
-
-The following are explicitly out of scope for the initial implementation but inform the design:
-
-- **Column reordering**: Drag-and-drop to reorder signal columns
-- **Value-change highlighting**: Flash or highlight cells that just transitioned when scrolling through time
-- **Expand collapsed transitions**: Click `"(+N)"` to expand inline and show all transitions at that timestamp
-- **Filter by transition-only**: Toggle to hide rows where a specific signal did not transition (show only that signal's actual changes)
-- **Cross-signal trigger filtering**: Show only rows where a specific signal meets a condition (e.g., `clk == 1`)
-- **Auto-refresh**: React to waveform reload or signal list changes
-- **Export to CSV**: Direct file export of the merged table
+- inline expansion of collapsed transitions
+- auto-refresh signal membership
+- CSV export
+- advanced trigger-based row filtering
