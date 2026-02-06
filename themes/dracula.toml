@@ -1,0 +1,117 @@
+# Dracula-inspired dark theme with thin 1px signal/UI lines.
+
+foreground = "f8f8f2"
+alt_text_color = "282a36"
+border_color = "44475a"
+selected_elements_colors = { background = "44475a", foreground = "f8f8f2" }
+canvas_colors = { background = "282a36", alt_background = "303445", foreground = "f8f8f2" }
+primary_ui_color = { background = "21222c", foreground = "f8f8f2" }
+secondary_ui_color = { background = "1f2029", foreground = "f8f8f2" }
+accent_info = { background = "8be9fd", foreground = "282a36" }
+accent_warn = { background = "ffb86c", foreground = "282a36" }
+accent_error = { background = "ff5555", foreground = "f8f8f2" }
+
+clock_highlight_line = { color = "6272a4", width = 1 }
+clock_highlight_cycle = "343746"
+clock_rising_marker = true
+
+variable_default = "50fa7b"
+variable_undef = "ff5555"
+variable_highimp = "f1fa8c"
+variable_dontcare = "bd93f9"
+variable_weak = "6272a4"
+variable_parameter = "ff79c6"
+variable_event = "8be9fd"
+transaction_default = "50fa7b"
+
+waveform_opacity = 0.2
+wide_opacity = 0.1
+
+cursor = { color = "ff79c6", width = 1 }
+gesture = { color = "ffb86c", width = 1 }
+measure = { color = "8be9fd", width = 1 }
+
+linewidth = 1
+thick_linewidth = 1
+vector_transition_width = 2
+alt_frequency = 3
+
+viewport_separator = { color = "6272a4", width = 1 }
+drag_threshold = 1.0
+drag_hint_color = "6272a4"
+drag_hint_width = 1.0
+highlight_background = "3d4255"
+
+[colors]
+Green = "50fa7b"
+Red = "ff5555"
+Yellow = "f1fa8c"
+Blue = "8be9fd"
+Pink = "ff79c6"
+Purple = "bd93f9"
+Orange = "ffb86c"
+Comment = "6272a4"
+
+[ticks]
+style = { color = "44475a", width = 1 }
+density = 1
+
+[relation_arrow]
+style = { color = "ff79c6", width = 1 }
+head_angle = 25
+head_length = 8
+
+# Remix icon code points from egui-remixicon.
+[scope_icons]
+module = "\uebf0"            # CPU_LINE
+task = "\uf1e8"              # TASK_LINE
+function = "\ued9e"          # FUNCTION_LINE
+begin = "\ueba7"             # CODE_BOX_LINE
+fork = "\uedbd"              # GIT_BRANCH_LINE
+generate = "\uf074"          # REPEAT_LINE
+struct = "\uf1de"            # TABLE_LINE
+union = "\uef41"             # MERGE_CELLS_HORIZONTAL
+class = "\uea3e"             # APP_STORE_LINE
+interface = "\uf019"         # PLUG_LINE
+package = "\uf2f5"           # BOX_3_LINE
+program = "\uecd1"           # FILE_CODE_LINE
+vhdl_architecture = "\ueb0d" # BUILDING_4_LINE
+vhdl_procedure = "\uf1f8"    # TERMINAL_LINE
+vhdl_function = "\ueae9"     # BRACES_LINE
+vhdl_record = "\uee90"       # LAYOUT_GRID_LINE
+vhdl_process = "\ued46"      # FLOW_CHART
+vhdl_block = "\uf42c"        # CODE_BLOCK
+vhdl_for_generate = "\uef90" # NODE_TREE
+vhdl_if_generate = "\uf045"  # QUESTION_LINE
+vhdl_generate = "\uf44f"     # PUZZLE_2_LINE
+vhdl_package = "\ued07"      # FILE_SETTINGS_LINE
+ghw_generic = "\uf0e6"       # SETTINGS_3_LINE
+vhdl_array = "\ueaeb"        # BRACKETS_LINE
+unknown = "\uf092"           # ROBOT_LINE
+
+[scope_icons.colors]
+module = "8be9fd"
+task = "ffb86c"
+function = "bd93f9"
+begin = "50fa7b"
+fork = "ff5555"
+generate = "f1fa8c"
+struct = "8be9fd"
+union = "ff79c6"
+class = "bd93f9"
+interface = "8be9fd"
+package = "ffb86c"
+program = "ff79c6"
+vhdl_architecture = "8be9fd"
+vhdl_procedure = "ffb86c"
+vhdl_function = "bd93f9"
+vhdl_record = "8be9fd"
+vhdl_process = "50fa7b"
+vhdl_block = "6272a4"
+vhdl_for_generate = "f1fa8c"
+vhdl_if_generate = "ff79c6"
+vhdl_generate = "f1fa8c"
+vhdl_package = "ffb86c"
+ghw_generic = "6272a4"
+vhdl_array = "bd93f9"
+unknown = "6272a4"

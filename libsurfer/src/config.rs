@@ -39,6 +39,7 @@ static BUILTIN_THEMES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock:
     HashMap::from([
         theme!("dark+"),
         theme!("dark-high-contrast"),
+        theme!("dracula"),
         theme!("ibm"),
         theme!("light+"),
         theme!("light-high-contrast"),
@@ -1166,6 +1167,30 @@ where
 {
     let buf = String::deserialize(deserializer)?;
     SurferTheme::new(Some(buf)).map_err(de::Error::custom)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dracula_theme_has_thin_lines_and_scope_icons() {
+        let theme_name = "dracula".to_string();
+        let (theme_builder, theme_names) = SurferTheme::generate_defaults(Some(&theme_name));
+        let theme = theme_builder
+            .set_override("theme_names", theme_names)
+            .expect("Failed to set theme names")
+            .build()
+            .expect("Failed to build config")
+            .try_deserialize::<SurferTheme>()
+            .expect("Failed to deserialize Dracula theme");
+
+        assert_eq!(theme.linewidth, 1.0);
+        assert_eq!(theme.cursor.width, 1.0);
+        assert_eq!(theme.ticks.style.width, 1.0);
+        assert_eq!(theme.scope_icons.module, "\u{ebf0}");
+        assert_eq!(theme.scope_icons.unknown, "\u{f092}");
+    }
 }
 
 /// Searches for `.surfer` directories upward from the current location until it reaches root.
