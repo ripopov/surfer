@@ -402,6 +402,7 @@ pub enum Message {
     #[serde(skip)]
     TableCacheBuilt {
         tile_id: TableTileId,
+        revision: u64,
         #[debug(skip)]
         entry: Arc<TableCacheEntry>,
         #[debug(skip)]

@@ -2279,17 +2279,28 @@ impl SystemState {
                     }
                 };
 
+                let runtime = self.table_runtime.get_mut(&tile_id)?;
+
+                // Cancel any in-flight build for this tile
+                runtime
+                    .cancel_token
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                runtime.table_revision += 1;
+                let revision = runtime.table_revision;
+
+                let cancel_token = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                runtime.cancel_token = cancel_token.clone();
+
                 let entry = std::sync::Arc::new(crate::table::TableCacheEntry::new(
                     cache_key.clone(),
                     cache_key.generation,
+                    revision,
                 ));
 
-                if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
-                    runtime.cache_key = Some(cache_key.clone());
-                    runtime.cache = Some(entry.clone());
-                    runtime.last_error = None;
-                    runtime.model = Some(model.clone());
-                }
+                runtime.cache_key = Some(cache_key.clone());
+                runtime.cache = Some(entry.clone());
+                runtime.last_error = None;
+                runtime.model = Some(model.clone());
 
                 self.table_inflight.insert(cache_key.clone(), entry.clone());
 
@@ -2300,10 +2311,12 @@ impl SystemState {
                         model,
                         cache_key_for_build.display_filter.clone(),
                         cache_key_for_build.view_sort.clone(),
+                        Some(cancel_token),
                     );
 
                     let msg = Message::TableCacheBuilt {
                         tile_id,
+                        revision,
                         entry: entry.clone(),
                         result,
                     };
@@ -2335,6 +2348,7 @@ impl SystemState {
             }
             Message::TableCacheBuilt {
                 tile_id,
+                revision,
                 entry,
                 result,
             } => {
@@ -2343,6 +2357,12 @@ impl SystemState {
 
                 let runtime = self.table_runtime.get_mut(&tile_id)?;
 
+                // Discard stale results from superseded builds
+                if revision != runtime.table_revision {
+                    return None;
+                }
+
+                // Defense-in-depth: also check cache key
                 if runtime.cache_key.as_ref() != Some(&entry.cache_key) {
                     return None;
                 }
@@ -2353,6 +2373,9 @@ impl SystemState {
                     Ok(cache) => {
                         entry.set(cache);
                         runtime.last_error = None;
+                    }
+                    Err(crate::table::TableCacheError::Cancelled) => {
+                        // Silently discard cancelled builds
                     }
                     Err(err) => {
                         runtime.last_error = Some(err);

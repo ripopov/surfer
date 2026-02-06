@@ -6,6 +6,7 @@ use super::model::{
 use regex::RegexBuilder;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -134,21 +135,29 @@ pub struct TableCache {
 
 const SEARCH_PROBE_CHUNK_SIZE: usize = 256;
 
+fn is_cancelled(token: &Option<Arc<AtomicBool>>) -> bool {
+    token
+        .as_ref()
+        .is_some_and(|t| t.load(std::sync::atomic::Ordering::Relaxed))
+}
+
 /// Runtime, non-serialized cache handle.
 #[derive(Debug)]
 pub struct TableCacheEntry {
     pub inner: OnceLock<TableCache>,
     pub cache_key: TableCacheKey,
     pub generation: u64,
+    pub revision: u64,
 }
 
 impl TableCacheEntry {
     #[must_use]
-    pub fn new(cache_key: TableCacheKey, generation: u64) -> Self {
+    pub fn new(cache_key: TableCacheKey, generation: u64, revision: u64) -> Self {
         Self {
             inner: OnceLock::new(),
             cache_key,
             generation,
+            revision,
         }
     }
 
@@ -280,6 +289,10 @@ pub struct TableRuntimeState {
     pub hidden_selection_count: usize,
     /// Cached table model (Arc clone is O(1), avoids per-frame recreation).
     pub model: Option<Arc<dyn super::model::TableModel>>,
+    /// Monotonic revision counter, incremented on each `BuildTableCache` request.
+    pub table_revision: u64,
+    /// Cooperative cancellation token for in-flight async cache builds.
+    pub cancel_token: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for TableRuntimeState {
@@ -295,6 +308,11 @@ impl std::fmt::Debug for TableRuntimeState {
             .field("filter_draft", &self.filter_draft)
             .field("hidden_selection_count", &self.hidden_selection_count)
             .field("model", &self.model.as_ref().map(|_| "..."))
+            .field("table_revision", &self.table_revision)
+            .field(
+                "cancel_token",
+                &self.cancel_token.load(std::sync::atomic::Ordering::Relaxed),
+            )
             .finish()
     }
 }
@@ -422,11 +440,16 @@ fn filter_rows_with_eager_search_texts(
     model: &dyn TableModel,
     base_rows: &[(TableRowId, usize)],
     filter: &TableFilter,
-) -> (Vec<(TableRowId, usize)>, Vec<String>) {
+    cancelled: &Option<Arc<AtomicBool>>,
+) -> Result<(Vec<(TableRowId, usize)>, Vec<String>), TableCacheError> {
     let mut filtered_rows = Vec::with_capacity(base_rows.len());
     let mut search_texts = Vec::with_capacity(base_rows.len());
 
     for chunk in base_rows.chunks(SEARCH_PROBE_CHUNK_SIZE) {
+        if is_cancelled(cancelled) {
+            return Err(TableCacheError::Cancelled);
+        }
+
         let chunk_row_ids: Vec<TableRowId> = chunk.iter().map(|(row_id, _)| *row_id).collect();
         let search_window =
             model.materialize_window(&chunk_row_ids, &[], MaterializePurpose::SearchProbe);
@@ -443,20 +466,25 @@ fn filter_rows_with_eager_search_texts(
         }
     }
 
-    (filtered_rows, search_texts)
+    Ok((filtered_rows, search_texts))
 }
 
 fn filter_rows_with_lazy_search_probes(
     model: &dyn TableModel,
     base_rows: &[(TableRowId, usize)],
     filter: &TableFilter,
-) -> Vec<(TableRowId, usize)> {
+    cancelled: &Option<Arc<AtomicBool>>,
+) -> Result<Vec<(TableRowId, usize)>, TableCacheError> {
     if !filter.is_active() {
-        return base_rows.to_vec();
+        return Ok(base_rows.to_vec());
     }
 
     let mut filtered_rows = Vec::with_capacity(base_rows.len());
     for chunk in base_rows.chunks(SEARCH_PROBE_CHUNK_SIZE) {
+        if is_cancelled(cancelled) {
+            return Err(TableCacheError::Cancelled);
+        }
+
         let chunk_row_ids: Vec<TableRowId> = chunk.iter().map(|(row_id, _)| *row_id).collect();
         let search_window =
             model.materialize_window(&chunk_row_ids, &[], MaterializePurpose::SearchProbe);
@@ -472,23 +500,28 @@ fn filter_rows_with_lazy_search_probes(
         }
     }
 
-    filtered_rows
+    Ok(filtered_rows)
 }
 
 fn build_row_entries(
     model: &dyn TableModel,
     filtered_rows: &[(TableRowId, usize)],
     sort_columns: &[(usize, TableSortDirection)],
-) -> Vec<RowEntry> {
+    cancelled: &Option<Arc<AtomicBool>>,
+) -> Result<Vec<RowEntry>, TableCacheError> {
     if sort_columns.is_empty() {
-        return filtered_rows
+        return Ok(filtered_rows
             .iter()
             .map(|&(row_id, base_index)| RowEntry {
                 row_id,
                 base_index,
                 sort_keys: Vec::new(),
             })
-            .collect();
+            .collect());
+    }
+
+    if is_cancelled(cancelled) {
+        return Err(TableCacheError::Cancelled);
     }
 
     let row_ids: Vec<TableRowId> = filtered_rows.iter().map(|(row_id, _)| *row_id).collect();
@@ -496,7 +529,7 @@ fn build_row_entries(
     let sort_window =
         model.materialize_window(&row_ids, &sort_col_indices, MaterializePurpose::SortProbe);
 
-    filtered_rows
+    Ok(filtered_rows
         .iter()
         .map(|&(row_id, base_index)| {
             let sort_keys = sort_columns
@@ -514,7 +547,7 @@ fn build_row_entries(
                 sort_keys,
             }
         })
-        .collect()
+        .collect())
 }
 
 fn type_search_start_index(
@@ -585,10 +618,14 @@ pub fn find_type_search_match_in_cache(
 }
 
 /// Build a table cache by filtering and sorting the model rows.
+///
+/// If `cancelled` is provided and set to `true` during execution, the build
+/// will return `Err(TableCacheError::Cancelled)` at the next check point.
 pub fn build_table_cache(
     model: Arc<dyn TableModel>,
     display_filter: TableSearchSpec,
     view_sort: Vec<TableSortSpec>,
+    cancelled: Option<Arc<AtomicBool>>,
 ) -> Result<TableCache, TableCacheError> {
     let schema = model.schema();
     let filter = TableFilter::new(&display_filter)?;
@@ -600,23 +637,35 @@ pub fn build_table_cache(
         }
     }
 
+    if is_cancelled(&cancelled) {
+        return Err(TableCacheError::Cancelled);
+    }
+
     let base_rows: Vec<(TableRowId, usize)> = (0..model.row_count())
         .filter_map(|index| model.row_id_at(index).map(|row_id| (row_id, index)))
         .collect();
 
     let (filtered_rows, search_texts) = match model.search_text_mode() {
         SearchTextMode::Eager => {
-            let (rows, search_texts) =
-                filter_rows_with_eager_search_texts(model.as_ref(), &base_rows, &filter);
+            let (rows, search_texts) = filter_rows_with_eager_search_texts(
+                model.as_ref(),
+                &base_rows,
+                &filter,
+                &cancelled,
+            )?;
             (rows, Some(search_texts))
         }
         SearchTextMode::LazyProbe => (
-            filter_rows_with_lazy_search_probes(model.as_ref(), &base_rows, &filter),
+            filter_rows_with_lazy_search_probes(model.as_ref(), &base_rows, &filter, &cancelled)?,
             None,
         ),
     };
 
-    let mut rows = build_row_entries(model.as_ref(), &filtered_rows, &sort_columns);
+    if is_cancelled(&cancelled) {
+        return Err(TableCacheError::Cancelled);
+    }
+
+    let mut rows = build_row_entries(model.as_ref(), &filtered_rows, &sort_columns, &cancelled)?;
 
     if !sort_columns.is_empty() {
         rows.sort_by(|left, right| {

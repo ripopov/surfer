@@ -9,6 +9,7 @@ use crate::{StartupParams, WaveSource};
 use project_root::get_project_root;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 /// Helper to build a row_index HashMap from a slice of row IDs.
 fn build_row_index(rows: &[TableRowId]) -> HashMap<TableRowId, usize> {
@@ -494,7 +495,7 @@ fn table_cache_entry_ready_state() {
         view_sort: vec![],
         generation: 0,
     };
-    let entry = TableCacheEntry::new(cache_key, 0);
+    let entry = TableCacheEntry::new(cache_key, 0, 0);
     assert!(!entry.is_ready());
 
     entry.set(TableCache {
@@ -516,6 +517,7 @@ fn table_cache_builder_unfiltered_unsorted() {
             text: String::new(),
         },
         vec![],
+        None,
     )
     .expect("cache build should succeed");
 
@@ -543,6 +545,7 @@ fn table_cache_builder_filters_contains() {
             text: "r3c0".to_string(),
         },
         vec![],
+        None,
     )
     .expect("cache build should succeed");
 
@@ -570,6 +573,7 @@ fn table_cache_builder_lazy_probe_keeps_index_only_cache_shape() {
             key: TableColumnKey::Str("col".to_string()),
             direction: TableSortDirection::Descending,
         }],
+        None,
     )
     .expect("cache build should succeed");
 
@@ -593,7 +597,7 @@ fn type_search_uses_lazy_probe_provider_when_eager_cache_absent() {
         ],
     });
 
-    let cache = build_table_cache(model.clone(), TableSearchSpec::default(), vec![])
+    let cache = build_table_cache(model.clone(), TableSearchSpec::default(), vec![], None)
         .expect("cache build should succeed");
     assert!(cache.search_texts.is_none());
 
@@ -691,6 +695,7 @@ fn table_cache_builder_sorts_rows() {
             key: TableColumnKey::Str("col".to_string()),
             direction: TableSortDirection::Ascending,
         }],
+        None,
     )
     .expect("cache build should succeed");
 
@@ -710,6 +715,7 @@ fn table_cache_builder_sorts_rows() {
             key: TableColumnKey::Str("col".to_string()),
             direction: TableSortDirection::Descending,
         }],
+        None,
     )
     .expect("cache build should succeed");
 
@@ -730,6 +736,7 @@ fn table_cache_builder_empty_result() {
             text: "nope".to_string(),
         },
         vec![],
+        None,
     )
     .expect("cache build should succeed");
 
@@ -749,6 +756,7 @@ fn table_cache_builder_invalid_regex() {
             text: "(".to_string(),
         },
         vec![],
+        None,
     );
 
     match result {
@@ -797,14 +805,17 @@ fn table_cache_built_stale_key_ignored() {
             filter_draft: None,
             hidden_selection_count: 0,
             model: None,
+            table_revision: 0,
+            cancel_token: Arc::new(AtomicBool::new(false)),
         },
     );
 
-    let entry = Arc::new(TableCacheEntry::new(old_key.clone(), old_key.generation));
+    let entry = Arc::new(TableCacheEntry::new(old_key.clone(), old_key.generation, 0));
     state.table_inflight.insert(old_key, entry.clone());
 
     let msg = Message::TableCacheBuilt {
         tile_id,
+        revision: 0,
         entry: entry.clone(),
         result: Ok(TableCache {
             row_ids: vec![],
@@ -941,6 +952,8 @@ fn table_runtime_state_not_serialized() {
         filter_draft: None,
         hidden_selection_count: 0,
         model: None,
+        table_revision: 0,
+        cancel_token: Arc::new(AtomicBool::new(false)),
     };
 
     // Verify the runtime state has the expected fields
@@ -1314,6 +1327,7 @@ fn table_cache_builder_filters_fuzzy() {
             text: "r3".to_string(),
         },
         vec![],
+        None,
     )
     .expect("cache build should succeed");
 
@@ -1395,6 +1409,7 @@ fn table_cache_builder_fuzzy_subsequence_matching() {
             text: "aa".to_string(),
         },
         vec![],
+        None,
     )
     .expect("cache build should succeed");
 
@@ -3115,14 +3130,14 @@ fn table_select_all_in_multi_mode() {
     // Build cache manually for the test
     let ctx = state.table_model_context();
     let model = spec.create_model(&ctx).unwrap();
-    let cache = build_table_cache(model, TableSearchSpec::default(), vec![]).unwrap();
+    let cache = build_table_cache(model, TableSearchSpec::default(), vec![], None).unwrap();
     let cache_key = TableCacheKey {
         model_key: TableModelKey(tile_id.0),
         display_filter: TableSearchSpec::default(),
         view_sort: vec![],
         generation: 0,
     };
-    let cache_entry = Arc::new(TableCacheEntry::new(cache_key.clone(), 0));
+    let cache_entry = Arc::new(TableCacheEntry::new(cache_key.clone(), 0, 0));
     cache_entry.set(cache);
 
     state.table_runtime.get_mut(&tile_id).unwrap().cache = Some(cache_entry);
@@ -5186,6 +5201,7 @@ fn test_row_index_lookup_consistency() {
             key: TableColumnKey::Str("col_0".to_string()),
             direction: TableSortDirection::Descending,
         }],
+        None,
     )
     .expect("cache build should succeed");
 
@@ -5208,7 +5224,7 @@ fn test_row_index_lookup_consistency() {
 fn test_hidden_count_consistency() {
     // Create runtime with cache and selection mixing visible/hidden rows
     let model = Arc::new(VirtualTableModel::new(10, 2, 0));
-    let cache = build_table_cache(model, TableSearchSpec::default(), vec![])
+    let cache = build_table_cache(model, TableSearchSpec::default(), vec![], None)
         .expect("cache build should succeed");
 
     let cache_key = TableCacheKey {
@@ -5217,7 +5233,7 @@ fn test_hidden_count_consistency() {
         view_sort: vec![],
         generation: 0,
     };
-    let entry = Arc::new(TableCacheEntry::new(cache_key.clone(), 0));
+    let entry = Arc::new(TableCacheEntry::new(cache_key.clone(), 0, 0));
     entry.set(cache);
 
     let mut runtime = TableRuntimeState {
@@ -5256,6 +5272,7 @@ fn test_row_index_after_filter() {
             text: "r1".to_string(), // Matches rows 1, 10-19
         },
         vec![],
+        None,
     )
     .expect("cache build should succeed");
 
@@ -6288,4 +6305,158 @@ fn multi_signal_materialize_window_search_probe() {
             "search text should not be empty for row {row_id:?}"
         );
     }
+}
+
+// ========================
+// Stage 8 Tests - Async Revision Gating and Cancellation Safety
+// ========================
+
+#[test]
+fn revision_defaults_to_zero_and_entry_carries_revision() {
+    // Verify default TableRuntimeState has revision 0
+    let runtime = TableRuntimeState::default();
+    assert_eq!(runtime.table_revision, 0);
+
+    // Verify TableCacheEntry carries its assigned revision
+    let cache_key = TableCacheKey {
+        model_key: TableModelKey(1),
+        display_filter: TableSearchSpec::default(),
+        view_sort: vec![],
+        generation: 0,
+    };
+    let entry = TableCacheEntry::new(cache_key, 0, 42);
+    assert_eq!(entry.revision, 42);
+}
+
+#[test]
+fn stale_revision_ignored_on_cache_built() {
+    let mut state = SystemState::new_default_config().expect("state");
+    let tile_id = TableTileId(99);
+
+    let cache_key = TableCacheKey {
+        model_key: TableModelKey(1),
+        display_filter: TableSearchSpec::default(),
+        view_sort: vec![],
+        generation: 0,
+    };
+
+    // Set up runtime at revision 5 (simulating several prior builds)
+    state.table_runtime.insert(
+        tile_id,
+        TableRuntimeState {
+            cache_key: Some(cache_key.clone()),
+            cache: None,
+            last_error: None,
+            selection: TableSelection::default(),
+            scroll_offset: 0.0,
+            type_search: TypeSearchState::default(),
+            scroll_state: TableScrollState::default(),
+            filter_draft: None,
+            hidden_selection_count: 0,
+            model: None,
+            table_revision: 5,
+            cancel_token: Arc::new(AtomicBool::new(false)),
+        },
+    );
+
+    // Send a TableCacheBuilt with stale revision 3
+    let stale_entry = Arc::new(TableCacheEntry::new(cache_key.clone(), 0, 3));
+
+    let msg = Message::TableCacheBuilt {
+        tile_id,
+        revision: 3, // stale - runtime is at 5
+        entry: stale_entry.clone(),
+        result: Ok(TableCache {
+            row_ids: vec![TableRowId(99)],
+            row_index: build_row_index(&[TableRowId(99)]),
+            search_texts: Some(vec!["stale".to_string()]),
+        }),
+    };
+    state.update(msg);
+
+    // The stale entry should NOT have been committed
+    assert!(
+        !stale_entry.is_ready(),
+        "stale revision result should be discarded"
+    );
+}
+
+#[test]
+fn cancellation_stops_build_early() {
+    let model = Arc::new(VirtualTableModel::new(100, 3, 42));
+    let cancel = Arc::new(AtomicBool::new(true)); // pre-cancelled
+
+    let result = build_table_cache(model, TableSearchSpec::default(), vec![], Some(cancel));
+
+    match result {
+        Err(TableCacheError::Cancelled) => {} // expected
+        other => panic!("expected Cancelled, got {other:?}"),
+    }
+}
+
+#[test]
+fn selection_preserved_across_cancelled_build() {
+    let mut state = SystemState::new_default_config().expect("state");
+    let tile_id = TableTileId(88);
+
+    let cache_key = TableCacheKey {
+        model_key: TableModelKey(1),
+        display_filter: TableSearchSpec::default(),
+        view_sort: vec![],
+        generation: 0,
+    };
+
+    // Set up runtime with selection and revision 3
+    let mut selection = TableSelection::new();
+    selection.rows.insert(TableRowId(1));
+    selection.rows.insert(TableRowId(3));
+    selection.anchor = Some(TableRowId(1));
+
+    state.table_runtime.insert(
+        tile_id,
+        TableRuntimeState {
+            cache_key: Some(cache_key.clone()),
+            cache: None,
+            last_error: None,
+            selection,
+            scroll_offset: 0.0,
+            type_search: TypeSearchState::default(),
+            scroll_state: TableScrollState::default(),
+            filter_draft: None,
+            hidden_selection_count: 0,
+            model: None,
+            table_revision: 3,
+            cancel_token: Arc::new(AtomicBool::new(false)),
+        },
+    );
+
+    // Send a stale TableCacheBuilt with revision 0
+    let stale_entry = Arc::new(TableCacheEntry::new(cache_key.clone(), 0, 0));
+    state.update(Message::TableCacheBuilt {
+        tile_id,
+        revision: 0, // stale
+        entry: stale_entry,
+        result: Ok(TableCache {
+            row_ids: vec![],
+            row_index: HashMap::new(),
+            search_texts: Some(vec![]),
+        }),
+    });
+
+    // Selection should be unchanged
+    assert_eq!(
+        state.table_runtime[&tile_id].selection.len(),
+        2,
+        "selection should be preserved when stale build is discarded"
+    );
+    assert!(
+        state.table_runtime[&tile_id]
+            .selection
+            .contains(TableRowId(1))
+    );
+    assert!(
+        state.table_runtime[&tile_id]
+            .selection
+            .contains(TableRowId(3))
+    );
 }
