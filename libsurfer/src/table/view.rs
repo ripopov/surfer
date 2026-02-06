@@ -1,12 +1,12 @@
 use crate::SystemState;
 use crate::message::Message;
 use crate::table::{
-    FilterDraft, MaterializePurpose, MaterializedWindow, PendingScrollOp, ScrollTarget, TableCache,
-    TableCacheKey, TableCell, TableColumnKey, TableModel, TableModelSpec, TableRuntimeState,
-    TableSearchMode, TableSearchSpec, TableSelection, TableSelectionMode, TableSortSpec,
-    TableTileId, TableTileState, TableViewConfig, find_type_search_match_in_cache,
-    format_selection_count, hidden_columns, navigate_down, navigate_end, navigate_extend_selection,
-    navigate_home, navigate_page_down, navigate_page_up, navigate_up, scroll_target_after_filter,
+    FilterDraft, PendingScrollOp, ScrollTarget, TableCache, TableCacheKey, TableCell,
+    TableColumnKey, TableModel, TableModelSpec, TableRuntimeState, TableSearchMode,
+    TableSearchSpec, TableSelection, TableSelectionMode, TableSortSpec, TableTileId,
+    TableTileState, TableViewConfig, find_type_search_match_in_cache, format_selection_count,
+    hidden_columns, navigate_down, navigate_end, navigate_extend_selection, navigate_home,
+    navigate_page_down, navigate_page_up, navigate_up, scroll_target_after_filter,
     scroll_target_after_sort, selection_on_click_multi, selection_on_click_single,
     selection_on_ctrl_click, selection_on_shift_click, should_clear_selection_on_generation_change,
     sort_indicator, sort_spec_on_click, sort_spec_on_shift_click, visible_columns,
@@ -117,10 +117,10 @@ pub fn draw_table_tile(
                 ui.heading(&title);
                 if show_signal_analysis_actions {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("Refresh").clicked() {
+                        if ui.small_button("Refresh analysis").clicked() {
                             msgs.push(Message::RefreshSignalAnalysis { tile_id });
                         }
-                        if ui.small_button("Edit").clicked() {
+                        if ui.small_button("Edit configuration...").clicked() {
                             msgs.push(Message::EditSignalAnalysis { tile_id });
                         }
                     });
@@ -482,38 +482,6 @@ fn render_table(
             .collect()
     };
 
-    // Build columns from visible columns
-    let mut builder = TableBuilder::new(ui)
-        .striped(true)
-        .vscroll(true)
-        .sense(egui::Sense::click())
-        .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
-
-    // Add columns based on visible columns
-    for (schema_idx, col) in &visible_col_info {
-        // Get width from config if available, otherwise use schema default
-        let width = columns_config
-            .iter()
-            .find(|c| c.key == col.key)
-            .and_then(|c| c.width)
-            .or(col.default_width)
-            .unwrap_or(100.0);
-
-        let resizable = columns_config
-            .iter()
-            .find(|c| c.key == col.key)
-            .map(|c| c.resizable)
-            .unwrap_or(col.default_resizable);
-
-        let column = if resizable {
-            Column::initial(width).resizable(true).clip(true)
-        } else {
-            Column::exact(width)
-        };
-        builder = builder.column(column);
-        let _ = schema_idx; // Used in body rendering
-    }
-
     // Determine scroll-to row index if scroll target specified
     let scroll_to_row = scroll_target.and_then(|target| match target {
         ScrollTarget::ToRow(row_id) => cache.row_index.get(row_id).copied(),
@@ -521,11 +489,6 @@ fn render_table(
         ScrollTarget::ToBottom if !cache.row_ids.is_empty() => Some(cache.row_ids.len() - 1),
         _ => None,
     });
-
-    // Apply scroll target using egui's scroll_to_row
-    if let Some(row_idx) = scroll_to_row {
-        builder = builder.scroll_to_row(row_idx, Some(egui::Align::Center));
-    }
 
     // Track sort changes, selection changes, and visibility changes to emit after rendering
     let mut new_sort: Option<Vec<TableSortSpec>> = None;
@@ -545,194 +508,214 @@ fn render_table(
     let all_schema_columns: Vec<TableColumnKey> =
         schema.columns.iter().map(|c| c.key.clone()).collect();
 
-    // Render header with clickable sorting
-    builder
-        .header(row_height, |mut header| {
-            for (_, col) in &visible_col_info {
-                header.col(|ui| {
-                    ui.painter()
-                        .rect_filled(ui.available_rect_before_wrap(), 0.0, header_bg);
+    // Wrap in horizontal ScrollArea for wide tables (follows logs.rs pattern)
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+    egui::ScrollArea::horizontal()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+        // Build columns from visible columns
+        let mut builder = TableBuilder::new(ui)
+            .striped(true)
+            .vscroll(true)
+            .sense(egui::Sense::click())
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
 
-                    // Build header text with sort indicator
-                    let indicator = sort_indicator(current_sort, &col.key);
-                    let header_text = match &indicator {
-                        Some(ind) => format!("{} {}", col.label, ind),
-                        None => col.label.clone(),
-                    };
+        // Add columns based on visible columns
+        for (schema_idx, col) in &visible_col_info {
+            // Get width from config if available, otherwise use schema default
+            let width = columns_config
+                .iter()
+                .find(|c| c.key == col.key)
+                .and_then(|c| c.width)
+                .or(col.default_width)
+                .unwrap_or(100.0);
 
-                    let label = if dense_rows {
-                        egui::RichText::new(&header_text).small().color(text_color)
-                    } else {
-                        egui::RichText::new(&header_text).strong().color(text_color)
-                    };
+            let resizable = columns_config
+                .iter()
+                .find(|c| c.key == col.key)
+                .map(|c| c.resizable)
+                .unwrap_or(col.default_resizable);
 
-                    // Make the header clickable for sorting
-                    let response = ui.add(
-                        egui::Label::new(label)
-                            .selectable(false)
-                            .sense(egui::Sense::click()),
-                    );
+            let column = if resizable {
+                Column::initial(width).resizable(true).clip(true)
+            } else {
+                Column::exact(width)
+            };
+            builder = builder.column(column);
+            let _ = schema_idx; // Used in body rendering
+        }
 
-                    if response.clicked() {
-                        // Check for Shift modifier
-                        let modifiers = ui.input(|i| i.modifiers);
-                        let computed_sort = if modifiers.shift {
-                            sort_spec_on_shift_click(current_sort, &col.key)
-                        } else {
-                            sort_spec_on_click(current_sort, &col.key)
+        // Apply scroll target using egui's scroll_to_row
+        if let Some(row_idx) = scroll_to_row {
+            builder = builder.scroll_to_row(row_idx, Some(egui::Align::Center));
+        }
+
+        // Render header with clickable sorting
+        builder
+            .header(row_height, |mut header| {
+                for (_, col) in &visible_col_info {
+                    header.col(|ui| {
+                        ui.painter()
+                            .rect_filled(ui.available_rect_before_wrap(), 0.0, header_bg);
+
+                        // Build header text with sort indicator
+                        let indicator = sort_indicator(current_sort, &col.key);
+                        let header_text = match &indicator {
+                            Some(ind) => format!("{} {}", col.label, ind),
+                            None => col.label.clone(),
                         };
-                        new_sort = Some(computed_sort);
-                    }
 
-                    // Context menu for column visibility and drill-down
-                    response.context_menu(|ui| {
-                        // Drill-down: open single-signal change list for signal columns
-                        if let TableColumnKey::Str(key_str) = &col.key
-                            && let Some((full_path, field)) =
-                                crate::table::sources::decode_signal_column_key(key_str)
-                        {
-                            if ui.button("Signal change list").clicked() {
-                                let variable =
-                                    crate::wave_container::VariableRef::from_hierarchy_string(
-                                        &full_path,
-                                    );
-                                msgs.push(Message::AddTableTile {
-                                    spec: TableModelSpec::SignalChangeList { variable, field },
-                                });
-                                ui.close();
-                            }
-                            ui.separator();
-                        }
-                        ui.label("Column visibility:");
-                        ui.separator();
-                        for key in &all_schema_columns {
-                            let is_visible = column_keys.contains(key);
-                            let col_label = schema
-                                .columns
-                                .iter()
-                                .find(|c| &c.key == key)
-                                .map(|c| c.label.as_str())
-                                .unwrap_or("Unknown");
-                            if ui.checkbox(&mut is_visible.clone(), col_label).clicked() {
-                                new_visibility_toggle = Some(key.clone());
-                                ui.close();
-                            }
-                        }
-                    });
+                        let label = if dense_rows {
+                            egui::RichText::new(&header_text).small().color(text_color)
+                        } else {
+                            egui::RichText::new(&header_text).strong().color(text_color)
+                        };
 
-                    // Show tooltip for sorting help
-                    response.on_hover_text(
-                        "Click to sort, Shift+click for multi-column sort, right-click for column options",
-                    );
-                });
-            }
-        })
-        .body(|body| {
-            // Pre-materialize visible rows for batch rendering.
-            // Estimate visible row range from available height and row height.
-            let available_height = body.max_rect().height();
-            let estimated_visible_count =
-                (available_height / row_height).ceil() as usize + 2; // +2 for partial rows
-            let total_rows = cache.row_ids.len();
+                        // Make the header clickable for sorting
+                        let response = ui.add(
+                            egui::Label::new(label)
+                                .selectable(false)
+                                .sense(egui::Sense::click()),
+                        );
 
-            // Determine start row from scroll target, default to 0
-            let estimated_start = scroll_to_row.unwrap_or(0).saturating_sub(1);
-            let estimated_end = (estimated_start + estimated_visible_count).min(total_rows);
-
-            let visible_row_ids: Vec<super::TableRowId> = cache.row_ids
-                [estimated_start..estimated_end]
-                .to_vec();
-            let visible_col_indices: Vec<usize> =
-                visible_col_info.iter().map(|(idx, _)| *idx).collect();
-            let materialized: MaterializedWindow = model.materialize_window(
-                &visible_row_ids,
-                &visible_col_indices,
-                MaterializePurpose::Render,
-            );
-
-            body.rows(row_height, total_rows, |mut row| {
-                let row_idx = row.index();
-                if let Some(&row_id) = cache.row_ids.get(row_idx) {
-                    // Check if this row is selected
-                    let is_selected = selection_clone.contains(row_id);
-
-                    // Set row background color for selected rows
-                    if is_selected {
-                        row.set_selected(true);
-                    }
-
-                    // Render only visible columns
-                    for (col_idx, _) in &visible_col_info {
-                        row.col(|ui| {
-                            // Paint selection background if selected
-                            if is_selected {
-                                ui.painter().rect_filled(
-                                    ui.available_rect_before_wrap(),
-                                    0.0,
-                                    selection_bg,
-                                );
-                            }
-
-                            // Use pre-materialized cell when available, fall back to model
-                            let cell = materialized
-                                .cell(row_id, *col_idx)
-                                .cloned()
-                                .unwrap_or_else(|| model.cell(row_id, *col_idx));
-                            let text = match cell {
-                                TableCell::Text(s) => s,
-                                TableCell::RichText(rt) => {
-                                    ui.add(egui::Label::new(rt).selectable(false));
-                                    return;
-                                }
-                            };
-                            let label = if dense_rows {
-                                egui::RichText::new(&text).small()
-                            } else {
-                                egui::RichText::new(&text)
-                            };
-                            ui.add(egui::Label::new(label).selectable(false));
-                        });
-                    }
-
-                    // Handle row click for selection (only if selection mode is not None)
-                    if selection_mode != TableSelectionMode::None {
-                        let response = row.response();
                         if response.clicked() {
-                            let modifiers = response.ctx.input(|i| i.modifiers);
-                            let update = match selection_mode {
-                                TableSelectionMode::None => None,
-                                TableSelectionMode::Single => {
-                                    Some(selection_on_click_single(&selection_clone, row_id))
-                                }
-                                TableSelectionMode::Multi => {
-                                    if modifiers.command {
-                                        // Ctrl/Cmd+click: toggle
-                                        Some(selection_on_ctrl_click(&selection_clone, row_id))
-                                    } else if modifiers.shift {
-                                        // Shift+click: range selection
-                                        Some(selection_on_shift_click(
-                                            &selection_clone,
-                                            row_id,
-                                            visible_rows,
-                                            row_index,
-                                        ))
-                                    } else {
-                                        // Plain click: select single
-                                        Some(selection_on_click_multi(&selection_clone, row_id))
-                                    }
-                                }
+                            // Check for Shift modifier
+                            let modifiers = ui.input(|i| i.modifiers);
+                            let computed_sort = if modifiers.shift {
+                                sort_spec_on_shift_click(current_sort, &col.key)
+                            } else {
+                                sort_spec_on_click(current_sort, &col.key)
                             };
+                            new_sort = Some(computed_sort);
+                        }
 
-                            if let Some(update) = update
-                                && update.changed
+                        // Context menu for column visibility and drill-down
+                        response.context_menu(|ui| {
+                            // Drill-down: open single-signal change list for signal columns
+                            if let TableColumnKey::Str(key_str) = &col.key
+                                && let Some((full_path, field)) =
+                                    crate::table::sources::decode_signal_column_key(key_str)
                             {
-                                new_selection = Some(update.selection);
+                                if ui.button("Signal change list").clicked() {
+                                    let variable =
+                                        crate::wave_container::VariableRef::from_hierarchy_string(
+                                            &full_path,
+                                        );
+                                    msgs.push(Message::AddTableTile {
+                                        spec: TableModelSpec::SignalChangeList { variable, field },
+                                    });
+                                    ui.close();
+                                }
+                                ui.separator();
+                            }
+                            ui.label("Column visibility:");
+                            ui.separator();
+                            for key in &all_schema_columns {
+                                let is_visible = column_keys.contains(key);
+                                let col_label = schema
+                                    .columns
+                                    .iter()
+                                    .find(|c| &c.key == key)
+                                    .map(|c| c.label.as_str())
+                                    .unwrap_or("Unknown");
+                                if ui.checkbox(&mut is_visible.clone(), col_label).clicked() {
+                                    new_visibility_toggle = Some(key.clone());
+                                    ui.close();
+                                }
+                            }
+                        });
+
+                        // Show tooltip for sorting help
+                        response.on_hover_text(
+                            "Click to sort, Shift+click for multi-column sort, right-click for column options",
+                        );
+                    });
+                }
+            })
+            .body(|body| {
+                let total_rows = cache.row_ids.len();
+
+                body.rows(row_height, total_rows, |mut row| {
+                    let row_idx = row.index();
+                    if let Some(&row_id) = cache.row_ids.get(row_idx) {
+                        // Check if this row is selected
+                        let is_selected = selection_clone.contains(row_id);
+
+                        // Set row background color for selected rows
+                        if is_selected {
+                            row.set_selected(true);
+                        }
+
+                        // Render only visible columns
+                        for (col_idx, _) in &visible_col_info {
+                            row.col(|ui| {
+                                // Paint selection background if selected
+                                if is_selected {
+                                    ui.painter().rect_filled(
+                                        ui.available_rect_before_wrap(),
+                                        0.0,
+                                        selection_bg,
+                                    );
+                                }
+
+                                // Per-row cell access (egui only calls visible rows)
+                                let cell = model.cell(row_id, *col_idx);
+                                let text = match cell {
+                                    TableCell::Text(s) => s,
+                                    TableCell::RichText(rt) => {
+                                        ui.add(egui::Label::new(rt).selectable(false));
+                                        return;
+                                    }
+                                };
+                                let label = if dense_rows {
+                                    egui::RichText::new(&text).small()
+                                } else {
+                                    egui::RichText::new(&text)
+                                };
+                                ui.add(egui::Label::new(label).selectable(false));
+                            });
+                        }
+
+                        // Handle row click for selection (only if selection mode is not None)
+                        if selection_mode != TableSelectionMode::None {
+                            let response = row.response();
+                            if response.clicked() {
+                                let modifiers = response.ctx.input(|i| i.modifiers);
+                                let update = match selection_mode {
+                                    TableSelectionMode::None => None,
+                                    TableSelectionMode::Single => {
+                                        Some(selection_on_click_single(&selection_clone, row_id))
+                                    }
+                                    TableSelectionMode::Multi => {
+                                        if modifiers.command {
+                                            // Ctrl/Cmd+click: toggle
+                                            Some(selection_on_ctrl_click(&selection_clone, row_id))
+                                        } else if modifiers.shift {
+                                            // Shift+click: range selection
+                                            Some(selection_on_shift_click(
+                                                &selection_clone,
+                                                row_id,
+                                                visible_rows,
+                                                row_index,
+                                            ))
+                                        } else {
+                                            // Plain click: select single
+                                            Some(selection_on_click_multi(&selection_clone, row_id))
+                                        }
+                                    }
+                                };
+
+                                if let Some(update) = update
+                                    && update.changed
+                                {
+                                    new_selection = Some(update.selection);
+                                }
                             }
                         }
                     }
-                }
+                });
             });
-        });
+    });
 
     // Emit sort change message if needed
     if let Some(sort) = new_sort {

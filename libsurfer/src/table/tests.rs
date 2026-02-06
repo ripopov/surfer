@@ -871,7 +871,7 @@ fn table_cache_built_stale_key_ignored() {
             cache: None,
             last_error: None,
             selection: TableSelection::default(),
-            scroll_offset: 0.0,
+
             type_search: TypeSearchState::default(),
             scroll_state: TableScrollState::default(),
             filter_draft: None,
@@ -1019,7 +1019,7 @@ fn table_runtime_state_not_serialized() {
         cache: None,
         last_error: None,
         selection: TableSelection::default(),
-        scroll_offset: 42.0,
+
         type_search: TypeSearchState::default(),
         scroll_state: TableScrollState::default(),
         filter_draft: None,
@@ -1034,8 +1034,6 @@ fn table_runtime_state_not_serialized() {
     assert!(runtime.cache.is_none());
     assert!(runtime.last_error.is_none());
     assert!(runtime.selection.rows.is_empty());
-    assert_eq!(runtime.scroll_offset, 42.0);
-
     // Note: We can't directly test that TableRuntimeState doesn't implement Serialize,
     // but the type system enforces this - if it derived Serialize, it wouldn't compile
     // because OnceLock doesn't implement Serialize.
@@ -4506,6 +4504,49 @@ fn find_visible_index_for_variable(
         )
 }
 
+fn wait_for_table_cache_ready(
+    state: &mut SystemState,
+    tile_id: TableTileId,
+    expected_model_key: Option<TableModelKey>,
+) {
+    let build_start = std::time::Instant::now();
+    loop {
+        state.handle_async_messages();
+
+        let ready = state.table_runtime.get(&tile_id).is_some_and(|runtime| {
+            runtime.model.is_some()
+                && runtime.cache.as_ref().is_some_and(|entry| {
+                    entry.is_ready()
+                        && expected_model_key
+                            .map_or(true, |model_key| entry.cache_key.model_key == model_key)
+                })
+        });
+        if ready {
+            break;
+        }
+
+        if build_start.elapsed().as_secs() > 10 {
+            panic!("timed out waiting for table cache build");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+fn trigger_table_cache_build_for_tile(state: &mut SystemState, tile_id: TableTileId) {
+    let tile_state = state.user.table_tiles.get(&tile_id).expect("tile state");
+    let cache_key = TableCacheKey {
+        model_key: tile_state.spec.model_key_for_tile(tile_id),
+        display_filter: tile_state.config.display_filter.clone(),
+        view_sort: tile_state.config.sort.clone(),
+        generation: state
+            .user
+            .waves
+            .as_ref()
+            .map_or(0, |waves| waves.cache_generation),
+    };
+    state.update(Message::BuildTableCache { tile_id, cache_key });
+}
+
 #[test]
 fn signal_change_list_model_basic_rows() {
     let _runtime = test_runtime();
@@ -4805,7 +4846,9 @@ fn signal_analysis_model_non_empty_field_disables_numeric_metrics() {
 
 #[test]
 fn analysis_results_default_view_config_sets_sort_and_activation() {
-    let state = SystemState::new_default_config().expect("state");
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = load_counter_state();
     let ctx = state.table_model_context();
     let spec = TableModelSpec::AnalysisResults {
         kind: AnalysisKind::SignalAnalysisV1,
@@ -4825,7 +4868,7 @@ fn analysis_results_default_view_config_sets_sort_and_activation() {
     };
 
     let config = spec.default_view_config(&ctx);
-    assert_eq!(config.title, "Signal Analysis: tb.clk");
+    assert_eq!(config.title, "Signal Analysis: tb.clk (posedge)");
     assert_eq!(config.selection_mode, TableSelectionMode::Single);
     assert!(config.activate_on_select);
     assert_eq!(
@@ -4869,6 +4912,7 @@ fn run_signal_analysis_creates_analysis_tile_and_preloads_signals() {
         .iter()
         .next()
         .expect("analysis tile should exist");
+    assert_eq!(tile_state.config.title, "Signal Analysis: tb.clk (posedge)");
     match &tile_state.spec {
         TableModelSpec::AnalysisResults {
             kind: AnalysisKind::SignalAnalysisV1,
@@ -4905,6 +4949,45 @@ fn run_signal_analysis_creates_analysis_tile_and_preloads_signals() {
             variable.full_path_string()
         );
     }
+}
+
+#[test]
+fn signal_analysis_table_tile_state_round_trips_through_user_state_ron() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    let config = SignalAnalysisConfig {
+        sampling: SignalAnalysisSamplingConfig {
+            signal: VariableRef::from_hierarchy_string("tb.clk"),
+        },
+        signals: vec![SignalAnalysisSignal {
+            variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+            field: vec![],
+            translator: "Unsigned".to_string(),
+        }],
+        run_revision: 9,
+    };
+
+    state.update(Message::RunSignalAnalysis { config });
+
+    let tile_id = *state.user.table_tiles.keys().next().expect("analysis tile");
+    let tile_state = state
+        .user
+        .table_tiles
+        .get(&tile_id)
+        .expect("analysis tile state");
+    assert_eq!(tile_state.config.title, "Signal Analysis: tb.clk (posedge)");
+
+    let encoded = ron::ser::to_string(&state.user).expect("serialize user state");
+    let decoded: crate::state::UserState =
+        ron::de::from_str(&encoded).expect("deserialize user state");
+
+    let restored_tile_state = decoded
+        .table_tiles
+        .get(&tile_id)
+        .expect("restored analysis tile");
+    assert_eq!(restored_tile_state.spec, tile_state.spec);
+    assert_eq!(restored_tile_state.config, tile_state.config);
 }
 
 #[test]
@@ -5167,6 +5250,77 @@ fn signal_analysis_model_key_changes_on_refresh_run_revision() {
 }
 
 #[test]
+fn refresh_signal_analysis_rebuilds_with_current_markers() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    let config = SignalAnalysisConfig {
+        sampling: SignalAnalysisSamplingConfig {
+            signal: VariableRef::from_hierarchy_string("tb.clk"),
+        },
+        signals: vec![SignalAnalysisSignal {
+            variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+            field: vec![],
+            translator: "Unsigned".to_string(),
+        }],
+        run_revision: 0,
+    };
+
+    state.update(Message::RunSignalAnalysis { config });
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile");
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+    let initial_model_key = state.user.table_tiles[&tile_id]
+        .spec
+        .model_key_for_tile(tile_id);
+    trigger_table_cache_build_for_tile(&mut state, tile_id);
+    wait_for_table_cache_ready(&mut state, tile_id, Some(initial_model_key));
+
+    let initial_row_count = state
+        .table_runtime
+        .get(&tile_id)
+        .and_then(|runtime| runtime.cache.as_ref())
+        .and_then(|entry| entry.get())
+        .map_or(0, |cache| cache.row_ids.len());
+    assert_eq!(
+        initial_row_count, 1,
+        "expected global-only result before markers"
+    );
+
+    state.update(Message::SetMarker {
+        id: 1,
+        time: num::BigInt::from(5u64),
+    });
+    state.update(Message::RefreshSignalAnalysis { tile_id });
+
+    let tile_state = state.user.table_tiles.get(&tile_id).expect("tile state");
+    let refreshed_model_key = tile_state.spec.model_key_for_tile(tile_id);
+    assert_ne!(initial_model_key, refreshed_model_key);
+    match &tile_state.spec {
+        TableModelSpec::AnalysisResults {
+            kind: AnalysisKind::SignalAnalysisV1,
+            params:
+                AnalysisParams::SignalAnalysisV1 {
+                    config: refreshed_config,
+                },
+        } => assert_eq!(refreshed_config.run_revision, 1),
+        other => panic!("expected signal-analysis spec, got {other:?}"),
+    }
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+    trigger_table_cache_build_for_tile(&mut state, tile_id);
+    wait_for_table_cache_ready(&mut state, tile_id, Some(refreshed_model_key));
+
+    let refreshed_row_count = state
+        .table_runtime
+        .get(&tile_id)
+        .and_then(|runtime| runtime.cache.as_ref())
+        .and_then(|entry| entry.get())
+        .map_or(0, |cache| cache.row_ids.len());
+    assert_eq!(refreshed_row_count, 3);
+}
+
+#[test]
 fn edit_signal_analysis_run_updates_existing_tile_and_bumps_revision() {
     let _runtime = test_runtime();
     let _guard = _runtime.enter();
@@ -5255,7 +5409,7 @@ fn stale_signal_analysis_result_does_not_evict_current_inflight_entry() {
             cache: Some(current_entry.clone()),
             last_error: None,
             selection: TableSelection::default(),
-            scroll_offset: 0.0,
+
             type_search: TypeSearchState::default(),
             scroll_state: TableScrollState::default(),
             filter_draft: None,
@@ -5492,6 +5646,58 @@ fn table_activate_selection_moves_cursor() {
     runtime.selection = selection;
 
     state.update(Message::TableActivateSelection { tile_id });
+    let cursor = state.user.waves.as_ref().expect("waves").cursor.clone();
+    assert_eq!(cursor, Some(expected_time));
+}
+
+#[test]
+fn signal_analysis_selection_moves_cursor_to_interval_end() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::SetMarker {
+        id: 1,
+        time: num::BigInt::from(5u64),
+    });
+
+    state.update(Message::RunSignalAnalysis {
+        config: SignalAnalysisConfig {
+            sampling: SignalAnalysisSamplingConfig {
+                signal: VariableRef::from_hierarchy_string("tb.clk"),
+            },
+            signals: vec![SignalAnalysisSignal {
+                variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                field: vec![],
+                translator: "Unsigned".to_string(),
+            }],
+            run_revision: 0,
+        },
+    });
+
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile");
+    wait_for_waves_fully_loaded(&mut state, 10);
+    let model_key = state.user.table_tiles[&tile_id]
+        .spec
+        .model_key_for_tile(tile_id);
+    trigger_table_cache_build_for_tile(&mut state, tile_id);
+    wait_for_table_cache_ready(&mut state, tile_id, Some(model_key));
+
+    let model = state
+        .table_runtime
+        .get(&tile_id)
+        .and_then(|runtime| runtime.model.clone())
+        .expect("analysis model");
+    let row_id = model.row_id_at(0).expect("first interval row");
+    let expected_time = match model.on_activate(row_id) {
+        TableAction::CursorSet(time) => time,
+        other => panic!("expected CursorSet, got {other:?}"),
+    };
+
+    let mut selection = TableSelection::new();
+    selection.rows.insert(row_id);
+    selection.anchor = Some(row_id);
+    state.update(Message::SetTableSelection { tile_id, selection });
+
     let cursor = state.user.waves.as_ref().expect("waves").cursor.clone();
     assert_eq!(cursor, Some(expected_time));
 }
@@ -7245,7 +7451,7 @@ fn stale_revision_ignored_on_cache_built() {
             cache: None,
             last_error: None,
             selection: TableSelection::default(),
-            scroll_offset: 0.0,
+
             type_search: TypeSearchState::default(),
             scroll_state: TableScrollState::default(),
             filter_draft: None,
@@ -7317,7 +7523,7 @@ fn selection_preserved_across_cancelled_build() {
             cache: None,
             last_error: None,
             selection,
-            scroll_offset: 0.0,
+
             type_search: TypeSearchState::default(),
             scroll_state: TableScrollState::default(),
             filter_draft: None,

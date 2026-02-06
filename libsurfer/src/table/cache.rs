@@ -277,8 +277,6 @@ pub struct TableRuntimeState {
     pub last_error: Option<TableCacheError>,
     /// Runtime selection state (keyed by TableRowId for stability across sort/filter).
     pub selection: super::model::TableSelection,
-    /// Vertical scroll offset in pixels.
-    pub scroll_offset: f32,
     /// Type-to-search state for keyboard navigation.
     pub type_search: TypeSearchState,
     /// Scroll state for tracking scroll targets and generation changes.
@@ -302,7 +300,6 @@ impl std::fmt::Debug for TableRuntimeState {
             .field("cache", &self.cache)
             .field("last_error", &self.last_error)
             .field("selection", &self.selection)
-            .field("scroll_offset", &self.scroll_offset)
             .field("type_search", &self.type_search)
             .field("scroll_state", &self.scroll_state)
             .field("filter_draft", &self.filter_draft)
