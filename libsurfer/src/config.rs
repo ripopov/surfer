@@ -453,6 +453,10 @@ pub struct SurferTheme {
     ///  Line style for cursor
     pub cursor: SurferLineStyle,
 
+    /// Line style for markers (defaults to cursor style if not specified)
+    #[serde(default)]
+    pub marker: Option<SurferLineStyle>,
+
     /// Line style for mouse gesture lines
     pub gesture: SurferLineStyle,
 
@@ -859,6 +863,15 @@ fn get_luminance(color: Color32) -> f32 {
 }
 
 impl SurferTheme {
+    /// Default marker color, falling back to cursor color if no marker style is set
+    #[must_use]
+    pub fn marker_color(&self) -> Color32 {
+        self.marker
+            .as_ref()
+            .map(|m| m.color)
+            .unwrap_or(self.cursor.color)
+    }
+
     #[must_use]
     pub fn get_color(&self, color: &str) -> Option<Color32> {
         self.colors.get(color).copied()

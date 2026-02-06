@@ -900,14 +900,14 @@ impl SystemState {
             &self.user.config.theme,
         );
 
-        waves.draw_cursor(
+        waves.draw_markers(
             &self.user.config.theme,
             &mut ctx,
             response.rect.size(),
             &waves.viewports[viewport_idx],
         );
 
-        waves.draw_markers(
+        waves.draw_cursor(
             &self.user.config.theme,
             &mut ctx,
             response.rect.size(),

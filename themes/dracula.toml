@@ -28,6 +28,7 @@ waveform_opacity = 0.2
 wide_opacity = 0.1
 
 cursor = { color = "ff79c6", width = 1 }
+marker = { color = "bd93f9", width = 1 }
 gesture = { color = "ffb86c", width = 1 }
 measure = { color = "8be9fd", width = 1 }
 
