@@ -71,6 +71,16 @@ impl SignalAccessor {
             SignalAccessor::Wellen(accessor) => accessor.iter_changes(),
         }
     }
+
+    /// Query the signal value at or before the given time.
+    ///
+    /// Returns `None` if there is no transition at or before `time_u64`.
+    #[must_use]
+    pub fn query_at_time(&self, time_u64: u64) -> Option<VariableValue> {
+        match self {
+            SignalAccessor::Wellen(accessor) => accessor.query_at_time(time_u64),
+        }
+    }
 }
 
 #[derive(Debug, Default)]

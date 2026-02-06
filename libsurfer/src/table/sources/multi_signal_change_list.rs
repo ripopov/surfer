@@ -5,20 +5,18 @@ use crate::table::{
     TableColumnKey, TableModel, TableModelContext, TableRowId, TableSchema, TableSortKey,
 };
 use crate::time::TimeFormatter;
-use crate::translation::{AnyTranslator, TranslatorList};
+use crate::translation::{AnyTranslator, TranslationResultExt, TranslatorList};
 use crate::wave_container::{SignalAccessor, VariableMeta, VariableRefExt};
+use egui::RichText;
 use num::BigInt;
 use std::sync::OnceLock;
+use surfer_translation_types::Translator;
 use tracing::warn;
 
 const TIME_COLUMN_KEY: &str = "time";
 const SIGNAL_COLUMN_KEY_PREFIX: &str = "sig:v1:";
 
 /// Resolved per-signal entry metadata for the multi-signal model.
-///
-/// Fields like `meta`, `field`, `translator`, `translators`, `root_format`, and
-/// `field_formats` are stored now but used in Stage 6 for on-demand cell materialization.
-#[allow(dead_code)]
 struct ResolvedSignalEntry {
     meta: VariableMeta,
     field: Vec<String>,
@@ -175,6 +173,90 @@ impl MultiSignalChangeListModel {
             .map(|entry| entry.accessor.iter_changes().map(|(time, _)| time));
         MergedIndex::from_transition_time_iters(transition_iters)
     }
+
+    /// Classify a signal cell at a given row timestamp.
+    ///
+    /// Returns `(CellState, run_len)` where `run_len > 1` indicates collapsed same-time runs.
+    fn classify_cell(&self, signal_idx: usize, time_u64: u64) -> (CellState, u16) {
+        let index = self.index();
+        if let Some(run) = index.exact_run(signal_idx, time_u64) {
+            (CellState::Transition, run.run_len)
+        } else if index.previous_run(signal_idx, time_u64).is_some() {
+            (CellState::Held, 1)
+        } else {
+            (CellState::NoData, 1)
+        }
+    }
+
+    /// Format a signal value using its translator, mirroring `SignalChangeListModel::format_value`.
+    fn format_signal_value(
+        entry: &ResolvedSignalEntry,
+        value: &surfer_translation_types::VariableValue,
+    ) -> (String, Option<f64>) {
+        let numeric = if entry.field.is_empty() {
+            entry.translator.translate_numeric(&entry.meta, value)
+        } else {
+            None
+        };
+
+        match entry.translator.translate(&entry.meta, value) {
+            Ok(translated) => {
+                let fields = translated.format_flat(
+                    &entry.root_format,
+                    &entry.field_formats,
+                    &entry.translators,
+                );
+                let match_field = fields.iter().find(|res| res.names == entry.field);
+                match match_field.and_then(|res| res.value.as_ref()) {
+                    Some(val) => (val.value.clone(), numeric),
+                    None => ("\u{2014}".to_string(), numeric),
+                }
+            }
+            Err(_) => ("\u{2014}".to_string(), numeric),
+        }
+    }
+
+    /// Materialize a signal cell's display text and numeric value.
+    fn materialize_signal_cell(
+        &self,
+        signal_idx: usize,
+        time_u64: u64,
+    ) -> (CellState, String, Option<f64>, u16) {
+        let (state, run_len) = self.classify_cell(signal_idx, time_u64);
+        let entry = &self.entries[signal_idx];
+
+        match state {
+            CellState::Transition | CellState::Held => {
+                match entry.accessor.query_at_time(time_u64) {
+                    Some(value) => {
+                        let (text, numeric) = Self::format_signal_value(entry, &value);
+                        if state == CellState::Transition && run_len > 1 {
+                            let collapsed = format!("{text} (+{})", run_len - 1);
+                            (state, collapsed, numeric, run_len)
+                        } else {
+                            (state, text, numeric, run_len)
+                        }
+                    }
+                    None => (CellState::NoData, EM_DASH.to_string(), None, run_len),
+                }
+            }
+            CellState::NoData => (CellState::NoData, EM_DASH.to_string(), None, run_len),
+        }
+    }
+}
+
+/// Em dash used for no-data cells.
+const EM_DASH: &str = "\u{2014}";
+
+/// Cell state classification for multi-signal table cells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CellState {
+    /// Signal has a transition at this exact time.
+    Transition,
+    /// Signal holds its value from a previous transition.
+    Held,
+    /// No data exists for this signal at or before this time.
+    NoData,
 }
 
 impl TableModel for MultiSignalChangeListModel {
@@ -219,21 +301,49 @@ impl TableModel for MultiSignalChangeListModel {
             let time = BigInt::from(row.0);
             return TableCell::Text(self.time_formatter.format(&time));
         }
-        // Signal columns use placeholder for now (Stage 6 will add full materialization)
-        TableCell::Text(String::new())
+
+        let signal_idx = col - 1;
+        if signal_idx >= self.entries.len() {
+            return TableCell::Text(String::new());
+        }
+
+        let (state, text, _, _) = self.materialize_signal_cell(signal_idx, row.0);
+        match state {
+            CellState::Transition => TableCell::Text(text),
+            CellState::Held | CellState::NoData => TableCell::RichText(RichText::new(text).weak()),
+        }
     }
 
     fn sort_key(&self, row: TableRowId, col: usize) -> TableSortKey {
         if col == 0 {
             return TableSortKey::Numeric(row.0 as f64);
         }
-        // Signal columns use placeholder for now (Stage 6 will add full materialization)
-        TableSortKey::None
+
+        let signal_idx = col - 1;
+        if signal_idx >= self.entries.len() {
+            return TableSortKey::None;
+        }
+
+        let (state, text, numeric, _) = self.materialize_signal_cell(signal_idx, row.0);
+        match state {
+            CellState::NoData => TableSortKey::None,
+            CellState::Transition | CellState::Held => match numeric {
+                Some(n) => TableSortKey::Numeric(n),
+                None => TableSortKey::Text(text),
+            },
+        }
     }
 
     fn search_text(&self, row: TableRowId) -> String {
         let time = BigInt::from(row.0);
-        self.time_formatter.format(&time)
+        let mut parts = vec![self.time_formatter.format(&time)];
+
+        for signal_idx in 0..self.entries.len() {
+            let (_, text, _, _) = self.materialize_signal_cell(signal_idx, row.0);
+            parts.push(text);
+        }
+
+        parts.join(" ")
     }
 
     fn on_activate(&self, row: TableRowId) -> TableAction {

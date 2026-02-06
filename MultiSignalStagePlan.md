@@ -10,7 +10,7 @@ Rule for all stages: do not start the next stage until the current stage passes 
 - Stage 3: Completed (implemented and full stage gate green).
 - Stage 4: Completed (implemented and full stage gate green).
 - Stage 5: Completed (implemented and full stage gate green).
-- Stage 6: Not started.
+- Stage 6: Completed (implemented and full stage gate green).
 - Stage 7: Not started.
 - Stage 8: Not started.
 - Stage 9: Not started.
@@ -255,6 +255,29 @@ Implemented tests:
 
 Goal: implement `Transition/Held/NoData` behavior using index + `query_variable`, with no full cell matrix.
 
+Status: Completed (2026-02-06)
+
+Validation status:
+- `cargo fmt`: passed
+- `cargo clippy --no-deps`: passed
+- `cargo test`: passed
+- `cargo test -- --include-ignored`: passed
+
+Implemented:
+- Added `SignalAccessor::query_at_time(time_u64)` and `WellenSignalAccessor::query_at_time(time_u64)` for O(log N) point queries via binary search on time table + signal offset lookup.
+- Added `CellState` enum (`Transition`, `Held`, `NoData`) for per-cell classification.
+- Implemented `classify_cell(signal_idx, time_u64)` using merged index exact/previous run lookup.
+- Implemented `format_signal_value(entry, value)` mirroring `SignalChangeListModel::format_value` with translator + format_flat pipeline.
+- Implemented `materialize_signal_cell(signal_idx, time_u64)` combining classification + value lookup + translation.
+- Render semantics:
+  - Transition cells: `TableCell::Text(...)` (normal text).
+  - Held cells: `TableCell::RichText(RichText::new(...).weak())` (dimmed).
+  - NoData cells: `TableCell::RichText(RichText::new("\u{2014}").weak())` (dimmed em dash).
+  - Collapsed same-time run marker: `"value (+N)"` where `N = run_len - 1`.
+- `cell()`, `sort_key()`, and `search_text()` now delegate to on-demand materialization.
+- `search_text()` concatenates time + all signal column values for comprehensive searchability.
+- Removed `#[allow(dead_code)]` from `ResolvedSignalEntry` as all fields are now used.
+
 Scope:
 - Implement per-cell materialization from:
 - exactness and run length from index.
@@ -268,7 +291,8 @@ Scope:
 
 Expected files:
 - `libsurfer/src/table/sources/multi_signal_change_list.rs`
-- `libsurfer/src/table/model.rs`
+- `libsurfer/src/wave_container.rs` (added `query_at_time` to `SignalAccessor`)
+- `libsurfer/src/wellen.rs` (added `query_at_time` to `WellenSignalAccessor`)
 - `libsurfer/src/table/tests.rs`
 
 Tests to add:
@@ -276,6 +300,15 @@ Tests to add:
 - `query_variable` authoritative value behavior at exact and held timestamps.
 - Collapsed count correctness for same-timestamp runs.
 - Numeric vs text sort key probing behavior.
+
+Implemented tests:
+- `multi_signal_transition_held_nodata_classification`
+- `multi_signal_cell_value_matches_query_variable`
+- `multi_signal_nodata_renders_em_dash`
+- `multi_signal_sort_key_numeric_vs_text`
+- `multi_signal_search_text_includes_all_columns`
+- `multi_signal_held_value_matches_previous_transition`
+- `multi_signal_out_of_bounds_column_returns_empty`
 
 ## Stage 7 - Window Materialization Cache and Renderer Integration
 

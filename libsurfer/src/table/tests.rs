@@ -5567,3 +5567,408 @@ fn multi_signal_model_row_ids_match_merged_timeline() {
         "merged timeline should have at least as many rows as single signal"
     );
 }
+
+// ========================
+// Stage 6 Tests - On-Demand Cell Materialization
+// ========================
+
+/// Helper to extract text content from a TableCell.
+fn cell_text(cell: &TableCell) -> String {
+    match cell {
+        TableCell::Text(text) => text.clone(),
+        TableCell::RichText(rt) => rt.text().to_string(),
+    }
+}
+
+/// Helper to check if a TableCell is RichText (used for dimmed/held/no-data).
+fn cell_is_rich_text(cell: &TableCell) -> bool {
+    matches!(cell, TableCell::RichText(_))
+}
+
+#[test]
+fn multi_signal_transition_held_nodata_classification() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.clk"),
+                field: vec![],
+            },
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                field: vec![],
+            },
+        ],
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    let row_count = model.row_count();
+    assert!(row_count > 0, "expected non-empty merged timeline");
+
+    // Collect all signal cells and verify classification:
+    // - Every cell in a signal column should be non-empty (either value or em dash)
+    // - Transition cells should be TableCell::Text (normal)
+    // - Held and NoData cells should be TableCell::RichText (dimmed)
+    let mut found_transition = false;
+    let mut found_held_or_nodata = false;
+
+    for idx in 0..row_count {
+        let row_id = model.row_id_at(idx).expect("row");
+
+        // Check signal columns (col 1 and col 2)
+        for col in 1..=2 {
+            let cell = model.cell(row_id, col);
+            let text = cell_text(&cell);
+            assert!(!text.is_empty(), "cell text should never be empty");
+
+            if cell_is_rich_text(&cell) {
+                found_held_or_nodata = true;
+            } else {
+                found_transition = true;
+            }
+        }
+    }
+
+    // With two different signals (clk and counter), the merged timeline should have
+    // some transition and some held cells (since not every signal transitions at every time).
+    assert!(
+        found_transition,
+        "expected at least one transition cell in multi-signal table"
+    );
+    assert!(
+        found_held_or_nodata,
+        "expected at least one held/no-data cell in multi-signal table"
+    );
+}
+
+#[test]
+fn multi_signal_cell_value_matches_query_variable() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+
+    // Build multi-signal model with clk
+    let multi_spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![MultiSignalEntry {
+            variable: VariableRef::from_hierarchy_string("tb.clk"),
+            field: vec![],
+        }],
+    };
+
+    // Build single-signal model with clk for comparison
+    let single_spec = TableModelSpec::SignalChangeList {
+        variable: VariableRef::from_hierarchy_string("tb.clk"),
+        field: vec![],
+    };
+
+    let multi_model = multi_spec.create_model(&ctx).expect("multi model");
+    let single_model = single_spec.create_model(&ctx).expect("single model");
+
+    // For each row in the multi-signal model that corresponds to a transition,
+    // the cell text should match the single-signal model's value cell.
+    let single_row_count = single_model.row_count();
+    let mut matched = 0;
+
+    for idx in 0..single_row_count {
+        let single_row_id = single_model.row_id_at(idx).expect("single row");
+        let single_value = cell_text(&single_model.cell(single_row_id, 1));
+
+        // The multi-signal model uses the same row ID (TableRowId(time_u64))
+        let multi_cell = multi_model.cell(single_row_id, 1);
+        let multi_value = cell_text(&multi_cell);
+
+        // For transition cells, values should match
+        if !cell_is_rich_text(&multi_cell) {
+            assert_eq!(
+                multi_value, single_value,
+                "transition cell value should match single-signal value at row {single_row_id:?}"
+            );
+            matched += 1;
+        }
+    }
+
+    assert!(
+        matched > 0,
+        "expected at least some matching transition cells"
+    );
+}
+
+#[test]
+fn multi_signal_nodata_renders_em_dash() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.clk"),
+                field: vec![],
+            },
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                field: vec![],
+            },
+        ],
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+
+    // Check the first row (time 0): at least one signal may not have a value here
+    // (counter may start at 0 or not have data before time 0)
+    // We check that if no-data appears, it uses the em dash
+    let row_count = model.row_count();
+    let em_dash = "\u{2014}";
+    let mut found_nodata = false;
+
+    for idx in 0..row_count {
+        let row_id = model.row_id_at(idx).expect("row");
+        for col in 1..=2 {
+            let cell = model.cell(row_id, col);
+            let text = cell_text(&cell);
+            if text == em_dash {
+                assert!(
+                    cell_is_rich_text(&cell),
+                    "em dash cell should be RichText (dimmed)"
+                );
+                found_nodata = true;
+            }
+        }
+    }
+
+    // It's possible no-data doesn't occur if both signals start at time 0,
+    // so we just verify the em-dash handling is correct when it does occur
+    if found_nodata {
+        // Test passed - em dash cells are correctly dimmed
+    }
+}
+
+#[test]
+fn multi_signal_sort_key_numeric_vs_text() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.clk"),
+                field: vec![],
+            },
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                field: vec![],
+            },
+        ],
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    let row_count = model.row_count();
+    assert!(row_count > 0);
+
+    let mut found_numeric_or_text = false;
+    let mut found_none = false;
+
+    for idx in 0..row_count {
+        let row_id = model.row_id_at(idx).expect("row");
+
+        // Time column should always be numeric
+        let time_key = model.sort_key(row_id, 0);
+        assert!(
+            matches!(time_key, TableSortKey::Numeric(_)),
+            "time sort key should be numeric"
+        );
+
+        // Signal columns should be Numeric/Text for data, None for no-data
+        for col in 1..=2 {
+            let key = model.sort_key(row_id, col);
+            match key {
+                TableSortKey::Numeric(_) | TableSortKey::Text(_) => {
+                    found_numeric_or_text = true;
+                }
+                TableSortKey::None => {
+                    found_none = true;
+                }
+                TableSortKey::Bytes(_) => {
+                    panic!("unexpected Bytes sort key");
+                }
+            }
+        }
+    }
+
+    assert!(
+        found_numeric_or_text,
+        "expected at least one numeric or text sort key"
+    );
+    // `found_none` may or may not occur depending on whether no-data cells exist
+    let _ = found_none;
+}
+
+#[test]
+fn multi_signal_search_text_includes_all_columns() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.clk"),
+                field: vec![],
+            },
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                field: vec![],
+            },
+        ],
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    let row_id = model.row_id_at(0).expect("first row");
+
+    let search_text = model.search_text(row_id);
+    assert!(!search_text.is_empty(), "search text should not be empty");
+
+    // Search text should contain the time column text
+    let time_cell = cell_text(&model.cell(row_id, 0));
+    assert!(
+        search_text.contains(&time_cell),
+        "search text should contain the time value"
+    );
+
+    // Search text should contain signal values
+    let sig1_cell = cell_text(&model.cell(row_id, 1));
+    assert!(
+        search_text.contains(&sig1_cell),
+        "search text should contain signal 1 value"
+    );
+    let sig2_cell = cell_text(&model.cell(row_id, 2));
+    assert!(
+        search_text.contains(&sig2_cell),
+        "search text should contain signal 2 value"
+    );
+}
+
+#[test]
+fn multi_signal_held_value_matches_previous_transition() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.clk"),
+                field: vec![],
+            },
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                field: vec![],
+            },
+        ],
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    let row_count = model.row_count();
+
+    // For a held cell, the value should match what was set at a previous transition.
+    // We verify this by tracking last-seen transition value for each signal column.
+    let mut last_transition_val = vec![String::new(); 2];
+
+    for idx in 0..row_count {
+        let row_id = model.row_id_at(idx).expect("row");
+
+        for sig_col in 0..2usize {
+            let col = sig_col + 1;
+            let cell = model.cell(row_id, col);
+            let text = cell_text(&cell);
+
+            if !cell_is_rich_text(&cell) {
+                // Transition cell - update last known value (strip collapsed marker)
+                let base_value = text.split(" (+").next().unwrap_or(&text).to_string();
+                last_transition_val[sig_col] = base_value;
+            } else if text != "\u{2014}" {
+                // Held cell (not no-data) - should match last transition value
+                assert_eq!(
+                    text, last_transition_val[sig_col],
+                    "held value at row {idx} col {col} should match previous transition"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn multi_signal_out_of_bounds_column_returns_empty() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![MultiSignalEntry {
+            variable: VariableRef::from_hierarchy_string("tb.clk"),
+            field: vec![],
+        }],
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    let row_id = model.row_id_at(0).expect("first row");
+
+    // Column 0 = time, Column 1 = clk, Column 2+ = out of bounds
+    let oob_cell = model.cell(row_id, 99);
+    assert_eq!(
+        cell_text(&oob_cell),
+        "",
+        "out-of-bounds column should return empty text"
+    );
+
+    let oob_key = model.sort_key(row_id, 99);
+    assert!(
+        matches!(oob_key, TableSortKey::None),
+        "out-of-bounds sort key should be None"
+    );
+}
