@@ -174,6 +174,77 @@ fn table_view_config_round_trip() {
     assert_eq!(config, decoded);
 }
 
+#[test]
+fn signal_analysis_config_ron_round_trip() {
+    let config = SignalAnalysisConfig {
+        sampling: SignalAnalysisSamplingConfig {
+            signal: VariableRef::from_hierarchy_string("tb.clk"),
+        },
+        signals: vec![
+            SignalAnalysisSignal {
+                variable: VariableRef::from_hierarchy_string("tb.data_out"),
+                field: vec![],
+                translator: "Unsigned".to_string(),
+            },
+            SignalAnalysisSignal {
+                variable: VariableRef::from_hierarchy_string("tb.counter"),
+                field: vec!["value".to_string()],
+                translator: "Signed".to_string(),
+            },
+        ],
+        run_revision: 7,
+    };
+
+    let encoded = ron::ser::to_string(&config).expect("serialize SignalAnalysisConfig");
+    let decoded: SignalAnalysisConfig =
+        ron::de::from_str(&encoded).expect("deserialize SignalAnalysisConfig");
+
+    assert_eq!(config, decoded);
+}
+
+#[test]
+fn table_model_spec_analysis_results_signal_analysis_v1_ron_round_trip() {
+    let spec = TableModelSpec::AnalysisResults {
+        kind: AnalysisKind::SignalAnalysisV1,
+        params: AnalysisParams::SignalAnalysisV1 {
+            config: SignalAnalysisConfig {
+                sampling: SignalAnalysisSamplingConfig {
+                    signal: VariableRef::from_hierarchy_string("tb.clk"),
+                },
+                signals: vec![SignalAnalysisSignal {
+                    variable: VariableRef::from_hierarchy_string("tb.data_out"),
+                    field: vec![],
+                    translator: "Unsigned".to_string(),
+                }],
+                run_revision: 0,
+            },
+        },
+    };
+
+    let encoded = ron::ser::to_string(&spec).expect("serialize TableModelSpec::AnalysisResults");
+    let decoded: TableModelSpec =
+        ron::de::from_str(&encoded).expect("deserialize TableModelSpec::AnalysisResults");
+
+    assert!(encoded.contains("SignalAnalysisV1"));
+    assert_eq!(spec, decoded);
+}
+
+#[test]
+fn table_model_spec_analysis_results_placeholder_ron_round_trip() {
+    let spec = TableModelSpec::AnalysisResults {
+        kind: AnalysisKind::Placeholder,
+        params: AnalysisParams::Placeholder {
+            payload: "{}".to_string(),
+        },
+    };
+
+    let encoded = ron::ser::to_string(&spec).expect("serialize placeholder analysis spec");
+    let decoded: TableModelSpec =
+        ron::de::from_str(&encoded).expect("deserialize placeholder analysis spec");
+
+    assert_eq!(spec, decoded);
+}
+
 // ========================
 // Stage 2 Tests
 // ========================

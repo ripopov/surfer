@@ -43,7 +43,7 @@ pub enum TableModelSpec {
     SearchResults {
         source_query: TableSearchSpec,
     },
-    /// Deferred to v2: AnalysisKind and AnalysisParams will define derived metrics.
+    /// Derived analysis models and their typed parameters.
     AnalysisResults {
         kind: AnalysisKind,
         params: AnalysisParams,
@@ -545,16 +545,50 @@ impl MaterializedWindow {
     }
 }
 
-/// Deferred analysis kind (v2).
+/// Config for signal-analysis table model.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SignalAnalysisConfig {
+    pub sampling: SignalAnalysisSamplingConfig,
+    pub signals: Vec<SignalAnalysisSignal>,
+    #[serde(default)]
+    pub run_revision: u64,
+}
+
+/// Sampling signal selection for signal analysis.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SignalAnalysisSamplingConfig {
+    pub signal: VariableRef,
+}
+
+/// Per-signal analysis configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SignalAnalysisSignal {
+    pub variable: VariableRef,
+    #[serde(default)]
+    pub field: Vec<String>,
+    pub translator: String,
+}
+
+/// Resolved sampling behavior (derived from sampling signal metadata).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SignalAnalysisSamplingMode {
+    Event,
+    PosEdge,
+    AnyChange,
+}
+
+/// Kind of analysis model.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AnalysisKind {
     Placeholder,
+    SignalAnalysisV1,
 }
 
-/// Deferred analysis parameters (v2).
+/// Parameters for analysis model kinds.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct AnalysisParams {
-    pub payload: String,
+pub enum AnalysisParams {
+    Placeholder { payload: String },
+    SignalAnalysisV1 { config: SignalAnalysisConfig },
 }
 
 pub trait TableModel: Send + Sync {
