@@ -7,7 +7,7 @@ Rule for all stages: do not start the next stage until the current stage passes 
 
 - Stage 1: Completed (implemented and table test suite green).
 - Stage 2: Completed (implemented and full stage gate green).
-- Stage 3: Not started.
+- Stage 3: Completed (implemented and full stage gate green).
 - Stage 4: Not started.
 - Stage 5: Not started.
 - Stage 6: Not started.
@@ -107,6 +107,21 @@ Tests to add:
 
 Goal: make table cache capable of index-only row storage for models that opt into lazy probing.
 
+Status: Completed (2026-02-06)
+
+Validation status:
+- `cargo fmt`: passed
+- `cargo clippy --no-deps`: passed
+- `cargo test`: passed
+- `cargo test -- --include-ignored`: passed
+
+Implemented:
+- Added `SearchTextMode` (`Eager`, `LazyProbe`) on `TableModel` to let models opt into lazy search probing.
+- Refactored `TableCache` to keep `row_ids`/`row_index` as durable core and make eager `search_texts` optional.
+- Refactored `build_table_cache(...)` to use batch `materialize_window(...)` probes for search and sort paths.
+- Added lazy filtering and type-search probe flow while keeping eager behavior unchanged for existing models.
+- Updated table view keyboard type-search to use cache-aware eager/lazy probing via `find_type_search_match_in_cache(...)`.
+
 Scope:
 - Refactor `TableCache` to store row ordering/index as the durable cache core.
 - Add lazy search probe path used by filtering and type-to-search when model does not provide eager `search_texts`.
@@ -123,6 +138,12 @@ Tests to add:
 - Filtering correctness for eager models (no behavior change).
 - Type-to-search correctness with lazy probe provider.
 - Cache shape regression tests verifying row IDs and row index stability.
+
+Implemented tests:
+- `table_cache_builder_filters_contains`
+- `table_cache_builder_lazy_probe_keeps_index_only_cache_shape`
+- `type_search_uses_lazy_probe_provider_when_eager_cache_absent`
+- `test_row_index_lookup_consistency`
 
 ## Stage 4 - Pure Merged Index Builder (No UI Wiring Yet)
 

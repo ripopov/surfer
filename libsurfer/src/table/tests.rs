@@ -384,6 +384,106 @@ fn table_model_materialize_window_default_adapter_matches_legacy_methods() {
 // Stage 3 Tests
 // ========================
 
+#[derive(Clone)]
+struct LazyProbeTestModel {
+    rows: Vec<(TableRowId, f64, String)>,
+}
+
+impl LazyProbeTestModel {
+    fn row(&self, row: TableRowId) -> Option<&(TableRowId, f64, String)> {
+        self.rows.iter().find(|(id, _, _)| *id == row)
+    }
+}
+
+impl TableModel for LazyProbeTestModel {
+    fn schema(&self) -> TableSchema {
+        TableSchema {
+            columns: vec![TableColumn {
+                key: TableColumnKey::Str("col".to_string()),
+                label: "Col".to_string(),
+                default_width: None,
+                default_visible: true,
+                default_resizable: true,
+            }],
+        }
+    }
+
+    fn row_count(&self) -> usize {
+        self.rows.len()
+    }
+
+    fn row_id_at(&self, index: usize) -> Option<TableRowId> {
+        self.rows.get(index).map(|(id, _, _)| *id)
+    }
+
+    fn search_text_mode(&self) -> SearchTextMode {
+        SearchTextMode::LazyProbe
+    }
+
+    fn materialize_window(
+        &self,
+        row_ids: &[TableRowId],
+        visible_cols: &[usize],
+        purpose: MaterializePurpose,
+    ) -> MaterializedWindow {
+        let mut window = MaterializedWindow::new();
+        match purpose {
+            MaterializePurpose::Render | MaterializePurpose::Clipboard => {
+                for &row_id in row_ids {
+                    for &col in visible_cols {
+                        if col == 0
+                            && let Some((_, _, text)) = self.row(row_id)
+                        {
+                            window.insert_cell(row_id, col, TableCell::Text(text.clone()));
+                        }
+                    }
+                }
+            }
+            MaterializePurpose::SortProbe => {
+                for &row_id in row_ids {
+                    for &col in visible_cols {
+                        if col == 0
+                            && let Some((_, value, _)) = self.row(row_id)
+                        {
+                            window.insert_sort_key(row_id, col, TableSortKey::Numeric(*value));
+                        }
+                    }
+                }
+            }
+            MaterializePurpose::SearchProbe => {
+                for &row_id in row_ids {
+                    if let Some((_, _, text)) = self.row(row_id) {
+                        window.insert_search_text(row_id, text.clone());
+                    }
+                }
+            }
+        }
+        window
+    }
+
+    fn cell(&self, row: TableRowId, _col: usize) -> TableCell {
+        let text = self
+            .row(row)
+            .map(|(_, _, text)| text.clone())
+            .unwrap_or_default();
+        TableCell::Text(text)
+    }
+
+    fn sort_key(&self, row: TableRowId, _col: usize) -> TableSortKey {
+        self.row(row)
+            .map(|(_, value, _)| TableSortKey::Numeric(*value))
+            .unwrap_or(TableSortKey::None)
+    }
+
+    fn search_text(&self, _row: TableRowId) -> String {
+        panic!("lazy probe test model should not call eager search_text")
+    }
+
+    fn on_activate(&self, _row: TableRowId) -> TableAction {
+        TableAction::None
+    }
+}
+
 #[test]
 fn table_cache_entry_ready_state() {
     let cache_key = TableCacheKey {
@@ -401,8 +501,8 @@ fn table_cache_entry_ready_state() {
 
     entry.set(TableCache {
         row_ids: vec![],
-        search_texts: vec![],
         row_index: HashMap::new(),
+        search_texts: Some(vec![]),
     });
     assert!(entry.is_ready());
 }
@@ -423,7 +523,14 @@ fn table_cache_builder_unfiltered_unsorted() {
 
     let expected: Vec<_> = (0..5).map(|idx| TableRowId(idx as u64)).collect();
     assert_eq!(cache.row_ids, expected);
-    assert_eq!(cache.search_texts.len(), expected.len());
+    assert_eq!(
+        cache
+            .search_texts
+            .as_ref()
+            .expect("virtual model uses eager search cache")
+            .len(),
+        expected.len()
+    );
     assert_eq!(cache.row_index.len(), expected.len());
 }
 
@@ -442,6 +549,70 @@ fn table_cache_builder_filters_contains() {
     .expect("cache build should succeed");
 
     assert_eq!(cache.row_ids, vec![TableRowId(3)]);
+}
+
+#[test]
+fn table_cache_builder_lazy_probe_keeps_index_only_cache_shape() {
+    let model = Arc::new(LazyProbeTestModel {
+        rows: vec![
+            (TableRowId(10), 5.0, "alpha".to_string()),
+            (TableRowId(11), 1.0, "beta".to_string()),
+            (TableRowId(12), 3.0, "gamma".to_string()),
+        ],
+    });
+
+    let cache = build_table_cache(
+        model,
+        TableSearchSpec {
+            mode: TableSearchMode::Contains,
+            case_sensitive: false,
+            text: "a".to_string(),
+        },
+        vec![TableSortSpec {
+            key: TableColumnKey::Str("col".to_string()),
+            direction: TableSortDirection::Descending,
+        }],
+    )
+    .expect("cache build should succeed");
+
+    assert_eq!(
+        cache.row_ids,
+        vec![TableRowId(10), TableRowId(12), TableRowId(11)]
+    );
+    assert!(cache.search_texts.is_none());
+    for (expected_pos, &row_id) in cache.row_ids.iter().enumerate() {
+        assert_eq!(cache.row_index.get(&row_id), Some(&expected_pos));
+    }
+}
+
+#[test]
+fn type_search_uses_lazy_probe_provider_when_eager_cache_absent() {
+    let model = Arc::new(LazyProbeTestModel {
+        rows: vec![
+            (TableRowId(0), 0.0, "alpha".to_string()),
+            (TableRowId(1), 1.0, "beta".to_string()),
+            (TableRowId(2), 2.0, "gamma".to_string()),
+        ],
+    });
+
+    let cache = build_table_cache(model.clone(), TableSearchSpec::default(), vec![])
+        .expect("cache build should succeed");
+    assert!(cache.search_texts.is_none());
+
+    let mut selection = TableSelection::new();
+    selection.rows.insert(TableRowId(0));
+    selection.anchor = Some(TableRowId(0));
+
+    let match_row = find_type_search_match_in_cache("ga", &selection, &cache, model.as_ref());
+    assert_eq!(match_row, Some(TableRowId(2)));
+
+    let mut wrapped_selection = TableSelection::new();
+    wrapped_selection.rows.insert(TableRowId(2));
+    wrapped_selection.anchor = Some(TableRowId(2));
+
+    let wrapped_match =
+        find_type_search_match_in_cache("al", &wrapped_selection, &cache, model.as_ref());
+    assert_eq!(wrapped_match, Some(TableRowId(0)));
 }
 
 #[test]
@@ -565,7 +736,7 @@ fn table_cache_builder_empty_result() {
     .expect("cache build should succeed");
 
     assert!(cache.row_ids.is_empty());
-    assert!(cache.search_texts.is_empty());
+    assert_eq!(cache.search_texts, Some(vec![]));
     assert!(cache.row_index.is_empty());
 }
 
@@ -639,8 +810,8 @@ fn table_cache_built_stale_key_ignored() {
         entry: entry.clone(),
         result: Ok(TableCache {
             row_ids: vec![],
-            search_texts: vec![],
             row_index: HashMap::new(),
+            search_texts: Some(vec![]),
         }),
     };
 

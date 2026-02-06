@@ -1,6 +1,7 @@
 use super::model::{
-    TableModel, TableModelKey, TableRowId, TableSearchMode, TableSearchSpec, TableSortDirection,
-    TableSortKey, TableSortSpec,
+    MaterializePurpose, SearchTextMode, TableModel, TableModelKey, TableRowId, TableSearchMode,
+    TableSearchSpec, TableSelection, TableSortDirection, TableSortKey, TableSortSpec,
+    find_type_search_match,
 };
 use regex::RegexBuilder;
 use std::cmp::Ordering;
@@ -123,10 +124,15 @@ pub struct TableCacheKey {
 /// Cached table rows and per-row data.
 #[derive(Debug, Clone)]
 pub struct TableCache {
+    /// Durable cache core used by render, selection, scroll and row addressing.
     pub row_ids: Vec<TableRowId>,
-    pub search_texts: Vec<String>,
     pub row_index: HashMap<TableRowId, usize>,
+    /// Optional eager search text cache aligned with `row_ids`.
+    /// Lazy models keep this as `None` and probe on demand.
+    pub search_texts: Option<Vec<String>>,
 }
+
+const SEARCH_PROBE_CHUNK_SIZE: usize = 256;
 
 /// Runtime, non-serialized cache handle.
 #[derive(Debug)]
@@ -384,7 +390,6 @@ impl TableFilter {
 struct RowEntry {
     row_id: TableRowId,
     base_index: usize,
-    search_text: String,
     sort_keys: Vec<TableSortKey>,
 }
 
@@ -413,6 +418,172 @@ fn compare_sort_keys(a: &TableSortKey, b: &TableSortKey) -> Ordering {
     }
 }
 
+fn filter_rows_with_eager_search_texts(
+    model: &dyn TableModel,
+    base_rows: &[(TableRowId, usize)],
+    filter: &TableFilter,
+) -> (Vec<(TableRowId, usize)>, Vec<String>) {
+    let mut filtered_rows = Vec::with_capacity(base_rows.len());
+    let mut search_texts = Vec::with_capacity(base_rows.len());
+
+    for chunk in base_rows.chunks(SEARCH_PROBE_CHUNK_SIZE) {
+        let chunk_row_ids: Vec<TableRowId> = chunk.iter().map(|(row_id, _)| *row_id).collect();
+        let search_window =
+            model.materialize_window(&chunk_row_ids, &[], MaterializePurpose::SearchProbe);
+
+        for &(row_id, base_index) in chunk {
+            let search_text = search_window
+                .search_text(row_id)
+                .map(str::to_owned)
+                .unwrap_or_else(|| model.search_text(row_id));
+            if filter.matches(&search_text) {
+                filtered_rows.push((row_id, base_index));
+                search_texts.push(search_text);
+            }
+        }
+    }
+
+    (filtered_rows, search_texts)
+}
+
+fn filter_rows_with_lazy_search_probes(
+    model: &dyn TableModel,
+    base_rows: &[(TableRowId, usize)],
+    filter: &TableFilter,
+) -> Vec<(TableRowId, usize)> {
+    if !filter.is_active() {
+        return base_rows.to_vec();
+    }
+
+    let mut filtered_rows = Vec::with_capacity(base_rows.len());
+    for chunk in base_rows.chunks(SEARCH_PROBE_CHUNK_SIZE) {
+        let chunk_row_ids: Vec<TableRowId> = chunk.iter().map(|(row_id, _)| *row_id).collect();
+        let search_window =
+            model.materialize_window(&chunk_row_ids, &[], MaterializePurpose::SearchProbe);
+
+        for &(row_id, base_index) in chunk {
+            let search_text = search_window
+                .search_text(row_id)
+                .map(str::to_owned)
+                .unwrap_or_else(|| model.search_text(row_id));
+            if filter.matches(&search_text) {
+                filtered_rows.push((row_id, base_index));
+            }
+        }
+    }
+
+    filtered_rows
+}
+
+fn build_row_entries(
+    model: &dyn TableModel,
+    filtered_rows: &[(TableRowId, usize)],
+    sort_columns: &[(usize, TableSortDirection)],
+) -> Vec<RowEntry> {
+    if sort_columns.is_empty() {
+        return filtered_rows
+            .iter()
+            .map(|&(row_id, base_index)| RowEntry {
+                row_id,
+                base_index,
+                sort_keys: Vec::new(),
+            })
+            .collect();
+    }
+
+    let row_ids: Vec<TableRowId> = filtered_rows.iter().map(|(row_id, _)| *row_id).collect();
+    let sort_col_indices: Vec<usize> = sort_columns.iter().map(|(col, _)| *col).collect();
+    let sort_window =
+        model.materialize_window(&row_ids, &sort_col_indices, MaterializePurpose::SortProbe);
+
+    filtered_rows
+        .iter()
+        .map(|&(row_id, base_index)| {
+            let sort_keys = sort_columns
+                .iter()
+                .map(|(col, _)| {
+                    sort_window
+                        .sort_key(row_id, *col)
+                        .cloned()
+                        .unwrap_or_else(|| model.sort_key(row_id, *col))
+                })
+                .collect();
+            RowEntry {
+                row_id,
+                base_index,
+                sort_keys,
+            }
+        })
+        .collect()
+}
+
+fn type_search_start_index(
+    current_selection: &TableSelection,
+    row_index: &HashMap<TableRowId, usize>,
+    len: usize,
+) -> usize {
+    current_selection
+        .anchor
+        .and_then(|anchor| row_index.get(&anchor).copied())
+        .map_or(0, |idx| (idx + 1) % len)
+}
+
+fn type_search_matches_query(query_lower: &str, text: &str) -> bool {
+    let text_lower = text.to_lowercase();
+    text_lower.starts_with(query_lower) || text_lower.contains(query_lower)
+}
+
+/// Finds the best matching row for type-to-search using eager cache data when available.
+/// Falls back to lazy search probes for models that opt out of eager search text storage.
+#[must_use]
+pub fn find_type_search_match_in_cache(
+    query: &str,
+    current_selection: &TableSelection,
+    cache: &TableCache,
+    model: &dyn TableModel,
+) -> Option<TableRowId> {
+    if query.is_empty() || cache.row_ids.is_empty() {
+        return None;
+    }
+
+    if let Some(search_texts) = &cache.search_texts {
+        return find_type_search_match(
+            query,
+            current_selection,
+            &cache.row_ids,
+            search_texts,
+            &cache.row_index,
+        );
+    }
+
+    let query_lower = query.to_lowercase();
+    let start_idx =
+        type_search_start_index(current_selection, &cache.row_index, cache.row_ids.len());
+    let wrapped_indices: Vec<usize> = (start_idx..cache.row_ids.len())
+        .chain(0..start_idx)
+        .collect();
+
+    for index_chunk in wrapped_indices.chunks(SEARCH_PROBE_CHUNK_SIZE) {
+        let chunk_row_ids: Vec<TableRowId> =
+            index_chunk.iter().map(|&idx| cache.row_ids[idx]).collect();
+        let search_window =
+            model.materialize_window(&chunk_row_ids, &[], MaterializePurpose::SearchProbe);
+
+        for &idx in index_chunk {
+            let row_id = cache.row_ids[idx];
+            let search_text = search_window
+                .search_text(row_id)
+                .map(str::to_owned)
+                .unwrap_or_else(|| model.search_text(row_id));
+            if type_search_matches_query(&query_lower, &search_text) {
+                return Some(row_id);
+            }
+        }
+    }
+
+    None
+}
+
 /// Build a table cache by filtering and sorting the model rows.
 pub fn build_table_cache(
     model: Arc<dyn TableModel>,
@@ -429,29 +600,23 @@ pub fn build_table_cache(
         }
     }
 
-    let mut rows: Vec<RowEntry> = Vec::new();
-    for index in 0..model.row_count() {
-        let Some(row_id) = model.row_id_at(index) else {
-            continue;
-        };
+    let base_rows: Vec<(TableRowId, usize)> = (0..model.row_count())
+        .filter_map(|index| model.row_id_at(index).map(|row_id| (row_id, index)))
+        .collect();
 
-        let search_text = model.search_text(row_id);
-        if !filter.matches(&search_text) {
-            continue;
+    let (filtered_rows, search_texts) = match model.search_text_mode() {
+        SearchTextMode::Eager => {
+            let (rows, search_texts) =
+                filter_rows_with_eager_search_texts(model.as_ref(), &base_rows, &filter);
+            (rows, Some(search_texts))
         }
+        SearchTextMode::LazyProbe => (
+            filter_rows_with_lazy_search_probes(model.as_ref(), &base_rows, &filter),
+            None,
+        ),
+    };
 
-        let sort_keys = sort_columns
-            .iter()
-            .map(|(col, _)| model.sort_key(row_id, *col))
-            .collect::<Vec<_>>();
-
-        rows.push(RowEntry {
-            row_id,
-            base_index: index,
-            search_text,
-            sort_keys,
-        });
-    }
+    let mut rows = build_row_entries(model.as_ref(), &filtered_rows, &sort_columns);
 
     if !sort_columns.is_empty() {
         rows.sort_by(|left, right| {
@@ -472,8 +637,8 @@ pub fn build_table_cache(
     let row_index = row_ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
     Ok(TableCache {
         row_ids,
-        search_texts: rows.iter().map(|row| row.search_text.clone()).collect(),
         row_index,
+        search_texts,
     })
 }
 

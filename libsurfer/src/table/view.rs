@@ -4,12 +4,12 @@ use crate::table::{
     FilterDraft, PendingScrollOp, ScrollTarget, TableCache, TableCacheKey, TableCell,
     TableColumnKey, TableModel, TableModelKey, TableRuntimeState, TableSearchMode, TableSearchSpec,
     TableSelection, TableSelectionMode, TableSortSpec, TableTileId, TableTileState,
-    TableViewConfig, find_type_search_match, format_selection_count, hidden_columns, navigate_down,
-    navigate_end, navigate_extend_selection, navigate_home, navigate_page_down, navigate_page_up,
-    navigate_up, scroll_target_after_filter, scroll_target_after_sort, selection_on_click_multi,
-    selection_on_click_single, selection_on_ctrl_click, selection_on_shift_click,
-    should_clear_selection_on_generation_change, sort_indicator, sort_spec_on_click,
-    sort_spec_on_shift_click, visible_columns,
+    TableViewConfig, find_type_search_match_in_cache, format_selection_count, hidden_columns,
+    navigate_down, navigate_end, navigate_extend_selection, navigate_home, navigate_page_down,
+    navigate_page_up, navigate_up, scroll_target_after_filter, scroll_target_after_sort,
+    selection_on_click_multi, selection_on_click_single, selection_on_ctrl_click,
+    selection_on_shift_click, should_clear_selection_on_generation_change, sort_indicator,
+    sort_spec_on_click, sort_spec_on_shift_click, visible_columns,
 };
 use egui_extras::{Column, TableBuilder};
 use std::collections::HashMap;
@@ -388,14 +388,14 @@ fn handle_keyboard_navigation(
                     if let Some(runtime) = state.table_runtime.get(&tile_id)
                         && let Some(cache_entry) = &runtime.cache
                         && let Some(cache) = cache_entry.get()
+                        && let Some(model) = runtime.model.as_deref()
                     {
                         let query = runtime.type_search.buffer.clone();
-                        if let Some(match_row) = find_type_search_match(
+                        if let Some(match_row) = find_type_search_match_in_cache(
                             &query,
                             &runtime.selection,
-                            &cache.row_ids,
-                            &cache.search_texts,
-                            &cache.row_index,
+                            cache,
+                            model,
                         ) {
                             let mut new_selection = TableSelection::new();
                             new_selection.rows.insert(match_row);

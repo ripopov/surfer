@@ -492,6 +492,15 @@ pub enum MaterializePurpose {
     Clipboard,
 }
 
+/// Search text strategy for cache building and type-to-search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SearchTextMode {
+    /// Build and retain eager `search_texts` aligned with visible row order.
+    Eager,
+    /// Probe search text on demand; cache stores row ordering/index only.
+    LazyProbe,
+}
+
 /// Batch materialization output for row/column probe requests.
 #[derive(Debug, Clone, Default)]
 pub struct MaterializedWindow {
@@ -550,6 +559,9 @@ pub trait TableModel: Send + Sync {
     fn schema(&self) -> TableSchema;
     fn row_count(&self) -> usize;
     fn row_id_at(&self, index: usize) -> Option<TableRowId>;
+    fn search_text_mode(&self) -> SearchTextMode {
+        SearchTextMode::Eager
+    }
     fn materialize_window(
         &self,
         row_ids: &[TableRowId],
