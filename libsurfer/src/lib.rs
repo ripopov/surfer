@@ -2239,6 +2239,18 @@ impl SystemState {
                 );
             }
             Message::BuildTableCache { tile_id, cache_key } => {
+                let reusable_model = self.table_runtime.get(&tile_id).and_then(|runtime| {
+                    let model = runtime.model.clone()?;
+                    runtime
+                        .cache_key
+                        .as_ref()
+                        .filter(|existing_key| {
+                            existing_key.model_key == cache_key.model_key
+                                && existing_key.generation == cache_key.generation
+                        })
+                        .map(|_| model)
+                });
+
                 {
                     let runtime = self.table_runtime.entry(tile_id).or_default();
 
@@ -2257,28 +2269,63 @@ impl SystemState {
                     }
                 }
 
-                // Create model from table tile spec
-                let model = match self.user.table_tiles.get(&tile_id) {
-                    Some(tile_state) => {
-                        let model_ctx = self.table_model_context();
-                        match tile_state.spec.create_model(&model_ctx) {
-                            Ok(model) => model,
-                            Err(err) => {
-                                if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
-                                    runtime.last_error = Some(err);
-                                }
-                                return None;
+                enum TableBuildJob {
+                    Model(std::sync::Arc<dyn crate::table::TableModel>),
+                    SignalAnalysis(
+                        crate::table::sources::signal_analysis::PreparedSignalAnalysisModelInput,
+                    ),
+                }
+
+                // Create model from table tile spec. Signal analysis uses a prepared input that
+                // lets heavy model construction happen on the worker thread.
+                let build_job = if let Some(model) = reusable_model {
+                    TableBuildJob::Model(model)
+                } else {
+                    match self.user.table_tiles.get(&tile_id) {
+                        Some(tile_state) => match &tile_state.spec {
+                            crate::table::TableModelSpec::AnalysisResults {
+                                kind: crate::table::AnalysisKind::SignalAnalysisV1,
+                                params: crate::table::AnalysisParams::SignalAnalysisV1 { config },
+                            } => {
+                                let model_ctx = self.table_model_context();
+                                match crate::table::sources::signal_analysis::prepare_signal_analysis_model_input(
+                                        config,
+                                        &model_ctx,
+                                    ) {
+                                        Ok(prepared) => TableBuildJob::SignalAnalysis(prepared),
+                                        Err(err) => {
+                                            if let Some(runtime) =
+                                                self.table_runtime.get_mut(&tile_id)
+                                            {
+                                                runtime.last_error = Some(err);
+                                            }
+                                            return None;
+                                        }
+                                    }
                             }
+                            _ => {
+                                let model_ctx = self.table_model_context();
+                                match tile_state.spec.create_model(&model_ctx) {
+                                    Ok(model) => TableBuildJob::Model(model),
+                                    Err(err) => {
+                                        if let Some(runtime) = self.table_runtime.get_mut(&tile_id)
+                                        {
+                                            runtime.last_error = Some(err);
+                                        }
+                                        return None;
+                                    }
+                                }
+                            }
+                        },
+                        None => {
+                            if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
+                                runtime.last_error =
+                                    Some(crate::table::TableCacheError::ModelNotFound {
+                                        description: "Table tile not found".to_string(),
+                                    });
+                            }
+                            return None;
                         }
-                    }
-                    None => {
-                        if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
-                            runtime.last_error =
-                                Some(crate::table::TableCacheError::ModelNotFound {
-                                    description: "Table tile not found".to_string(),
-                                });
-                        }
-                        return None;
                     }
                 };
 
@@ -2303,24 +2350,53 @@ impl SystemState {
                 runtime.cache_key = Some(cache_key.clone());
                 runtime.cache = Some(entry.clone());
                 runtime.last_error = None;
-                runtime.model = Some(model.clone());
+                runtime.model = match &build_job {
+                    TableBuildJob::Model(model) => Some(model.clone()),
+                    TableBuildJob::SignalAnalysis(_) => None,
+                };
 
                 self.table_inflight.insert(cache_key.clone(), entry.clone());
 
                 let sender = self.channels.msg_sender.clone();
                 let cache_key_for_build = cache_key.clone();
                 crate::async_util::perform_work(move || {
-                    let result = crate::table::build_table_cache(
-                        model,
-                        cache_key_for_build.display_filter.clone(),
-                        cache_key_for_build.view_sort.clone(),
-                        Some(cancel_token),
-                    );
+                    let (model, result) = match build_job {
+                        TableBuildJob::Model(model) => {
+                            let result = crate::table::build_table_cache(
+                                model.clone(),
+                                cache_key_for_build.display_filter.clone(),
+                                cache_key_for_build.view_sort.clone(),
+                                Some(cancel_token),
+                            );
+                            (Some(model), result)
+                        }
+                        TableBuildJob::SignalAnalysis(prepared) => {
+                            match crate::table::sources::SignalAnalysisResultsModel::from_prepared(
+                                prepared,
+                            )
+                            .map(|model| {
+                                std::sync::Arc::new(model)
+                                    as std::sync::Arc<dyn crate::table::TableModel>
+                            }) {
+                                Ok(model) => {
+                                    let result = crate::table::build_table_cache(
+                                        model.clone(),
+                                        cache_key_for_build.display_filter.clone(),
+                                        cache_key_for_build.view_sort.clone(),
+                                        Some(cancel_token),
+                                    );
+                                    (Some(model), result)
+                                }
+                                Err(err) => (None, Err(err)),
+                            }
+                        }
+                    };
 
                     let msg = Message::TableCacheBuilt {
                         tile_id,
                         revision,
                         entry: entry.clone(),
+                        model,
                         result,
                     };
 
@@ -2353,6 +2429,7 @@ impl SystemState {
                 tile_id,
                 revision,
                 entry,
+                model,
                 result,
             } => {
                 OUTSTANDING_TRANSACTIONS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
@@ -2375,6 +2452,10 @@ impl SystemState {
                 // Defense-in-depth: message revision should match entry revision
                 if entry.revision != revision {
                     return None;
+                }
+
+                if let Some(model) = model {
+                    runtime.model = Some(model);
                 }
 
                 self.table_inflight.remove(&entry.cache_key);

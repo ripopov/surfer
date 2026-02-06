@@ -18,7 +18,8 @@ use crate::hierarchy::{ParameterDisplayLocation, ScopeExpandType};
 use crate::state::UserState;
 use crate::table::{
     SignalAnalysisConfig, TableCache, TableCacheEntry, TableCacheError, TableCacheKey,
-    TableColumnKey, TableModelSpec, TableSearchSpec, TableSelection, TableSortSpec, TableTileId,
+    TableColumnKey, TableModel, TableModelSpec, TableSearchSpec, TableSelection, TableSortSpec,
+    TableTileId,
 };
 use crate::transaction_container::{
     StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
@@ -405,6 +406,8 @@ pub enum Message {
         revision: u64,
         #[debug(skip)]
         entry: Arc<TableCacheEntry>,
+        #[debug(skip)]
+        model: Option<Arc<dyn TableModel>>,
         #[debug(skip)]
         result: Result<TableCache, TableCacheError>,
     },

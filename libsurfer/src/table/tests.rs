@@ -889,6 +889,7 @@ fn table_cache_built_stale_key_ignored() {
         tile_id,
         revision: 0,
         entry: entry.clone(),
+        model: None,
         result: Ok(TableCache {
             row_ids: vec![],
             row_index: HashMap::new(),
@@ -4945,6 +4946,14 @@ fn signal_analysis_build_table_cache_flow_completes_after_run() {
         cache_key: cache_key.clone(),
     });
 
+    assert!(
+        state
+            .table_runtime
+            .get(&tile_id)
+            .is_some_and(|runtime| runtime.model.is_none()),
+        "signal-analysis model should be constructed asynchronously"
+    );
+
     let build_start = std::time::Instant::now();
     loop {
         state.handle_async_messages();
@@ -4975,6 +4984,137 @@ fn signal_analysis_build_table_cache_flow_completes_after_run() {
     assert!(
         !cache.row_ids.is_empty(),
         "analysis cache should contain at least the global row"
+    );
+}
+
+#[test]
+fn signal_analysis_sort_reuses_cached_model() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    let config = SignalAnalysisConfig {
+        sampling: SignalAnalysisSamplingConfig {
+            signal: VariableRef::from_hierarchy_string("tb.clk"),
+        },
+        signals: vec![SignalAnalysisSignal {
+            variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+            field: vec![],
+            translator: "Unsigned".to_string(),
+        }],
+        run_revision: 1,
+    };
+
+    state.update(Message::RunSignalAnalysis { config });
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile");
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let tile_state = state.user.table_tiles.get(&tile_id).expect("tile state");
+    let initial_cache_key = TableCacheKey {
+        model_key: tile_state.spec.model_key_for_tile(tile_id),
+        display_filter: tile_state.config.display_filter.clone(),
+        view_sort: tile_state.config.sort.clone(),
+        generation: state
+            .user
+            .waves
+            .as_ref()
+            .map_or(0, |waves| waves.cache_generation),
+    };
+    state.update(Message::BuildTableCache {
+        tile_id,
+        cache_key: initial_cache_key,
+    });
+
+    let initial_build_start = std::time::Instant::now();
+    loop {
+        state.handle_async_messages();
+
+        let ready = state
+            .table_runtime
+            .get(&tile_id)
+            .is_some_and(|runtime| runtime.model.is_some())
+            && state
+                .table_runtime
+                .get(&tile_id)
+                .and_then(|runtime| runtime.cache.as_ref())
+                .is_some_and(|entry| entry.is_ready());
+        if ready {
+            break;
+        }
+
+        if initial_build_start.elapsed().as_secs() > 10 {
+            panic!("timed out waiting for initial signal-analysis cache build");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+
+    let model_before = state
+        .table_runtime
+        .get(&tile_id)
+        .and_then(|runtime| runtime.model.clone())
+        .expect("initial model");
+
+    state.update(Message::SetTableSort {
+        tile_id,
+        sort: vec![TableSortSpec {
+            key: TableColumnKey::Str("interval_end".to_string()),
+            direction: TableSortDirection::Descending,
+        }],
+    });
+
+    let tile_state = state.user.table_tiles.get(&tile_id).expect("tile state");
+    let sort_cache_key = TableCacheKey {
+        model_key: tile_state.spec.model_key_for_tile(tile_id),
+        display_filter: tile_state.config.display_filter.clone(),
+        view_sort: tile_state.config.sort.clone(),
+        generation: state
+            .user
+            .waves
+            .as_ref()
+            .map_or(0, |waves| waves.cache_generation),
+    };
+
+    state.update(Message::BuildTableCache {
+        tile_id,
+        cache_key: sort_cache_key.clone(),
+    });
+
+    let model_after_request = state
+        .table_runtime
+        .get(&tile_id)
+        .and_then(|runtime| runtime.model.clone())
+        .expect("model after sort rebuild request");
+    assert!(
+        Arc::ptr_eq(&model_before, &model_after_request),
+        "sort rebuild should reuse existing analysis model"
+    );
+
+    let sort_build_start = std::time::Instant::now();
+    loop {
+        state.handle_async_messages();
+
+        let ready = state
+            .table_runtime
+            .get(&tile_id)
+            .and_then(|runtime| runtime.cache.as_ref())
+            .is_some_and(|entry| entry.is_ready() && entry.cache_key == sort_cache_key);
+        if ready {
+            break;
+        }
+
+        if sort_build_start.elapsed().as_secs() > 10 {
+            panic!("timed out waiting for sorted signal-analysis cache build");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+
+    let model_after_sort = state
+        .table_runtime
+        .get(&tile_id)
+        .and_then(|runtime| runtime.model.clone())
+        .expect("model after sort rebuild");
+    assert!(
+        Arc::ptr_eq(&model_before, &model_after_sort),
+        "sort rebuild completion should keep the same analysis model"
     );
 }
 
@@ -5134,6 +5274,7 @@ fn stale_signal_analysis_result_does_not_evict_current_inflight_entry() {
         tile_id,
         revision: 1,
         entry: stale_entry.clone(),
+        model: None,
         result: Ok(TableCache {
             row_ids: vec![TableRowId(9)],
             row_index: build_row_index(&[TableRowId(9)]),
@@ -7122,6 +7263,7 @@ fn stale_revision_ignored_on_cache_built() {
         tile_id,
         revision: 3, // stale - runtime is at 5
         entry: stale_entry.clone(),
+        model: None,
         result: Ok(TableCache {
             row_ids: vec![TableRowId(99)],
             row_index: build_row_index(&[TableRowId(99)]),
@@ -7192,6 +7334,7 @@ fn selection_preserved_across_cancelled_build() {
         tile_id,
         revision: 0, // stale
         entry: stale_entry,
+        model: None,
         result: Ok(TableCache {
             row_ids: vec![],
             row_index: HashMap::new(),

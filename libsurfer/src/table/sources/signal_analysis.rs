@@ -3,7 +3,7 @@ use crate::table::{
     TableColumn, TableColumnKey, TableModel, TableModelContext, TableRowId, TableSchema,
     TableSortKey,
 };
-use crate::time::TimeFormatter;
+use crate::time::{TimeFormat, TimeFormatter, TimeScale, TimeUnit};
 use crate::translation::AnyTranslator;
 use crate::wave_container::{
     SignalAccessor, VariableMeta, VariableRef, VariableRefExt, WaveContainer,
@@ -79,6 +79,18 @@ struct ResolvedSignalAnalysisSignal {
     translator: AnyTranslator,
 }
 
+/// Prepared runtime input for async signal-analysis model construction.
+pub(crate) struct PreparedSignalAnalysisModelInput {
+    sampling_mode: SignalAnalysisSamplingMode,
+    sampling_accessor: SignalAccessor,
+    analyzed_signals: Vec<ResolvedSignalAnalysisSignal>,
+    range: SignalAnalysisTimeRange,
+    markers: Vec<SignalAnalysisMarker>,
+    timescale: TimeScale,
+    wanted_timeunit: TimeUnit,
+    time_format: TimeFormat,
+}
+
 struct SignalAnalysisResultRow {
     row_id: TableRowId,
     interval_end_u64: u64,
@@ -102,51 +114,26 @@ impl SignalAnalysisResultsModel {
         config: SignalAnalysisConfig,
         ctx: &TableModelContext<'_>,
     ) -> Result<Self, TableCacheError> {
-        let waves = ctx.waves.ok_or(TableCacheError::DataUnavailable)?;
-        let wave_container = waves
-            .inner
-            .as_waves()
-            .ok_or(TableCacheError::DataUnavailable)?;
+        let prepared = prepare_signal_analysis_model_input(&config, ctx)?;
+        Self::from_prepared(prepared)
+    }
 
-        if config.signals.is_empty() {
-            return Err(TableCacheError::ModelNotFound {
-                description: "Signal analysis requires at least one analyzed signal".to_string(),
-            });
-        }
-
-        let (_sampling_variable, sampling_meta, sampling_accessor) =
-            resolve_loaded_signal(wave_container, &config.sampling.signal)?;
-
-        let sampling_mode = infer_sampling_mode(&sampling_meta);
-        let trigger_times = collect_trigger_times(sampling_mode, sampling_accessor.iter_changes());
-
-        let analyzed_signals = config
-            .signals
-            .iter()
-            .map(|signal| {
-                let (variable, meta, accessor) =
-                    resolve_loaded_signal(wave_container, &signal.variable)?;
-                Ok(ResolvedSignalAnalysisSignal {
-                    display_label: signal_display_label(&variable, &signal.field),
-                    field: signal.field.clone(),
-                    meta,
-                    accessor,
-                    translator: resolve_translator(ctx, &signal.translator),
-                })
-            })
-            .collect::<Result<Vec<_>, TableCacheError>>()?;
-
-        let end_u64 = waves
-            .num_timestamps()
-            .and_then(|num| num.to_u64())
-            .ok_or(TableCacheError::DataUnavailable)?;
-        let range =
-            SignalAnalysisTimeRange::new(0, end_u64).ok_or(TableCacheError::DataUnavailable)?;
-
-        let markers = normalize_markers(
-            waves.markers.iter().map(|(id, time)| (*id, time.clone())),
+    /// Build the analysis model from pre-resolved, thread-owned inputs.
+    pub(crate) fn from_prepared(
+        input: PreparedSignalAnalysisModelInput,
+    ) -> Result<Self, TableCacheError> {
+        let PreparedSignalAnalysisModelInput {
+            sampling_mode,
+            sampling_accessor,
+            analyzed_signals,
             range,
-        );
+            markers,
+            timescale,
+            wanted_timeunit,
+            time_format,
+        } = input;
+
+        let trigger_times = collect_trigger_times(sampling_mode, sampling_accessor.iter_changes());
         let intervals = build_intervals(range, &markers);
 
         let accumulation = accumulate_signal_metrics(
@@ -164,11 +151,7 @@ impl SignalAnalysisResultsModel {
             },
         );
 
-        let time_formatter = TimeFormatter::new(
-            &wave_container.metadata().timescale,
-            &ctx.wanted_timeunit,
-            &ctx.time_format,
-        );
+        let time_formatter = TimeFormatter::new(&timescale, &wanted_timeunit, &time_format);
 
         let mut rows = Vec::new();
         if markers.is_empty() {
@@ -224,6 +207,66 @@ impl SignalAnalysisResultsModel {
     fn row_by_id(&self, row: TableRowId) -> Option<&SignalAnalysisResultRow> {
         self.row_index.get(&row).and_then(|idx| self.rows.get(*idx))
     }
+}
+
+/// Resolve runtime signal handles and immutable run context before async model build.
+pub(crate) fn prepare_signal_analysis_model_input(
+    config: &SignalAnalysisConfig,
+    ctx: &TableModelContext<'_>,
+) -> Result<PreparedSignalAnalysisModelInput, TableCacheError> {
+    let waves = ctx.waves.ok_or(TableCacheError::DataUnavailable)?;
+    let wave_container = waves
+        .inner
+        .as_waves()
+        .ok_or(TableCacheError::DataUnavailable)?;
+
+    if config.signals.is_empty() {
+        return Err(TableCacheError::ModelNotFound {
+            description: "Signal analysis requires at least one analyzed signal".to_string(),
+        });
+    }
+
+    let (_sampling_variable, sampling_meta, sampling_accessor) =
+        resolve_loaded_signal(wave_container, &config.sampling.signal)?;
+    let sampling_mode = infer_sampling_mode(&sampling_meta);
+
+    let analyzed_signals = config
+        .signals
+        .iter()
+        .map(|signal| {
+            let (variable, meta, accessor) =
+                resolve_loaded_signal(wave_container, &signal.variable)?;
+            Ok(ResolvedSignalAnalysisSignal {
+                display_label: signal_display_label(&variable, &signal.field),
+                field: signal.field.clone(),
+                meta,
+                accessor,
+                translator: resolve_translator(ctx, &signal.translator),
+            })
+        })
+        .collect::<Result<Vec<_>, TableCacheError>>()?;
+
+    let end_u64 = waves
+        .num_timestamps()
+        .and_then(|num| num.to_u64())
+        .ok_or(TableCacheError::DataUnavailable)?;
+    let range = SignalAnalysisTimeRange::new(0, end_u64).ok_or(TableCacheError::DataUnavailable)?;
+
+    let markers = normalize_markers(
+        waves.markers.iter().map(|(id, time)| (*id, time.clone())),
+        range,
+    );
+
+    Ok(PreparedSignalAnalysisModelInput {
+        sampling_mode,
+        sampling_accessor,
+        analyzed_signals,
+        range,
+        markers,
+        timescale: wave_container.metadata().timescale,
+        wanted_timeunit: ctx.wanted_timeunit,
+        time_format: ctx.time_format.clone(),
+    })
 }
 
 impl TableModel for SignalAnalysisResultsModel {
