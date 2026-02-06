@@ -6,7 +6,7 @@ Rule for all stages: do not start the next stage until the current stage passes 
 ## Current Status Snapshot (2026-02-06)
 
 - Stage 1: Completed (2026-02-06).
-- Stage 2: Not started.
+- Stage 2: Completed (2026-02-06).
 - Stage 3: Not started.
 - Stage 4: Not started.
 - Stage 5: Not started.
@@ -73,7 +73,7 @@ Implemented:
 
 Goal: Implement and test pure logic for mode inference, trigger extraction, intervals, and metric accumulation.
 
-Status: Not started.
+Status: Completed (2026-02-06).
 
 Scope:
 - Add new source module for signal analysis computation helpers.
@@ -90,6 +90,19 @@ Expected files:
 
 Exit criteria:
 - Unit tests cover all algorithmic edge cases from `SignalAnalysis.md`.
+
+Validation status (2026-02-06):
+- `ulimit -n 10240`: applied before each gate command.
+- `cargo fmt`: pass.
+- `cargo clippy --no-deps`: pass (existing warning in `libsurfer/src/table/cache.rs` about `type_complexity`).
+- `cargo test -- --skip tests::wcp_tcp:: --skip file_watcher::tests::notifies_on_change --skip file_watcher::tests::resolves_files_that_are_named_differently`: pass.
+- `cargo test -- --include-ignored --skip tests::wcp_tcp:: --skip file_watcher::tests::notifies_on_change --skip file_watcher::tests::resolves_files_that_are_named_differently`: pass.
+
+Implemented:
+- Added pure signal-analysis kernel module `libsurfer/src/table/sources/signal_analysis.rs`.
+- Implemented mode inference, trigger extraction, BigInt->u64 run-range normalization, marker normalization, interval construction, and per-interval/global metric accumulation.
+- Added unit coverage for all stage-2 algorithm edges: mode precedence, posedge detection, marker sort/dedup/clipping, interval boundary semantics, NaN/non-numeric handling, empty intervals, and out-of-range triggers.
+- Re-exported stage-2 kernel APIs from `libsurfer/src/table/sources/mod.rs` for Stage 3 integration.
 
 ## Stage 3 - SignalAnalysis TableModel
 
