@@ -8,7 +8,7 @@ Rule for all stages: do not start the next stage until the current stage passes 
 - Stage 1: Completed (implemented and table test suite green).
 - Stage 2: Completed (implemented and full stage gate green).
 - Stage 3: Completed (implemented and full stage gate green).
-- Stage 4: Not started.
+- Stage 4: Completed (implemented and full stage gate green).
 - Stage 5: Not started.
 - Stage 6: Not started.
 - Stage 7: Not started.
@@ -149,6 +149,24 @@ Implemented tests:
 
 Goal: implement and validate the sparse merged timeline index as a standalone component.
 
+Status: Completed (2026-02-06)
+
+Validation status:
+- `cargo fmt`: passed
+- `cargo clippy --no-deps`: passed
+- `cargo test`: passed
+- `cargo test -- --include-ignored`: passed
+
+Implemented:
+- Added `table::sources::multi_signal_index` with standalone `MergedIndex`, `SignalRuns`, and `TransitionAtTime`.
+- Implemented builders from transition iterators:
+  - `MergedIndex::from_transition_iters(...)` for `(time_u64, value)` streams.
+  - `MergedIndex::from_transition_time_iters(...)` for time-only streams.
+- Enforced merged row identity as `TableRowId(time_u64)` with globally deduplicated/sorted `row_times`, plus `row_ids` and `row_index`.
+- Added `O(log R)` exact and strict-previous run lookup helpers on both `SignalRuns` and `MergedIndex`.
+- Added `dedup_multi_signal_entries(...)` to deduplicate selected entries by `(VariableRef, field)` while preserving first occurrence order.
+- Re-exported index types/helpers from `table::sources::mod`.
+
 Scope:
 - Add `MergedIndex`, `SignalRuns`, and `TransitionAtTime` builder from transition iterators.
 - Enforce row identity as `TableRowId(time_u64)` with deduplicated merged timeline.
@@ -165,6 +183,13 @@ Tests to add:
 - Per-signal same-timestamp run grouping correctness.
 - Exact run and previous run lookup behavior.
 - Duplicate selected signal dedup logic by `(VariableRef, field)`.
+
+Implemented tests:
+- `merged_index_dedups_and_sorts_global_timeline`
+- `signal_runs_group_same_timestamp_transitions`
+- `signal_runs_exact_and_previous_lookup_are_logarithmic_and_correct`
+- `merged_index_exact_and_previous_lookup_route_to_signal_runs`
+- `dedup_multi_signal_entries_by_variable_and_field`
 
 ## Stage 5 - MultiSignal Model Skeleton with Index-Only Rows
 
