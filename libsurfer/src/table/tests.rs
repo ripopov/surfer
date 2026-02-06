@@ -114,7 +114,7 @@ fn multi_signal_change_list_default_view_config_deterministic() {
 }
 
 #[test]
-fn multi_signal_change_list_model_creation_is_placeholder_error() {
+fn multi_signal_change_list_model_creation_no_waves_returns_data_unavailable() {
     let state = SystemState::new_default_config().expect("state");
     let ctx = state.table_model_context();
     let spec = TableModelSpec::MultiSignalChangeList {
@@ -124,15 +124,13 @@ fn multi_signal_change_list_model_creation_is_placeholder_error() {
         }],
     };
 
-    match spec.create_model(&ctx) {
-        Err(TableCacheError::ModelNotFound { description }) => {
-            assert!(
-                description.contains("not yet implemented"),
-                "expected placeholder error message, got: {description}"
-            );
-        }
-        _ => panic!("expected ModelNotFound placeholder error"),
-    }
+    assert!(
+        matches!(
+            spec.create_model(&ctx),
+            Err(TableCacheError::DataUnavailable)
+        ),
+        "expected DataUnavailable when no wave data loaded"
+    );
 }
 
 #[test]
@@ -5266,4 +5264,306 @@ fn test_row_index_after_filter() {
     for (pos, &row_id) in cache.row_ids.iter().enumerate() {
         assert_eq!(cache.row_index[&row_id], pos);
     }
+}
+
+// ========================
+// Stage 5 Tests - MultiSignalChangeListModel
+// ========================
+
+use crate::table::sources::multi_signal_change_list::{
+    decode_signal_column_key, encode_signal_column_key,
+};
+
+#[test]
+fn multi_signal_model_creation_with_valid_signals() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.clk"),
+                field: vec![],
+            },
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                field: vec![],
+            },
+        ],
+    };
+
+    let model = spec
+        .create_model(&ctx)
+        .expect("model creation should succeed");
+    assert!(model.row_count() > 0, "merged index should have rows");
+
+    let schema = model.schema();
+    assert_eq!(
+        schema.columns.len(),
+        3,
+        "expected 1 time + 2 signal columns"
+    );
+
+    assert_eq!(
+        schema.columns[0].key,
+        TableColumnKey::Str("time".to_string())
+    );
+    assert_eq!(schema.columns[0].label, "Time");
+
+    for col in &schema.columns[1..] {
+        if let TableColumnKey::Str(key) = &col.key {
+            assert!(
+                key.starts_with("sig:v1:"),
+                "signal column key should start with sig:v1: prefix, got: {key}"
+            );
+        } else {
+            panic!("signal column key should be Str variant");
+        }
+    }
+}
+
+#[test]
+fn multi_signal_model_skips_missing_signals_warns() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+
+    // Mix of valid and invalid signals
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.nonexistent"),
+                field: vec![],
+            },
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.clk"),
+                field: vec![],
+            },
+        ],
+    };
+
+    let model = spec
+        .create_model(&ctx)
+        .expect("should succeed with at least one valid signal");
+    let schema = model.schema();
+    assert_eq!(
+        schema.columns.len(),
+        2,
+        "expected 1 time + 1 valid signal column (invalid skipped)"
+    );
+}
+
+#[test]
+fn multi_signal_model_all_invalid_signals_returns_error() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = load_counter_state();
+    let ctx = state.table_model_context();
+
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.nonexistent1"),
+                field: vec![],
+            },
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.nonexistent2"),
+                field: vec![],
+            },
+        ],
+    };
+
+    match spec.create_model(&ctx) {
+        Err(TableCacheError::ModelNotFound { description }) => {
+            assert!(
+                description.contains("No valid signals"),
+                "expected 'No valid signals' error, got: {description}"
+            );
+        }
+        Ok(_) => panic!("expected ModelNotFound error, got Ok"),
+        Err(other) => panic!("expected ModelNotFound error, got: {other:?}"),
+    }
+}
+
+#[test]
+fn multi_signal_model_column_key_stable_and_reversible() {
+    let path = "tb.dut.counter";
+    let field = vec!["value".to_string()];
+
+    let key1 = encode_signal_column_key(path, &field);
+    let key2 = encode_signal_column_key(path, &field);
+    assert_eq!(key1, key2, "column key should be deterministic");
+
+    let (decoded_path, decoded_field) =
+        decode_signal_column_key(&key1).expect("should decode successfully");
+    assert_eq!(decoded_path, path);
+    assert_eq!(decoded_field, field);
+
+    // Verify empty field
+    let key_empty = encode_signal_column_key("tb.clk", &[]);
+    let (decoded_path2, decoded_field2) =
+        decode_signal_column_key(&key_empty).expect("should decode empty field");
+    assert_eq!(decoded_path2, "tb.clk");
+    assert!(decoded_field2.is_empty());
+}
+
+#[test]
+fn multi_signal_model_on_activate_sets_cursor() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![MultiSignalEntry {
+            variable: VariableRef::from_hierarchy_string("tb.clk"),
+            field: vec![],
+        }],
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    let row_id = model.row_id_at(0).expect("first row should exist");
+
+    match model.on_activate(row_id) {
+        TableAction::CursorSet(time) => {
+            assert_eq!(
+                time,
+                num::BigInt::from(row_id.0),
+                "cursor should be set to row timestamp"
+            );
+        }
+        other => panic!("expected CursorSet, got: {other:?}"),
+    }
+}
+
+#[test]
+fn multi_signal_model_time_column_rendering() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![MultiSignalEntry {
+            variable: VariableRef::from_hierarchy_string("tb.clk"),
+            field: vec![],
+        }],
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    let row_id = model.row_id_at(0).expect("first row");
+
+    let time_cell = match model.cell(row_id, 0) {
+        TableCell::Text(text) => text,
+        TableCell::RichText(text) => text.text().to_string(),
+    };
+    assert!(
+        !time_cell.is_empty(),
+        "time column should render non-empty text"
+    );
+
+    let sort_key = model.sort_key(row_id, 0);
+    assert!(
+        matches!(sort_key, TableSortKey::Numeric(_)),
+        "time sort key should be numeric"
+    );
+}
+
+#[test]
+fn multi_signal_model_uses_lazy_search_mode() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![MultiSignalEntry {
+            variable: VariableRef::from_hierarchy_string("tb.clk"),
+            field: vec![],
+        }],
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    assert_eq!(
+        model.search_text_mode(),
+        SearchTextMode::LazyProbe,
+        "multi-signal model should use lazy search mode"
+    );
+}
+
+#[test]
+fn multi_signal_model_row_ids_match_merged_timeline() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.clk"),
+                field: vec![],
+            },
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                field: vec![],
+            },
+        ],
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    let row_count = model.row_count();
+    assert!(row_count > 0);
+
+    // Verify row IDs are sorted by timestamp (monotonically increasing)
+    let mut prev_time = 0u64;
+    for idx in 0..row_count {
+        let row_id = model.row_id_at(idx).expect("row id should exist");
+        assert!(
+            row_id.0 >= prev_time,
+            "row times should be monotonically non-decreasing"
+        );
+        prev_time = row_id.0;
+    }
+
+    // Verify merged timeline has at least as many rows as either single signal
+    let clk_spec = TableModelSpec::SignalChangeList {
+        variable: VariableRef::from_hierarchy_string("tb.clk"),
+        field: vec![],
+    };
+    let clk_model = clk_spec.create_model(&ctx).expect("clk model");
+    assert!(
+        row_count >= clk_model.row_count(),
+        "merged timeline should have at least as many rows as single signal"
+    );
 }

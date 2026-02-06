@@ -1,7 +1,8 @@
 use super::cache::TableCacheError;
 use crate::config::SurferTheme;
 use crate::table::sources::{
-    SignalChangeListModel, TransactionTraceModelWithData, VirtualTableModel,
+    MultiSignalChangeListModel, SignalChangeListModel, TransactionTraceModelWithData,
+    VirtualTableModel,
 };
 use crate::time::{TimeFormat, TimeUnit};
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
@@ -84,9 +85,10 @@ impl TableModelSpec {
                 TransactionTraceModelWithData::new(generator.clone(), ctx)
                     .map(|model| Arc::new(model) as Arc<dyn TableModel>)
             }
-            Self::MultiSignalChangeList { .. } => Err(TableCacheError::ModelNotFound {
-                description: "Multi-signal change list model not yet implemented".to_string(),
-            }),
+            Self::MultiSignalChangeList { variables } => {
+                MultiSignalChangeListModel::new(variables.clone(), ctx)
+                    .map(|model| Arc::new(model) as Arc<dyn TableModel>)
+            }
             // Other model types will be implemented in later stages
             Self::SearchResults { .. } | Self::AnalysisResults { .. } | Self::Custom { .. } => {
                 Err(TableCacheError::ModelNotFound {

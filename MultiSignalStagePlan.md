@@ -9,7 +9,7 @@ Rule for all stages: do not start the next stage until the current stage passes 
 - Stage 2: Completed (implemented and full stage gate green).
 - Stage 3: Completed (implemented and full stage gate green).
 - Stage 4: Completed (implemented and full stage gate green).
-- Stage 5: Not started.
+- Stage 5: Completed (implemented and full stage gate green).
 - Stage 6: Not started.
 - Stage 7: Not started.
 - Stage 8: Not started.
@@ -195,6 +195,28 @@ Implemented tests:
 
 Goal: wire a new model that uses the merged index but still keeps per-cell rendering minimal.
 
+Status: Completed (2026-02-06)
+
+Validation status:
+- `cargo fmt`: passed
+- `cargo clippy --no-deps`: passed
+- `cargo test`: passed
+- `cargo test -- --include-ignored`: passed
+
+Implemented:
+- Added `MultiSignalChangeListModel` with `ResolvedSignalEntry` per-signal metadata resolution.
+- Constructor resolves each signal entry via `update_variable_ref`, `signal_id`, `is_signal_loaded`, `signal_accessor`, `variable_meta`, translator selection, and display format extraction.
+- Invalid/missing/unloaded signals are skipped with `tracing::warn!`; fails if no valid signals remain.
+- Lazy `OnceLock<MergedIndex>` built from transition time iterators on first access.
+- Schema generation with stable column keys: `time` and `sig:v1:<percent-encoded-path>#<percent-encoded-field>`.
+- Percent-encoding covers `%`, `.`, `#`, `/` with reversible decode via `encode_signal_column_key`/`decode_signal_column_key`.
+- Row count, row id lookup, time column rendering, and time sort key backed by merged index.
+- `on_activate` returns `TableAction::CursorSet(BigInt::from(row.0))`.
+- Uses `SearchTextMode::LazyProbe` for lazy search text mode.
+- Signal cell columns return placeholder empty text (deferred to Stage 6).
+- Integrated `TableModelSpec::create_model` to instantiate `MultiSignalChangeListModel`.
+- Re-exported from `table::sources::mod`.
+
 Scope:
 - Add `MultiSignalChangeListModel` with:
 - signal entry resolution (`VariableRef`, field, translator/meta/accessor).
@@ -216,6 +238,18 @@ Tests to add:
 - Missing/unloaded signals skipped with warning, fail if no valid signals remain.
 - Stable and reversible column key generation.
 - `on_activate` sets cursor to row timestamp.
+
+Implemented tests:
+- `multi_signal_model_creation_with_valid_signals`
+- `multi_signal_model_skips_missing_signals_warns`
+- `multi_signal_model_all_invalid_signals_returns_error`
+- `multi_signal_model_column_key_stable_and_reversible`
+- `multi_signal_model_on_activate_sets_cursor`
+- `multi_signal_model_time_column_rendering`
+- `multi_signal_model_uses_lazy_search_mode`
+- `multi_signal_model_row_ids_match_merged_timeline`
+- `multi_signal_change_list_model_creation_no_waves_returns_data_unavailable`
+- Unit tests in `multi_signal_change_list::tests`: column key encode/decode round-trips, special chars, invalid prefix, missing hash, display label generation
 
 ## Stage 6 - On-Demand Cell Materialization Semantics
 
