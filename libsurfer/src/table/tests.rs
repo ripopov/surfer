@@ -5287,6 +5287,7 @@ fn test_row_index_after_filter() {
 // Stage 5 Tests - MultiSignalChangeListModel
 // ========================
 
+use crate::displayed_item::DisplayedItem;
 use crate::table::sources::multi_signal_change_list::{
     decode_signal_column_key, encode_signal_column_key,
 };
@@ -6459,4 +6460,233 @@ fn selection_preserved_across_cancelled_build() {
             .selection
             .contains(TableRowId(3))
     );
+}
+
+// ========================
+// Stage 9 Tests - UX Entry Point and Drill-Down
+// ========================
+
+/// Helper: collect multi-signal entries from selected variables in displayed items,
+/// matching the context menu logic in menus.rs.
+fn collect_selected_variable_entries(waves: &crate::wave_data::WaveData) -> Vec<MultiSignalEntry> {
+    waves
+        .items_tree
+        .iter_visible_selected()
+        .filter_map(|node| {
+            let item = waves.displayed_items.get(&node.item_ref)?;
+            if let DisplayedItem::Variable(var) = item {
+                Some(MultiSignalEntry {
+                    variable: var.variable_ref.clone(),
+                    field: vec![],
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn menu_single_variable_selected_produces_signal_change_list() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let waves = state.user.waves.as_ref().unwrap();
+    let clk_ref = VariableRef::from_hierarchy_string("tb.clk");
+    let clk_idx = find_visible_index_for_variable(waves, &clk_ref).expect("clk should be visible");
+
+    // Select only one variable
+    state.update(Message::SetItemSelected(clk_idx, true));
+
+    let waves = state.user.waves.as_ref().unwrap();
+    let entries = collect_selected_variable_entries(waves);
+    assert_eq!(entries.len(), 1, "exactly one variable selected");
+    assert_eq!(entries[0].variable, clk_ref);
+}
+
+#[test]
+fn menu_multiple_variables_selected_produces_multi_signal_entries() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let waves = state.user.waves.as_ref().unwrap();
+    let clk_ref = VariableRef::from_hierarchy_string("tb.clk");
+    let counter_ref = VariableRef::from_hierarchy_string("tb.dut.counter");
+    let clk_idx = find_visible_index_for_variable(waves, &clk_ref).expect("clk should be visible");
+    let counter_idx =
+        find_visible_index_for_variable(waves, &counter_ref).expect("counter should be visible");
+
+    // Select both variables
+    state.update(Message::SetItemSelected(clk_idx, true));
+    state.update(Message::SetItemSelected(counter_idx, true));
+
+    let waves = state.user.waves.as_ref().unwrap();
+    let entries = collect_selected_variable_entries(waves);
+    assert_eq!(entries.len(), 2, "two variables selected");
+
+    // Entries should include both variables (order may depend on display order)
+    let var_refs: Vec<_> = entries.iter().map(|e| &e.variable).collect();
+    assert!(var_refs.contains(&&clk_ref));
+    assert!(var_refs.contains(&&counter_ref));
+}
+
+#[test]
+fn menu_non_variable_selections_filtered_out() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+
+    // Add a variable and a divider
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+    state.update(Message::AddDivider(Some("---".to_string()), None));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    // Select all visible items (variable + divider)
+    state.update(Message::ItemSelectAll);
+
+    let waves = state.user.waves.as_ref().unwrap();
+    let selected_count = waves.items_tree.iter_visible_selected().count();
+    assert!(
+        selected_count >= 2,
+        "should have at least 2 selected items (variable + divider)"
+    );
+
+    let entries = collect_selected_variable_entries(waves);
+    assert_eq!(
+        entries.len(),
+        1,
+        "non-variable items should be filtered out"
+    );
+    assert_eq!(
+        entries[0].variable,
+        VariableRef::from_hierarchy_string("tb.clk")
+    );
+}
+
+#[test]
+fn add_table_tile_multi_signal_creates_tile() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let initial_tile_count = state.user.table_tiles.len();
+
+    state.update(Message::AddTableTile {
+        spec: TableModelSpec::MultiSignalChangeList {
+            variables: vec![
+                MultiSignalEntry {
+                    variable: VariableRef::from_hierarchy_string("tb.clk"),
+                    field: vec![],
+                },
+                MultiSignalEntry {
+                    variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                    field: vec![],
+                },
+            ],
+        },
+    });
+
+    assert_eq!(
+        state.user.table_tiles.len(),
+        initial_tile_count + 1,
+        "multi-signal table tile should be created"
+    );
+
+    // Verify the tile has the correct spec
+    let (_, tile_state) = state
+        .user
+        .table_tiles
+        .iter()
+        .last()
+        .expect("should have a tile");
+    match &tile_state.spec {
+        TableModelSpec::MultiSignalChangeList { variables } => {
+            assert_eq!(variables.len(), 2);
+        }
+        other => panic!("expected MultiSignalChangeList spec, got {:?}", other),
+    }
+}
+
+#[test]
+fn drill_down_column_key_to_single_signal_spec() {
+    // Verify that decoding a signal column key produces the correct
+    // VariableRef and field for a SignalChangeList spec.
+    let full_path = "tb.dut.counter";
+    let field: Vec<String> = vec![];
+    let column_key = encode_signal_column_key(full_path, &field);
+
+    // Decode the key (as the drill-down code in view.rs does)
+    let (decoded_path, decoded_field) =
+        decode_signal_column_key(&column_key).expect("should decode signal column key");
+
+    assert_eq!(decoded_path, full_path);
+    assert_eq!(decoded_field, field);
+
+    // Construct the spec that the drill-down would produce
+    let spec = TableModelSpec::SignalChangeList {
+        variable: VariableRef::from_hierarchy_string(&decoded_path),
+        field: decoded_field,
+    };
+
+    match &spec {
+        TableModelSpec::SignalChangeList { variable, field } => {
+            assert_eq!(
+                variable,
+                &VariableRef::from_hierarchy_string("tb.dut.counter")
+            );
+            assert!(field.is_empty());
+        }
+        _ => panic!("expected SignalChangeList spec"),
+    }
+}
+
+#[test]
+fn drill_down_column_key_with_field_to_single_signal_spec() {
+    // Verify drill-down for a signal with sub-fields
+    let full_path = "tb.dut.bus";
+    let field = vec!["data".to_string(), "valid".to_string()];
+    let column_key = encode_signal_column_key(full_path, &field);
+
+    let (decoded_path, decoded_field) =
+        decode_signal_column_key(&column_key).expect("should decode");
+
+    let spec = TableModelSpec::SignalChangeList {
+        variable: VariableRef::from_hierarchy_string(&decoded_path),
+        field: decoded_field.clone(),
+    };
+
+    match &spec {
+        TableModelSpec::SignalChangeList { variable, field } => {
+            assert_eq!(variable, &VariableRef::from_hierarchy_string("tb.dut.bus"));
+            assert_eq!(field, &["data", "valid"]);
+        }
+        _ => panic!("expected SignalChangeList spec"),
+    }
+}
+
+#[test]
+fn non_signal_column_key_does_not_decode() {
+    // The "time" column key should not decode as a signal column
+    assert!(decode_signal_column_key("time").is_none());
+    assert!(decode_signal_column_key("").is_none());
+    assert!(decode_signal_column_key("other:prefix:foo#bar").is_none());
 }

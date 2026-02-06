@@ -11,7 +11,7 @@ use crate::displayed_item_tree::VisibleItemIndex;
 use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation, ScopeExpandType};
 use crate::keyboard_shortcuts::ShortcutAction;
 use crate::message::MessageTarget;
-use crate::table::TableModelSpec;
+use crate::table::{MultiSignalEntry, TableModelSpec};
 use crate::transaction_container::StreamScopeRef;
 use crate::wave_container::{FieldRef, VariableRefExt};
 use crate::wave_data::ScopeType;
@@ -590,7 +590,33 @@ impl SystemState {
                 }
             });
 
-            if ui.button("Signal change list").clicked() {
+            // Count selected variables to decide between single vs multi-signal table.
+            let selected_variables: Vec<MultiSignalEntry> = waves
+                .items_tree
+                .iter_visible_selected()
+                .filter_map(|node| {
+                    let item = waves.displayed_items.get(&node.item_ref)?;
+                    if let DisplayedItem::Variable(var) = item {
+                        Some(MultiSignalEntry {
+                            variable: var.variable_ref.clone(),
+                            field: vec![],
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if selected_variables.len() >= 2 {
+                if ui.button("Multi-signal change list").clicked() {
+                    msgs.push(Message::AddTableTile {
+                        spec: TableModelSpec::MultiSignalChangeList {
+                            variables: selected_variables,
+                        },
+                    });
+                    ui.close();
+                }
+            } else if ui.button("Signal change list").clicked() {
                 let (variable_ref, field) = path
                     .map(|path| (path.root.clone(), path.field.clone()))
                     .unwrap_or_else(|| (variable.variable_ref.clone(), Vec::new()));

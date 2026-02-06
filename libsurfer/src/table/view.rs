@@ -2,15 +2,16 @@ use crate::SystemState;
 use crate::message::Message;
 use crate::table::{
     FilterDraft, MaterializePurpose, MaterializedWindow, PendingScrollOp, ScrollTarget, TableCache,
-    TableCacheKey, TableCell, TableColumnKey, TableModel, TableModelKey, TableRuntimeState,
-    TableSearchMode, TableSearchSpec, TableSelection, TableSelectionMode, TableSortSpec,
-    TableTileId, TableTileState, TableViewConfig, find_type_search_match_in_cache,
+    TableCacheKey, TableCell, TableColumnKey, TableModel, TableModelKey, TableModelSpec,
+    TableRuntimeState, TableSearchMode, TableSearchSpec, TableSelection, TableSelectionMode,
+    TableSortSpec, TableTileId, TableTileState, TableViewConfig, find_type_search_match_in_cache,
     format_selection_count, hidden_columns, navigate_down, navigate_end, navigate_extend_selection,
     navigate_home, navigate_page_down, navigate_page_up, navigate_up, scroll_target_after_filter,
     scroll_target_after_sort, selection_on_click_multi, selection_on_click_single,
     selection_on_ctrl_click, selection_on_shift_click, should_clear_selection_on_generation_change,
     sort_indicator, sort_spec_on_click, sort_spec_on_shift_click, visible_columns,
 };
+use crate::wave_container::VariableRefExt;
 use egui_extras::{Column, TableBuilder};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -564,8 +565,25 @@ fn render_table(
                         new_sort = Some(computed_sort);
                     }
 
-                    // Context menu for column visibility
+                    // Context menu for column visibility and drill-down
                     response.context_menu(|ui| {
+                        // Drill-down: open single-signal change list for signal columns
+                        if let TableColumnKey::Str(key_str) = &col.key
+                            && let Some((full_path, field)) =
+                                crate::table::sources::decode_signal_column_key(key_str)
+                        {
+                            if ui.button("Signal change list").clicked() {
+                                let variable =
+                                    crate::wave_container::VariableRef::from_hierarchy_string(
+                                        &full_path,
+                                    );
+                                msgs.push(Message::AddTableTile {
+                                    spec: TableModelSpec::SignalChangeList { variable, field },
+                                });
+                                ui.close();
+                            }
+                            ui.separator();
+                        }
                         ui.label("Column visibility:");
                         ui.separator();
                         for key in &all_schema_columns {

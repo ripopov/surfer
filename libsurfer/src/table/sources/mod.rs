@@ -4,7 +4,7 @@ pub mod signal_change_list;
 pub mod transaction_trace;
 pub mod virtual_model;
 
-pub use multi_signal_change_list::MultiSignalChangeListModel;
+pub use multi_signal_change_list::{MultiSignalChangeListModel, decode_signal_column_key};
 pub use multi_signal_index::{
     MergedIndex, SignalRuns, TransitionAtTime, dedup_multi_signal_entries,
 };

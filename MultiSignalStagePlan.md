@@ -12,8 +12,8 @@ Rule for all stages: do not start the next stage until the current stage passes 
 - Stage 5: Completed (implemented and full stage gate green).
 - Stage 6: Completed (implemented and full stage gate green).
 - Stage 7: Completed (implemented and full stage gate green).
-- Stage 8: Not started.
-- Stage 9: Not started.
+- Stage 8: Completed (implemented and full stage gate green).
+- Stage 9: Completed (implemented and full stage gate green).
 - Stage 10: Not started.
 
 ## Global Stage Gate (run after every stage)
@@ -367,6 +367,24 @@ Implemented tests:
 
 Goal: ensure stale async work never commits and new requests supersede old work safely.
 
+Status: Completed (2026-02-06)
+
+Validation status:
+- `cargo fmt`: passed
+- `cargo clippy --no-deps`: passed
+- `cargo test`: passed (748 lib tests + integration tests)
+- `cargo test -- --include-ignored`: passed
+
+Implemented:
+- Added `table_revision: u64` (monotonic counter) and `cancel_token: Arc<AtomicBool>` (cooperative cancellation) to `TableRuntimeState`, with updated manual `Debug` impl.
+- Added `revision: u64` field to `TableCacheEntry` and its constructor.
+- Added `revision: u64` field to the `TableCacheBuilt` message variant.
+- Added `is_cancelled()` helper for cooperative cancellation checking at chunk boundaries.
+- Updated `filter_rows_with_eager_search_texts`, `filter_rows_with_lazy_search_probes`, and `build_row_entries` to accept cancellation token and return `Result` with cancellation checks.
+- Updated `build_table_cache` to accept `cancelled: Option<Arc<AtomicBool>>` with checks before filter, between filter/sort, and propagated to sub-functions.
+- `BuildTableCache` handler: cancels previous in-flight build token, increments revision, creates fresh cancel token, passes it to async `build_table_cache`, includes revision in `TableCacheBuilt` message.
+- `TableCacheBuilt` handler: rejects results with stale revision (defense-in-depth with existing cache key check), silently discards `Cancelled` errors.
+
 Scope:
 - Add monotonic `table_revision` per tile runtime.
 - Capture revision + task kind in async cache/filter/sort/search work.
@@ -375,8 +393,8 @@ Scope:
 
 Expected files:
 - `libsurfer/src/table/cache.rs`
+- `libsurfer/src/message.rs`
 - `libsurfer/src/lib.rs`
-- `libsurfer/src/table/model.rs`
 - `libsurfer/src/table/tests.rs`
 
 Tests to add:
@@ -384,9 +402,31 @@ Tests to add:
 - Revision increment behavior on each superseding request.
 - Selection/scroll behavior remains correct across canceled and superseded tasks.
 
+Implemented tests:
+- `revision_defaults_to_zero_and_entry_carries_revision`
+- `stale_revision_ignored_on_cache_built`
+- `cancellation_stops_build_early`
+- `selection_preserved_across_cancelled_build`
+
 ## Stage 9 - UX Entry Point and Drill-Down Behavior
 
 Goal: complete user-facing access path while preserving existing single-signal UX.
+
+Status: Completed (2026-02-06)
+
+Validation status:
+- `cargo fmt`: passed
+- `cargo clippy --no-deps`: passed
+- `cargo test`: passed (755 lib tests + integration tests)
+- `cargo test -- --include-ignored`: passed
+
+Implemented:
+- Context menu in `menus.rs` now collects selected variables via `iter_visible_selected()`, filtering non-variable items (`DisplayedItem::Variable` only).
+- When 2+ variables are selected, shows "Multi-signal change list" button that emits `AddTableTile` with `MultiSignalChangeList` spec containing all selected variables.
+- When 0-1 variables selected, shows original "Signal change list" button for the clicked variable (preserving existing single-signal behavior).
+- Column header context menu in `view.rs` now offers "Signal change list" drill-down for signal columns (keys decoded via `decode_signal_column_key`), creating a `SignalChangeList` spec from the column's variable path and field.
+- Re-exported `decode_signal_column_key` from `table::sources` module.
+- No changes needed to `message.rs` or `lib.rs` — `AddTableTile` handler is already generic over all `TableModelSpec` variants.
 
 Scope:
 - Context menu behavior:
@@ -398,14 +438,23 @@ Scope:
 
 Expected files:
 - `libsurfer/src/menus.rs`
-- `libsurfer/src/message.rs`
-- `libsurfer/src/lib.rs`
+- `libsurfer/src/table/view.rs`
+- `libsurfer/src/table/sources/mod.rs`
 - `libsurfer/src/table/tests.rs`
 
 Tests to add:
 - Menu action selection for one vs many variable selections.
 - Non-variable selections do not create invalid multi-signal entries.
 - Drill-down action opens correct single-signal table spec.
+
+Implemented tests:
+- `menu_single_variable_selected_produces_signal_change_list`
+- `menu_multiple_variables_selected_produces_multi_signal_entries`
+- `menu_non_variable_selections_filtered_out`
+- `add_table_tile_multi_signal_creates_tile`
+- `drill_down_column_key_to_single_signal_spec`
+- `drill_down_column_key_with_field_to_single_signal_spec`
+- `non_signal_column_key_does_not_decode`
 
 ## Stage 10 - Snapshot, Performance, and Hardening Pass
 
