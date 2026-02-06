@@ -50,6 +50,92 @@ fn table_model_spec_virtual_ron_format() {
 }
 
 #[test]
+fn table_model_spec_multi_signal_change_list_ron_round_trip() {
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.clk"),
+                field: vec![],
+            },
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                field: vec!["value".to_string(), "lsb".to_string()],
+            },
+        ],
+    };
+
+    let encoded =
+        ron::ser::to_string(&spec).expect("serialize TableModelSpec::MultiSignalChangeList");
+    let decoded: TableModelSpec =
+        ron::de::from_str(&encoded).expect("deserialize TableModelSpec::MultiSignalChangeList");
+
+    assert_eq!(spec, decoded);
+}
+
+#[test]
+fn multi_signal_change_list_default_view_config_deterministic() {
+    let state = SystemState::new_default_config().expect("state");
+    let ctx = state.table_model_context();
+
+    let spec_a = TableModelSpec::MultiSignalChangeList {
+        variables: vec![
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.clk"),
+                field: vec![],
+            },
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                field: vec!["value".to_string()],
+            },
+        ],
+    };
+    let spec_b = TableModelSpec::MultiSignalChangeList {
+        variables: vec![MultiSignalEntry {
+            variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+            field: vec!["value".to_string()],
+        }],
+    };
+
+    let config_a = spec_a.default_view_config(&ctx);
+    let config_b = spec_b.default_view_config(&ctx);
+
+    assert_eq!(config_a.title, "Multi-signal change list");
+    assert_eq!(config_a.title, config_b.title);
+    assert_eq!(
+        config_a.sort,
+        vec![TableSortSpec {
+            key: TableColumnKey::Str("time".to_string()),
+            direction: TableSortDirection::Ascending,
+        }]
+    );
+    assert_eq!(config_a.sort, config_b.sort);
+    assert_eq!(config_a.selection_mode, TableSelectionMode::Single);
+    assert!(config_a.activate_on_select);
+}
+
+#[test]
+fn multi_signal_change_list_model_creation_is_placeholder_error() {
+    let state = SystemState::new_default_config().expect("state");
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![MultiSignalEntry {
+            variable: VariableRef::from_hierarchy_string("tb.clk"),
+            field: vec![],
+        }],
+    };
+
+    match spec.create_model(&ctx) {
+        Err(TableCacheError::ModelNotFound { description }) => {
+            assert!(
+                description.contains("not yet implemented"),
+                "expected placeholder error message, got: {description}"
+            );
+        }
+        _ => panic!("expected ModelNotFound placeholder error"),
+    }
+}
+
+#[test]
 fn table_view_config_round_trip() {
     let config = TableViewConfig {
         title: "Example".to_string(),

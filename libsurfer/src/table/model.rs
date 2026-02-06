@@ -29,6 +29,9 @@ pub enum TableModelSpec {
         variable: VariableRef,
         field: Vec<String>,
     },
+    MultiSignalChangeList {
+        variables: Vec<MultiSignalEntry>,
+    },
     /// Transaction trace table for a specific generator.
     /// Each generator has its own attribute schema, so tables are per-generator.
     TransactionTrace {
@@ -55,6 +58,12 @@ pub enum TableModelSpec {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MultiSignalEntry {
+    pub variable: VariableRef,
+    pub field: Vec<String>,
+}
+
 impl TableModelSpec {
     /// Create a table model instance from this specification.
     pub fn create_model(
@@ -75,6 +84,9 @@ impl TableModelSpec {
                 TransactionTraceModelWithData::new(generator.clone(), ctx)
                     .map(|model| Arc::new(model) as Arc<dyn TableModel>)
             }
+            Self::MultiSignalChangeList { .. } => Err(TableCacheError::ModelNotFound {
+                description: "Multi-signal change list model not yet implemented".to_string(),
+            }),
             // Other model types will be implemented in later stages
             Self::SearchResults { .. } | Self::AnalysisResults { .. } | Self::Custom { .. } => {
                 Err(TableCacheError::ModelNotFound {
@@ -109,6 +121,16 @@ impl TableModelSpec {
                 // Default sort: ascending by start time
                 sort: vec![TableSortSpec {
                     key: TableColumnKey::Str("start".to_string()),
+                    direction: TableSortDirection::Ascending,
+                }],
+                selection_mode: TableSelectionMode::Single,
+                activate_on_select: true,
+                ..Default::default()
+            },
+            Self::MultiSignalChangeList { .. } => TableViewConfig {
+                title: "Multi-signal change list".to_string(),
+                sort: vec![TableSortSpec {
+                    key: TableColumnKey::Str("time".to_string()),
                     direction: TableSortDirection::Ascending,
                 }],
                 selection_mode: TableSelectionMode::Single,
