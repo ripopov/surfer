@@ -277,6 +277,109 @@ fn virtual_model_schema_keys_match_expected_format() {
     assert_eq!(labels[2], "Col 2");
 }
 
+#[test]
+fn table_model_materialize_window_default_adapter_matches_legacy_methods() {
+    struct LegacyModel {
+        rows: Vec<TableRowId>,
+    }
+
+    impl TableModel for LegacyModel {
+        fn schema(&self) -> TableSchema {
+            TableSchema {
+                columns: vec![
+                    TableColumn {
+                        key: TableColumnKey::Str("col_0".to_string()),
+                        label: "Col 0".to_string(),
+                        default_width: None,
+                        default_visible: true,
+                        default_resizable: true,
+                    },
+                    TableColumn {
+                        key: TableColumnKey::Str("col_1".to_string()),
+                        label: "Col 1".to_string(),
+                        default_width: None,
+                        default_visible: true,
+                        default_resizable: true,
+                    },
+                    TableColumn {
+                        key: TableColumnKey::Str("col_2".to_string()),
+                        label: "Col 2".to_string(),
+                        default_width: None,
+                        default_visible: true,
+                        default_resizable: true,
+                    },
+                ],
+            }
+        }
+
+        fn row_count(&self) -> usize {
+            self.rows.len()
+        }
+
+        fn row_id_at(&self, index: usize) -> Option<TableRowId> {
+            self.rows.get(index).copied()
+        }
+
+        fn cell(&self, row: TableRowId, col: usize) -> TableCell {
+            TableCell::Text(format!("cell:{}:{col}", row.0))
+        }
+
+        fn sort_key(&self, row: TableRowId, col: usize) -> TableSortKey {
+            TableSortKey::Numeric((row.0 * 10 + col as u64) as f64)
+        }
+
+        fn search_text(&self, row: TableRowId) -> String {
+            format!("search:{}", row.0)
+        }
+
+        fn on_activate(&self, _row: TableRowId) -> TableAction {
+            TableAction::None
+        }
+    }
+
+    fn cell_to_text(cell: &TableCell) -> String {
+        match cell {
+            TableCell::Text(text) => text.clone(),
+            TableCell::RichText(text) => text.text().to_string(),
+        }
+    }
+
+    let model = LegacyModel {
+        rows: vec![TableRowId(5), TableRowId(7)],
+    };
+    let row_ids = model.rows.clone();
+    let visible_cols = vec![0, 2];
+
+    let render_window =
+        model.materialize_window(&row_ids, &visible_cols, MaterializePurpose::Render);
+    let clipboard_window =
+        model.materialize_window(&row_ids, &visible_cols, MaterializePurpose::Clipboard);
+    let sort_window =
+        model.materialize_window(&row_ids, &visible_cols, MaterializePurpose::SortProbe);
+    let search_window =
+        model.materialize_window(&row_ids, &visible_cols, MaterializePurpose::SearchProbe);
+
+    for &row_id in &row_ids {
+        for &col in &visible_cols {
+            let expected_cell = model.cell(row_id, col);
+            let expected_cell_text = cell_to_text(&expected_cell);
+            let expected_sort_key = model.sort_key(row_id, col);
+            let render_text = render_window.cell(row_id, col).map(cell_to_text);
+            let clipboard_text = clipboard_window.cell(row_id, col).map(cell_to_text);
+
+            assert_eq!(render_text, Some(expected_cell_text.clone()));
+            assert_eq!(clipboard_text, Some(expected_cell_text));
+            assert_eq!(sort_window.sort_key(row_id, col), Some(&expected_sort_key));
+        }
+
+        let expected_search = model.search_text(row_id);
+        assert_eq!(
+            search_window.search_text(row_id),
+            Some(expected_search.as_str())
+        );
+    }
+}
+
 // ========================
 // Stage 3 Tests
 // ========================

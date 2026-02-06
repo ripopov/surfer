@@ -483,6 +483,57 @@ pub enum TableAction {
     SelectSignal(VariableRef),
 }
 
+/// Purpose hint for batch materialization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MaterializePurpose {
+    Render,
+    SortProbe,
+    SearchProbe,
+    Clipboard,
+}
+
+/// Batch materialization output for row/column probe requests.
+#[derive(Debug, Clone, Default)]
+pub struct MaterializedWindow {
+    cells: HashMap<(TableRowId, usize), TableCell>,
+    sort_keys: HashMap<(TableRowId, usize), TableSortKey>,
+    search_texts: HashMap<TableRowId, String>,
+}
+
+impl MaterializedWindow {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert_cell(&mut self, row: TableRowId, col: usize, cell: TableCell) {
+        self.cells.insert((row, col), cell);
+    }
+
+    #[must_use]
+    pub fn cell(&self, row: TableRowId, col: usize) -> Option<&TableCell> {
+        self.cells.get(&(row, col))
+    }
+
+    pub fn insert_sort_key(&mut self, row: TableRowId, col: usize, sort_key: TableSortKey) {
+        self.sort_keys.insert((row, col), sort_key);
+    }
+
+    #[must_use]
+    pub fn sort_key(&self, row: TableRowId, col: usize) -> Option<&TableSortKey> {
+        self.sort_keys.get(&(row, col))
+    }
+
+    pub fn insert_search_text(&mut self, row: TableRowId, text: String) {
+        self.search_texts.insert(row, text);
+    }
+
+    #[must_use]
+    pub fn search_text(&self, row: TableRowId) -> Option<&str> {
+        self.search_texts.get(&row).map(String::as_str)
+    }
+}
+
 /// Deferred analysis kind (v2).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AnalysisKind {
@@ -499,6 +550,36 @@ pub trait TableModel: Send + Sync {
     fn schema(&self) -> TableSchema;
     fn row_count(&self) -> usize;
     fn row_id_at(&self, index: usize) -> Option<TableRowId>;
+    fn materialize_window(
+        &self,
+        row_ids: &[TableRowId],
+        visible_cols: &[usize],
+        purpose: MaterializePurpose,
+    ) -> MaterializedWindow {
+        let mut window = MaterializedWindow::new();
+        match purpose {
+            MaterializePurpose::Render | MaterializePurpose::Clipboard => {
+                for &row_id in row_ids {
+                    for &col in visible_cols {
+                        window.insert_cell(row_id, col, self.cell(row_id, col));
+                    }
+                }
+            }
+            MaterializePurpose::SortProbe => {
+                for &row_id in row_ids {
+                    for &col in visible_cols {
+                        window.insert_sort_key(row_id, col, self.sort_key(row_id, col));
+                    }
+                }
+            }
+            MaterializePurpose::SearchProbe => {
+                for &row_id in row_ids {
+                    window.insert_search_text(row_id, self.search_text(row_id));
+                }
+            }
+        }
+        window
+    }
     fn cell(&self, row: TableRowId, col: usize) -> TableCell;
     fn sort_key(&self, row: TableRowId, col: usize) -> TableSortKey;
     fn search_text(&self, row: TableRowId) -> String;

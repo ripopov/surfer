@@ -3,6 +3,19 @@
 This plan implements the requirements in `MultiSignalChangeList.md` in small, regression-safe stages.
 Rule for all stages: do not start the next stage until the current stage passes the full test gate.
 
+## Current Status Snapshot (2026-02-06)
+
+- Stage 1: Completed (implemented and table test suite green).
+- Stage 2: Completed (implemented and full stage gate green).
+- Stage 3: Not started.
+- Stage 4: Not started.
+- Stage 5: Not started.
+- Stage 6: Not started.
+- Stage 7: Not started.
+- Stage 8: Not started.
+- Stage 9: Not started.
+- Stage 10: Not started.
+
 ## Global Stage Gate (run after every stage)
 
 1. `cargo fmt`
@@ -11,12 +24,20 @@ Rule for all stages: do not start the next stage until the current stage passes 
 4. `cargo test -- --include-ignored`
 
 If snapshot output changes are expected in a stage, review the diffs, run `./accept_snapshots.bash`, and rerun `cargo test -- --include-ignored` before continuing.
+Note: on restricted/sandboxed runners, `wcp_tcp` and `file_watcher` tests may fail due environment constraints; use an unrestricted local run for authoritative gate status.
 
 ## Stage 1 - Spec and Serialization Skeleton
 
 Goal: introduce the new table spec and config shape without changing runtime behavior.
 
 Status: Completed (2026-02-06)
+
+Validation status:
+- `cargo fmt`: passed
+- `cargo clippy --no-deps`: passed
+- `cargo test table::tests::`: passed
+- `cargo test table::tests:: -- --include-ignored`: passed
+- Full unfiltered `cargo test`: interrupted due unrelated long-running failing integration tests when requested to stop and continue
 
 Implemented:
 - Added `TableModelSpec::MultiSignalChangeList { variables: Vec<MultiSignalEntry> }`.
@@ -48,6 +69,21 @@ Implemented tests:
 ## Stage 2 - TableModel Lazy/Batch API (Backward Compatible)
 
 Goal: add the required materialization contract without breaking existing models.
+
+Status: Completed (2026-02-06)
+
+Validation status:
+- `cargo fmt`: passed
+- `cargo clippy --no-deps`: passed
+- `cargo test`: passed
+- `cargo test -- --include-ignored`: passed
+
+Implemented:
+- Added `MaterializePurpose` (`Render`, `SortProbe`, `SearchProbe`, `Clipboard`).
+- Added `MaterializedWindow` with per-purpose storage helpers (`cell`, `sort_key`, `search_text`).
+- Added default `TableModel::materialize_window(...)` adapter that delegates to legacy `cell/sort_key/search_text`.
+- Re-exported `MaterializePurpose` and `MaterializedWindow` from `table::mod`.
+- Added test `table_model_materialize_window_default_adapter_matches_legacy_methods`.
 
 Scope:
 - Extend `TableModel` with batch-oriented APIs:

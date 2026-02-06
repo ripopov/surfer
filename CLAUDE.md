@@ -138,6 +138,12 @@ The project enforces via `.pre-commit-config.yaml`:
 - Think about software architecture quality and extensibility
 - Use Rust idioms: pattern matching, `Option`/`Result` combinators, destructuring
 
+## Non-Negotiable Engineering Rules
+
+- Do not introduce any Rust `unsafe` code. New `unsafe` blocks, `unsafe fn`, `unsafe trait`, `unsafe impl`, and `extern` blocks are not allowed.
+- Do not make architectural compromises to land a fix. Avoid bypassing core abstractions, duplicating logic as a shortcut, or weakening invariants for expediency.
+- If a requested fix appears to require a workaround, stop implementation and propose a redesign/refactoring plan instead.
+
 ## Patterns
 
 - **Error handling:** Use `eyre::Result<T>` with `.context()` for error chains
@@ -148,6 +154,28 @@ The project enforces via `.pre-commit-config.yaml`:
 ## Testing
 
 **Design for fully automated testing.** When planning features or changes, all functionality must be verifiable through automated tests. Manual testing is not allowed—if something cannot be tested automatically, redesign it so it can be.
+
+**Sandbox test policy (important):** In restricted/sandboxed environments, do not spend time running known environment-sensitive tests that rely on local TCP port probing or filesystem watcher callbacks. These are known to fail in sandbox even when code is correct.
+
+- Avoid running these in sandbox:
+  - `tests::wcp_tcp::*`
+  - `file_watcher::tests::notifies_on_change`
+  - `file_watcher::tests::resolves_files_that_are_named_differently`
+- For authoritative validation, run `cargo test` and `cargo test -- --include-ignored` in an unrestricted environment (or with escalation) from the start.
+- If only sandbox execution is possible, run best-effort tests and skip the known environment-sensitive ones:
+
+```bash
+cargo test -- --skip tests::wcp_tcp:: --skip file_watcher::tests::notifies_on_change --skip file_watcher::tests::resolves_files_that_are_named_differently
+cargo test -- --include-ignored --skip tests::wcp_tcp:: --skip file_watcher::tests::notifies_on_change --skip file_watcher::tests::resolves_files_that_are_named_differently
+```
+
+**File descriptor limit (macOS):** Snapshot and WCP tests run in parallel and open many files. On macOS the default `ulimit -n` (256) is too low, causing "Too many open files" failures. Before running tests, raise the limit:
+
+```bash
+ulimit -n 10240
+```
+
+Add this to `~/.zshrc` to make it permanent.
 
 Snapshot tests compare rendered images. After visual changes:
 1. Run `cargo test --include-ignored`
