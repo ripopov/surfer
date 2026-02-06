@@ -23,9 +23,10 @@ This specification does not define:
 
 ## User Stories
 - Signal change list: show `<time, value>` transitions for a signal, and activating a row moves cursor/time focus.
+- Multi-signal change list: show merged transitions across multiple signals with deduplication, and activating a row moves cursor.
 - FTR transaction trace: show one transaction per row with timing/type/attribute columns; activating a row focuses that transaction and moves cursor.
+- Signal analysis results: show derived metrics (interval durations, per-signal values at sampling edges) computed from waveform data, with configurable sampling signal and mode.
 - Signal search results: show one row per source-level match with jump-to-time behavior.
-- Signal analysis results: show derived metrics (for example spikes, idle windows, glitches) in table form.
 - Virtual data model: generate deterministic synthetic rows/columns for development, benchmarking, and snapshots.
 - Future sources: support additional derived table views over waveform/transaction data.
 
@@ -40,7 +41,7 @@ This specification does not define:
 - Selection must be keyed by stable row identity, not by display index.
 - Selection must survive sort/filter changes and support hidden-selection accounting.
 - Activation must be model-driven via table actions.
-- Cache build must be asynchronous and stale-safe.
+- Cache build must be asynchronous and stale-safe via revision gating and cooperative cancellation.
 - In-flight cache requests must be deduplicated for identical cache keys.
 - Table actions must flow through existing message/update architecture.
 - Table tiles must be removable with runtime cleanup.
@@ -101,6 +102,7 @@ Implemented in `libsurfer/src/table/`.
 - `TableTileId`: stable per tile in layout/state.
 - `TableRowId`: stable row identity within a generation.
 - `TableColumnKey`: stable column identity (string or numeric key).
+- `TableModelKey`: stable model identity derived from spec and tile id, used in cache keys for async safety.
 
 ### Model Specification (`TableModelSpec`)
 Current variants and status:
@@ -108,11 +110,12 @@ Current variants and status:
 | Variant | Status | Notes |
 |---|---|---|
 | `SignalChangeList` | Implemented | Supports root or subfield paths. |
+| `MultiSignalChangeList` | Implemented | Merged view of multiple signals with deduplication. |
 | `TransactionTrace` | Implemented | Per-generator transaction tables. |
+| `AnalysisResults` | Implemented | Signal analysis with `SignalAnalysisV1` kind (Stages 1-7). |
 | `Virtual` | Implemented | Deterministic synthetic data. |
-| `SearchResults` | Planned | Stage 13. |
-| `Custom` | Planned | Stage 14. |
-| `AnalysisResults` | Planned | Stage 15 (v2). |
+| `SearchResults` | Planned | Stage 13. Enum variant defined; returns `ModelNotFound` at runtime. |
+| `Custom` | Planned | Stage 14. Enum variant defined; returns `ModelNotFound` at runtime. |
 
 ### View Configuration (`TableViewConfig`)
 - Title.
@@ -131,7 +134,9 @@ Current variants and status:
 - Type-to-search state.
 - Scroll state and pending scroll operations.
 - Debounced filter draft.
-- Cached model handle.
+- Cached model handle (`Arc<dyn TableModel>`).
+- Table revision counter (monotonic `u64`, incremented per `BuildTableCache`).
+- Cooperative cancellation token (`Arc<AtomicBool>`).
 
 ## Tile Integration
 Table is integrated as `SurferPane::Table(TableTileId)`.
@@ -156,27 +161,40 @@ sequenceDiagram
 
     V->>S: BuildTableCache(tile_id, cache_key)
     S->>S: Check runtime cache + table_inflight
+    S->>S: Increment table_revision, create cancel_token
     S->>S: Create/reuse model and cache entry
-    S->>W: build_table_cache(model, filter, sort)
-    W-->>S: TableCacheBuilt(tile_id, entry, result)
-    S->>S: Drop result if tile/key is stale
+    S->>W: build_table_cache(model, filter, sort, cancel_token)
+    W-->>S: TableCacheBuilt(tile_id, revision, entry, model, result)
+    S->>S: Drop if revision != runtime.table_revision (stale)
+    S->>S: Defense-in-depth: validate cache_key and entry.revision
     S->>S: Apply cache entry + hidden count
     S-->>V: Next frame renders table
 ```
 
 ### Current Pipeline Behavior
-- View computes `TableCacheKey` from tile identity, display filter, sort, and waveform generation.
+- View computes `TableCacheKey` from model key, display filter, sort, and waveform generation.
 - If cache is stale/missing, view emits `BuildTableCache`.
 - `SystemState` deduplicates by `table_inflight` and key match.
-- Model creation currently happens on UI thread in `BuildTableCache` handling.
-- Worker builds filtered/sorted row cache.
-- Apply step enforces cache key match and tile existence.
-- Stale results are ignored.
+- For most model types, model creation happens on UI thread in `BuildTableCache` handling. Signal analysis uses `PreparedSignalAnalysisModelInput` to defer heavy model construction to the worker thread.
+- Worker builds filtered/sorted row cache with cooperative cancellation checks.
+- Apply step enforces triple validation: revision match, cache key match, and entry revision match.
+- Stale and cancelled results are silently discarded.
+
+### Revision Gating
+- `runtime.table_revision` is a monotonic `u64` incremented on each `BuildTableCache` request.
+- `TableCacheBuilt` handler discards results where `revision != runtime.table_revision`.
+- Defense-in-depth: cache key and entry revision are also validated before adoption.
+
+### Cooperative Cancellation
+- `runtime.cancel_token` (`Arc<AtomicBool>`) is set to `true` before each new build.
+- A fresh token is created and passed to the async `build_table_cache` worker.
+- The worker checks the token at filter, sort, and build checkpoints.
+- Cancelled builds produce `TableCacheError::Cancelled`, which is silently discarded.
 
 ### Cache Entry Semantics
 - `TableCacheEntry` uses `OnceLock` for one-time cache set.
 - New key/generation implies new entry instance.
-- Entry tracks key and generation for stale-safe adoption.
+- Entry tracks key, generation, and revision for stale-safe adoption.
 
 ## Filtering, Sorting, and Search
 ### Display Filter
@@ -191,13 +209,13 @@ sequenceDiagram
 - Stable ordering fallback uses model base row order.
 
 ### Type-to-Search
-- Runtime buffer with timeout.
-- Case-insensitive prefix/contains matching over cached search text.
+- Runtime buffer with timeout (1 second).
+- Case-insensitive prefix/contains matching over cached or lazily probed search text.
 - Wrap-around behavior from current anchor.
 
 ## Selection and Activation
 ### Selection Model
-- Selection is runtime-only and row-id based.
+- Selection is runtime-only and row-id based (`BTreeSet<TableRowId>` with optional anchor).
 - Supports None, Single, Multi modes.
 - Multi mode supports plain click, Ctrl/Cmd toggle, Shift range.
 - Hidden selection count is cached in runtime state.
@@ -212,10 +230,10 @@ sequenceDiagram
 
 ### Activation Actions
 Model activation maps to:
-- Cursor set.
-- Transaction focus.
-- Signal select (reserved path).
-- No-op.
+- Cursor set (`CursorSet(BigInt)`).
+- Transaction focus (`FocusTransaction(TransactionRef)`).
+- Signal select (`SelectSignal(VariableRef)`, reserved path).
+- No-op (`None`).
 
 For transaction rows, activation focuses transaction and sets cursor to transaction start time.
 
@@ -225,16 +243,18 @@ For transaction rows, activation focuses transaction and sets cursor to transact
 - Dense mode row height variant.
 - Header sorting interactions.
 - Column visibility messaging and hidden-column bar.
+- Horizontal scrollbar via `egui::ScrollArea::horizontal()` wrapping the table builder.
+- Column width persistence through `ResizeTableColumn` message handling.
 
 ### Constraints
 - `sticky_header` preference is stored but currently not switchable at runtime because the underlying table builder keeps sticky headers.
-- Column width persistence pathway exists as message handling but is not fully wired from interactive resize events in the current table view.
 - Column visibility persistence expects column configs to exist; default empty config means visibility toggles may not affect persisted config until schema-derived column configs are initialized.
 
 ## Responsiveness, Accessibility, and Scroll Contract
 ### Responsiveness
 - Rendering uses row virtualization and avoids full dataset drawing.
-- Cache build executes off-thread, but model construction for cache requests still has UI-thread work and remains an optimization target.
+- Cell values are probed lazily per visible row during the egui row callback (no batch pre-materialization).
+- Cache build executes off-thread. Signal analysis defers model construction to the worker via `PreparedSignalAnalysisModelInput`. Other model types are constructed on the UI thread before spawning the worker.
 
 ### Accessibility
 - Rows are selectable and keyboard navigable through table focus handling.
@@ -257,6 +277,13 @@ For transaction rows, activation focuses transaction and sets cursor to transact
 - Formatting: uses Surfer time formatter and translator pipeline.
 - Activation: set cursor to selected transition time.
 
+### MultiSignalChangeList Model
+- Data source: loaded waveform signal transitions for multiple signals.
+- Columns: Time, Signal, Value (plus per-signal columns for multi-signal views).
+- Deduplication via `MultiSignalIndex` helper for merged timestamp ordering.
+- Formatting: uses Surfer time formatter and translator pipeline.
+- Activation: set cursor to selected transition time.
+
 ### TransactionTrace Model
 - Data source: transactions for one generator.
 - Columns: fixed timing/type columns plus dynamic attribute columns.
@@ -265,9 +292,33 @@ For transaction rows, activation focuses transaction and sets cursor to transact
 - Activation: focus transaction and set cursor to transaction start.
 - FTR lazy-load interaction: generator transaction data must be loaded before model use.
 
+### SignalAnalysis Model
+- Data source: waveform transitions for configurable set of signals, sampled at edges of a configurable sampling signal.
+- Columns: Interval (start-end time range), Duration, plus one column per analyzed signal showing value at sampling edge.
+- Sampling modes: `Event`, `PosEdge`, `AnyChange` (auto-inferred from sampling signal metadata via `infer_sampling_mode`).
+- Row id: interval index.
+- Configuration: `SignalAnalysisConfig` with `sampling` (signal reference), `signals` (list of variable + field + translator), and `run_revision` (for deterministic refresh).
+- Model construction deferred to worker thread via `PreparedSignalAnalysisModelInput`.
+- UX entry points: wizard dialog (`OpenSignalAnalysisWizard`), refresh (`RefreshSignalAnalysis`), edit (`EditSignalAnalysis`).
+- Activation: set cursor to interval start time.
+
+## TableModel Trait
+The `TableModel` trait (`Send + Sync`) defines the contract for all model implementations:
+- `schema()` - returns `TableSchema` with column definitions.
+- `row_count()` - total row count.
+- `row_id_at(index)` - row id by base order index.
+- `search_text_mode()` - returns `Eager` (build search text during cache build) or `LazyProbe` (probe on demand).
+- `materialize_window(row_ids, visible_cols, purpose)` - batch probe for cells, sort keys, or search text by `MaterializePurpose`.
+- `cell(row, col)` - single cell value (`TableCell::Text` or `TableCell::RichText`).
+- `sort_key(row, col)` - sortable value (`Numeric`, `Text`, `Bytes`, or `None`).
+- `search_text(row)` - concatenated searchable text for a row.
+- `on_activate(row)` - returns `TableAction` for row activation.
+
 ## Entry Points and UX Integration
 ### Menus
 - Variable context menu supports opening signal change list table.
+- Variable context menu supports opening multi-signal change list table.
+- Variable context menu supports opening signal analysis wizard.
 - Stream/generator context menus support opening transaction table(s).
 - Stream-level transaction action opens one table per generator.
 
@@ -296,24 +347,30 @@ For transaction rows, activation focuses transaction and sets cursor to transact
 - Filter draft.
 - Last errors.
 - Cached model handle.
+- Table revision counter.
+- Cancellation token.
 
 ### Current Invalidation Rules
 - Cache rebuild when cache key changes.
-- Cache key includes generation, display filter, and sort.
+- Cache key includes model key, generation, display filter, and sort.
+- Model key for signal analysis includes `run_revision` for deterministic refresh rebuilds.
 - Selection/model clear when detected generation change in view runtime state.
 - Hidden selection count recomputed on selection/cache application.
+- Stale results dropped by revision gating (primary) and cache key match (defense-in-depth).
 
 ### Current Risk Area
-- Model/context revisions not yet explicit. Time formatting or translator changes can invalidate semantic model output without changing the current table cache key, so stale table renderings are possible until another invalidation event occurs.
+- Model/context revisions not yet explicit for all context changes. Time formatting or translator changes can invalidate semantic model output without changing the current table cache key, so stale table renderings are possible until another invalidation event occurs.
 
 ## Performance Architecture Decisions
 | Decision | Target | Current Status |
 |---|---|---|
-| Separate model lifecycle from view-cache lifecycle | Keep model and cache lifetimes explicit and independent | Partially implemented. Runtime model cache exists, but model key lifecycle is not explicit. |
-| Explicit revision keys | Add model build key with context revision | Pending. No dedicated context revision key in runtime state. |
-| Async stale-safe pipeline | Apply worker results only on key match | Partially implemented. Cache key match is enforced; model key matching is not yet explicit. |
-| Eliminate steady-state cloning | Borrow hot-path data and avoid full-vector clones | Largely implemented for row/id navigation/filter paths. |
-| Prioritize low-risk wins first | Land no-regret perf fixes before deep refactor | Implemented. Row index, hidden-count caching, and temporary sort-key handling are in place. |
+| Separate model lifecycle from view-cache lifecycle | Keep model and cache lifetimes explicit and independent | Implemented. Runtime model cache (`runtime.model`) exists. Model key is explicit in `TableCacheKey`. |
+| Explicit revision keys | Add model build key with context revision | Partially implemented. `TableModelKey` is in cache key. Signal analysis includes `run_revision`. General context revision (time format, translators) not yet tracked. |
+| Async stale-safe pipeline | Apply worker results only on key match | Implemented. Triple validation: revision gate, cache key match, entry revision match. |
+| Cooperative cancellation | Cancel in-flight builds when new build requested | Implemented. `cancel_token` (`Arc<AtomicBool>`) checked at filter/sort/build checkpoints. |
+| Eliminate steady-state cloning | Borrow hot-path data and avoid full-vector clones | Implemented for row/id navigation/filter paths. View uses `&cache.row_ids` references. |
+| Lazy cell access | Avoid batch pre-materialization for render path | Implemented. Cells probed on-demand per visible row in egui row callback. |
+| Prioritize low-risk wins first | Land no-regret perf fixes before deep refactor | Implemented. Row index, hidden-count caching, temporary sort-key handling, and model caching are in place. |
 
 ## Target Performance Architecture
 ### Target Keys
@@ -332,9 +389,9 @@ For transaction rows, activation focuses transaction and sets cursor to transact
 - Display-format changes affecting model output.
 
 ## Known Gaps and Technical Debt
-- Model construction for cache build still runs on UI thread before spawning worker.
-- Model key and context revision are not explicit runtime state fields.
-- `SearchResults`, `Custom`, and `AnalysisResults` model variants are not implemented.
+- Model construction for most model types (except signal analysis) still runs on UI thread before spawning worker.
+- General context revision (time format, translators) is not yet tracked in cache keys.
+- `SearchResults` and `Custom` model variants are defined but not implemented (return `ModelNotFound`).
 - Source-level search (`source_query`) is designed but not implemented yet.
 - Sticky header option is stored but currently non-functional as a toggle.
 - Column config initialization from schema defaults is incomplete for some runtime visibility workflows.
@@ -347,8 +404,9 @@ All table functionality must be verified by automated tests.
 ### Current Test Portfolio
 - Unit tests for model contracts, selection mechanics, sort/filter helpers, navigation helpers, and cache behavior.
 - Message-flow integration tests for tile lifecycle, selection, activation, copy, sort/filter updates, and stream-level transaction table opening.
-- Snapshot tests for visual behavior, multi-tile layouts, sorting, keyboard-selection states, and transaction table rendering/restoration.
+- Snapshot tests for visual behavior, multi-tile layouts, sorting, keyboard-selection states, transaction table rendering/restoration, multi-signal change lists, and signal analysis results.
 - Safety tests for performance-sensitive invariants (row-index consistency and hidden-count correctness).
+- Revision gating tests for stale cache result handling.
 
 ### Ongoing Test Requirements
 - Add stale-result race tests whenever async key logic changes.
@@ -360,17 +418,22 @@ All table functionality must be verified by automated tests.
 - Stages 1-11: core table infrastructure, virtual model, signal change list model, sort/filter/selection/navigation/copy foundations, scroll and visibility primitives.
 - Stage 12: transaction trace model and integration.
 - Stage 12b: stream-level transaction table opening (one table per generator).
+- Multi-signal change list model (merged view of multiple signals).
+- Signal analysis model (Stages 1-7): typed config, async model build with deferred construction, wizard UI, context menu entry, refresh/edit with revisioned rebuilds, horizontal scrollbar.
 
 ### Current Availability Matrix
 | Capability | Status |
 |---|---|
 | Virtual table model | Complete |
 | Signal change list table | Complete |
+| Multi-signal change list table | Complete |
 | Transaction trace table | Complete |
 | Stream-level transaction table opening | Complete |
+| Signal analysis results table | Complete |
+| Revision gating and cooperative cancellation | Complete |
+| Horizontal scrollbar | Complete |
 | Source-level search results model | Pending |
 | Custom/plugin model registry | Pending |
-| Analysis results model | Pending |
 
 ## Future Plans
 
@@ -405,27 +468,14 @@ Support externally registered table models via a model registry.
 - Unknown key error-path tests.
 - Integration test for rendering a custom model in a tile.
 
-### Stage 15 (v2): AnalysisResults Model
-### Goal
-Support derived analysis tables for advanced workflows.
-
-### Scope
-- Define analysis kinds and parameter schema.
-- Implement worker pipelines producing analysis rows.
-- Add model wiring and UX entry points.
-
-### Acceptance Criteria
-- To be finalized with analysis framework design.
-
 ## Remaining Performance Phases
 ### Phase 2 Completion
-- Add explicit model key into runtime state.
-- Stop UI-thread model recreation for any remaining handler path.
-- Introduce context revision source and invalidation integration.
+- Introduce general context revision source (time format, translators) and integrate with cache key invalidation.
+- Move remaining UI-thread model construction to workers where feasible.
 
 ### Phase 3
-- Move heavy model construction to workers via owned build inputs.
-- Keep cheap UI-thread request path.
+- Move heavy model construction to workers via owned build inputs (partially done for signal analysis).
+- Keep cheap UI-thread request path for simple models.
 
 ### Phase 4
 - Optional search memory/performance tuning after measurement.
@@ -436,9 +486,9 @@ Support derived analysis tables for advanced workflows.
 ## Implementation Order Summary
 ```mermaid
 flowchart TD
-    A[Completed: Stages 1-12b] --> B[Next: Stage 13 SearchResults]
+    A[Completed: Stages 1-12b + MultiSignal + SignalAnalysis] --> B[Next: Stage 13 SearchResults]
     A --> C[Next: Stage 14 Custom Model]
-    B --> D[Then: Stage 15 AnalysisResults v2]
+    B --> D[Future extensions]
     C --> D
     A --> E[In parallel: Performance Phase 2 completion]
     E --> F[Performance Phase 3]
@@ -448,7 +498,7 @@ flowchart TD
 
 ## Definition of Done for Next Architecture Milestone
 - No steady-state model recreation during table interaction paths.
-- Explicit model key + context revision integrated with stale-safe async apply.
+- General context revision integrated with stale-safe async apply for time format/translator changes.
 - Cache/model invalidation rules are documented and covered by tests.
 - SearchResults stage is implemented with automated tests.
 - Existing table visual snapshots remain stable unless intentionally updated.

@@ -2012,6 +2012,10 @@ snapshot_ui_with_file_and_msgs! {draw_events, "examples/events.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["logic"]), false),
 ]}
 
+snapshot_ui_with_file_and_msgs! {add_scope_events_recursive_nested, "examples/nested_event_scopes.vcd", [
+    Message::AddScopeEventsRecursive(ScopeRef::from_strs(&["top"])),
+]}
+
 snapshot_ui_with_file_and_msgs! {direction_works, "examples/tb_recv.ghw", [
     Message::SetSidePanelVisible(true),
     Message::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb_recv", "dut"])))),
@@ -4045,4 +4049,29 @@ snapshot_ui_with_file_and_msgs! {signal_analysis_wizard_dialog, "examples/counte
     Message::SetItemSelected(VisibleItemIndex(0), true),
     Message::SetItemSelected(VisibleItemIndex(1), true),
     Message::OpenSignalAnalysisWizard,
+]}
+
+snapshot_ui_with_file_and_msgs! {signal_analysis_results_table, "examples/counter.vcd", [
+    Message::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"])))),
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]),
+    Message::SetMarker {
+        id: 1,
+        time: BigInt::from(5u64),
+    },
+    Message::RunSignalAnalysis {
+        config: crate::table::SignalAnalysisConfig {
+            sampling: crate::table::SignalAnalysisSamplingConfig {
+                signal: VariableRef::from_hierarchy_string("tb.clk"),
+            },
+            signals: vec![crate::table::SignalAnalysisSignal {
+                variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                field: vec![],
+                translator: "Unsigned".to_string(),
+            }],
+            run_revision: 0,
+        },
+    },
 ]}

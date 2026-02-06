@@ -362,6 +362,24 @@ impl SystemState {
 
                 self.invalidate_draw_commands();
             }
+            Message::AddScopeEventsRecursive(scope) => {
+                let vars = self.get_scope_vcd_events(scope.clone(), true);
+                if vars.is_empty() {
+                    warn!("No event variables found in scope {scope}");
+                } else {
+                    self.save_current_canvas(format!("Add events from scope {}", scope.name()));
+                    let waves = self.user.waves.as_mut()?;
+
+                    // TODO add parameter to add_variables, insert to (self.drag_target_idx, self.drag_source_idx)
+                    if let (Some(cmd), _) =
+                        waves.add_variables(&self.translators, vars, None, true, false, None)
+                    {
+                        self.load_variables(cmd);
+                    }
+
+                    self.invalidate_draw_commands();
+                }
+            }
             Message::AddScopeAsGroup(scope, recursive) => {
                 self.save_current_canvas(format!("Add scope {} as group", scope.name()));
                 let waves = self.user.waves.as_mut()?;
@@ -2512,6 +2530,7 @@ impl SystemState {
                 self.user.show_signal_analysis_wizard = None;
                 let edit_target = self.user.signal_analysis_wizard_edit_target.take();
                 self.preload_signal_analysis_variables(&config);
+                let sampling_mode = self.signal_analysis_sampling_mode(&config.sampling.signal);
 
                 if let Some(tile_id) = edit_target
                     && let Some(tile_state) = self.user.table_tiles.get_mut(&tile_id)
@@ -2532,10 +2551,8 @@ impl SystemState {
                     };
 
                     // Keep existing view settings while refreshing title from config.
-                    tile_state.config.title = format!(
-                        "Signal Analysis: {}",
-                        config.sampling.signal.full_path_string()
-                    );
+                    tile_state.config.title =
+                        crate::table::signal_analysis_title(&config, sampling_mode);
 
                     self.invalidate_draw_commands();
                     self.trigger_table_cache_build(tile_id);

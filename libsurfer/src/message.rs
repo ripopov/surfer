@@ -82,6 +82,8 @@ pub enum Message {
     AddVariables(Vec<VariableRef>),
     /// Add scope to wave view. If second argument is true, add subscopes recursively.
     AddScope(ScopeRef, bool),
+    /// Add VCD event variables from scope subtree to wave view.
+    AddScopeEventsRecursive(ScopeRef),
     /// Add scope to wave view as a group. If second argument is true, add subscopes recursively.
     AddScopeAsGroup(ScopeRef, bool),
     /// Add a character to the repeat command counter.

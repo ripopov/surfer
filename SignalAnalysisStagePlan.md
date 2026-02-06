@@ -11,7 +11,7 @@ Rule for all stages: do not start the next stage until the current stage passes 
 - Stage 4: Completed (2026-02-06).
 - Stage 5: Completed (2026-02-06).
 - Stage 6: Completed (2026-02-06).
-- Stage 7: Not started.
+- Stage 7: Completed (2026-02-06).
 
 ## Global Stage Gate (run after every stage)
 
@@ -253,7 +253,7 @@ Validation status (2026-02-06):
 
 Implemented:
 - Added `Message::RefreshSignalAnalysis { tile_id }` and `Message::EditSignalAnalysis { tile_id }`.
-- Added signal-analysis inline table actions (`Refresh`, `Edit`) in `libsurfer/src/table/view.rs`.
+- Added signal-analysis inline table actions in `libsurfer/src/table/view.rs` (later refined in Stage 7 to `"Refresh analysis"` and `"Edit configuration..."`).
 - Added edit workflow state to `UserState` and wired edit-run behavior to update the existing analysis tile (instead of creating a new tile), bumping `run_revision` on each edit-run.
 - Added `TableModelSpec::model_key_for_tile` and used it for table cache keys so `SignalAnalysisConfig.run_revision` participates in cache/model identity, forcing deterministic refresh rebuilds.
 - Hardened stale async handling in `Message::TableCacheBuilt` so stale revisions are ignored without evicting the current in-flight cache entry.
@@ -266,7 +266,7 @@ Implemented:
 
 Goal: Finalize tests, snapshots, and documentation for stable rollout.
 
-Status: Not started.
+Status: Completed (2026-02-06).
 
 Scope:
 - Add/complete integration tests for serialization, activation, and refresh semantics.
@@ -282,3 +282,23 @@ Exit criteria:
 - Stage gate green.
 - Unrestricted authoritative test runs green.
 - Plan status updated to reflect completion.
+
+Validation status (2026-02-06):
+- `ulimit -n 10240`: applied before each gate command.
+- `cargo fmt`: pass.
+- `cargo clippy --no-deps`: pass (existing warning in `libsurfer/src/table/cache.rs` about `type_complexity`).
+- `cargo test -- --skip tests::wcp_tcp:: --skip file_watcher::tests::notifies_on_change --skip file_watcher::tests::resolves_files_that_are_named_differently`: pass.
+- `cargo test -- --include-ignored --skip tests::wcp_tcp:: --skip file_watcher::tests::notifies_on_change --skip file_watcher::tests::resolves_files_that_are_named_differently`: pass.
+- `cargo test`: pass.
+- `cargo test -- --include-ignored`: pass.
+
+Implemented:
+- Updated signal-analysis table titles to follow the UX spec format `"Signal Analysis: <sampling_signal> (<resolved_mode>)"` and reused the same title builder in default config and edit-run refresh flows.
+- Updated signal-analysis inline table action labels to match the UX wording: `"Refresh analysis"` and `"Edit configuration..."`.
+- Added Stage 7 integration coverage in `libsurfer/src/table/tests.rs` for:
+  - signal-analysis table tile RON round-trip through `UserState` serialization
+  - activate-on-select cursor movement for analysis rows
+  - refresh rebuild semantics using current markers and revisioned cache/model identity
+- Added signal-analysis results snapshot coverage in `libsurfer/src/tests/snapshot.rs`:
+  - `tests::snapshot::signal_analysis_results_table`
+  - baseline image `snapshots/signal_analysis_results_table.png`.

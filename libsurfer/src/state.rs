@@ -31,9 +31,15 @@ use egui::{
 use eyre::{Context, Result};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use surfer_translation_types::Translator;
+use surfer_translation_types::{Translator, VariableType};
 use surver::SurverFileInfo;
 use tracing::{error, info, trace, warn};
+
+#[derive(Clone, Copy)]
+enum ScopeVariableSelection {
+    All,
+    VcdEventOnly,
+}
 
 /// The parts of the program state that need to be serialized when loading/saving state
 #[derive(Serialize, Deserialize)]
@@ -275,7 +281,24 @@ impl SystemState {
     }
 
     pub(crate) fn get_scope(&mut self, scope: ScopeRef, recursive: bool) -> Vec<VariableRef> {
-        let Some(waves) = self.user.waves.as_mut() else {
+        self.collect_scope_variables(scope, recursive, ScopeVariableSelection::All)
+    }
+
+    pub(crate) fn get_scope_vcd_events(
+        &mut self,
+        scope: ScopeRef,
+        recursive: bool,
+    ) -> Vec<VariableRef> {
+        self.collect_scope_variables(scope, recursive, ScopeVariableSelection::VcdEventOnly)
+    }
+
+    fn collect_scope_variables(
+        &mut self,
+        scope: ScopeRef,
+        recursive: bool,
+        selection: ScopeVariableSelection,
+    ) -> Vec<VariableRef> {
+        let Some(waves) = self.user.waves.as_ref() else {
             return vec![];
         };
 
@@ -286,12 +309,26 @@ impl SystemState {
             .variables_in_scope(&scope)
             .iter()
             .sorted_by(|a, b| numeric_sort::cmp(&a.name, &b.name))
-            .cloned()
+            .filter_map(|var| match selection {
+                ScopeVariableSelection::All => Some(var.clone()),
+                ScopeVariableSelection::VcdEventOnly => match wave_cont.variable_meta(var) {
+                    Ok(meta) => {
+                        (meta.variable_type == Some(VariableType::VCDEvent)).then_some(var.clone())
+                    }
+                    Err(error) => {
+                        warn!(
+                            "Failed metadata lookup for variable {:?} in scope {scope}: {error:#}",
+                            var
+                        );
+                        None
+                    }
+                },
+            })
             .collect_vec();
 
         if recursive && let Ok(children) = children {
             for child in children {
-                variables.append(&mut self.get_scope(child, true));
+                variables.append(&mut self.collect_scope_variables(child, true, selection));
             }
         }
 

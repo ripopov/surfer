@@ -1,7 +1,7 @@
 default_variable_name_type = "Unique"
 default_clock_highlight_type = "Line"
 snap_distance = 6
-theme = ""
+theme = "dracula"
 undo_stack_size = 50
 autoreload_files = "Ask"
 autoload_sibling_state_files = "Ask"

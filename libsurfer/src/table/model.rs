@@ -2,7 +2,7 @@ use super::cache::TableCacheError;
 use crate::config::SurferTheme;
 use crate::table::sources::{
     MultiSignalChangeListModel, SignalAnalysisResultsModel, SignalChangeListModel,
-    TransactionTraceModelWithData, VirtualTableModel,
+    TransactionTraceModelWithData, VirtualTableModel, infer_sampling_mode,
 };
 use crate::time::{TimeFormat, TimeUnit};
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
@@ -124,7 +124,7 @@ impl TableModelSpec {
 
     /// Returns a default view configuration for this model type.
     #[must_use]
-    pub fn default_view_config(&self, _ctx: &TableModelContext<'_>) -> TableViewConfig {
+    pub fn default_view_config(&self, ctx: &TableModelContext<'_>) -> TableViewConfig {
         match self {
             Self::SignalChangeList { variable, field } => {
                 let mut config = TableViewConfig::default();
@@ -167,9 +167,9 @@ impl TableModelSpec {
                 kind: AnalysisKind::SignalAnalysisV1,
                 params: AnalysisParams::SignalAnalysisV1 { config },
             } => TableViewConfig {
-                title: format!(
-                    "Signal Analysis: {}",
-                    config.sampling.signal.full_path_string()
+                title: signal_analysis_title(
+                    config,
+                    signal_analysis_sampling_mode_from_context(config, ctx),
                 ),
                 sort: vec![TableSortSpec {
                     key: TableColumnKey::Str("interval_end".to_string()),
@@ -182,6 +182,45 @@ impl TableModelSpec {
             _ => TableViewConfig::default(),
         }
     }
+}
+
+#[must_use]
+pub fn signal_analysis_title(
+    config: &SignalAnalysisConfig,
+    mode: Option<SignalAnalysisSamplingMode>,
+) -> String {
+    let sampling_signal = config.sampling.signal.full_path_string();
+    match mode {
+        Some(mode) => format!(
+            "Signal Analysis: {sampling_signal} ({})",
+            signal_analysis_mode_title_text(mode)
+        ),
+        None => format!("Signal Analysis: {sampling_signal}"),
+    }
+}
+
+#[must_use]
+pub const fn signal_analysis_mode_title_text(mode: SignalAnalysisSamplingMode) -> &'static str {
+    match mode {
+        SignalAnalysisSamplingMode::Event => "event",
+        SignalAnalysisSamplingMode::PosEdge => "posedge",
+        SignalAnalysisSamplingMode::AnyChange => "any-change",
+    }
+}
+
+fn signal_analysis_sampling_mode_from_context(
+    config: &SignalAnalysisConfig,
+    ctx: &TableModelContext<'_>,
+) -> Option<SignalAnalysisSamplingMode> {
+    let waves = ctx.waves?;
+    let wave_container = waves.inner.as_waves()?;
+    let resolved_sampling_signal = wave_container
+        .update_variable_ref(&config.sampling.signal)
+        .unwrap_or_else(|| config.sampling.signal.clone());
+    let sampling_meta = wave_container
+        .variable_meta(&resolved_sampling_signal)
+        .ok()?;
+    Some(infer_sampling_mode(&sampling_meta))
 }
 
 /// Context for building table models from specifications.

@@ -22,8 +22,9 @@ pub use model::{
     navigate_page_down, navigate_page_up, navigate_up, resize_column,
     scroll_target_after_activation, scroll_target_after_filter, scroll_target_after_sort,
     selection_on_click_multi, selection_on_click_single, selection_on_ctrl_click,
-    selection_on_shift_click, should_clear_selection_on_generation_change, sort_indicator,
-    sort_spec_on_click, sort_spec_on_shift_click, toggle_column_visibility, visible_columns,
+    selection_on_shift_click, should_clear_selection_on_generation_change, signal_analysis_title,
+    sort_indicator, sort_spec_on_click, sort_spec_on_shift_click, toggle_column_visibility,
+    visible_columns,
 };
 pub use view::draw_table_tile;
 
