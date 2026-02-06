@@ -2,11 +2,11 @@
 
 ## 1. Feature Overview
 
-The Signal Analyzer is a new table model for Surfer's tile-based UI that computes statistical summaries (average, min, max, sum) of selected signals sampled at configurable trigger events. Results are broken down by marker-delimited intervals, giving users insight into signal behavior across different phases of simulation.
+The Signal Analyzer is a new table model for Surfer's tile-based UI that computes statistical summaries (average, min, max, sum) of selected signals sampled at trigger events inferred from the chosen sampling signal. Results are broken down by marker-delimited intervals, giving users insight into signal behavior across different phases of simulation.
 
 ### Core Capabilities
 
-- **Sampling modes**: Positive edge of a clock, any-change (counter mode), or event-type signal
+- **Automatic sampling mode selection**: Sampling behavior is inferred from the selected sampling signal type/encoding
 - **Computed metrics**: Average, minimum, maximum, sum of sampled numeric values per signal
 - **Interval segmentation**: Global statistics plus per-interval breakdown using waveform markers as interval boundaries
 - **Async computation**: Analysis runs on a background worker thread
@@ -21,22 +21,30 @@ The Signal Analyzer is a new table model for Surfer's tile-based UI that compute
 ```
 AnalysisConfig
   ├── sampling: SamplingConfig
-  │     ├── mode: PosEdge | AnyChange | Event
-  │     └── signal: VariableRef        // clock or trigger signal
+  │     └── signal: VariableRef        // clock / counter / event trigger signal
   ├── signals: Vec<AnalyzedSignal>
   │     ├── variable: VariableRef
-  │     ├── field: Vec<String>         // sub-field path (for structs)
+  │     ├── field: Vec<String>         // reserved for v2 (field-level numeric metrics)
   │     └── translator: String         // format name for numeric interpretation
-  └── marker_snapshot: Vec<(u8, BigInt)>  // sorted copy of markers at analysis time
+  └── run_revision: u64                // incremented on refresh/re-run
+
+AnalysisRunContext (runtime-only, not serialized)
+  ├── resolved_sampling_mode: PosEdge | AnyChange | Event
+  ├── marker_snapshot: Vec<(u8, BigInt)>  // sorted marker copy at run start
+  └── time_range: (BigInt, BigInt)        // waveform start/end at run start
 ```
 
-### 2.2 Sampling Modes
+### 2.2 Automatic Sampling Mode Selection
 
-| Mode | Trigger Condition | Use Case |
-|------|-------------------|----------|
-| **PosEdge** | Sampling signal transitions to `1` (rising edge) | Synchronous clock-domain analysis |
-| **AnyChange** | Every value change of the sampling signal | Asynchronous / counter-driven sampling |
-| **Event** | Each event occurrence on an event-type signal | Protocol event analysis |
+Sampling mode is inferred automatically from the selected sampling signal:
+
+| Sampling signal kind | Resolved mode | Trigger Condition |
+|----------------------|---------------|-------------------|
+| **VCD event signal** (`VariableMeta::is_event()`) | **Event** | Each event occurrence |
+| **1-bit signal** | **PosEdge** | Transition to logic `1` from logic `0` |
+| **n-bit signal** (n > 1) | **AnyChange** | Every value change |
+
+Precedence rule: event encoding is checked first, then bit-width.
 
 ### 2.3 Result Schema
 
@@ -114,11 +122,6 @@ After clicking "Analyze selected signals...", a configuration dialog opens. The 
 │  │  top.clk                                                ▾ │  │
 │  └────────────────────────────────────────────────────────────┘  │
 │                                                                  │
-│  Sampling Mode                                                   │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐             │
-│  │ ● Pos. Edge  │ │ ○ Any Change │ │ ○ Event      │             │
-│  └──────────────┘ └──────────────┘ └──────────────┘             │
-│                                                                  │
 │  Signals to analyze (3 selected)                                 │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │  ☑ top.data_out    [Unsigned ▾]                           │  │
@@ -140,12 +143,13 @@ After clicking "Analyze selected signals...", a configuration dialog opens. The 
 - Combo box listing all variables currently displayed in the waveform viewport
 - Default: first 1-bit signal in the displayed items list (heuristic for clock detection)
 - Signals are shown with their display names (matching the viewport)
-- The selected sampling signal is automatically excluded from the "signals to analyze" list
+- The selected sampling signal remains eligible for analysis (self-analysis is allowed)
 
-**Sampling Mode**:
-- Radio button group with three options: `Pos. Edge`, `Any Change`, `Event`
-- Default: `Pos. Edge` if sampling signal is 1-bit, `Any Change` otherwise
-- `Event` mode enabled only when sampling signal has event encoding (`VariableMeta::is_event()`)
+**Sampling Mode (read-only)**:
+- Display-only label derived from the selected sampling signal:
+- Event signal → `Event`
+- 1-bit signal → `Pos. Edge`
+- n-bit signal → `Any Change`
 
 **Signals to Analyze**:
 - Scrollable list of all selected variables (pre-checked)
@@ -175,7 +179,7 @@ User clicks "Run"
         │
         ▼
 ┌────────────────────────────┐
-│  Create TableTileState     │── spec: TableModelSpec::SignalAnalysis { config }
+│  Create TableTileState     │── spec: TableModelSpec::AnalysisResults { kind, params }
 │  with AnalysisConfig       │   config: default_view_config()
 └─────────────┬──────────────┘
               │
@@ -188,12 +192,12 @@ User clicks "Run"
               ▼  (async worker thread)
 ┌────────────────────────────────────────┐
 │  1. Iterate sampling signal changes    │
-│  2. Detect trigger edges               │
+│  2. Detect trigger events (inferred mode) │
 │  3. At each trigger:                   │
 │     - Query all analyzed signals       │
 │     - Accumulate per-interval stats    │
-│  4. Build result rows                  │
-│  5. Return TableCache + model          │
+│  4. Build model rows                   │
+│  5. Return TableCache                  │
 └─────────────┬──────────────────────────┘
               │
               ▼
@@ -216,7 +220,7 @@ The analysis result appears as a standard table tile (bottom pane or horizontal 
 
 #### Table Title
 
-Format: `"Signal Analysis: <sampling_signal> (<mode>)"`
+Format: `"Signal Analysis: <sampling_signal> (<resolved_mode>)"`
 
 Example: `"Signal Analysis: top.clk (posedge)"`
 
@@ -224,7 +228,7 @@ Example: `"Signal Analysis: top.clk (posedge)"`
 
 The analysis is a snapshot computation — it does not auto-update when markers move. To support iterative workflows:
 
-**Context menu on the analysis table tile header**:
+**Inline actions in the table tile (v1)**:
 ```
 ┌──────────────────────────┐
 │  Refresh analysis        │  ← Re-run with current markers
@@ -234,8 +238,8 @@ The analysis is a snapshot computation — it does not auto-update when markers 
 └──────────────────────────┘
 ```
 
-- **Refresh analysis**: Re-runs the analysis using the same signals and sampling config, but with the current marker positions. Emits a new `BuildTableCache` with updated marker snapshot.
-- **Edit configuration...**: Re-opens the configuration wizard pre-populated with the current analysis settings. User can modify signals, sampling, then re-run.
+- **Refresh analysis**: Re-runs analysis using current markers and the same sampling config. It increments `run_revision` and forces model/cache rebuild even if sort/filter/generation are unchanged.
+- **Edit configuration...**: Re-opens the configuration wizard pre-populated with the current analysis settings. User can modify sampling signal and analyzed signals, then re-run.
 
 ---
 
@@ -244,11 +248,16 @@ The analysis is a snapshot computation — it does not auto-update when markers 
 ### 4.1 Trigger Point Collection
 
 ```
-Input: sampling signal accessor, sampling mode
+Input: sampling signal accessor + sampling signal metadata
 Output: sorted Vec<u64> of trigger timestamps
 
+resolved_mode = infer_mode(meta):
+    if meta.is_event(): Event
+    else if meta.num_bits == 1: PosEdge
+    else: AnyChange
+
 For each (time, value) in sampling_signal.iter_changes():
-    match mode:
+    match resolved_mode:
         PosEdge:
             if value == "1" and previous_value == "0":
                 emit time as trigger point
@@ -266,12 +275,13 @@ Output: Vec<Interval>
 
 Sort markers by timestamp.
 Remove duplicate timestamps.
+Drop markers outside [t_start, t_end].
 
 Intervals:
-    [t_start,    marker_1]   label: "start → Marker 1"
-    [marker_1,   marker_2]   label: "Marker 1 → Marker 2"
+    [t_start,    marker_1)   label: "start → Marker 1"
+    [marker_1,   marker_2)   label: "Marker 1 → Marker 2"
     ...
-    [marker_N,   t_end]      label: "Marker N → end"
+    [marker_N,   t_end]      label: "Marker N → end"   // inclusive end for final interval
     [t_start,    t_end]      label: "GLOBAL"
 
 If no markers exist:
@@ -284,14 +294,16 @@ If no markers exist:
 For each trigger timestamp t:
     Determine which interval t belongs to (binary search on interval boundaries)
     For each analyzed signal:
-        query_variable(signal, t) → value
-        translate_numeric(meta, value) → f64
+        query_variable(signal, t) → current value at-or-before t
+        translate_numeric(meta, value) → f64   // v1: only root variable metrics
         If valid f64 (not NaN):
             interval_accum.count += 1
             interval_accum.sum += value
             interval_accum.min = min(interval_accum.min, value)
             interval_accum.max = max(interval_accum.max, value)
             global_accum: same updates
+        Else:
+            keep metric cells as "—" for that signal/interval
 
 After all triggers:
     For each interval and each signal:
@@ -301,7 +313,7 @@ After all triggers:
 
 ### 4.4 Performance Considerations
 
-- **Signal loading**: All analyzed signals and the sampling signal must be loaded before analysis begins. The async worker should request loading if needed (via `load_variable`) and wait.
+- **Signal loading**: Missing signals are requested before launching analysis work (preflight on UI/update thread). The table model itself remains read-only; it does not mutate/load waveform data from worker threads.
 - **Memory**: Accumulator state is O(intervals x signals) — negligible. Trigger point list is O(transitions of sampling signal).
 - **Large waveforms**: For files with millions of clock edges, the computation is CPU-bound. The async worker thread keeps the UI responsive. A progress indication appears in the table tile (standard loading spinner from the table cache build flow).
 - **Numeric precision**: Use `f64` accumulators. This provides sufficient precision for typical simulation values. Sum may lose precision for very large sample counts of large values — acceptable trade-off.
@@ -312,20 +324,21 @@ After all triggers:
 
 ### 5.1 TableModelSpec Extension
 
-A new variant is added to `TableModelSpec`:
+Use the existing analysis slot in `TableModelSpec` (architecture-aligned):
 
 ```
-TableModelSpec::SignalAnalysis {
-    config: SignalAnalysisConfig
+TableModelSpec::AnalysisResults {
+    kind: AnalysisKind::SignalAnalysisV1,
+    params: AnalysisParams::SignalAnalysis(SignalAnalysisConfig)
 }
 ```
 
 Where `SignalAnalysisConfig` contains:
 - `sampling_variable: VariableRef`
-- `sampling_mode: SamplingMode` (PosEdge | AnyChange | Event)
 - `analyzed_signals: Vec<AnalyzedSignalSpec>` (variable ref + field path + translator name)
+- `run_revision: u64`
 
-Marker positions are **not** serialized in the spec — they are captured at analysis time from `WaveData.markers`. This means loading a `.surf.ron` file with an analysis tile will re-analyze using the markers present in the restored session.
+Marker positions are **not** serialized in the spec — they are captured at run time from `WaveData.markers`.
 
 ### 5.2 Cache Invalidation
 
@@ -333,6 +346,11 @@ The analysis table cache should be rebuilt when:
 - User explicitly requests refresh
 - User edits configuration and re-runs
 - Waveform data is reloaded (cache generation changes)
+- Model/context revision changes (time format, translator-set changes, variable display-format changes)
+
+To make refresh deterministic, the model/cache identity must include `run_revision`
+(for example via `TableModelKey`/cache-key model revision input), so repeated refreshes
+cannot be deduplicated as a no-op.
 
 The analysis does **not** auto-invalidate on marker moves — this is by design, as analysis is a deliberate snapshot operation.
 
@@ -351,6 +369,14 @@ Message::OpenSignalAnalysisWizard {
 Message::RunSignalAnalysis {
     config: SignalAnalysisConfig
 }
+
+Message::RefreshSignalAnalysis {
+    tile_id: TableTileId
+}
+
+Message::EditSignalAnalysis {
+    tile_id: TableTileId
+}
 ```
 
 ### 6.2 Interaction Sequence
@@ -364,13 +390,12 @@ Message::RunSignalAnalysis {
   Click "Analyze     │                       │                          │
   selected           │                       │                          │
   signals..."        │──── menu click ──────▶│                          │
-                     │                       │── OpenSignalAnalysis ──▶│
-                     │                       │   Wizard                 │
+                     │                       │── OpenSignalAnalysisWizard ─▶│
                      │                       │                          │
                      │                       │◀── open wizard dialog ──│
                      │                       │                          │
   Configure          │                       │                          │
-  sampling &         │◀── dialog fields ────▶│                          │
+  sampling signal &  │◀── dialog fields ────▶│                          │
   signals            │                       │                          │
                      │                       │                          │
   Click "Run"        │──── run button ──────▶│                          │
@@ -396,9 +421,11 @@ Message::RunSignalAnalysis {
 | Condition | Behavior |
 |-----------|----------|
 | No signals selected when opening wizard | Menu item is disabled/hidden |
-| Sampling signal has no transitions | Analysis completes with empty table, info message in tile |
+| Sampling signal kind changes | Resolved sampling mode updates automatically |
+| Sampling signal has no transitions | Analysis completes with interval/global rows and `"—"` metrics |
 | No triggers fall within an interval | Interval row shows `"—"` for all metrics |
-| Signal not loaded in waveform backend | Async worker loads signal before sampling |
+| Signal not loaded in waveform backend | Preflight requests load; model returns `DataUnavailable` until data arrives |
+| A non-empty `field` is configured | Supported as metadata in config; numeric metrics remain root-level in v1 (`"—"` if field-only value) |
 | Sampling signal same as analyzed signal | Allowed (self-analysis is valid) |
 | All analyzed signals are non-numeric | Table shows `"—"` in all metric columns; still useful for interval structure |
 | No markers present | Table shows single GLOBAL row |
@@ -418,7 +445,8 @@ All functionality must be verifiable through automated tests.
 
 ### 8.1 Unit Tests (table/sources/signal_analysis.rs)
 
-- **Trigger detection**: Verify PosEdge/AnyChange/Event modes produce correct trigger timestamps from known signal data
+- **Mode inference**: Verify automatic mapping `event -> Event`, `1-bit -> PosEdge`, `n-bit -> AnyChange`
+- **Trigger detection**: Verify inferred mode produces correct trigger timestamps from known signal data
 - **Interval construction**: Test marker sorting, deduplication, boundary computation
 - **Accumulator math**: Verify average/min/max/sum with known inputs, including edge cases (single sample, zero values, negative values)
 - **Non-numeric signals**: Verify `"—"` output for signals without numeric translation
@@ -430,6 +458,8 @@ All functionality must be verifiable through automated tests.
 - **Round-trip serialization**: `SignalAnalysisConfig` survives RON serialize/deserialize
 - **Cache build flow**: End-to-end `BuildTableCache` → `TableCacheBuilt` with analysis spec
 - **Row activation**: Clicking interval row sets cursor to correct timestamp
+- **Refresh semantics**: Refresh forces rebuild when sort/filter/generation are unchanged
+- **Stale-result safety**: Late worker result from old run revision is dropped
 
 ### 8.3 Snapshot Tests
 
