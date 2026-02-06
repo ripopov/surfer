@@ -4472,6 +4472,18 @@ fn load_counter_state_with_variable(var_path: &str) -> SystemState {
     state
 }
 
+fn load_counter_state_with_variables(var_paths: &[&str]) -> SystemState {
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(
+        var_paths
+            .iter()
+            .map(|path| VariableRef::from_hierarchy_string(path))
+            .collect(),
+    ));
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state
+}
+
 fn find_visible_index_for_variable(
     waves: &crate::wave_data::WaveData,
     variable: &VariableRef,
@@ -4593,6 +4605,234 @@ fn signal_change_list_model_errors() {
         spec.create_model(&ctx),
         Err(TableCacheError::DataUnavailable)
     ));
+}
+
+#[test]
+fn signal_analysis_model_requires_loaded_signals() {
+    let empty_state = SystemState::new_default_config().expect("state");
+    let empty_ctx = empty_state.table_model_context();
+    let spec = TableModelSpec::AnalysisResults {
+        kind: AnalysisKind::SignalAnalysisV1,
+        params: AnalysisParams::SignalAnalysisV1 {
+            config: SignalAnalysisConfig {
+                sampling: SignalAnalysisSamplingConfig {
+                    signal: VariableRef::from_hierarchy_string("tb.clk"),
+                },
+                signals: vec![SignalAnalysisSignal {
+                    variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                    field: vec![],
+                    translator: "Unsigned".to_string(),
+                }],
+                run_revision: 0,
+            },
+        },
+    };
+    assert!(matches!(
+        spec.create_model(&empty_ctx),
+        Err(TableCacheError::DataUnavailable)
+    ));
+
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = load_counter_state_with_variable("tb.clk");
+    let ctx = state.table_model_context();
+    assert!(matches!(
+        spec.create_model(&ctx),
+        Err(TableCacheError::DataUnavailable)
+    ));
+}
+
+#[test]
+fn signal_analysis_model_schema_rows_sort_search_and_activation() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = load_counter_state_with_variables(&["tb.clk", "tb.dut.counter"]);
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::AnalysisResults {
+        kind: AnalysisKind::SignalAnalysisV1,
+        params: AnalysisParams::SignalAnalysisV1 {
+            config: SignalAnalysisConfig {
+                sampling: SignalAnalysisSamplingConfig {
+                    signal: VariableRef::from_hierarchy_string("tb.clk"),
+                },
+                signals: vec![SignalAnalysisSignal {
+                    variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                    field: vec![],
+                    translator: "Unsigned".to_string(),
+                }],
+                run_revision: 0,
+            },
+        },
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    let schema = model.schema();
+    assert_eq!(schema.columns.len(), 6);
+    assert_eq!(schema.columns[0].label, "Interval End");
+    assert_eq!(schema.columns[1].label, "Info");
+    assert_eq!(
+        schema.columns[2].key,
+        TableColumnKey::Str("signal_analysis:v1:0:avg".to_string())
+    );
+    assert_eq!(schema.columns[2].label, "tb.dut.counter.avg");
+
+    // No markers => single global row.
+    assert_eq!(model.row_count(), 1);
+    let row_id = model.row_id_at(0).expect("row");
+
+    let end_text = match model.cell(row_id, 0) {
+        TableCell::Text(text) => text,
+        TableCell::RichText(text) => text.text().to_string(),
+    };
+    assert!(!end_text.is_empty());
+
+    let info_text = match model.cell(row_id, 1) {
+        TableCell::Text(text) => text,
+        TableCell::RichText(text) => text.text().to_string(),
+    };
+    assert_eq!(info_text, "GLOBAL");
+
+    assert!(matches!(
+        model.sort_key(row_id, 0),
+        TableSortKey::Numeric(_)
+    ));
+    assert!(matches!(
+        model.sort_key(row_id, 2),
+        TableSortKey::Numeric(_) | TableSortKey::None
+    ));
+
+    let search_text = model.search_text(row_id);
+    assert!(search_text.contains("GLOBAL"));
+    assert!(search_text.contains(&end_text));
+
+    let activated_time = match model.on_activate(row_id) {
+        TableAction::CursorSet(time) => time,
+        _ => panic!("expected cursor set"),
+    };
+    assert_eq!(
+        activated_time,
+        state
+            .user
+            .waves
+            .as_ref()
+            .expect("waves")
+            .num_timestamps()
+            .expect("end time")
+    );
+}
+
+#[test]
+fn signal_analysis_model_intervals_and_activation_use_interval_end() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state_with_variables(&["tb.clk", "tb.dut.counter"]);
+    state
+        .user
+        .waves
+        .as_mut()
+        .expect("waves")
+        .markers
+        .insert(1, num::BigInt::from(5u64));
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::AnalysisResults {
+        kind: AnalysisKind::SignalAnalysisV1,
+        params: AnalysisParams::SignalAnalysisV1 {
+            config: SignalAnalysisConfig {
+                sampling: SignalAnalysisSamplingConfig {
+                    signal: VariableRef::from_hierarchy_string("tb.clk"),
+                },
+                signals: vec![SignalAnalysisSignal {
+                    variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                    field: vec![],
+                    translator: "Unsigned".to_string(),
+                }],
+                run_revision: 0,
+            },
+        },
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    assert_eq!(model.row_count(), 3);
+
+    let first_row = model.row_id_at(0).expect("first row");
+    let first_info = match model.cell(first_row, 1) {
+        TableCell::Text(text) => text,
+        TableCell::RichText(text) => text.text().to_string(),
+    };
+    assert_eq!(first_info, "start -> Marker 1");
+
+    match model.on_activate(first_row) {
+        TableAction::CursorSet(time) => assert_eq!(time, num::BigInt::from(5u64)),
+        _ => panic!("expected cursor set"),
+    }
+}
+
+#[test]
+fn signal_analysis_model_non_empty_field_disables_numeric_metrics() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let state = load_counter_state_with_variables(&["tb.clk", "tb.dut.counter"]);
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::AnalysisResults {
+        kind: AnalysisKind::SignalAnalysisV1,
+        params: AnalysisParams::SignalAnalysisV1 {
+            config: SignalAnalysisConfig {
+                sampling: SignalAnalysisSamplingConfig {
+                    signal: VariableRef::from_hierarchy_string("tb.clk"),
+                },
+                signals: vec![SignalAnalysisSignal {
+                    variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                    field: vec!["value".to_string()],
+                    translator: "Unsigned".to_string(),
+                }],
+                run_revision: 0,
+            },
+        },
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    let row_id = model.row_id_at(0).expect("row");
+    let avg_text = match model.cell(row_id, 2) {
+        TableCell::Text(text) => text,
+        TableCell::RichText(text) => text.text().to_string(),
+    };
+    assert_eq!(avg_text, "—");
+    assert_eq!(model.sort_key(row_id, 2), TableSortKey::None);
+}
+
+#[test]
+fn analysis_results_default_view_config_sets_sort_and_activation() {
+    let state = SystemState::new_default_config().expect("state");
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::AnalysisResults {
+        kind: AnalysisKind::SignalAnalysisV1,
+        params: AnalysisParams::SignalAnalysisV1 {
+            config: SignalAnalysisConfig {
+                sampling: SignalAnalysisSamplingConfig {
+                    signal: VariableRef::from_hierarchy_string("tb.clk"),
+                },
+                signals: vec![SignalAnalysisSignal {
+                    variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                    field: vec![],
+                    translator: "Unsigned".to_string(),
+                }],
+                run_revision: 0,
+            },
+        },
+    };
+
+    let config = spec.default_view_config(&ctx);
+    assert_eq!(config.title, "Signal Analysis: tb.clk");
+    assert_eq!(config.selection_mode, TableSelectionMode::Single);
+    assert!(config.activate_on_select);
+    assert_eq!(
+        config.sort,
+        vec![TableSortSpec {
+            key: TableColumnKey::Str("interval_end".to_string()),
+            direction: TableSortDirection::Ascending,
+        }]
+    );
 }
 
 #[test]

@@ -1,8 +1,8 @@
 use super::cache::TableCacheError;
 use crate::config::SurferTheme;
 use crate::table::sources::{
-    MultiSignalChangeListModel, SignalChangeListModel, TransactionTraceModelWithData,
-    VirtualTableModel,
+    MultiSignalChangeListModel, SignalAnalysisResultsModel, SignalChangeListModel,
+    TransactionTraceModelWithData, VirtualTableModel,
 };
 use crate::time::{TimeFormat, TimeUnit};
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
@@ -89,6 +89,11 @@ impl TableModelSpec {
                 MultiSignalChangeListModel::new(variables.clone(), ctx)
                     .map(|model| Arc::new(model) as Arc<dyn TableModel>)
             }
+            Self::AnalysisResults {
+                kind: AnalysisKind::SignalAnalysisV1,
+                params: AnalysisParams::SignalAnalysisV1 { config },
+            } => SignalAnalysisResultsModel::new(config.clone(), ctx)
+                .map(|model| Arc::new(model) as Arc<dyn TableModel>),
             // Other model types will be implemented in later stages
             Self::SearchResults { .. } | Self::AnalysisResults { .. } | Self::Custom { .. } => {
                 Err(TableCacheError::ModelNotFound {
@@ -133,6 +138,22 @@ impl TableModelSpec {
                 title: "Multi-signal change list".to_string(),
                 sort: vec![TableSortSpec {
                     key: TableColumnKey::Str("time".to_string()),
+                    direction: TableSortDirection::Ascending,
+                }],
+                selection_mode: TableSelectionMode::Single,
+                activate_on_select: true,
+                ..Default::default()
+            },
+            Self::AnalysisResults {
+                kind: AnalysisKind::SignalAnalysisV1,
+                params: AnalysisParams::SignalAnalysisV1 { config },
+            } => TableViewConfig {
+                title: format!(
+                    "Signal Analysis: {}",
+                    config.sampling.signal.full_path_string()
+                ),
+                sort: vec![TableSortSpec {
+                    key: TableColumnKey::Str("interval_end".to_string()),
                     direction: TableSortDirection::Ascending,
                 }],
                 selection_mode: TableSelectionMode::Single,

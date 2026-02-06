@@ -7,7 +7,7 @@ Rule for all stages: do not start the next stage until the current stage passes 
 
 - Stage 1: Completed (2026-02-06).
 - Stage 2: Completed (2026-02-06).
-- Stage 3: Not started.
+- Stage 3: Completed (2026-02-06).
 - Stage 4: Not started.
 - Stage 5: Not started.
 - Stage 6: Not started.
@@ -108,7 +108,7 @@ Implemented:
 
 Goal: Build `TableModel` implementation for analysis results using Stage 2 kernel.
 
-Status: Not started.
+Status: Completed (2026-02-06).
 
 Scope:
 - Implement schema, rows, cells, sort keys, search text, and `on_activate`.
@@ -123,6 +123,20 @@ Expected files:
 
 Exit criteria:
 - Table model compliance tests pass for schema/row/cell/sort/search/activation.
+
+Validation status (2026-02-06):
+- `ulimit -n 10240`: applied before each gate command.
+- `cargo fmt`: pass.
+- `cargo clippy --no-deps`: pass (existing warning in `libsurfer/src/table/cache.rs` about `type_complexity`).
+- `cargo test -- --skip tests::wcp_tcp:: --skip file_watcher::tests::notifies_on_change --skip file_watcher::tests::resolves_files_that_are_named_differently`: pass.
+- `cargo test -- --include-ignored --skip tests::wcp_tcp:: --skip file_watcher::tests::notifies_on_change --skip file_watcher::tests::resolves_files_that_are_named_differently`: pass.
+
+Implemented:
+- Added `SignalAnalysisResultsModel` in `libsurfer/src/table/sources/signal_analysis.rs`, reusing Stage 2 kernel helpers for trigger extraction, marker intervals, and metric accumulation.
+- Implemented full `TableModel` behavior for analysis results: schema, rows/cells, sort keys, search text, and row activation (`CursorSet` to interval end timestamp).
+- Added required-signal availability checks so model creation returns `TableCacheError::DataUnavailable` when sampling/analyzed signals are not loaded.
+- Wired `TableModelSpec::create_model` for `AnalysisResults { SignalAnalysisV1 }` and added analysis-specific default view config (title, sort, single-select with activate-on-select).
+- Added Stage 3 table tests covering schema/row/cell/sort/search/activation, interval-end activation semantics, non-empty field handling, and default view config behavior.
 
 ## Stage 4 - Run Path and Async Cache Integration
 

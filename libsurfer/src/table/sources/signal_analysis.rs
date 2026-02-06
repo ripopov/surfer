@@ -1,9 +1,23 @@
-use crate::table::SignalAnalysisSamplingMode;
-use crate::wave_container::VariableMeta;
+use crate::table::{
+    SignalAnalysisConfig, SignalAnalysisSamplingMode, TableAction, TableCacheError, TableCell,
+    TableColumn, TableColumnKey, TableModel, TableModelContext, TableRowId, TableSchema,
+    TableSortKey,
+};
+use crate::time::TimeFormatter;
+use crate::translation::AnyTranslator;
+use crate::wave_container::{
+    SignalAccessor, VariableMeta, VariableRef, VariableRefExt, WaveContainer,
+};
 use num::{BigInt, One, ToPrimitive, Zero};
-use surfer_translation_types::VariableValue;
+use std::collections::HashMap;
+use surfer_translation_types::{Translator, VariableValue};
 
 const GLOBAL_LABEL: &str = "GLOBAL";
+const EM_DASH: &str = "\u{2014}";
+const INTERVAL_END_COLUMN_KEY: &str = "interval_end";
+const INFO_COLUMN_KEY: &str = "info";
+const ANALYSIS_COLUMN_KEY_PREFIX: &str = "signal_analysis:v1:";
+const METRIC_SUFFIXES: [&str; 4] = ["avg", "min", "max", "sum"];
 
 /// Inclusive time range captured for a single analysis run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +71,225 @@ pub struct SignalAnalysisAccumulation {
     pub global: Vec<Option<SignalAnalysisMetrics>>,
 }
 
+struct ResolvedSignalAnalysisSignal {
+    display_label: String,
+    field: Vec<String>,
+    meta: VariableMeta,
+    accessor: SignalAccessor,
+    translator: AnyTranslator,
+}
+
+struct SignalAnalysisResultRow {
+    row_id: TableRowId,
+    interval_end_u64: u64,
+    interval_end: BigInt,
+    interval_end_text: String,
+    info: String,
+    metric_values: Vec<Option<f64>>,
+    metric_texts: Vec<String>,
+    search_text: String,
+}
+
+/// Analysis-result table model backed by stage-2 pure computation helpers.
+pub struct SignalAnalysisResultsModel {
+    schema: TableSchema,
+    rows: Vec<SignalAnalysisResultRow>,
+    row_index: HashMap<TableRowId, usize>,
+}
+
+impl SignalAnalysisResultsModel {
+    pub fn new(
+        config: SignalAnalysisConfig,
+        ctx: &TableModelContext<'_>,
+    ) -> Result<Self, TableCacheError> {
+        let waves = ctx.waves.ok_or(TableCacheError::DataUnavailable)?;
+        let wave_container = waves
+            .inner
+            .as_waves()
+            .ok_or(TableCacheError::DataUnavailable)?;
+
+        if config.signals.is_empty() {
+            return Err(TableCacheError::ModelNotFound {
+                description: "Signal analysis requires at least one analyzed signal".to_string(),
+            });
+        }
+
+        let (_sampling_variable, sampling_meta, sampling_accessor) =
+            resolve_loaded_signal(wave_container, &config.sampling.signal)?;
+
+        let sampling_mode = infer_sampling_mode(&sampling_meta);
+        let trigger_times = collect_trigger_times(sampling_mode, sampling_accessor.iter_changes());
+
+        let analyzed_signals = config
+            .signals
+            .iter()
+            .map(|signal| {
+                let (variable, meta, accessor) =
+                    resolve_loaded_signal(wave_container, &signal.variable)?;
+                Ok(ResolvedSignalAnalysisSignal {
+                    display_label: signal_display_label(&variable, &signal.field),
+                    field: signal.field.clone(),
+                    meta,
+                    accessor,
+                    translator: resolve_translator(ctx, &signal.translator),
+                })
+            })
+            .collect::<Result<Vec<_>, TableCacheError>>()?;
+
+        let end_u64 = waves
+            .num_timestamps()
+            .and_then(|num| num.to_u64())
+            .ok_or(TableCacheError::DataUnavailable)?;
+        let range =
+            SignalAnalysisTimeRange::new(0, end_u64).ok_or(TableCacheError::DataUnavailable)?;
+
+        let markers = normalize_markers(
+            waves.markers.iter().map(|(id, time)| (*id, time.clone())),
+            range,
+        );
+        let intervals = build_intervals(range, &markers);
+
+        let accumulation = accumulate_signal_metrics(
+            &trigger_times,
+            range,
+            &markers,
+            analyzed_signals.len(),
+            |signal_idx, time| {
+                let signal = &analyzed_signals[signal_idx];
+                if !signal.field.is_empty() {
+                    return None;
+                }
+                let value = signal.accessor.query_at_time(time)?;
+                signal.translator.translate_numeric(&signal.meta, &value)
+            },
+        );
+
+        let time_formatter = TimeFormatter::new(
+            &wave_container.metadata().timescale,
+            &ctx.wanted_timeunit,
+            &ctx.time_format,
+        );
+
+        let mut rows = Vec::new();
+        if markers.is_empty() {
+            rows.push(build_result_row(
+                TableRowId(0),
+                range.end,
+                GLOBAL_LABEL.to_string(),
+                &accumulation.global,
+                &time_formatter,
+            ));
+        } else {
+            for (idx, interval) in intervals.iter().enumerate() {
+                let metrics = accumulation
+                    .per_interval
+                    .get(idx)
+                    .cloned()
+                    .unwrap_or_else(|| vec![None; analyzed_signals.len()]);
+                rows.push(build_result_row(
+                    TableRowId(idx as u64),
+                    interval.end,
+                    interval.label.clone(),
+                    &metrics,
+                    &time_formatter,
+                ));
+            }
+            rows.push(build_result_row(
+                TableRowId(rows.len() as u64),
+                range.end,
+                GLOBAL_LABEL.to_string(),
+                &accumulation.global,
+                &time_formatter,
+            ));
+        }
+
+        let row_index = rows
+            .iter()
+            .enumerate()
+            .map(|(idx, row)| (row.row_id, idx))
+            .collect();
+
+        let signal_labels = analyzed_signals
+            .iter()
+            .map(|signal| signal.display_label.clone())
+            .collect::<Vec<_>>();
+
+        Ok(Self {
+            schema: build_schema(&signal_labels),
+            rows,
+            row_index,
+        })
+    }
+
+    fn row_by_id(&self, row: TableRowId) -> Option<&SignalAnalysisResultRow> {
+        self.row_index.get(&row).and_then(|idx| self.rows.get(*idx))
+    }
+}
+
+impl TableModel for SignalAnalysisResultsModel {
+    fn schema(&self) -> TableSchema {
+        self.schema.clone()
+    }
+
+    fn row_count(&self) -> usize {
+        self.rows.len()
+    }
+
+    fn row_id_at(&self, index: usize) -> Option<TableRowId> {
+        self.rows.get(index).map(|row| row.row_id)
+    }
+
+    fn cell(&self, row: TableRowId, col: usize) -> TableCell {
+        let Some(row) = self.row_by_id(row) else {
+            return TableCell::Text(String::new());
+        };
+
+        match col {
+            0 => TableCell::Text(row.interval_end_text.clone()),
+            1 => TableCell::Text(row.info.clone()),
+            col => {
+                let metric_idx = col.saturating_sub(2);
+                TableCell::Text(
+                    row.metric_texts
+                        .get(metric_idx)
+                        .cloned()
+                        .unwrap_or_default(),
+                )
+            }
+        }
+    }
+
+    fn sort_key(&self, row: TableRowId, col: usize) -> TableSortKey {
+        let Some(row) = self.row_by_id(row) else {
+            return TableSortKey::None;
+        };
+
+        match col {
+            0 => TableSortKey::Numeric(row.interval_end_u64 as f64),
+            1 => TableSortKey::Text(row.info.clone()),
+            col => {
+                let metric_idx = col.saturating_sub(2);
+                row.metric_values
+                    .get(metric_idx)
+                    .and_then(|value| *value)
+                    .map_or(TableSortKey::None, TableSortKey::Numeric)
+            }
+        }
+    }
+
+    fn search_text(&self, row: TableRowId) -> String {
+        self.row_by_id(row)
+            .map(|row| row.search_text.clone())
+            .unwrap_or_default()
+    }
+
+    fn on_activate(&self, row: TableRowId) -> TableAction {
+        self.row_by_id(row)
+            .map(|row| TableAction::CursorSet(row.interval_end.clone()))
+            .unwrap_or(TableAction::None)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 struct MetricsAccumulator {
     count: u64,
@@ -86,6 +319,164 @@ impl MetricsAccumulator {
             sum: self.sum,
         })
     }
+}
+
+fn resolve_loaded_signal(
+    wave_container: &WaveContainer,
+    variable: &VariableRef,
+) -> Result<(VariableRef, VariableMeta, SignalAccessor), TableCacheError> {
+    let Some(updated_variable) = wave_container.update_variable_ref(variable) else {
+        return Err(TableCacheError::ModelNotFound {
+            description: format!("Signal not found: {}", variable.full_path_string()),
+        });
+    };
+
+    let signal_id = wave_container.signal_id(&updated_variable).map_err(|err| {
+        TableCacheError::ModelNotFound {
+            description: err.to_string(),
+        }
+    })?;
+
+    if !wave_container.is_signal_loaded(&signal_id) {
+        return Err(TableCacheError::DataUnavailable);
+    }
+
+    let accessor = wave_container
+        .signal_accessor(signal_id)
+        .map_err(|_| TableCacheError::DataUnavailable)?;
+
+    let meta = wave_container
+        .variable_meta(&updated_variable)
+        .map_err(|err| TableCacheError::ModelNotFound {
+            description: err.to_string(),
+        })?;
+
+    Ok((updated_variable, meta, accessor))
+}
+
+fn resolve_translator(ctx: &TableModelContext<'_>, requested: &str) -> AnyTranslator {
+    let has_requested = ctx
+        .translators
+        .all_translators()
+        .iter()
+        .any(|translator| translator.name() == requested);
+
+    let translator_name = if has_requested {
+        requested
+    } else {
+        &ctx.translators.default
+    };
+
+    ctx.translators.clone_translator(translator_name)
+}
+
+fn signal_display_label(variable: &VariableRef, field: &[String]) -> String {
+    let full_path = variable.full_path_string();
+    if field.is_empty() {
+        full_path
+    } else {
+        format!("{}.{}", full_path, field.join("."))
+    }
+}
+
+fn build_schema(signal_labels: &[String]) -> TableSchema {
+    let mut columns = vec![
+        TableColumn {
+            key: TableColumnKey::Str(INTERVAL_END_COLUMN_KEY.to_string()),
+            label: "Interval End".to_string(),
+            default_width: Some(140.0),
+            default_visible: true,
+            default_resizable: true,
+        },
+        TableColumn {
+            key: TableColumnKey::Str(INFO_COLUMN_KEY.to_string()),
+            label: "Info".to_string(),
+            default_width: Some(240.0),
+            default_visible: true,
+            default_resizable: true,
+        },
+    ];
+
+    for (signal_idx, signal_label) in signal_labels.iter().enumerate() {
+        for suffix in METRIC_SUFFIXES {
+            columns.push(TableColumn {
+                key: TableColumnKey::Str(metric_column_key(signal_idx, suffix)),
+                label: format!("{signal_label}.{suffix}"),
+                default_width: Some(120.0),
+                default_visible: true,
+                default_resizable: true,
+            });
+        }
+    }
+
+    TableSchema { columns }
+}
+
+fn metric_column_key(signal_idx: usize, suffix: &str) -> String {
+    format!("{ANALYSIS_COLUMN_KEY_PREFIX}{signal_idx}:{suffix}")
+}
+
+fn build_result_row(
+    row_id: TableRowId,
+    interval_end_u64: u64,
+    info: String,
+    metrics: &[Option<SignalAnalysisMetrics>],
+    time_formatter: &TimeFormatter,
+) -> SignalAnalysisResultRow {
+    let interval_end = BigInt::from(interval_end_u64);
+    let interval_end_text = time_formatter.format(&interval_end);
+
+    let mut metric_values = Vec::with_capacity(metrics.len() * METRIC_SUFFIXES.len());
+    for metric in metrics {
+        match metric {
+            Some(metric) => {
+                metric_values.push(Some(metric.average));
+                metric_values.push(Some(metric.min));
+                metric_values.push(Some(metric.max));
+                metric_values.push(Some(metric.sum));
+            }
+            None => {
+                metric_values.extend([None; METRIC_SUFFIXES.len()]);
+            }
+        }
+    }
+
+    let metric_texts = metric_values
+        .iter()
+        .map(|value| {
+            value
+                .map(format_metric)
+                .unwrap_or_else(|| EM_DASH.to_string())
+        })
+        .collect::<Vec<_>>();
+
+    let mut search_parts = Vec::with_capacity(2 + metric_texts.len());
+    search_parts.push(interval_end_text.clone());
+    search_parts.push(info.clone());
+    search_parts.extend(metric_texts.iter().cloned());
+
+    SignalAnalysisResultRow {
+        row_id,
+        interval_end_u64,
+        interval_end,
+        interval_end_text,
+        info,
+        metric_values,
+        metric_texts,
+        search_text: search_parts.join(" "),
+    }
+}
+
+fn format_metric(value: f64) -> String {
+    let mut text = format!("{value:.6}");
+
+    while text.contains('.') && text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    if text == "-0" { "0".to_string() } else { text }
 }
 
 /// Infer sampling mode from signal metadata using required precedence:

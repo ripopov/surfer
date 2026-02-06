@@ -11,9 +11,9 @@ pub use multi_signal_index::{
 };
 pub use signal_analysis::{
     SignalAnalysisAccumulation, SignalAnalysisInterval, SignalAnalysisMarker,
-    SignalAnalysisMetrics, SignalAnalysisTimeRange, accumulate_signal_metrics, build_intervals,
-    collect_trigger_times, infer_sampling_mode, interval_index_for_time, normalize_markers,
-    normalize_time_range,
+    SignalAnalysisMetrics, SignalAnalysisResultsModel, SignalAnalysisTimeRange,
+    accumulate_signal_metrics, build_intervals, collect_trigger_times, infer_sampling_mode,
+    interval_index_for_time, normalize_markers, normalize_time_range,
 };
 pub use signal_change_list::SignalChangeListModel;
 pub use transaction_trace::TransactionTraceModelWithData;
