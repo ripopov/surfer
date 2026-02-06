@@ -1,15 +1,15 @@
 use crate::SystemState;
 use crate::message::Message;
 use crate::table::{
-    FilterDraft, PendingScrollOp, ScrollTarget, TableCache, TableCacheKey, TableCell,
-    TableColumnKey, TableModel, TableModelKey, TableRuntimeState, TableSearchMode, TableSearchSpec,
-    TableSelection, TableSelectionMode, TableSortSpec, TableTileId, TableTileState,
-    TableViewConfig, find_type_search_match_in_cache, format_selection_count, hidden_columns,
-    navigate_down, navigate_end, navigate_extend_selection, navigate_home, navigate_page_down,
-    navigate_page_up, navigate_up, scroll_target_after_filter, scroll_target_after_sort,
-    selection_on_click_multi, selection_on_click_single, selection_on_ctrl_click,
-    selection_on_shift_click, should_clear_selection_on_generation_change, sort_indicator,
-    sort_spec_on_click, sort_spec_on_shift_click, visible_columns,
+    FilterDraft, MaterializePurpose, MaterializedWindow, PendingScrollOp, ScrollTarget, TableCache,
+    TableCacheKey, TableCell, TableColumnKey, TableModel, TableModelKey, TableRuntimeState,
+    TableSearchMode, TableSearchSpec, TableSelection, TableSelectionMode, TableSortSpec,
+    TableTileId, TableTileState, TableViewConfig, find_type_search_match_in_cache,
+    format_selection_count, hidden_columns, navigate_down, navigate_end, navigate_extend_selection,
+    navigate_home, navigate_page_down, navigate_page_up, navigate_up, scroll_target_after_filter,
+    scroll_target_after_sort, selection_on_click_multi, selection_on_click_single,
+    selection_on_ctrl_click, selection_on_shift_click, should_clear_selection_on_generation_change,
+    sort_indicator, sort_spec_on_click, sort_spec_on_shift_click, visible_columns,
 };
 use egui_extras::{Column, TableBuilder};
 use std::collections::HashMap;
@@ -591,7 +591,29 @@ fn render_table(
             }
         })
         .body(|body| {
-            body.rows(row_height, cache.row_ids.len(), |mut row| {
+            // Pre-materialize visible rows for batch rendering.
+            // Estimate visible row range from available height and row height.
+            let available_height = body.max_rect().height();
+            let estimated_visible_count =
+                (available_height / row_height).ceil() as usize + 2; // +2 for partial rows
+            let total_rows = cache.row_ids.len();
+
+            // Determine start row from scroll target, default to 0
+            let estimated_start = scroll_to_row.unwrap_or(0).saturating_sub(1);
+            let estimated_end = (estimated_start + estimated_visible_count).min(total_rows);
+
+            let visible_row_ids: Vec<super::TableRowId> = cache.row_ids
+                [estimated_start..estimated_end]
+                .to_vec();
+            let visible_col_indices: Vec<usize> =
+                visible_col_info.iter().map(|(idx, _)| *idx).collect();
+            let materialized: MaterializedWindow = model.materialize_window(
+                &visible_row_ids,
+                &visible_col_indices,
+                MaterializePurpose::Render,
+            );
+
+            body.rows(row_height, total_rows, |mut row| {
                 let row_idx = row.index();
                 if let Some(&row_id) = cache.row_ids.get(row_idx) {
                     // Check if this row is selected
@@ -614,7 +636,11 @@ fn render_table(
                                 );
                             }
 
-                            let cell = model.cell(row_id, *col_idx);
+                            // Use pre-materialized cell when available, fall back to model
+                            let cell = materialized
+                                .cell(row_id, *col_idx)
+                                .cloned()
+                                .unwrap_or_else(|| model.cell(row_id, *col_idx));
                             let text = match cell {
                                 TableCell::Text(s) => s,
                                 TableCell::RichText(rt) => {

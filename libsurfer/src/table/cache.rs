@@ -648,6 +648,7 @@ pub fn build_table_cache(
 
 /// Formats selected rows as tab-separated values for clipboard.
 /// Only includes visible columns in their current display order.
+/// Uses `materialize_window` for batch cell materialization.
 /// Does not include header row.
 pub fn format_rows_as_tsv(
     model: &dyn super::model::TableModel,
@@ -666,6 +667,10 @@ pub fn format_rows_as_tsv(
         .filter_map(|key| schema.columns.iter().position(|col| &col.key == key))
         .collect();
 
+    // Batch-materialize all requested cells
+    let materialized =
+        model.materialize_window(selected_rows, &col_indices, MaterializePurpose::Clipboard);
+
     let mut output = String::new();
     for (row_num, &row_id) in selected_rows.iter().enumerate() {
         if row_num > 0 {
@@ -677,7 +682,10 @@ pub fn format_rows_as_tsv(
                 output.push('\t');
             }
 
-            let cell = model.cell(row_id, col_idx);
+            let cell = materialized
+                .cell(row_id, col_idx)
+                .cloned()
+                .unwrap_or_else(|| model.cell(row_id, col_idx));
             let text = match cell {
                 super::model::TableCell::Text(s) => s,
                 super::model::TableCell::RichText(rt) => rt.text().to_string(),
@@ -693,6 +701,7 @@ pub fn format_rows_as_tsv(
 }
 
 /// Formats selected rows with a header row as tab-separated values.
+/// Uses `materialize_window` for batch cell materialization.
 /// Includes column labels as first row.
 pub fn format_rows_as_tsv_with_header(
     model: &dyn super::model::TableModel,
@@ -716,6 +725,12 @@ pub fn format_rows_as_tsv_with_header(
         })
         .collect();
 
+    let col_indices: Vec<usize> = col_info.iter().map(|(idx, _)| *idx).collect();
+
+    // Batch-materialize all requested cells
+    let materialized =
+        model.materialize_window(selected_rows, &col_indices, MaterializePurpose::Clipboard);
+
     let mut output = String::new();
 
     // Header row
@@ -735,7 +750,10 @@ pub fn format_rows_as_tsv_with_header(
                 output.push('\t');
             }
 
-            let cell = model.cell(row_id, col_idx);
+            let cell = materialized
+                .cell(row_id, col_idx)
+                .cloned()
+                .unwrap_or_else(|| model.cell(row_id, col_idx));
             let text = match cell {
                 super::model::TableCell::Text(s) => s,
                 super::model::TableCell::RichText(rt) => rt.text().to_string(),

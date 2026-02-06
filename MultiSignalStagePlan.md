@@ -11,7 +11,7 @@ Rule for all stages: do not start the next stage until the current stage passes 
 - Stage 4: Completed (implemented and full stage gate green).
 - Stage 5: Completed (implemented and full stage gate green).
 - Stage 6: Completed (implemented and full stage gate green).
-- Stage 7: Not started.
+- Stage 7: Completed (implemented and full stage gate green).
 - Stage 8: Not started.
 - Stage 9: Not started.
 - Stage 10: Not started.
@@ -314,6 +314,24 @@ Implemented tests:
 
 Goal: optimize viewport rendering to materialize only visible windows and reuse short-lived cached windows.
 
+Status: Completed (2026-02-06)
+
+Validation status:
+- `cargo fmt`: passed
+- `cargo clippy --no-deps`: passed
+- `cargo test`: passed
+- `cargo test -- --include-ignored`: passed
+
+Implemented:
+- Added model-local `CachedWindow` struct with `Mutex`-guarded cache inside `MultiSignalChangeListModel`.
+- Cache keyed by exact row IDs, visible columns, and `MaterializePurpose` — consecutive frames with identical viewport hit the cache without re-materializing.
+- Extracted `render_cell()`, `compute_sort_key()`, `compute_search_text()` as shared helpers used by both direct `cell()`/`sort_key()`/`search_text()` and batch `build_materialized_window()`.
+- Overrode `materialize_window()` on `MultiSignalChangeListModel` with cache-check → build → store flow.
+- `cell()` trait method checks window cache for render/clipboard purpose hits before falling back to direct materialization.
+- Updated `render_table()` in `view.rs` to pre-materialize visible rows via `materialize_window(Render)` before the egui body loop, with estimated visible row range from available height.
+- Updated `format_rows_as_tsv()` and `format_rows_as_tsv_with_header()` in `cache.rs` to use `materialize_window(Clipboard)` for batch cell materialization.
+- All changes preserve no-global-cell-table invariant: only the visible viewport window is ever materialized.
+
 Scope:
 - Implement model-local `WindowCellCache` keyed by:
 - row-range bucket.
@@ -336,6 +354,14 @@ Tests to add:
 - Cache reuse on repeated viewport requests.
 - Cache invalidation on revision/generation changes.
 - Clipboard export uses window materialization and preserves visible-column order.
+
+Implemented tests:
+- `multi_signal_materialize_window_limited_to_requested_rows`
+- `multi_signal_materialize_window_cache_reuse_on_same_viewport`
+- `multi_signal_materialize_window_cache_invalidated_on_different_params`
+- `multi_signal_cell_uses_cached_window_after_materialize`
+- `multi_signal_clipboard_uses_window_materialization`
+- `multi_signal_materialize_window_search_probe`
 
 ## Stage 8 - Async Revision Gating and Cancellation Safety
 

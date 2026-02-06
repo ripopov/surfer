@@ -1,15 +1,16 @@
 use crate::displayed_item::{DisplayedItem, FieldFormat};
 use crate::table::sources::multi_signal_index::MergedIndex;
 use crate::table::{
-    MultiSignalEntry, SearchTextMode, TableAction, TableCacheError, TableCell, TableColumn,
-    TableColumnKey, TableModel, TableModelContext, TableRowId, TableSchema, TableSortKey,
+    MaterializePurpose, MaterializedWindow, MultiSignalEntry, SearchTextMode, TableAction,
+    TableCacheError, TableCell, TableColumn, TableColumnKey, TableModel, TableModelContext,
+    TableRowId, TableSchema, TableSortKey,
 };
 use crate::time::TimeFormatter;
 use crate::translation::{AnyTranslator, TranslationResultExt, TranslatorList};
 use crate::wave_container::{SignalAccessor, VariableMeta, VariableRefExt};
 use egui::RichText;
 use num::BigInt;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use surfer_translation_types::Translator;
 use tracing::warn;
 
@@ -29,10 +30,36 @@ struct ResolvedSignalEntry {
     display_label: String,
 }
 
+/// Cached result from a recent `materialize_window` call.
+///
+/// Keyed by the exact set of row IDs, visible columns, and purpose so that
+/// consecutive frames with the same viewport reuse the cached window without
+/// re-materializing every cell.
+struct CachedWindow {
+    window: MaterializedWindow,
+    row_ids: Vec<TableRowId>,
+    visible_cols: Vec<usize>,
+    purpose: MaterializePurpose,
+}
+
+impl CachedWindow {
+    /// Returns `true` if this cached window covers the exact same request.
+    fn matches(
+        &self,
+        row_ids: &[TableRowId],
+        visible_cols: &[usize],
+        purpose: MaterializePurpose,
+    ) -> bool {
+        self.purpose == purpose && self.visible_cols == visible_cols && self.row_ids == row_ids
+    }
+}
+
 pub struct MultiSignalChangeListModel {
     entries: Vec<ResolvedSignalEntry>,
     time_formatter: TimeFormatter,
     index: OnceLock<MergedIndex>,
+    /// Short-lived window cache for viewport rendering reuse.
+    window_cache: Mutex<Option<CachedWindow>>,
 }
 
 impl MultiSignalChangeListModel {
@@ -159,6 +186,7 @@ impl MultiSignalChangeListModel {
             entries,
             time_formatter,
             index: OnceLock::new(),
+            window_cache: Mutex::new(None),
         })
     }
 
@@ -214,6 +242,91 @@ impl MultiSignalChangeListModel {
             }
             Err(_) => ("\u{2014}".to_string(), numeric),
         }
+    }
+
+    /// Build a fresh `MaterializedWindow` for the given rows, columns, and purpose.
+    fn build_materialized_window(
+        &self,
+        row_ids: &[TableRowId],
+        visible_cols: &[usize],
+        purpose: MaterializePurpose,
+    ) -> MaterializedWindow {
+        let mut window = MaterializedWindow::new();
+        match purpose {
+            MaterializePurpose::Render | MaterializePurpose::Clipboard => {
+                for &row_id in row_ids {
+                    for &col in visible_cols {
+                        window.insert_cell(row_id, col, self.render_cell(row_id, col));
+                    }
+                }
+            }
+            MaterializePurpose::SortProbe => {
+                for &row_id in row_ids {
+                    for &col in visible_cols {
+                        window.insert_sort_key(row_id, col, self.compute_sort_key(row_id, col));
+                    }
+                }
+            }
+            MaterializePurpose::SearchProbe => {
+                for &row_id in row_ids {
+                    window.insert_search_text(row_id, self.compute_search_text(row_id));
+                }
+            }
+        }
+        window
+    }
+
+    /// Render a single cell (used by both direct `cell()` and batch materialization).
+    fn render_cell(&self, row: TableRowId, col: usize) -> TableCell {
+        if col == 0 {
+            let time = BigInt::from(row.0);
+            return TableCell::Text(self.time_formatter.format(&time));
+        }
+
+        let signal_idx = col - 1;
+        if signal_idx >= self.entries.len() {
+            return TableCell::Text(String::new());
+        }
+
+        let (state, text, _, _) = self.materialize_signal_cell(signal_idx, row.0);
+        match state {
+            CellState::Transition => TableCell::Text(text),
+            CellState::Held | CellState::NoData => TableCell::RichText(RichText::new(text).weak()),
+        }
+    }
+
+    /// Compute a single sort key (used by both direct `sort_key()` and batch materialization).
+    fn compute_sort_key(&self, row: TableRowId, col: usize) -> TableSortKey {
+        if col == 0 {
+            return TableSortKey::Numeric(row.0 as f64);
+        }
+
+        let signal_idx = col - 1;
+        if signal_idx >= self.entries.len() {
+            return TableSortKey::None;
+        }
+
+        let (state, text, numeric, _) = self.materialize_signal_cell(signal_idx, row.0);
+        match state {
+            CellState::NoData => TableSortKey::None,
+            CellState::Transition | CellState::Held => match numeric {
+                Some(n) => TableSortKey::Numeric(n),
+                None => TableSortKey::Text(text),
+            },
+        }
+    }
+
+    /// Compute search text for a row (used by both direct `search_text()` and batch materialization).
+    fn compute_search_text(&self, row: TableRowId) -> String {
+        let time = BigInt::from(row.0);
+        let mut parts = vec![self.time_formatter.format(&time)];
+
+        for signal_idx in 0..self.entries.len() {
+            let (_, text, _, _) = self.materialize_signal_cell(signal_idx, row.0);
+            parts.push(text);
+        }
+
+        parts.join(" ")
     }
 
     /// Materialize a signal cell's display text and numeric value.
@@ -296,54 +409,55 @@ impl TableModel for MultiSignalChangeListModel {
         SearchTextMode::LazyProbe
     }
 
+    fn materialize_window(
+        &self,
+        row_ids: &[TableRowId],
+        visible_cols: &[usize],
+        purpose: MaterializePurpose,
+    ) -> MaterializedWindow {
+        // Check cache first
+        if let Ok(guard) = self.window_cache.lock()
+            && let Some(cached) = guard.as_ref()
+            && cached.matches(row_ids, visible_cols, purpose)
+        {
+            return cached.window.clone();
+        }
+
+        // Cache miss — build fresh window
+        let window = self.build_materialized_window(row_ids, visible_cols, purpose);
+
+        // Store in cache
+        if let Ok(mut guard) = self.window_cache.lock() {
+            *guard = Some(CachedWindow {
+                window: window.clone(),
+                row_ids: row_ids.to_vec(),
+                visible_cols: visible_cols.to_vec(),
+                purpose,
+            });
+        }
+
+        window
+    }
+
     fn cell(&self, row: TableRowId, col: usize) -> TableCell {
-        if col == 0 {
-            let time = BigInt::from(row.0);
-            return TableCell::Text(self.time_formatter.format(&time));
+        // Check window cache for a render-purpose hit
+        if let Ok(guard) = self.window_cache.lock()
+            && let Some(cached) = guard.as_ref()
+            && (cached.purpose == MaterializePurpose::Render
+                || cached.purpose == MaterializePurpose::Clipboard)
+            && let Some(cell) = cached.window.cell(row, col)
+        {
+            return cell.clone();
         }
-
-        let signal_idx = col - 1;
-        if signal_idx >= self.entries.len() {
-            return TableCell::Text(String::new());
-        }
-
-        let (state, text, _, _) = self.materialize_signal_cell(signal_idx, row.0);
-        match state {
-            CellState::Transition => TableCell::Text(text),
-            CellState::Held | CellState::NoData => TableCell::RichText(RichText::new(text).weak()),
-        }
+        self.render_cell(row, col)
     }
 
     fn sort_key(&self, row: TableRowId, col: usize) -> TableSortKey {
-        if col == 0 {
-            return TableSortKey::Numeric(row.0 as f64);
-        }
-
-        let signal_idx = col - 1;
-        if signal_idx >= self.entries.len() {
-            return TableSortKey::None;
-        }
-
-        let (state, text, numeric, _) = self.materialize_signal_cell(signal_idx, row.0);
-        match state {
-            CellState::NoData => TableSortKey::None,
-            CellState::Transition | CellState::Held => match numeric {
-                Some(n) => TableSortKey::Numeric(n),
-                None => TableSortKey::Text(text),
-            },
-        }
+        self.compute_sort_key(row, col)
     }
 
     fn search_text(&self, row: TableRowId) -> String {
-        let time = BigInt::from(row.0);
-        let mut parts = vec![self.time_formatter.format(&time)];
-
-        for signal_idx in 0..self.entries.len() {
-            let (_, text, _, _) = self.materialize_signal_cell(signal_idx, row.0);
-            parts.push(text);
-        }
-
-        parts.join(" ")
+        self.compute_search_text(row)
     }
 
     fn on_activate(&self, row: TableRowId) -> TableAction {

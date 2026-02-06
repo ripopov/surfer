@@ -5972,3 +5972,320 @@ fn multi_signal_out_of_bounds_column_returns_empty() {
         "out-of-bounds sort key should be None"
     );
 }
+
+// ========================
+// Stage 7 Tests - Window Materialization Cache and Renderer Integration
+// ========================
+
+#[test]
+fn multi_signal_materialize_window_limited_to_requested_rows() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.clk"),
+                field: vec![],
+            },
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                field: vec![],
+            },
+        ],
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    let total_rows = model.row_count();
+    assert!(total_rows > 4, "need at least 5 rows for this test");
+
+    // Request only a subset of rows
+    let subset_row_ids: Vec<TableRowId> = (0..3).filter_map(|i| model.row_id_at(i)).collect();
+    let visible_cols: Vec<usize> = vec![0, 1]; // time + first signal
+    let window =
+        model.materialize_window(&subset_row_ids, &visible_cols, MaterializePurpose::Render);
+
+    // Materialized window should contain cells for requested rows
+    for &row_id in &subset_row_ids {
+        for &col in &visible_cols {
+            assert!(
+                window.cell(row_id, col).is_some(),
+                "cell for requested row {row_id:?} col {col} should be materialized"
+            );
+        }
+    }
+
+    // Rows NOT requested should NOT be in the window
+    let excluded_row = model
+        .row_id_at(total_rows - 1)
+        .expect("last row should exist");
+    assert!(
+        window.cell(excluded_row, 0).is_none(),
+        "cells for non-requested rows should not be in window"
+    );
+
+    // Columns NOT requested should NOT be in the window
+    let schema = model.schema();
+    if schema.columns.len() > 2 {
+        assert!(
+            window.cell(subset_row_ids[0], 2).is_none(),
+            "cells for non-requested columns should not be in window"
+        );
+    }
+}
+
+#[test]
+fn multi_signal_materialize_window_cache_reuse_on_same_viewport() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![MultiSignalEntry {
+            variable: VariableRef::from_hierarchy_string("tb.clk"),
+            field: vec![],
+        }],
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    let row_ids: Vec<TableRowId> = (0..3).filter_map(|i| model.row_id_at(i)).collect();
+    let cols = vec![0, 1];
+
+    // First call materializes fresh
+    let window1 = model.materialize_window(&row_ids, &cols, MaterializePurpose::Render);
+
+    // Second call with same params should return identical data (from cache)
+    let window2 = model.materialize_window(&row_ids, &cols, MaterializePurpose::Render);
+
+    // Verify identical content
+    for &row_id in &row_ids {
+        for &col in &cols {
+            let cell1 = window1.cell(row_id, col).map(cell_text);
+            let cell2 = window2.cell(row_id, col).map(cell_text);
+            assert_eq!(
+                cell1, cell2,
+                "cached window should return identical content for row {row_id:?} col {col}"
+            );
+        }
+    }
+}
+
+#[test]
+fn multi_signal_materialize_window_cache_invalidated_on_different_params() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.clk"),
+                field: vec![],
+            },
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                field: vec![],
+            },
+        ],
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    let total_rows = model.row_count();
+    assert!(total_rows >= 6, "need enough rows for two disjoint subsets");
+
+    // Materialize first window (rows 0..3)
+    let rows_a: Vec<TableRowId> = (0..3).filter_map(|i| model.row_id_at(i)).collect();
+    let cols = vec![0, 1];
+    let _window_a = model.materialize_window(&rows_a, &cols, MaterializePurpose::Render);
+
+    // Materialize different window (rows 3..6) — should invalidate cache
+    let rows_b: Vec<TableRowId> = (3..6).filter_map(|i| model.row_id_at(i)).collect();
+    let window_b = model.materialize_window(&rows_b, &cols, MaterializePurpose::Render);
+
+    // Window B should contain its own rows
+    for &row_id in &rows_b {
+        assert!(
+            window_b.cell(row_id, 0).is_some(),
+            "new window should contain its requested rows"
+        );
+    }
+
+    // Window B should NOT contain rows_a
+    for &row_id in &rows_a {
+        assert!(
+            window_b.cell(row_id, 0).is_none(),
+            "new window should not contain old window rows"
+        );
+    }
+
+    // Different purpose also invalidates
+    let sort_window = model.materialize_window(&rows_a, &cols, MaterializePurpose::SortProbe);
+    for &row_id in &rows_a {
+        for &col in &cols {
+            assert!(
+                sort_window.sort_key(row_id, col).is_some(),
+                "sort probe window should contain sort keys"
+            );
+        }
+    }
+}
+
+#[test]
+fn multi_signal_cell_uses_cached_window_after_materialize() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![MultiSignalEntry {
+            variable: VariableRef::from_hierarchy_string("tb.clk"),
+            field: vec![],
+        }],
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    let row_ids: Vec<TableRowId> = (0..3).filter_map(|i| model.row_id_at(i)).collect();
+    let cols = vec![0, 1];
+
+    // Pre-materialize via materialize_window
+    let window = model.materialize_window(&row_ids, &cols, MaterializePurpose::Render);
+
+    // Direct cell() calls should return identical values to window
+    for &row_id in &row_ids {
+        for &col in &cols {
+            let from_window = window.cell(row_id, col).map(cell_text);
+            let from_cell = cell_text(&model.cell(row_id, col));
+            assert_eq!(
+                from_window.as_deref(),
+                Some(from_cell.as_str()),
+                "cell() should match materialize_window result for row {row_id:?} col {col}"
+            );
+        }
+    }
+}
+
+#[test]
+fn multi_signal_clipboard_uses_window_materialization() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.clk"),
+                field: vec![],
+            },
+            MultiSignalEntry {
+                variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                field: vec![],
+            },
+        ],
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    let schema = model.schema();
+    let row_ids: Vec<TableRowId> = (0..3).filter_map(|i| model.row_id_at(i)).collect();
+    let visible_cols: Vec<TableColumnKey> = schema.columns.iter().map(|c| c.key.clone()).collect();
+
+    // TSV without header
+    let tsv = crate::table::format_rows_as_tsv(model.as_ref(), &row_ids, &visible_cols);
+    assert!(!tsv.is_empty(), "TSV output should not be empty");
+    let lines: Vec<&str> = tsv.lines().collect();
+    assert_eq!(lines.len(), 3, "should have 3 data rows");
+    for line in &lines {
+        let cols: Vec<&str> = line.split('\t').collect();
+        assert_eq!(
+            cols.len(),
+            schema.columns.len(),
+            "each row should have all columns tab-separated"
+        );
+    }
+
+    // TSV with header
+    let tsv_with_header = crate::table::format_rows_as_tsv_with_header(
+        model.as_ref(),
+        &schema,
+        &row_ids,
+        &visible_cols,
+    );
+    assert!(!tsv_with_header.is_empty());
+    let lines_with_header: Vec<&str> = tsv_with_header.lines().collect();
+    assert_eq!(
+        lines_with_header.len(),
+        4,
+        "should have 1 header + 3 data rows"
+    );
+
+    // Header should contain column labels
+    let header_cols: Vec<&str> = lines_with_header[0].split('\t').collect();
+    assert_eq!(header_cols[0], "Time");
+}
+
+#[test]
+fn multi_signal_materialize_window_search_probe() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let ctx = state.table_model_context();
+    let spec = TableModelSpec::MultiSignalChangeList {
+        variables: vec![MultiSignalEntry {
+            variable: VariableRef::from_hierarchy_string("tb.clk"),
+            field: vec![],
+        }],
+    };
+
+    let model = spec.create_model(&ctx).expect("model");
+    let row_ids: Vec<TableRowId> = (0..3).filter_map(|i| model.row_id_at(i)).collect();
+
+    let window = model.materialize_window(&row_ids, &[], MaterializePurpose::SearchProbe);
+
+    // Search probe should produce search text for each row
+    for &row_id in &row_ids {
+        let text = window.search_text(row_id);
+        assert!(
+            text.is_some(),
+            "search probe should produce text for row {row_id:?}"
+        );
+        // Search text should include time and signal values
+        let text = text.unwrap();
+        assert!(
+            !text.is_empty(),
+            "search text should not be empty for row {row_id:?}"
+        );
+    }
+}
