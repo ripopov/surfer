@@ -17,8 +17,8 @@ use crate::graphics::{Graphic, GraphicId};
 use crate::hierarchy::{ParameterDisplayLocation, ScopeExpandType};
 use crate::state::UserState;
 use crate::table::{
-    TableCache, TableCacheEntry, TableCacheError, TableCacheKey, TableColumnKey, TableModelSpec,
-    TableSearchSpec, TableSelection, TableSortSpec, TableTileId,
+    SignalAnalysisConfig, TableCache, TableCacheEntry, TableCacheError, TableCacheKey,
+    TableColumnKey, TableModelSpec, TableSearchSpec, TableSelection, TableSortSpec, TableTileId,
 };
 use crate::transaction_container::{
     StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
@@ -422,6 +422,12 @@ pub enum Message {
     /// Add a new table tile to the tile tree
     AddTableTile {
         spec: TableModelSpec,
+    },
+    /// Open the signal-analysis configuration wizard from selected waveform signals.
+    OpenSignalAnalysisWizard,
+    /// Run signal analysis and create a results table tile.
+    RunSignalAnalysis {
+        config: SignalAnalysisConfig,
     },
     /// Open a signal change list table for a variable
     OpenSignalChangeList {

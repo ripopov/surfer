@@ -630,6 +630,13 @@ impl SystemState {
                 ui.close();
             }
 
+            if self.has_signal_analysis_selection()
+                && ui.button("Analyze selected signals...").clicked()
+            {
+                msgs.push(Message::OpenSignalAnalysisWizard);
+                ui.close();
+            }
+
             if self.wcp_greeted_signal.load(Ordering::Relaxed) {
                 if self.wcp_client_capabilities.goto_declaration
                     && ui.button("Go to declaration").clicked()

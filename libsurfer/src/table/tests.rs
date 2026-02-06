@@ -1,5 +1,6 @@
 use super::*;
 use crate::SystemState;
+use crate::displayed_item_tree::VisibleItemIndex;
 use crate::message::{Message, MessageTarget};
 use crate::table::sources::VirtualTableModel;
 use crate::tests::snapshot::wait_for_waves_fully_loaded;
@@ -4832,6 +4833,272 @@ fn analysis_results_default_view_config_sets_sort_and_activation() {
             key: TableColumnKey::Str("interval_end".to_string()),
             direction: TableSortDirection::Ascending,
         }]
+    );
+}
+
+#[test]
+fn run_signal_analysis_creates_analysis_tile_and_preloads_signals() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    let config = SignalAnalysisConfig {
+        sampling: SignalAnalysisSamplingConfig {
+            signal: VariableRef::from_hierarchy_string("tb.clk"),
+        },
+        signals: vec![SignalAnalysisSignal {
+            variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+            field: vec![],
+            translator: "Unsigned".to_string(),
+        }],
+        run_revision: 3,
+    };
+
+    state.update(Message::RunSignalAnalysis {
+        config: config.clone(),
+    });
+
+    assert_eq!(
+        state.user.table_tiles.len(),
+        1,
+        "analysis tile should be created"
+    );
+    let (tile_id, tile_state) = state
+        .user
+        .table_tiles
+        .iter()
+        .next()
+        .expect("analysis tile should exist");
+    match &tile_state.spec {
+        TableModelSpec::AnalysisResults {
+            kind: AnalysisKind::SignalAnalysisV1,
+            params:
+                AnalysisParams::SignalAnalysisV1 {
+                    config: spec_config,
+                },
+        } => {
+            assert_eq!(spec_config, &config);
+        }
+        other => panic!("expected signal-analysis spec, got {other:?}"),
+    }
+    assert!(
+        state.table_runtime.contains_key(tile_id),
+        "run path should route through BuildTableCache"
+    );
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let waves = state.user.waves.as_ref().expect("waves");
+    let wave_container = waves.inner.as_waves().expect("wave container");
+    for variable in std::iter::once(&config.sampling.signal)
+        .chain(config.signals.iter().map(|signal| &signal.variable))
+    {
+        let resolved_variable = wave_container
+            .update_variable_ref(variable)
+            .unwrap_or_else(|| variable.clone());
+        let signal_id = wave_container
+            .signal_id(&resolved_variable)
+            .expect("signal id should resolve");
+        assert!(
+            wave_container.is_signal_loaded(&signal_id),
+            "signal should be preloaded for analysis run: {}",
+            variable.full_path_string()
+        );
+    }
+}
+
+#[test]
+fn signal_analysis_build_table_cache_flow_completes_after_run() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    let config = SignalAnalysisConfig {
+        sampling: SignalAnalysisSamplingConfig {
+            signal: VariableRef::from_hierarchy_string("tb.clk"),
+        },
+        signals: vec![SignalAnalysisSignal {
+            variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+            field: vec![],
+            translator: "Unsigned".to_string(),
+        }],
+        run_revision: 4,
+    };
+
+    state.update(Message::RunSignalAnalysis { config });
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile");
+
+    // Wait for signal preflight to finish before forcing a rebuild.
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let tile_state = state.user.table_tiles.get(&tile_id).expect("tile state");
+    let cache_key = TableCacheKey {
+        model_key: TableModelKey(tile_id.0),
+        display_filter: tile_state.config.display_filter.clone(),
+        view_sort: tile_state.config.sort.clone(),
+        generation: state
+            .user
+            .waves
+            .as_ref()
+            .map_or(0, |waves| waves.cache_generation),
+    };
+    state.update(Message::BuildTableCache {
+        tile_id,
+        cache_key: cache_key.clone(),
+    });
+
+    let build_start = std::time::Instant::now();
+    loop {
+        state.handle_async_messages();
+
+        let is_ready = state
+            .table_runtime
+            .get(&tile_id)
+            .and_then(|runtime| runtime.cache.as_ref())
+            .is_some_and(|entry| entry.is_ready());
+        if is_ready {
+            break;
+        }
+
+        if build_start.elapsed().as_secs() > 10 {
+            panic!("timed out waiting for signal-analysis table cache build");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+
+    let runtime = state.table_runtime.get(&tile_id).expect("runtime");
+    assert!(runtime.last_error.is_none());
+    assert!(runtime.model.is_some());
+    assert_eq!(runtime.cache_key.as_ref(), Some(&cache_key));
+
+    let cache_entry = runtime.cache.as_ref().expect("cache entry");
+    assert!(cache_entry.is_ready());
+    let cache = cache_entry.get().expect("ready cache");
+    assert!(
+        !cache.row_ids.is_empty(),
+        "analysis cache should contain at least the global row"
+    );
+}
+
+#[test]
+fn signal_analysis_menu_visibility_tracks_variable_selection() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    assert!(!state.has_signal_analysis_selection());
+
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state.update(Message::AddDivider(Some("---".to_string()), None));
+
+    let clk_ref = VariableRef::from_hierarchy_string("tb.clk");
+    let clk_idx = {
+        let waves = state.user.waves.as_ref().expect("waves");
+        find_visible_index_for_variable(waves, &clk_ref).expect("clk visible")
+    };
+    let divider_idx = {
+        let waves = state.user.waves.as_ref().expect("waves");
+        waves
+            .items_tree
+            .iter_visible()
+            .enumerate()
+            .find_map(|(idx, node)| {
+                matches!(
+                    waves.displayed_items.get(&node.item_ref),
+                    Some(crate::displayed_item::DisplayedItem::Divider(_))
+                )
+                .then_some(VisibleItemIndex(idx))
+            })
+            .expect("divider visible")
+    };
+
+    state.update(Message::ItemSelectionClear);
+    state.update(Message::SetItemSelected(divider_idx, true));
+    assert!(
+        !state.has_signal_analysis_selection(),
+        "non-variable selection should hide analysis action"
+    );
+
+    state.update(Message::ItemSelectionClear);
+    state.update(Message::SetItemSelected(clk_idx, true));
+    assert!(
+        state.has_signal_analysis_selection(),
+        "variable selection should show analysis action"
+    );
+}
+
+#[test]
+fn open_signal_analysis_wizard_filters_non_variable_selection() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state.update(Message::AddDivider(Some("---".to_string()), None));
+    state.update(Message::ItemSelectAll);
+
+    state.update(Message::OpenSignalAnalysisWizard);
+
+    let dialog = state
+        .user
+        .show_signal_analysis_wizard
+        .as_ref()
+        .expect("wizard should open");
+    assert_eq!(dialog.signals.len(), 1, "divider should be filtered out");
+    assert_eq!(
+        dialog.signals[0].variable,
+        VariableRef::from_hierarchy_string("tb.clk")
+    );
+}
+
+#[test]
+fn open_signal_analysis_wizard_defaults_sampling_to_first_one_bit_signal() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state_with_variables(&["tb.dut.counter", "tb.clk"]);
+
+    let (clk_idx, counter_idx) = {
+        let waves = state.user.waves.as_ref().expect("waves");
+        let clk_ref = VariableRef::from_hierarchy_string("tb.clk");
+        let counter_ref = VariableRef::from_hierarchy_string("tb.dut.counter");
+        (
+            find_visible_index_for_variable(waves, &clk_ref).expect("clk visible"),
+            find_visible_index_for_variable(waves, &counter_ref).expect("counter visible"),
+        )
+    };
+
+    state.update(Message::ItemSelectionClear);
+    state.update(Message::SetItemSelected(counter_idx, true));
+    state.update(Message::SetItemSelected(clk_idx, true));
+    state.update(Message::OpenSignalAnalysisWizard);
+
+    let dialog = state
+        .user
+        .show_signal_analysis_wizard
+        .as_ref()
+        .expect("wizard should open");
+    let clk_ref = VariableRef::from_hierarchy_string("tb.clk");
+    assert_eq!(dialog.sampling_signal, clk_ref);
+    assert_eq!(
+        state.signal_analysis_sampling_mode(&dialog.sampling_signal),
+        Some(SignalAnalysisSamplingMode::PosEdge)
+    );
+}
+
+#[test]
+fn open_signal_analysis_wizard_requires_selected_variables() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state_with_variable("tb.clk");
+
+    state.update(Message::ItemSelectionClear);
+    state.update(Message::OpenSignalAnalysisWizard);
+
+    assert!(
+        state.user.show_signal_analysis_wizard.is_none(),
+        "wizard should not open without selected variables"
     );
 }
 

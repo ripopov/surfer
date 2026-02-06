@@ -9,7 +9,7 @@ use crate::{
     clock_highlighting::ClockHighlightType,
     config::{ArrowKeyBindings, AutoLoad, PrimaryMouseDrag, SurferConfig, TransitionValue},
     data_container::DataContainer,
-    dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog},
+    dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog, SignalAnalysisWizardDialog},
     displayed_item_tree::{DisplayedItemTree, VisibleItemIndex},
     hierarchy::{HierarchyStyle, ParameterDisplayLocation},
     message::Message,
@@ -106,6 +106,8 @@ pub struct UserState {
     pub(crate) show_reload_suggestion: Option<ReloadWaveformDialog>,
     #[serde(skip, default)]
     pub(crate) show_open_sibling_state_file_suggestion: Option<OpenSiblingStateFileDialog>,
+    #[serde(skip, default)]
+    pub(crate) show_signal_analysis_wizard: Option<SignalAnalysisWizardDialog>,
     pub(crate) variable_name_filter_focused: bool,
     pub(crate) variable_filter: VariableFilter,
     //Sidepanel width
@@ -208,6 +210,7 @@ impl Default for UserState {
             show_url_entry: false,
             show_reload_suggestion: None,
             show_open_sibling_state_file_suggestion: None,
+            show_signal_analysis_wizard: None,
             variable_name_filter_focused: false,
             variable_filter: VariableFilter::new(),
             sidepanel_width: None,

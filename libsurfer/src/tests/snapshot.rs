@@ -4035,3 +4035,14 @@ snapshot_ui!(table_multi_signal_change_list_dense, || {
 
     state
 });
+
+snapshot_ui_with_file_and_msgs! {signal_analysis_wizard_dialog, "examples/counter.vcd", [
+    Message::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"])))),
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]),
+    Message::SetItemSelected(VisibleItemIndex(0), true),
+    Message::SetItemSelected(VisibleItemIndex(1), true),
+    Message::OpenSignalAnalysisWizard,
+]}

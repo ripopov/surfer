@@ -1,6 +1,9 @@
 use crate::{
     config::TransitionValue,
-    dialog::{draw_open_sibling_state_file_dialog, draw_reload_waveform_dialog},
+    dialog::{
+        draw_open_sibling_state_file_dialog, draw_reload_waveform_dialog,
+        draw_signal_analysis_wizard_dialog,
+    },
     displayed_item::DisplayedVariable,
     time::get_ticks,
     wave_container::{ScopeId, VarId, VariableMeta},
@@ -314,6 +317,20 @@ impl SystemState {
             draw_open_sibling_state_file_dialog(ctx, dialog, &mut msgs);
         }
 
+        if let Some(sampling_signal) = self
+            .user
+            .show_signal_analysis_wizard
+            .as_ref()
+            .map(|dialog| dialog.sampling_signal.clone())
+        {
+            let resolved_mode = self.signal_analysis_sampling_mode(&sampling_signal);
+            if let Some(dialog) = self.user.show_signal_analysis_wizard.as_mut()
+                && draw_signal_analysis_wizard_dialog(ctx, dialog, resolved_mode, &mut msgs)
+            {
+                self.user.show_signal_analysis_wizard = None;
+            }
+        }
+
         if self.user.show_performance {
             #[cfg(feature = "performance_plot")]
             self.draw_performance_graph(ctx, &mut msgs);
@@ -394,7 +411,10 @@ impl SystemState {
         });
 
         // If some dialogs are open, skip decoding keypresses
-        if !self.user.show_url_entry && self.user.show_reload_suggestion.is_none() {
+        if !self.user.show_url_entry
+            && self.user.show_reload_suggestion.is_none()
+            && self.user.show_signal_analysis_wizard.is_none()
+        {
             self.handle_pressed_keys(ctx, &mut msgs);
         }
         msgs

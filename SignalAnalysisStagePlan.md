@@ -8,8 +8,8 @@ Rule for all stages: do not start the next stage until the current stage passes 
 - Stage 1: Completed (2026-02-06).
 - Stage 2: Completed (2026-02-06).
 - Stage 3: Completed (2026-02-06).
-- Stage 4: Not started.
-- Stage 5: Not started.
+- Stage 4: Completed (2026-02-06).
+- Stage 5: Completed (2026-02-06).
 - Stage 6: Not started.
 - Stage 7: Not started.
 
@@ -142,7 +142,7 @@ Implemented:
 
 Goal: Add message and runtime flow to create analysis tile and build cache asynchronously.
 
-Status: Not started.
+Status: Completed (2026-02-06).
 
 Scope:
 - Add `RunSignalAnalysis` message path.
@@ -158,11 +158,26 @@ Expected files:
 Exit criteria:
 - Integration tests pass for run flow and cache-build flow.
 
+Validation status (2026-02-06):
+- `ulimit -n 10240`: applied before each gate command.
+- `cargo fmt`: pass.
+- `cargo clippy --no-deps`: pass (existing warning in `libsurfer/src/table/cache.rs` about `type_complexity`).
+- `cargo test -- --skip tests::wcp_tcp:: --skip file_watcher::tests::notifies_on_change --skip file_watcher::tests::resolves_files_that_are_named_differently`: pass.
+- `cargo test -- --include-ignored --skip tests::wcp_tcp:: --skip file_watcher::tests::notifies_on_change --skip file_watcher::tests::resolves_files_that_are_named_differently`: pass.
+
+Implemented:
+- Added `Message::RunSignalAnalysis { config }` and runtime handling in `SystemState::update`.
+- Added signal-analysis preflight loading for sampling/analyzed signals before model creation, using the existing waveform signal-loading path.
+- Added run-path table-tile creation for `TableModelSpec::AnalysisResults { SignalAnalysisV1 }` and routed cache build through existing `BuildTableCache -> TableCacheBuilt` flow.
+- Added Stage 4 integration tests for run flow and async cache build flow:
+  - `run_signal_analysis_creates_analysis_tile_and_preloads_signals`
+  - `signal_analysis_build_table_cache_flow_completes_after_run`
+
 ## Stage 5 - Wizard UI and Context Menu Entry
 
 Goal: Add user-facing analysis configuration workflow.
 
-Status: Not started.
+Status: Completed (2026-02-06).
 
 Scope:
 - Add waveform context-menu action: `Analyze selected signals...`.
@@ -185,6 +200,27 @@ Expected files:
 Exit criteria:
 - Snapshot tests for wizard rendering pass.
 - Menu visibility and selection filtering behavior tested.
+
+Validation status (2026-02-06):
+- `ulimit -n 10240`: applied before each gate command.
+- `cargo fmt`: pass.
+- `cargo clippy --no-deps`: pass (existing warning in `libsurfer/src/table/cache.rs` about `type_complexity`).
+- `cargo test -- --skip tests::wcp_tcp:: --skip file_watcher::tests::notifies_on_change --skip file_watcher::tests::resolves_files_that_are_named_differently`: pass.
+- `cargo test -- --include-ignored --skip tests::wcp_tcp:: --skip file_watcher::tests::notifies_on_change --skip file_watcher::tests::resolves_files_that_are_named_differently`: pass.
+
+Implemented:
+- Added context-menu entry `Analyze selected signals...` (visible only when at least one selected waveform item is a variable) and wired it to `Message::OpenSignalAnalysisWizard`.
+- Added signal-analysis wizard UI state (`show_signal_analysis_wizard`) and a single-page dialog with sampling signal selection, resolved sampling-mode display, selectable signal list with per-signal translator dropdowns, marker interval info, and Run/Cancel actions.
+- Added keyboard support in the wizard (`Enter` to run when valid, `Escape` to cancel) and disabled global key handling while the wizard is open.
+- Added runtime helpers to derive selected analysis signals (filtering out non-variable selections), sampling options from displayed variables, one-bit default sampling selection, and inferred sampling mode display.
+- Added Stage 5 tests for menu-visibility/selection filtering behavior and wizard-open defaults:
+  - `signal_analysis_menu_visibility_tracks_variable_selection`
+  - `open_signal_analysis_wizard_filters_non_variable_selection`
+  - `open_signal_analysis_wizard_defaults_sampling_to_first_one_bit_signal`
+  - `open_signal_analysis_wizard_requires_selected_variables`
+- Added wizard snapshot coverage:
+  - `tests::snapshot::signal_analysis_wizard_dialog`
+  - baseline image `snapshots/signal_analysis_wizard_dialog.png`.
 
 ## Stage 6 - Refresh/Edit and Revisioned Rebuild Semantics
 
