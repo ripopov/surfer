@@ -10,8 +10,9 @@ use crate::translation::TranslatorList;
 use crate::view::DrawingContext;
 use crate::viewport::Viewport;
 use crate::wave_data::WaveData;
-use egui::{Color32, Pos2, Stroke, emath};
-use epaint::{CornerRadius, PathShape};
+use ecolor::Color32;
+use emath::{Align2, Pos2, Rect, Vec2};
+use epaint::{CornerRadius, PathShape, Stroke};
 use num::{BigInt, ToPrimitive};
 use std::collections::HashMap;
 
@@ -193,7 +194,7 @@ fn draw_building_indicator(
 
     ctx.painter.text(
         pos,
-        egui::Align2::CENTER_CENTER,
+        Align2::CENTER_CENTER,
         text,
         egui::FontId::monospace(text_size),
         ctx.theme.foreground.gamma_multiply(0.6),
@@ -689,11 +690,8 @@ impl RenderContext {
         };
         let min = (ctx.to_screen)(start_x, self.offset);
         let max = (ctx.to_screen)(end_x, self.offset + self.line_height * self.height_scale);
-        ctx.painter.rect_filled(
-            egui::Rect::from_min_max(min, max),
-            CornerRadius::ZERO,
-            color,
-        );
+        ctx.painter
+            .rect_filled(Rect::from_min_max(min, max), CornerRadius::ZERO, color);
     }
 }
 
@@ -883,15 +881,15 @@ fn draw_amplitude_labels(render_ctx: &RenderContext, frame_width: f32, ctx: &mut
             ctx,
         );
 
-        let rect = egui::Rect::from_min_size(
+        let rect = Rect::from_min_size(
             Pos2::new(label_pos.x - 2.0, label_pos.y - galley.size().y / 2.0 - 2.0),
-            egui::Vec2::new(galley.size().x + 4.0, galley.size().y + 4.0),
+            Vec2::new(galley.size().x + 4.0, galley.size().y + 4.0),
         );
         ctx.painter
             .rect_filled(rect, CornerRadius::same(2), bg_color);
         ctx.painter.text(
             Pos2::new(label_pos.x, label_pos.y - galley.size().y / 2.0),
-            emath::Align2::LEFT_TOP,
+            Align2::LEFT_TOP,
             combined_text,
             font,
             text_color,
@@ -910,33 +908,28 @@ fn draw_amplitude_labels(render_ctx: &RenderContext, frame_width: f32, ctx: &mut
         let label_x = frame_width - max_galley.size().x.max(min_galley.size().x) - 5.0;
 
         let max_pos = render_ctx.to_screen(label_x, render_ctx.max_val, ctx);
-        let max_rect = egui::Rect::from_min_size(
+        let max_rect = Rect::from_min_size(
             Pos2::new(max_pos.x - 2.0, max_pos.y - 2.0),
-            egui::Vec2::new(max_galley.size().x + 4.0, max_galley.size().y + 4.0),
+            Vec2::new(max_galley.size().x + 4.0, max_galley.size().y + 4.0),
         );
         ctx.painter
             .rect_filled(max_rect, CornerRadius::same(2), bg_color);
         ctx.painter.text(
             max_pos,
-            emath::Align2::LEFT_TOP,
+            Align2::LEFT_TOP,
             max_text,
             font.clone(),
             text_color,
         );
 
         let min_pos = render_ctx.to_screen(label_x, render_ctx.min_val, ctx);
-        let min_rect = egui::Rect::from_min_size(
+        let min_rect = Rect::from_min_size(
             Pos2::new(min_pos.x - 2.0, min_pos.y - min_galley.size().y - 2.0),
-            egui::Vec2::new(min_galley.size().x + 4.0, min_galley.size().y + 4.0),
+            Vec2::new(min_galley.size().x + 4.0, min_galley.size().y + 4.0),
         );
         ctx.painter
             .rect_filled(min_rect, CornerRadius::same(2), bg_color);
-        ctx.painter.text(
-            min_pos,
-            emath::Align2::LEFT_BOTTOM,
-            min_text,
-            font,
-            text_color,
-        );
+        ctx.painter
+            .text(min_pos, Align2::LEFT_BOTTOM, min_text, font, text_color);
     }
 }
