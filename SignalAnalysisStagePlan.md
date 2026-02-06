@@ -10,7 +10,7 @@ Rule for all stages: do not start the next stage until the current stage passes 
 - Stage 3: Completed (2026-02-06).
 - Stage 4: Completed (2026-02-06).
 - Stage 5: Completed (2026-02-06).
-- Stage 6: Not started.
+- Stage 6: Completed (2026-02-06).
 - Stage 7: Not started.
 
 ## Global Stage Gate (run after every stage)
@@ -226,7 +226,7 @@ Implemented:
 
 Goal: Support snapshot re-analysis workflow with deterministic rebuilds.
 
-Status: Not started.
+Status: Completed (2026-02-06).
 
 Scope:
 - Add `RefreshSignalAnalysis` and `EditSignalAnalysis` messages.
@@ -243,6 +243,24 @@ Expected files:
 
 Exit criteria:
 - Tests verify refresh forces rebuild and stale results are ignored.
+
+Validation status (2026-02-06):
+- `ulimit -n 10240`: applied before each gate command.
+- `cargo fmt`: pass.
+- `cargo clippy --no-deps`: pass (existing warning in `libsurfer/src/table/cache.rs` about `type_complexity`).
+- `cargo test -- --skip tests::wcp_tcp:: --skip file_watcher::tests::notifies_on_change --skip file_watcher::tests::resolves_files_that_are_named_differently`: pass.
+- `cargo test -- --include-ignored --skip tests::wcp_tcp:: --skip file_watcher::tests::notifies_on_change --skip file_watcher::tests::resolves_files_that_are_named_differently`: pass.
+
+Implemented:
+- Added `Message::RefreshSignalAnalysis { tile_id }` and `Message::EditSignalAnalysis { tile_id }`.
+- Added signal-analysis inline table actions (`Refresh`, `Edit`) in `libsurfer/src/table/view.rs`.
+- Added edit workflow state to `UserState` and wired edit-run behavior to update the existing analysis tile (instead of creating a new tile), bumping `run_revision` on each edit-run.
+- Added `TableModelSpec::model_key_for_tile` and used it for table cache keys so `SignalAnalysisConfig.run_revision` participates in cache/model identity, forcing deterministic refresh rebuilds.
+- Hardened stale async handling in `Message::TableCacheBuilt` so stale revisions are ignored without evicting the current in-flight cache entry.
+- Added Stage 6 coverage in `libsurfer/src/table/tests.rs`:
+  - `signal_analysis_model_key_changes_on_refresh_run_revision`
+  - `edit_signal_analysis_run_updates_existing_tile_and_bumps_revision`
+  - `stale_signal_analysis_result_does_not_evict_current_inflight_entry`
 
 ## Stage 7 - Final Coverage, Snapshots, and Docs
 

@@ -66,6 +66,25 @@ pub struct MultiSignalEntry {
 }
 
 impl TableModelSpec {
+    /// Returns the model identity used in table cache keys for a tile.
+    /// Signal-analysis specs include run revision to force deterministic refresh rebuilds.
+    #[must_use]
+    pub fn model_key_for_tile(&self, tile_id: TableTileId) -> TableModelKey {
+        match self {
+            Self::AnalysisResults {
+                kind: AnalysisKind::SignalAnalysisV1,
+                params: AnalysisParams::SignalAnalysisV1 { config },
+            } => {
+                let mixed = tile_id
+                    .0
+                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    .wrapping_add(config.run_revision.wrapping_mul(0xD6E8_FEB8_6659_FD93));
+                TableModelKey(mixed)
+            }
+            _ => TableModelKey(tile_id.0),
+        }
+    }
+
     /// Create a table model instance from this specification.
     pub fn create_model(
         &self,

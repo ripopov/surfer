@@ -429,6 +429,14 @@ pub enum Message {
     RunSignalAnalysis {
         config: SignalAnalysisConfig,
     },
+    /// Refresh an existing signal-analysis table tile using the current config.
+    RefreshSignalAnalysis {
+        tile_id: TableTileId,
+    },
+    /// Edit an existing signal-analysis table configuration.
+    EditSignalAnalysis {
+        tile_id: TableTileId,
+    },
     /// Open a signal change list table for a variable
     OpenSignalChangeList {
         target: MessageTarget<VisibleItemIndex>,

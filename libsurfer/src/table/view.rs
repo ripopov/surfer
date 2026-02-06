@@ -2,9 +2,9 @@ use crate::SystemState;
 use crate::message::Message;
 use crate::table::{
     FilterDraft, MaterializePurpose, MaterializedWindow, PendingScrollOp, ScrollTarget, TableCache,
-    TableCacheKey, TableCell, TableColumnKey, TableModel, TableModelKey, TableModelSpec,
-    TableRuntimeState, TableSearchMode, TableSearchSpec, TableSelection, TableSelectionMode,
-    TableSortSpec, TableTileId, TableTileState, TableViewConfig, find_type_search_match_in_cache,
+    TableCacheKey, TableCell, TableColumnKey, TableModel, TableModelSpec, TableRuntimeState,
+    TableSearchMode, TableSearchSpec, TableSelection, TableSelectionMode, TableSortSpec,
+    TableTileId, TableTileState, TableViewConfig, find_type_search_match_in_cache,
     format_selection_count, hidden_columns, navigate_down, navigate_end, navigate_extend_selection,
     navigate_home, navigate_page_down, navigate_page_up, navigate_up, scroll_target_after_filter,
     scroll_target_after_sort, selection_on_click_multi, selection_on_click_single,
@@ -52,6 +52,13 @@ pub fn draw_table_tile(
     let view_sort = tile_state.config.sort.clone();
     let dense_rows = tile_state.config.dense_rows;
     let sticky_header = tile_state.config.sticky_header;
+    let show_signal_analysis_actions = matches!(
+        &tile_state.spec,
+        TableModelSpec::AnalysisResults {
+            kind: crate::table::AnalysisKind::SignalAnalysisV1,
+            params: crate::table::AnalysisParams::SignalAnalysisV1 { .. },
+        }
+    );
 
     // Get or create runtime state
     let runtime = state.table_runtime.entry(tile_id).or_default();
@@ -70,7 +77,7 @@ pub fn draw_table_tile(
 
     // Compute current cache key
     let cache_key = TableCacheKey {
-        model_key: TableModelKey(tile_id.0),
+        model_key: tile_state.spec.model_key_for_tile(tile_id),
         display_filter,
         view_sort,
         generation: current_generation,
@@ -106,7 +113,19 @@ pub fn draw_table_tile(
     // Render UI based on current state
     let table_response = ui
         .vertical(|ui| {
-            ui.heading(&title);
+            ui.horizontal(|ui| {
+                ui.heading(&title);
+                if show_signal_analysis_actions {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("Refresh").clicked() {
+                            msgs.push(Message::RefreshSignalAnalysis { tile_id });
+                        }
+                        if ui.small_button("Edit").clicked() {
+                            msgs.push(Message::EditSignalAnalysis { tile_id });
+                        }
+                    });
+                }
+            });
             ui.separator();
 
             // Always render filter bar first (bound to draft state for focus preservation)

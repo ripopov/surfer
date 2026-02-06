@@ -328,6 +328,7 @@ impl SystemState {
                 && draw_signal_analysis_wizard_dialog(ctx, dialog, resolved_mode, &mut msgs)
             {
                 self.user.show_signal_analysis_wizard = None;
+                self.user.signal_analysis_wizard_edit_target = None;
             }
         }
 

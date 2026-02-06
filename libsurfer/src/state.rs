@@ -108,6 +108,8 @@ pub struct UserState {
     pub(crate) show_open_sibling_state_file_suggestion: Option<OpenSiblingStateFileDialog>,
     #[serde(skip, default)]
     pub(crate) show_signal_analysis_wizard: Option<SignalAnalysisWizardDialog>,
+    #[serde(skip, default)]
+    pub(crate) signal_analysis_wizard_edit_target: Option<TableTileId>,
     pub(crate) variable_name_filter_focused: bool,
     pub(crate) variable_filter: VariableFilter,
     //Sidepanel width
@@ -211,6 +213,7 @@ impl Default for UserState {
             show_reload_suggestion: None,
             show_open_sibling_state_file_suggestion: None,
             show_signal_analysis_wizard: None,
+            signal_analysis_wizard_edit_target: None,
             variable_name_filter_focused: false,
             variable_filter: VariableFilter::new(),
             sidepanel_width: None,

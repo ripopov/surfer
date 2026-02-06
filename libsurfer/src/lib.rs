@@ -2356,9 +2356,10 @@ impl SystemState {
                 result,
             } => {
                 OUTSTANDING_TRANSACTIONS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-                self.table_inflight.remove(&entry.cache_key);
-
-                let runtime = self.table_runtime.get_mut(&tile_id)?;
+                let Some(runtime) = self.table_runtime.get_mut(&tile_id) else {
+                    self.table_inflight.remove(&entry.cache_key);
+                    return None;
+                };
 
                 // Discard stale results from superseded builds
                 if revision != runtime.table_revision {
@@ -2367,9 +2368,16 @@ impl SystemState {
 
                 // Defense-in-depth: also check cache key
                 if runtime.cache_key.as_ref() != Some(&entry.cache_key) {
+                    self.table_inflight.remove(&entry.cache_key);
                     return None;
                 }
 
+                // Defense-in-depth: message revision should match entry revision
+                if entry.revision != revision {
+                    return None;
+                }
+
+                self.table_inflight.remove(&entry.cache_key);
                 runtime.cache = Some(entry.clone());
 
                 match result {
@@ -2416,56 +2424,91 @@ impl SystemState {
                 self.invalidate_draw_commands();
             }
             Message::OpenSignalAnalysisWizard => {
+                self.user.signal_analysis_wizard_edit_target = None;
                 self.user.show_signal_analysis_wizard = self.build_signal_analysis_wizard_dialog();
             }
-            Message::RunSignalAnalysis { config } => {
+            Message::RunSignalAnalysis { mut config } => {
                 self.user.show_signal_analysis_wizard = None;
+                let edit_target = self.user.signal_analysis_wizard_edit_target.take();
+                self.preload_signal_analysis_variables(&config);
 
-                if let Some(waves) = self.user.waves.as_mut()
-                    && let Some(wave_container) = waves.inner.as_waves_mut()
+                if let Some(tile_id) = edit_target
+                    && let Some(tile_state) = self.user.table_tiles.get_mut(&tile_id)
+                    && let crate::table::TableModelSpec::AnalysisResults {
+                        kind: crate::table::AnalysisKind::SignalAnalysisV1,
+                        params:
+                            crate::table::AnalysisParams::SignalAnalysisV1 {
+                                config: previous_config,
+                            },
+                    } = &tile_state.spec
                 {
-                    let preload_variables = std::iter::once(config.sampling.signal.clone())
-                        .chain(config.signals.iter().map(|signal| signal.variable.clone()))
-                        .collect_vec();
+                    config.run_revision = previous_config.run_revision.wrapping_add(1);
+                    tile_state.spec = crate::table::TableModelSpec::AnalysisResults {
+                        kind: crate::table::AnalysisKind::SignalAnalysisV1,
+                        params: crate::table::AnalysisParams::SignalAnalysisV1 {
+                            config: config.clone(),
+                        },
+                    };
 
-                    if !preload_variables.is_empty() {
-                        match wave_container.load_variables(preload_variables.iter()) {
-                            Ok(Some(cmd)) => self.load_variables(cmd),
-                            Ok(None) => {}
-                            Err(err) => warn!(
-                                "Failed to preflight signal-analysis variable loading: {err:?}"
-                            ),
-                        }
-                    }
+                    // Keep existing view settings while refreshing title from config.
+                    tile_state.config.title = format!(
+                        "Signal Analysis: {}",
+                        config.sampling.signal.full_path_string()
+                    );
+
+                    self.invalidate_draw_commands();
+                    self.trigger_table_cache_build(tile_id);
+                    return None;
                 }
 
-                let spec = crate::table::TableModelSpec::AnalysisResults {
+                self.create_signal_analysis_tile(config);
+            }
+            Message::RefreshSignalAnalysis { tile_id } => {
+                let mut config = {
+                    let tile_state = self.user.table_tiles.get(&tile_id)?;
+                    match &tile_state.spec {
+                        crate::table::TableModelSpec::AnalysisResults {
+                            kind: crate::table::AnalysisKind::SignalAnalysisV1,
+                            params: crate::table::AnalysisParams::SignalAnalysisV1 { config },
+                        } => config.clone(),
+                        _ => return None,
+                    }
+                };
+
+                config.run_revision = config.run_revision.wrapping_add(1);
+                self.preload_signal_analysis_variables(&config);
+
+                let tile_state = self.user.table_tiles.get_mut(&tile_id)?;
+                tile_state.spec = crate::table::TableModelSpec::AnalysisResults {
                     kind: crate::table::AnalysisKind::SignalAnalysisV1,
                     params: crate::table::AnalysisParams::SignalAnalysisV1 {
                         config: config.clone(),
                     },
                 };
-                let table_tile_id = self.user.tile_tree.next_table_id();
-                let model_ctx = self.table_model_context();
-                let tile_config = spec.default_view_config(&model_ctx);
-                let cache_key = crate::table::TableCacheKey {
-                    model_key: crate::table::TableModelKey(table_tile_id.0),
-                    display_filter: tile_config.display_filter.clone(),
-                    view_sort: tile_config.sort.clone(),
-                    generation: model_ctx.cache_generation,
-                };
-                let state = crate::table::TableTileState {
-                    spec,
-                    config: tile_config,
-                };
-                self.user.table_tiles.insert(table_tile_id, state);
-                self.user.tile_tree.add_table_tile(table_tile_id);
-                self.invalidate_draw_commands();
 
-                self.update(Message::BuildTableCache {
-                    tile_id: table_tile_id,
-                    cache_key,
-                });
+                // Preserve existing view config and force cache rebuild via run revision key.
+                self.invalidate_draw_commands();
+                self.trigger_table_cache_build(tile_id);
+            }
+            Message::EditSignalAnalysis { tile_id } => {
+                let config = {
+                    let tile_state = self.user.table_tiles.get(&tile_id)?;
+                    match &tile_state.spec {
+                        crate::table::TableModelSpec::AnalysisResults {
+                            kind: crate::table::AnalysisKind::SignalAnalysisV1,
+                            params: crate::table::AnalysisParams::SignalAnalysisV1 { config },
+                        } => config.clone(),
+                        _ => return None,
+                    }
+                };
+
+                self.user.show_signal_analysis_wizard =
+                    self.build_signal_analysis_wizard_dialog_from_config(&config);
+                self.user.signal_analysis_wizard_edit_target = self
+                    .user
+                    .show_signal_analysis_wizard
+                    .as_ref()
+                    .map(|_| tile_id);
             }
             Message::OpenSignalChangeList { target } => {
                 let waves = self.user.waves.as_ref()?;
@@ -2945,15 +2988,7 @@ impl SystemState {
         let sampling_options = self.signal_analysis_sampling_options();
         let sampling_signal = self.default_signal_analysis_sampling_signal(&sampling_options)?;
         let marker_count = self.user.waves.as_ref()?.markers.len();
-
-        let mut translators = self
-            .translators
-            .all_translator_names()
-            .into_iter()
-            .map(str::to_string)
-            .collect_vec();
-        translators.sort_by(|a, b| numeric_sort::cmp(a, b));
-        translators.dedup();
+        let translators = self.signal_analysis_wizard_translators();
 
         Some(SignalAnalysisWizardDialog {
             sampling_options,
@@ -2962,6 +2997,120 @@ impl SystemState {
             translators,
             marker_count,
         })
+    }
+
+    fn build_signal_analysis_wizard_dialog_from_config(
+        &self,
+        config: &table::SignalAnalysisConfig,
+    ) -> Option<SignalAnalysisWizardDialog> {
+        let mut sampling_options = self.signal_analysis_sampling_options();
+        let mut seen = sampling_options
+            .iter()
+            .map(|option| option.variable.clone())
+            .collect::<HashSet<_>>();
+        if seen.insert(config.sampling.signal.clone()) {
+            sampling_options.push(SignalAnalysisWizardSamplingOption {
+                variable: config.sampling.signal.clone(),
+                display_name: config.sampling.signal.full_path_string(),
+            });
+        }
+        for signal in &config.signals {
+            if seen.insert(signal.variable.clone()) {
+                sampling_options.push(SignalAnalysisWizardSamplingOption {
+                    variable: signal.variable.clone(),
+                    display_name: signal.variable.full_path_string(),
+                });
+            }
+        }
+        if sampling_options.is_empty() {
+            return None;
+        }
+
+        let signals = config
+            .signals
+            .iter()
+            .map(|signal| SignalAnalysisWizardSignal {
+                variable: signal.variable.clone(),
+                display_name: signal.variable.full_path_string(),
+                include: true,
+                translator: signal.translator.clone(),
+            })
+            .collect_vec();
+        if signals.is_empty() {
+            return None;
+        }
+
+        Some(SignalAnalysisWizardDialog {
+            sampling_options,
+            sampling_signal: config.sampling.signal.clone(),
+            signals,
+            translators: self.signal_analysis_wizard_translators(),
+            marker_count: self.user.waves.as_ref()?.markers.len(),
+        })
+    }
+
+    fn signal_analysis_wizard_translators(&self) -> Vec<String> {
+        let mut translators = self
+            .translators
+            .all_translator_names()
+            .into_iter()
+            .map(str::to_string)
+            .collect_vec();
+        translators.sort_by(|a, b| numeric_sort::cmp(a, b));
+        translators.dedup();
+        translators
+    }
+
+    fn preload_signal_analysis_variables(&mut self, config: &table::SignalAnalysisConfig) {
+        if let Some(waves) = self.user.waves.as_mut()
+            && let Some(wave_container) = waves.inner.as_waves_mut()
+        {
+            let preload_variables = std::iter::once(config.sampling.signal.clone())
+                .chain(config.signals.iter().map(|signal| signal.variable.clone()))
+                .collect_vec();
+
+            if !preload_variables.is_empty() {
+                match wave_container.load_variables(preload_variables.iter()) {
+                    Ok(Some(cmd)) => self.load_variables(cmd),
+                    Ok(None) => {}
+                    Err(err) => {
+                        warn!("Failed to preflight signal-analysis variable loading: {err:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    fn create_signal_analysis_tile(&mut self, config: table::SignalAnalysisConfig) {
+        let spec = crate::table::TableModelSpec::AnalysisResults {
+            kind: crate::table::AnalysisKind::SignalAnalysisV1,
+            params: crate::table::AnalysisParams::SignalAnalysisV1 { config },
+        };
+        let table_tile_id = self.user.tile_tree.next_table_id();
+        let model_ctx = self.table_model_context();
+        let tile_config = spec.default_view_config(&model_ctx);
+        let state = crate::table::TableTileState {
+            spec,
+            config: tile_config,
+        };
+        self.user.table_tiles.insert(table_tile_id, state);
+        self.user.tile_tree.add_table_tile(table_tile_id);
+        self.invalidate_draw_commands();
+        self.trigger_table_cache_build(table_tile_id);
+    }
+
+    fn trigger_table_cache_build(&mut self, tile_id: crate::table::TableTileId) {
+        let Some(tile_state) = self.user.table_tiles.get(&tile_id) else {
+            return;
+        };
+        let model_ctx = self.table_model_context();
+        let cache_key = crate::table::TableCacheKey {
+            model_key: tile_state.spec.model_key_for_tile(tile_id),
+            display_filter: tile_state.config.display_filter.clone(),
+            view_sort: tile_state.config.sort.clone(),
+            generation: model_ctx.cache_generation,
+        };
+        self.update(Message::BuildTableCache { tile_id, cache_key });
     }
 
     pub(crate) fn signal_analysis_sampling_mode(

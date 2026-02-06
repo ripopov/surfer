@@ -4931,7 +4931,7 @@ fn signal_analysis_build_table_cache_flow_completes_after_run() {
 
     let tile_state = state.user.table_tiles.get(&tile_id).expect("tile state");
     let cache_key = TableCacheKey {
-        model_key: TableModelKey(tile_id.0),
+        model_key: tile_state.spec.model_key_for_tile(tile_id),
         display_filter: tile_state.config.display_filter.clone(),
         view_sort: tile_state.config.sort.clone(),
         generation: state
@@ -4975,6 +4975,183 @@ fn signal_analysis_build_table_cache_flow_completes_after_run() {
     assert!(
         !cache.row_ids.is_empty(),
         "analysis cache should contain at least the global row"
+    );
+}
+
+#[test]
+fn signal_analysis_model_key_changes_on_refresh_run_revision() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    let config = SignalAnalysisConfig {
+        sampling: SignalAnalysisSamplingConfig {
+            signal: VariableRef::from_hierarchy_string("tb.clk"),
+        },
+        signals: vec![SignalAnalysisSignal {
+            variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+            field: vec![],
+            translator: "Unsigned".to_string(),
+        }],
+        run_revision: 0,
+    };
+
+    state.update(Message::RunSignalAnalysis { config });
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile");
+    let old_model_key = state.user.table_tiles[&tile_id]
+        .spec
+        .model_key_for_tile(tile_id);
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state.update(Message::RefreshSignalAnalysis { tile_id });
+
+    let tile_state = state.user.table_tiles.get(&tile_id).expect("tile state");
+    let new_model_key = tile_state.spec.model_key_for_tile(tile_id);
+    assert_ne!(old_model_key, new_model_key);
+
+    match &tile_state.spec {
+        TableModelSpec::AnalysisResults {
+            kind: AnalysisKind::SignalAnalysisV1,
+            params:
+                AnalysisParams::SignalAnalysisV1 {
+                    config: updated_config,
+                },
+        } => assert_eq!(updated_config.run_revision, 1),
+        other => panic!("expected signal-analysis spec, got {other:?}"),
+    }
+
+    let runtime = state.table_runtime.get(&tile_id).expect("runtime");
+    assert_eq!(
+        runtime.cache_key.as_ref().map(|key| key.model_key),
+        Some(new_model_key)
+    );
+}
+
+#[test]
+fn edit_signal_analysis_run_updates_existing_tile_and_bumps_revision() {
+    let _runtime = test_runtime();
+    let _guard = _runtime.enter();
+    let mut state = load_counter_state();
+    let config = SignalAnalysisConfig {
+        sampling: SignalAnalysisSamplingConfig {
+            signal: VariableRef::from_hierarchy_string("tb.clk"),
+        },
+        signals: vec![SignalAnalysisSignal {
+            variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+            field: vec![],
+            translator: "Unsigned".to_string(),
+        }],
+        run_revision: 6,
+    };
+
+    state.update(Message::RunSignalAnalysis { config });
+    let tile_id = *state.user.table_tiles.keys().next().expect("tile");
+    state.update(Message::EditSignalAnalysis { tile_id });
+
+    assert_eq!(state.user.signal_analysis_wizard_edit_target, Some(tile_id));
+    {
+        let dialog = state
+            .user
+            .show_signal_analysis_wizard
+            .as_mut()
+            .expect("wizard should open");
+        dialog.signals[0].translator = "Signed".to_string();
+    }
+
+    let run_config = state
+        .user
+        .show_signal_analysis_wizard
+        .as_ref()
+        .expect("wizard should be present")
+        .to_config()
+        .expect("wizard config");
+    state.update(Message::RunSignalAnalysis { config: run_config });
+
+    assert_eq!(
+        state.user.table_tiles.len(),
+        1,
+        "should update existing tile"
+    );
+    assert!(
+        state.user.show_signal_analysis_wizard.is_none(),
+        "wizard should close after run"
+    );
+    assert!(
+        state.user.signal_analysis_wizard_edit_target.is_none(),
+        "edit target should clear after run"
+    );
+
+    let tile_state = state.user.table_tiles.get(&tile_id).expect("tile");
+    match &tile_state.spec {
+        TableModelSpec::AnalysisResults {
+            kind: AnalysisKind::SignalAnalysisV1,
+            params:
+                AnalysisParams::SignalAnalysisV1 {
+                    config: updated_config,
+                },
+        } => {
+            assert_eq!(updated_config.run_revision, 7);
+            assert_eq!(updated_config.signals[0].translator, "Signed");
+        }
+        other => panic!("expected signal-analysis spec, got {other:?}"),
+    }
+}
+
+#[test]
+fn stale_signal_analysis_result_does_not_evict_current_inflight_entry() {
+    let mut state = SystemState::new_default_config().expect("state");
+    let tile_id = TableTileId(321);
+    let cache_key = TableCacheKey {
+        model_key: TableModelKey(123),
+        display_filter: TableSearchSpec::default(),
+        view_sort: vec![],
+        generation: 0,
+    };
+    let current_entry = Arc::new(TableCacheEntry::new(cache_key.clone(), 0, 2));
+
+    state.table_runtime.insert(
+        tile_id,
+        TableRuntimeState {
+            cache_key: Some(cache_key.clone()),
+            cache: Some(current_entry.clone()),
+            last_error: None,
+            selection: TableSelection::default(),
+            scroll_offset: 0.0,
+            type_search: TypeSearchState::default(),
+            scroll_state: TableScrollState::default(),
+            filter_draft: None,
+            hidden_selection_count: 0,
+            model: None,
+            table_revision: 2,
+            cancel_token: Arc::new(AtomicBool::new(false)),
+        },
+    );
+    state
+        .table_inflight
+        .insert(cache_key.clone(), current_entry.clone());
+
+    let stale_entry = Arc::new(TableCacheEntry::new(cache_key.clone(), 0, 1));
+    state.update(Message::TableCacheBuilt {
+        tile_id,
+        revision: 1,
+        entry: stale_entry.clone(),
+        result: Ok(TableCache {
+            row_ids: vec![TableRowId(9)],
+            row_index: build_row_index(&[TableRowId(9)]),
+            search_texts: Some(vec!["stale".to_string()]),
+        }),
+    });
+
+    let inflight_entry = state
+        .table_inflight
+        .get(&cache_key)
+        .expect("inflight entry");
+    assert!(
+        Arc::ptr_eq(inflight_entry, &current_entry),
+        "stale completion must not evict current inflight entry"
+    );
+    assert!(
+        !stale_entry.is_ready(),
+        "stale cache payload should be ignored"
     );
 }
 
