@@ -1,7 +1,7 @@
 use ecolor::Color32;
 use egui::{FontId, PointerButton, Response, Sense, Ui};
 use emath::{Align2, Pos2, Rect, RectTransform, Vec2};
-use epaint::{CornerRadiusF32, CubicBezierShape, PathShape, PathStroke, RectShape, Shape, Stroke};
+use epaint::{CornerRadius, CubicBezierShape, PathShape, PathStroke, RectShape, Shape, Stroke};
 use eyre::WrapErr;
 use ftr_parser::types::{Transaction, TxGenerator};
 use itertools::Itertools;
@@ -805,7 +805,7 @@ impl SystemState {
         // Draw background
         painter.rect_filled(
             response.rect,
-            CornerRadiusF32::ZERO,
+            CornerRadius::ZERO,
             self.user.config.theme.canvas_colors.background,
         );
 
@@ -920,8 +920,11 @@ impl SystemState {
                     y: y_zero + ui.text_style_height(&egui::TextStyle::Body),
                 },
             };
-            ctx.painter
-                .rect_filled(rect, 0.0, self.user.config.theme.canvas_colors.background);
+            ctx.painter.rect_filled(
+                rect,
+                CornerRadius::ZERO,
+                self.user.config.theme.canvas_colors.background,
+            );
             self.draw_default_timeline(waves, &ctx, viewport_idx, frame_width);
         }
 
@@ -1252,7 +1255,7 @@ impl SystemState {
                                         Stroke::new(1.5, tx_fill_color.gamma_multiply(1.2));
                                     ctx.painter.rect(
                                         transaction_rect,
-                                        CornerRadiusF32::same(5.0),
+                                        CornerRadius::same(5),
                                         tx_fill_color,
                                         stroke,
                                         epaint::StrokeKind::Middle,
@@ -1263,7 +1266,7 @@ impl SystemState {
                                     let stroke = Stroke::new(1.5, tx_fill_color);
                                     ctx.painter.rect(
                                         transaction_rect,
-                                        CornerRadiusF32::ZERO,
+                                        CornerRadius::ZERO,
                                         tx_fill_color,
                                         stroke,
                                         epaint::StrokeKind::Middle,
@@ -1448,7 +1451,7 @@ impl SystemState {
                                 + ctx.theme.linewidth / 2.,
                         ),
                     },
-                    CornerRadiusF32::ZERO,
+                    CornerRadius::ZERO,
                     old_bg,
                     Stroke::NONE,
                     epaint::StrokeKind::Middle,

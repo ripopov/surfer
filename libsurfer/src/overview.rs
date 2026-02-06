@@ -3,7 +3,7 @@ use crate::view::{DrawConfig, DrawingContext};
 use crate::{SystemState, wave_data::WaveData};
 use egui::{Context, Frame, PointerButton, Sense, TopBottomPanel, Ui};
 use emath::{Align2, Pos2, Rect, RectTransform};
-use epaint::CornerRadiusF32;
+use epaint::CornerRadius;
 
 impl SystemState {
     pub fn add_overview_panel(&self, ctx: &Context, waves: &WaveData, msgs: &mut Vec<Message>) {
@@ -61,7 +61,7 @@ impl SystemState {
             let min = (ctx.to_screen)(minx, 0.);
             let max = (ctx.to_screen)(maxx, container_rect.max.y);
             ctx.painter
-                .rect_filled(Rect { min, max }, CornerRadiusF32::ZERO, fill_color);
+                .rect_filled(Rect { min, max }, CornerRadius::ZERO, fill_color);
         }
 
         waves.draw_cursor(&self.user.config.theme, &mut ctx, frame_size, &viewport_all);

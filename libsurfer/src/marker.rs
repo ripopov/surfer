@@ -175,7 +175,7 @@ impl WaveData {
         let max = Pos2::new(rect.max.x + padding, rect.max.y + padding);
 
         ctx.painter
-            .rect_filled(Rect { min, max }, CornerRadius::default(), background_color);
+            .rect_filled(Rect { min, max }, CornerRadius::ZERO, background_color);
 
         // Draw text on top of background
         ctx.painter.text(
@@ -385,7 +385,7 @@ impl SystemState {
             let max = (ctx.to_screen)(x + offset_width, y_bottom + gap);
 
             ctx.painter
-                .rect_filled(Rect { min, max }, CornerRadius::default(), background_color);
+                .rect_filled(Rect { min, max }, CornerRadius::ZERO, background_color);
 
             // Draw actual text on top of rectangle
             ctx.painter.galley(

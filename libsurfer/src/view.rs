@@ -16,7 +16,7 @@ use egui::{
 };
 use emath::{Align, GuiRounding, Pos2, Rect, RectTransform, Vec2};
 use epaint::{
-    CornerRadiusF32, Margin, Shape, Stroke,
+    CornerRadius, Margin, Shape, Stroke,
     text::{FontId, LayoutJob, TextFormat, TextWrapMode},
 };
 use itertools::Itertools;
@@ -1650,7 +1650,7 @@ impl SystemState {
         let min = (ctx.to_screen)(0.0, drawing_info.top() - y_zero - gap);
         let max = (ctx.to_screen)(frame_width, drawing_info.bottom() - y_zero + gap);
         ctx.painter
-            .rect_filled(Rect { min, max }, CornerRadiusF32::ZERO, background_color);
+            .rect_filled(Rect { min, max }, CornerRadius::ZERO, background_color);
     }
 
     pub fn get_background_color(

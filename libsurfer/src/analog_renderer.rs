@@ -11,7 +11,7 @@ use crate::view::DrawingContext;
 use crate::viewport::Viewport;
 use crate::wave_data::WaveData;
 use egui::{Color32, Pos2, Stroke, emath};
-use epaint::PathShape;
+use epaint::{CornerRadius, PathShape};
 use num::{BigInt, ToPrimitive};
 use std::collections::HashMap;
 
@@ -689,8 +689,11 @@ impl RenderContext {
         };
         let min = (ctx.to_screen)(start_x, self.offset);
         let max = (ctx.to_screen)(end_x, self.offset + self.line_height * self.height_scale);
-        ctx.painter
-            .rect_filled(egui::Rect::from_min_max(min, max), 0.0, color);
+        ctx.painter.rect_filled(
+            egui::Rect::from_min_max(min, max),
+            CornerRadius::ZERO,
+            color,
+        );
     }
 }
 
@@ -884,7 +887,8 @@ fn draw_amplitude_labels(render_ctx: &RenderContext, frame_width: f32, ctx: &mut
             Pos2::new(label_pos.x - 2.0, label_pos.y - galley.size().y / 2.0 - 2.0),
             egui::Vec2::new(galley.size().x + 4.0, galley.size().y + 4.0),
         );
-        ctx.painter.rect_filled(rect, 2.0, bg_color);
+        ctx.painter
+            .rect_filled(rect, CornerRadius::same(2), bg_color);
         ctx.painter.text(
             Pos2::new(label_pos.x, label_pos.y - galley.size().y / 2.0),
             emath::Align2::LEFT_TOP,
@@ -910,7 +914,8 @@ fn draw_amplitude_labels(render_ctx: &RenderContext, frame_width: f32, ctx: &mut
             Pos2::new(max_pos.x - 2.0, max_pos.y - 2.0),
             egui::Vec2::new(max_galley.size().x + 4.0, max_galley.size().y + 4.0),
         );
-        ctx.painter.rect_filled(max_rect, 2.0, bg_color);
+        ctx.painter
+            .rect_filled(max_rect, CornerRadius::same(2), bg_color);
         ctx.painter.text(
             max_pos,
             emath::Align2::LEFT_TOP,
@@ -924,7 +929,8 @@ fn draw_amplitude_labels(render_ctx: &RenderContext, frame_width: f32, ctx: &mut
             Pos2::new(min_pos.x - 2.0, min_pos.y - min_galley.size().y - 2.0),
             egui::Vec2::new(min_galley.size().x + 4.0, min_galley.size().y + 4.0),
         );
-        ctx.painter.rect_filled(min_rect, 2.0, bg_color);
+        ctx.painter
+            .rect_filled(min_rect, CornerRadius::same(2), bg_color);
         ctx.painter.text(
             min_pos,
             emath::Align2::LEFT_BOTTOM,
