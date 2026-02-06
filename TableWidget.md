@@ -1,707 +1,454 @@
-# Table Widget (Table Tile) Design Document
+# Table Tile Architecture Specification
 
-This document proposes the Table widget (Table tile) for Surfer. It focuses on a scrollable, sortable, searchable, selectable, responsive, and accessible table UI, with a clean model/view separation and RON serialization of layout/configuration only.
+## Purpose
+This document defines the architecture of Surfer's table tile subsystem. It replaces the earlier design draft with an implementation-grounded specification and integrates the revised performance architecture decisions.
 
-## Usage scenarios
+The audience is an engineer implementing or extending table features. After reading this document, an implementer should understand:
+- What exists today.
+- What is required behavior.
+- Where current architecture is intentionally incomplete.
+- How to implement the next stages without violating performance and correctness constraints.
 
-- Signal change list: show <time, value> transitions for a single signal, with row selection jumping the cursor to the chosen time.
-- FTR transaction trace: one transaction per row with columns for type, start/end, duration, generator, attributes; selection updates focused transaction.
-- Signal search results: one row per occurrence of a pattern/value, with click-to-jump to the time and optional highlight of the signal.
-- Signal analysis results: derived metrics (top 10 spikes, longest idle windows, glitch detection) presented in table form.
-- Virtual data model: synthetic rows/columns for UI testing, benchmarks, and demoing table features.
-- Future sources: any derived view over waveform/transaction data (statistics, exports, rule matches, protocol decodes).
+## Scope
+This specification covers:
+- Table tile architecture in `libsurfer/src/table/*`.
+- Integration in the central update loop (`libsurfer/src/lib.rs`).
+- Tile tree integration (`libsurfer/src/tiles.rs`).
+- User entry points (menus, transactions sidebar, command parser, shortcuts).
+- Current testing strategy and future staged plans.
 
-## Design overview
+This specification does not define:
+- New renderer primitives outside existing egui/egui_extras table capabilities.
+- Non-table waveform rendering internals.
 
-The Table widget is implemented as a new tile type in the existing egui_tiles layout. Each table tile consists of:
+## User Stories
+- Signal change list: show `<time, value>` transitions for a signal, and activating a row moves cursor/time focus.
+- FTR transaction trace: show one transaction per row with timing/type/attribute columns; activating a row focuses that transaction and moves cursor.
+- Signal search results: show one row per source-level match with jump-to-time behavior.
+- Signal analysis results: show derived metrics (for example spikes, idle windows, glitches) in table form.
+- Virtual data model: generate deterministic synthetic rows/columns for development, benchmarking, and snapshots.
+- Future sources: support additional derived table views over waveform/transaction data.
 
-- A serializable configuration (model spec + view config) stored in UserState, allowing layout persistence in .ron state files.
-- A runtime model and cache built on demand from the currently loaded waveform/transaction data. This cache is not serialized and is rebuilt after state load or data reload.
-- A view layer that renders the table and handles user interaction (scroll, sort, search, selection), producing Messages to mutate state.
+## Requirements
+### Functional Requirements
+- Table must be a first-class tile pane in the existing tile tree.
+- Table tile state must persist in state files as model specification plus view configuration only.
+- Runtime cache and runtime interaction state must never be serialized.
+- Table rendering must support virtualization and avoid full-list drawing.
+- Sorting must support single and multi-column stable ordering.
+- Filtering must support Contains, Exact, Regex, and Fuzzy modes.
+- Selection must be keyed by stable row identity, not by display index.
+- Selection must survive sort/filter changes and support hidden-selection accounting.
+- Activation must be model-driven via table actions.
+- Cache build must be asynchronous and stale-safe.
+- In-flight cache requests must be deduplicated for identical cache keys.
+- Table actions must flow through existing message/update architecture.
+- Table tiles must be removable with runtime cleanup.
+- Column identity must be key-based, not index-based.
+- Table data must be derived from `WaveData` or `TransactionContainer`; table models must not mutate source data.
+- Table models must be safe for cross-thread cache building (`Send + Sync` and immutable/read-only semantics).
+- Time/value formatting must match Surfer formatting and translation behavior.
+- Table interactions must remain keyboard-accessible and compatible with egui/accesskit pathways.
+- Scroll behavior must remain predictable after sort, filter, and activation operations.
+- Runtime cache/model state must not be captured in undo/redo or serialized state snapshots.
+- Table subsystem must degrade safely for missing data, invalid regex, and unavailable models.
 
-Key capabilities:
+### Non-Functional Requirements
+- No steady-state per-frame O(n) work on UI thread for large tables.
+- No per-frame model reconstruction.
+- Async stale results must be dropped deterministically.
+- Invalidations must be explicit and testable.
+- All behavior changes must be automatically testable (manual-only validation is not acceptable).
 
-- Scrollable (vertical and horizontal) with virtualized rows.
-- Sortable by column with ascending/descending and stable ordering.
-- Searchable with filter modes and live feedback.
-- Selectable with mouse and keyboard navigation.
-- Responsive layout (resizable columns, narrow-width behavior).
-- Accessible via egui widgets and accesskit when enabled.
-
-This closely mirrors the analog signal rendering pipeline:
-
-- Analog settings are serialized; caches are not.
-- A cache entry is built asynchronously and shared via Arc.
-- A generation counter invalidates caches after waveform reload.
-- The view shows a loading state while cache builds.
-
-## Design decisions
-
-- Model/view separation: data sources implement a TableModel trait; the table UI is a TableView that depends only on the trait and a cached index.
-- Serializable config only: table tiles store a TableModelSpec and TableViewConfig in .ron files. No table row data is serialized. This matches analog_signal_cache and avoids bloating state files.
-- Async caching with invalidation: expensive operations (sorting, search, row index construction) run in a worker thread. Cache entries are keyed by (model identity + display_filter + sort + generation) and invalidated when wave data reloads.
-- In-flight dedupe: at most one cache build per (tile_id, cache_key) runs at a time.
-- Cache adoption guard: TableCacheBuilt is only applied if (tile_id exists, cache_key matches current view state, and generation matches). Stale results are dropped to avoid UI races after sort/filter changes or tile close.
-- Stable row identity: selection uses a stable TableRowId (not an index) so selections survive sorting/filtering and incremental updates. Selection persists for filtered-out rows.
-- Selection invalidation on reload: when cache_generation changes, selection is cleared (or remapped if a model provides a remap hook in a future version).
-- Single source of truth: table data is derived from WaveData/TransactionContainer. Tables do not own or mutate waveform data.
-- Threading contract: TableModel implementations must be Send + Sync and backed by immutable data (Arc snapshots or read-only handles) so cache builds can run off-thread without borrowing UI thread state.
-- Column identity: TableSchema defines stable column keys; TableColumnConfig and TableSortSpec reference keys (not indices). Unknown keys are ignored; missing columns use schema defaults.
-- Consistent formatting: time and value columns reuse existing formatting utilities (TimeStringFormatting, TimeUnit, translators) to match the waveform view.
-- Accessibility: table rows are focusable and keyboard navigable. The design uses egui widgets with accesskit support when the feature is enabled.
-- Performance first: rendering is virtualized (only visible rows are drawn), and searching/sorting is cached and incremental to avoid per-frame O(n) work.
-- Undo/redo safety: runtime caches are excluded from Clone/serde, similar to AnalogVarState. Table config changes can be undoable, but caches must be rebuilt.
-- Tile lifecycle: table tiles are closable; closing a tile removes its config and runtime cache and prunes the tile tree.
-- Column formatting (v1): no per-column alignment/format configuration beyond schema defaults; TableColumnConfig only covers layout behavior (width, visibility, resizing).
-- Selection state is runtime-only (not serialized); TableViewConfig only stores the selection_mode. Scroll position is also runtime-only.
-
-## API
-
-### New types
-
-```rust
-/// Unique identifier for a table tile.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TableTileId(pub u64);
-
-/// Stable row identity for selection and caching.
-///
-/// Row identity contract:
-/// - SignalChangeList: timestamp of the transition
-/// - TransactionTrace: transaction ID from FTR
-/// - SearchResults: underlying model's row ID
-/// - Virtual: row index (stable within session)
-///
-/// Models MUST provide stable IDs within a generation; IDs may change across reloads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TableRowId(pub u64);
-
-/// Serializable model selector.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TableModelSpec {
-    SignalChangeList { variable: VariableRef, field: Vec<String> },
-    TransactionTrace { scope: TransactionScopeRef },
-    /// Source-level search that produces a derived table model from waveform data.
-    /// Named `source_query` to distinguish from view-level `display_filter`.
-    SearchResults { source_query: TableSearchSpec },
-    /// Deferred to v2: AnalysisKind and AnalysisParams will define derived metrics
-    /// (top 10 spikes, longest idle windows, glitch detection, etc.).
-    AnalysisResults { kind: AnalysisKind, params: AnalysisParams },
-    Virtual { rows: usize, columns: usize, seed: u64 },
-    Custom { key: String, payload: String },
-}
-
-/// Serializable view configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TableViewConfig {
-    pub title: String,
-    pub columns: Vec<TableColumnConfig>,
-    pub sort: Vec<TableSortSpec>,
-    /// View-level filter applied to current table cache (post-source search).
-    /// Named `display_filter` to distinguish from model-level `source_query`.
-    pub display_filter: TableSearchSpec,
-    pub selection_mode: TableSelectionMode,
-    /// When true, reduces vertical padding from 4px to 2px and uses smaller font.
-    pub dense_rows: bool,
-    /// When true, header row stays visible during vertical scroll.
-    /// When false, header scrolls with content (rarely desired).
-    pub sticky_header: bool,
-}
-
-/// Runtime, non-serialized cache handle.
-///
-/// OnceLock invalidation semantics: OnceLock can only be set once. When cache_key
-/// or generation changes, the old TableCacheEntry is dropped and a new one created.
-/// OnceLock provides atomic single-write semantics, not mutable updates.
-/// This matches the AnalogCacheEntry pattern in analog_signal_cache.rs.
-pub struct TableCacheEntry {
-    inner: OnceLock<TableCache>,
-    pub cache_key: TableCacheKey,
-    pub generation: u64,
-}
-
-/// Error type for cache build failures.
-#[derive(Debug, Clone)]
-pub enum TableCacheError {
-    /// The referenced model (variable, stream, etc.) was not found.
-    ModelNotFound { description: String },
-    /// Search pattern compilation failed (e.g., invalid regex).
-    InvalidSearch { pattern: String, reason: String },
-    /// Underlying waveform/transaction data is not available.
-    DataUnavailable,
-    /// Cache build was cancelled (e.g., tile closed during build).
-    Cancelled,
-}
+## Architecture Overview
+```mermaid
+flowchart LR
+    A[User Interaction in Table Tile] --> B[table::view::draw_table_tile]
+    B --> C[Message Queue]
+    C --> D[SystemState::update]
+    D --> E[table_runtime per tile]
+    D --> F[table_inflight by cache key]
+    D --> G[Worker: build_table_cache]
+    G --> H[Message::TableCacheBuilt]
+    H --> D
+    E --> B
+    I[UserState.table_tiles serialized] --> B
+    J[UserState.tile_tree serialized] --> B
 ```
 
-### TableModel trait
+## Runtime Layers
+### Layer 1: Persistent Tile Configuration
+Owned by `UserState`.
+- `table_tiles: HashMap<TableTileId, TableTileState>`.
+- `TableTileState` contains `TableModelSpec` and `TableViewConfig`.
+- Serialized in `.surf.ron` state files.
 
-```rust
-pub trait TableModel: Send + Sync {
-    fn schema(&self) -> TableSchema;
-    fn row_count(&self) -> usize;
-    fn row_id_at(&self, index: usize) -> Option<TableRowId>;
-    fn cell(&self, row: TableRowId, col: usize) -> TableCell;
-    fn sort_key(&self, row: TableRowId, col: usize) -> TableSortKey;
-    fn search_text(&self, row: TableRowId) -> String;
-    fn on_activate(&self, row: TableRowId) -> TableAction;
-}
+### Layer 2: Runtime Table State
+Owned by `SystemState`.
+- `table_runtime: HashMap<TableTileId, TableRuntimeState>`.
+- `table_inflight: HashMap<TableCacheKey, Arc<TableCacheEntry>>`.
+- Not serialized.
+
+### Layer 3: Model + Cache
+Implemented in `libsurfer/src/table/`.
+- Model contract: `TableModel` trait.
+- Cache build: `build_table_cache`.
+- View/controller: `view.rs`.
+- Source models: `sources/`.
+
+## Core Domain Model
+### Identities
+- `TableTileId`: stable per tile in layout/state.
+- `TableRowId`: stable row identity within a generation.
+- `TableColumnKey`: stable column identity (string or numeric key).
+
+### Model Specification (`TableModelSpec`)
+Current variants and status:
+
+| Variant | Status | Notes |
+|---|---|---|
+| `SignalChangeList` | Implemented | Supports root or subfield paths. |
+| `TransactionTrace` | Implemented | Per-generator transaction tables. |
+| `Virtual` | Implemented | Deterministic synthetic data. |
+| `SearchResults` | Planned | Stage 13. |
+| `Custom` | Planned | Stage 14. |
+| `AnalysisResults` | Planned | Stage 15 (v2). |
+
+### View Configuration (`TableViewConfig`)
+- Title.
+- Column configs.
+- Sort specification.
+- Display filter.
+- Selection mode.
+- Dense rows mode.
+- Sticky header preference.
+- Activate-on-select flag.
+
+### Runtime State (`TableRuntimeState`)
+- Current cache key and cache entry.
+- Last build error.
+- Current selection and hidden selection count.
+- Type-to-search state.
+- Scroll state and pending scroll operations.
+- Debounced filter draft.
+- Cached model handle.
+
+## Tile Integration
+Table is integrated as `SurferPane::Table(TableTileId)`.
+
+Creation flow:
+1. Allocate next `TableTileId` from tile tree.
+2. Build default view config from model spec and context.
+3. Insert into `user.table_tiles`.
+4. Insert table pane into tile tree.
+
+Removal flow:
+1. Remove table pane from tile tree.
+2. Remove persistent tile state from `user.table_tiles`.
+3. Remove runtime state from `table_runtime`.
+
+## Async Cache Pipeline
+```mermaid
+sequenceDiagram
+    participant V as Table View
+    participant S as SystemState
+    participant W as Worker
+
+    V->>S: BuildTableCache(tile_id, cache_key)
+    S->>S: Check runtime cache + table_inflight
+    S->>S: Create/reuse model and cache entry
+    S->>W: build_table_cache(model, filter, sort)
+    W-->>S: TableCacheBuilt(tile_id, entry, result)
+    S->>S: Drop result if tile/key is stale
+    S->>S: Apply cache entry + hidden count
+    S-->>V: Next frame renders table
 ```
 
-row_id_at defines the model's base order; stable sorting uses this order as a tie-breaker.
+### Current Pipeline Behavior
+- View computes `TableCacheKey` from tile identity, display filter, sort, and waveform generation.
+- If cache is stale/missing, view emits `BuildTableCache`.
+- `SystemState` deduplicates by `table_inflight` and key match.
+- Model creation currently happens on UI thread in `BuildTableCache` handling.
+- Worker builds filtered/sorted row cache.
+- Apply step enforces cache key match and tile existence.
+- Stale results are ignored.
 
-### Table view API
+### Cache Entry Semantics
+- `TableCacheEntry` uses `OnceLock` for one-time cache set.
+- New key/generation implies new entry instance.
+- Entry tracks key and generation for stale-safe adoption.
 
-```rust
-pub fn draw_table_tile(
-    state: &mut SystemState,
-    ctx: &egui::Context,
-    ui: &mut egui::Ui,
-    msgs: &mut Vec<Message>,
-    tile_id: TableTileId,
-);
+## Filtering, Sorting, and Search
+### Display Filter
+- View-level filter only (`display_filter`) is implemented.
+- Draft UI state is debounced (`FILTER_DEBOUNCE_MS = 200ms`).
+- Regex errors produce a structured cache build error.
+
+### Sort
+- Click header: single-column sort with direction toggle.
+- Shift+click header: multi-column sort add/toggle.
+- Sort indicator shows direction and multi-sort priority.
+- Stable ordering fallback uses model base row order.
+
+### Type-to-Search
+- Runtime buffer with timeout.
+- Case-insensitive prefix/contains matching over cached search text.
+- Wrap-around behavior from current anchor.
+
+## Selection and Activation
+### Selection Model
+- Selection is runtime-only and row-id based.
+- Supports None, Single, Multi modes.
+- Multi mode supports plain click, Ctrl/Cmd toggle, Shift range.
+- Hidden selection count is cached in runtime state.
+
+### Keyboard Navigation
+- Up/Down, Page Up/Down, Home/End.
+- Shift+navigation extends selection range.
+- Enter activates anchor row.
+- Escape clears selection.
+- Ctrl/Cmd+A selects all visible rows in Multi mode.
+- Ctrl/Cmd+C copies selection as TSV; Shift modifier includes header row.
+
+### Activation Actions
+Model activation maps to:
+- Cursor set.
+- Transaction focus.
+- Signal select (reserved path).
+- No-op.
+
+For transaction rows, activation focuses transaction and sets cursor to transaction start time.
+
+## Column and Layout Behavior
+### Implemented
+- Uniform row heights with virtualization.
+- Dense mode row height variant.
+- Header sorting interactions.
+- Column visibility messaging and hidden-column bar.
+
+### Constraints
+- `sticky_header` preference is stored but currently not switchable at runtime because the underlying table builder keeps sticky headers.
+- Column width persistence pathway exists as message handling but is not fully wired from interactive resize events in the current table view.
+- Column visibility persistence expects column configs to exist; default empty config means visibility toggles may not affect persisted config until schema-derived column configs are initialized.
+
+## Responsiveness, Accessibility, and Scroll Contract
+### Responsiveness
+- Rendering uses row virtualization and avoids full dataset drawing.
+- Cache build executes off-thread, but model construction for cache requests still has UI-thread work and remains an optimization target.
+
+### Accessibility
+- Rows are selectable and keyboard navigable through table focus handling.
+- Table interactions use egui widgets and remain compatible with accesskit-enabled builds.
+
+### Scroll Contract
+- After sort changes, scroll targets prioritize selected-row visibility when possible.
+- After filter changes, scroll targets prefer selected-row visibility and otherwise recover to valid visible regions.
+- After activation, scroll behavior ensures activated row visibility.
+
+## Model Implementations
+### Virtual Model
+- Deterministic synthetic dataset.
+- Used for infrastructure tests, snapshots, and performance experiments.
+
+### SignalChangeList Model
+- Data source: loaded waveform signal transitions.
+- Columns: Time, Value.
+- Row id strategy: timestamp-based id, with hashed sequence fallback for duplicate timestamps.
+- Formatting: uses Surfer time formatter and translator pipeline.
+- Activation: set cursor to selected transition time.
+
+### TransactionTrace Model
+- Data source: transactions for one generator.
+- Columns: fixed timing/type columns plus dynamic attribute columns.
+- Row ordering: start-time order.
+- Row id: transaction id within generator scope.
+- Activation: focus transaction and set cursor to transaction start.
+- FTR lazy-load interaction: generator transaction data must be loaded before model use.
+
+## Entry Points and UX Integration
+### Menus
+- Variable context menu supports opening signal change list table.
+- Stream/generator context menus support opening transaction table(s).
+- Stream-level transaction action opens one table per generator.
+
+### Transactions Sidebar
+- Generator context menu supports opening one transaction table.
+- Stream context menu supports opening transaction tables for all generators.
+
+### Commands
+- `table_view` opens signal change list for focused or explicit variable.
+- `transaction_table` opens transaction table for currently focused transaction's generator.
+
+### Keyboard Shortcuts
+- Shortcut action exists for table view (`OpenSignalChangeList`).
+- Default config maps `table_view` to `L`.
+- No dedicated shortcut action exists for `transaction_table`; transaction table access is currently command/menu-driven.
+
+## Persistence, Reload, and Invalidation
+### Persisted
+- Tile tree layout.
+- Table tile specs and view config.
+
+### Runtime-only
+- Cache entries.
+- Selection.
+- Scroll state.
+- Filter draft.
+- Last errors.
+- Cached model handle.
+
+### Current Invalidation Rules
+- Cache rebuild when cache key changes.
+- Cache key includes generation, display filter, and sort.
+- Selection/model clear when detected generation change in view runtime state.
+- Hidden selection count recomputed on selection/cache application.
+
+### Current Risk Area
+- Model/context revisions not yet explicit. Time formatting or translator changes can invalidate semantic model output without changing the current table cache key, so stale table renderings are possible until another invalidation event occurs.
+
+## Performance Architecture Decisions
+| Decision | Target | Current Status |
+|---|---|---|
+| Separate model lifecycle from view-cache lifecycle | Keep model and cache lifetimes explicit and independent | Partially implemented. Runtime model cache exists, but model key lifecycle is not explicit. |
+| Explicit revision keys | Add model build key with context revision | Pending. No dedicated context revision key in runtime state. |
+| Async stale-safe pipeline | Apply worker results only on key match | Partially implemented. Cache key match is enforced; model key matching is not yet explicit. |
+| Eliminate steady-state cloning | Borrow hot-path data and avoid full-vector clones | Largely implemented for row/id navigation/filter paths. |
+| Prioritize low-risk wins first | Land no-regret perf fixes before deep refactor | Implemented. Row index, hidden-count caching, and temporary sort-key handling are in place. |
+
+## Target Performance Architecture
+### Target Keys
+- Model build key must include waveform generation and table-context revision.
+- Cache key remains view-specific and must be tied to model key that produced it.
+
+### Target Invalidation Rules
+1. Rebuild model + cache when model key changes.
+2. Rebuild cache only when sort/filter changes and model key is unchanged.
+3. Recompute hidden selection count only when selection or visible row set changes.
+4. Always drop stale worker results by strict key checks.
+
+### Context Revision Inputs (Required)
+- Time unit/time string format changes.
+- Translator set changes.
+- Display-format changes affecting model output.
+
+## Known Gaps and Technical Debt
+- Model construction for cache build still runs on UI thread before spawning worker.
+- Model key and context revision are not explicit runtime state fields.
+- `SearchResults`, `Custom`, and `AnalysisResults` model variants are not implemented.
+- Source-level search (`source_query`) is designed but not implemented yet.
+- Sticky header option is stored but currently non-functional as a toggle.
+- Column config initialization from schema defaults is incomplete for some runtime visibility workflows.
+- Copy-selection path currently derives columns from schema directly, not from current visibility config.
+
+## Testing Strategy
+### Principle
+All table functionality must be verified by automated tests.
+
+### Current Test Portfolio
+- Unit tests for model contracts, selection mechanics, sort/filter helpers, navigation helpers, and cache behavior.
+- Message-flow integration tests for tile lifecycle, selection, activation, copy, sort/filter updates, and stream-level transaction table opening.
+- Snapshot tests for visual behavior, multi-tile layouts, sorting, keyboard-selection states, and transaction table rendering/restoration.
+- Safety tests for performance-sensitive invariants (row-index consistency and hidden-count correctness).
+
+### Ongoing Test Requirements
+- Add stale-result race tests whenever async key logic changes.
+- Add large-table ignored perf regression tests for interaction paths.
+- Preserve snapshot parity unless behavior is intentionally changed.
+
+## Implementation Status
+### Completed Stages
+- Stages 1-11: core table infrastructure, virtual model, signal change list model, sort/filter/selection/navigation/copy foundations, scroll and visibility primitives.
+- Stage 12: transaction trace model and integration.
+- Stage 12b: stream-level transaction table opening (one table per generator).
+
+### Current Availability Matrix
+| Capability | Status |
+|---|---|
+| Virtual table model | Complete |
+| Signal change list table | Complete |
+| Transaction trace table | Complete |
+| Stream-level transaction table opening | Complete |
+| Source-level search results model | Pending |
+| Custom/plugin model registry | Pending |
+| Analysis results model | Pending |
+
+## Future Plans
+
+### Stage 13: SearchResults Model
+### Goal
+Implement source-level search that produces a derived table model.
+
+### Scope
+- New `SearchResults` model implementation.
+- Source query execution over waveform data.
+- Schema with signal/time/value/context fields.
+- Activation behavior to jump and highlight.
+- Progress and cancellation behavior for long searches.
+
+### Acceptance Criteria
+- Automated tests validate occurrence correctness.
+- Automated tests validate context/metadata columns.
+- Integration tests validate navigation/highlight actions.
+- Long-running search behavior is testable and cancel-safe.
+
+### Stage 14: Custom Model Support
+### Goal
+Support externally registered table models via a model registry.
+
+### Scope
+- Registry for model factories keyed by identifier.
+- `Custom` model spec resolution and error reporting.
+- Documentation for plugin/external model integration.
+
+### Acceptance Criteria
+- Factory registration tests.
+- Unknown key error-path tests.
+- Integration test for rendering a custom model in a tile.
+
+### Stage 15 (v2): AnalysisResults Model
+### Goal
+Support derived analysis tables for advanced workflows.
+
+### Scope
+- Define analysis kinds and parameter schema.
+- Implement worker pipelines producing analysis rows.
+- Add model wiring and UX entry points.
+
+### Acceptance Criteria
+- To be finalized with analysis framework design.
+
+## Remaining Performance Phases
+### Phase 2 Completion
+- Add explicit model key into runtime state.
+- Stop UI-thread model recreation for any remaining handler path.
+- Introduce context revision source and invalidation integration.
+
+### Phase 3
+- Move heavy model construction to workers via owned build inputs.
+- Keep cheap UI-thread request path.
+
+### Phase 4
+- Optional search memory/performance tuning after measurement.
+
+### Phase 5
+- Optional advanced selection semantics only if profiling justifies complexity.
+
+## Implementation Order Summary
+```mermaid
+flowchart TD
+    A[Completed: Stages 1-12b] --> B[Next: Stage 13 SearchResults]
+    A --> C[Next: Stage 14 Custom Model]
+    B --> D[Then: Stage 15 AnalysisResults v2]
+    C --> D
+    A --> E[In parallel: Performance Phase 2 completion]
+    E --> F[Performance Phase 3]
+    F --> G[Optional Phase 4]
+    G --> H[Optional Phase 5]
 ```
 
-### Messages
-
-```rust
-pub enum Message {
-    AddTableTile { spec: TableModelSpec },
-    RemoveTableTile { tile_id: TableTileId },
-    SetTableSort { tile_id: TableTileId, sort: Vec<TableSortSpec> },
-    SetTableDisplayFilter { tile_id: TableTileId, filter: TableSearchSpec },
-    SetTableSelection { tile_id: TableTileId, selection: TableSelection },
-    BuildTableCache { tile_id: TableTileId, cache_key: TableCacheKey },
-    TableCacheBuilt { tile_id: TableTileId, entry: Arc<TableCacheEntry>, result: Result<TableCache, TableCacheError> },
-}
-```
-
-### Type glossary (v1)
-
-- TableSchema: ordered list of columns with stable keys and labels, with optional default width/visibility hints. Keys are strings or u64s.
-- TableColumnConfig: view layout for a column key (key, width, visibility, resizable). No formatting or alignment overrides in v1. Column drag-to-reorder deferred to v2.
-- TableSortSpec: (column key, direction) list used for multi-column sorting.
-- TableSearchSpec: { mode, case_sensitive, text }. Empty text means no filter. Used for both source_query (model-level) and display_filter (view-level).
-- TableSelectionMode: None | Single | Multi.
-- TableSelection: runtime selection state (set of TableRowId + anchor for range selection). Selection persists for filtered-out rows; when filter is cleared, previously selected rows become visible again.
-- TableCell: display-ready cell content (string or rich text), optional tooltip. Icons, badges, and progress indicators deferred to v2.
-- TableSortKey: sortable value (numeric/string/bytes) used for stable ordering.
-- TableCacheKey: { model_key, display_filter, view_sort, generation }. model_key is derived from TableModelSpec via Hash/Eq (SignalChangeList uses variable+field, TransactionTrace uses scope, etc.).
-- TableCache: cached row_ids in display order + per-row search text + per-row sort keys.
-- TableCacheError: structured error type for cache build failures (ModelNotFound, InvalidSearch, DataUnavailable, Cancelled).
-- TableAction: activation result (CursorSet, FocusTransaction, SelectSignal, None).
-- TransactionScopeRef: scope for transaction queries (Root | Stream(id) | Generator { stream_id, generator_id }). Serializable enum.
-- Row height: uniform height for all rows to enable virtualization. Variable row heights deferred to v2.
-
-## Implementation details
-
-### File layout
-
-- `libsurfer/src/table/mod.rs` - module root, shared types.
-- `libsurfer/src/table/model.rs` - TableModel trait, schema/row types.
-- `libsurfer/src/table/view.rs` - egui rendering, interaction handling.
-- `libsurfer/src/table/cache.rs` - cache entry, cache build helpers.
-- `libsurfer/src/table/sources/` - concrete model implementations.
-
-### Tile integration
-
-- Add `SurferPane::Table(TableTileId)` variant to `tiles.rs`.
-- Store table tile configs in UserState, keyed by TableTileId. Tile tree only stores the ID.
-- Provide `SurferTileTree::add_table_tile(spec)` to create new tiles and IDs.
-- Ensure tab close removes the table tile config and any runtime cache entries.
-
-### Runtime cache flow (analog-inspired)
-
-1. Table view attempts to access a cache entry by key (model identity + display_filter + sort + generation).
-2. If the cache is missing or stale (cache_key or generation mismatch), the old TableCacheEntry is dropped and a **new** TableCacheEntry is created. The view renders a loading state and emits Message::BuildTableCache.
-3. The SystemState handler starts a worker (perform_work) that builds the row index and any search/sort metadata. Cache building is always off-thread.
-4. If a build for the same cache_key is already in-flight, new BuildTableCache requests are ignored to avoid duplicate work.
-5. On completion, the worker sends Message::TableCacheBuilt and decrements OUTSTANDING_TRANSACTIONS.
-6. The cache entry stores the built TableCache in its OnceLock only if tile_id still exists and the cache_key + generation still match the current view state; otherwise the result is dropped. OnceLock provides atomic single-write semantics. The next frame renders the table normally when a valid cache exists.
-7. If cache building fails, a TableCacheError is stored in runtime state for the tile and displayed in the UI until the next successful build or query change.
-
-This mirrors analog cache behavior (AnalogVarState + AnalogCacheEntry + cache_generation).
-
-### Search and sort
-
-- Search uses a TableSearchSpec similar to VariableFilter: mode (contains, regex, fuzzy), case sensitivity, and an input string.
-- Regex compilation is cached to avoid per-frame rebuilds; invalid regex yields a TableCacheError::InvalidSearch in the UI.
-- Sorting is stable and multi-column (primary, secondary) and uses cached sort keys to avoid repeated string formatting.
-- Multi-column sort UI: Click column header to set primary sort (toggles ascending/descending). Shift+click adds or modifies secondary/tertiary sort. Header shows sort indicators (▲/▼) with numbers for multi-column priority (1▲ 2▼). Clicking without Shift resets to single-column sort.
-- Search scope split: TableModelSpec::SearchResults uses `source_query` (source-level search built from underlying waveform data by a worker), producing a derived table model. TableViewConfig uses `display_filter` (view-level filter applied to the current table cache). Both can be active: source_query narrows the dataset; display_filter further filters rows in the cache. The UI shows both scopes distinctly (e.g., separate filter badges) to avoid confusion.
-- Cache build stores per-row search text and sort keys; TableModel::search_text is called only during cache build, not per frame.
-
-### Selection and activation
-
-- Selection is stored as TableSelection (single/multi). It is keyed by TableRowId to survive sorting.
-- Selection persists even for rows filtered out by display_filter. When filter is cleared, previously selected rows become visible again. Selection count UI shows "N selected (M hidden)" when applicable.
-- Keyboard navigation:
-  - Up/Down: move selection by one row
-  - Page Up/Down: move selection by visible page height
-  - Home/End: jump to first/last row
-  - Ctrl+Home/Ctrl+End: jump to first/last row and scroll
-  - Enter: activate selected row
-  - Ctrl/Cmd-C: copy selected rows as tab-separated values (visible columns only, no header row). Future: configurable format (CSV, JSON).
-  - Type-to-search: typing alphanumeric characters triggers fuzzy jump to matching row (with debounce).
-- Activation returns a TableAction, mapped to Messages like CursorSet or FocusTransaction.
-- Selection lifecycle: on cache_generation change, selection is cleared because row ids may no longer be valid across reloads. If a model can provide stable ids across reloads in the future, a remap hook can preserve selection.
-- Context menus for rows/cells deferred to v2.
-
-### Responsiveness and accessibility
-
-- Use egui_extras::TableBuilder with vscroll(true) and row virtualization.
-- Row height is uniform across all rows to enable efficient virtualization. Variable row heights deferred to v2.
-- Column widths persist in TableViewConfig; columns can be resizable and auto-sized.
-- Rows are drawn with selectable labels for accessibility and keyboard focus.
-- Respect theme colors (SurferConfig theme) and ui zoom factor.
-
-### Scroll position behavior
-
-- After sort: scroll to keep the first selected row visible; if none selected, maintain approximate scroll position.
-- After filter change: if current scroll position would show empty space beyond content, scroll to keep content visible. If selected row is now filtered out, scroll to top.
-- After activation: keep activated row visible (scroll minimally to bring into view if needed).
-- Scroll position is runtime-only and not serialized; table opens at top on state load.
-
-### Serialization
-
-- TableTileState (spec + view config) is serialized in UserState.
-- Runtime caches and derived data are marked with serde(skip).
-- On load, table tiles are recreated and caches rebuilt once data is available.
-- Selection state, scroll position, and transient error strings are runtime-only and not serialized.
-
-### Column identity and schema
-
-- TableSchema provides an ordered list of columns with stable keys (string or u64) and labels.
-- TableColumnConfig and TableSortSpec reference columns by key, not by index.
-- Column order is defined by TableViewConfig.columns; any schema columns not present are appended in schema order.
-- Unknown column keys in config/sort are ignored; missing columns are added from the schema with defaults.
-- Column widths/visibility do not affect cache_key; only model identity + display_filter + sort + generation do.
-
-### Missing requirements from codebase review
-
-- Use existing time formatting (TimeStringFormatting, TimeUnit) and translator logic to match waveform values.
-- Handle waveform reload by invalidating caches via cache_generation (same pattern as analog).
-- Avoid storing caches in undo/redo stacks; use manual Clone to drop runtime caches.
-- Integrate with Message-based state updates to keep UI changes consistent with existing event flow.
-- Support DataContainer::Empty and partially loaded waveforms with clear loading/empty states.
-- Wire table actions into command_parser and keyboard_shortcuts (search focus, close tile, copy row).
-
-### Deferred to v2
-
-- AnalysisKind and AnalysisParams: derived metrics like top 10 spikes, longest idle windows, glitch detection.
-- Context menus for rows and cells (copy, filter by value, jump to related, etc.).
-- Column drag-to-reorder via mouse.
-- Variable row heights (requires different virtualization strategy).
-- Rich cell content: icons, badges, progress indicators, sparklines.
-- Configurable copy format (CSV, JSON, custom delimiter).
-- Selection remap hook for preserving selection across reloads when model provides stable cross-generation IDs.
-
-## Testing strategy
-
-- Unit tests for TableModel implementations (row_count, sort_key, search_text correctness).
-- Cache tests: build, reuse, invalidate on generation change; ensure no stale results.
-- Search tests: contains/regex/fuzzy; invalid regex reports error but does not panic.
-- Sorting tests: stable ordering, multi-column sort, Shift+click adds secondary sort, click without Shift resets to single-column.
-- Selection tests: selection persists across sorting/filtering (including hidden rows), clears on generation change, and UI shows correct "N selected (M hidden)" counts.
-- Serialization tests: TableTileState round-trip in .ron; caches omitted and rebuilt.
-- UI snapshot tests: add a virtual table tile and verify rendering and scroll behavior.
-- Scroll position tests: verify scroll maintains selected row visibility after sort, scrolls to top when filter hides selected row.
-- Keyboard navigation tests: verify Up/Down/Page/Home/End/type-to-search behavior.
-- Copy tests: verify tab-separated output format for selected rows.
-- Performance tests: large virtual data sets, ensure no per-frame O(n) work and acceptable FPS.
-
----
-
-## Implementation status
-
-### Completed (Stages 1-12)
-
-The core table infrastructure, first real data model, and transaction trace model are fully implemented:
-
-**Core types and module structure:**
-- `libsurfer/src/table/` module with model.rs, view.rs, cache.rs, and sources/ submodule
-- `TableTileId`, `TableRowId`, `TableModelSpec`, `TableViewConfig`, `TableTileState`
-- `TableSchema`, `TableColumnConfig`, `TableSortSpec`, `TableSearchSpec`, `TableSearchMode`
-- `TableSelectionMode`, `TableSelection`, `TableCell`, `TableSortKey`, `TableAction`
-- `TableCacheKey`, `TableCache`, `TableCacheEntry`, `TableCacheError`
-- `TableModel` trait with all required methods
-
-**Virtual model (`VirtualTableModel`):**
-- Deterministic synthetic data generation for testing (configurable rows, columns, seed)
-- Full TableModel trait implementation
-- Used for infrastructure validation and snapshot tests
-
-**Async cache system:**
-- `TableCacheEntry` with `OnceLock` for atomic cache storage
-- Cache builder with filtering (Contains, Exact, Regex, Fuzzy) and multi-column sorting
-- `Message::BuildTableCache` and `Message::TableCacheBuilt` handlers
-- In-flight deduplication to prevent duplicate cache builds
-- Stale result rejection based on cache_key and generation matching
-
-**Tile integration:**
-- `SurferPane::Table(TableTileId)` variant in tiles.rs
-- `table_tiles: HashMap<TableTileId, TableTileState>` in UserState (serialized)
-- `table_runtime: HashMap<TableTileId, TableRuntimeState>` in SystemState (not serialized)
-- `SurferTileTree::add_table_tile()` and tile lifecycle management
-- Tab close cleanup for config and runtime state
-
-**Table rendering:**
-- `egui_extras::TableBuilder` with row virtualization and striped rows
-- Header row with column labels from schema
-- Loading spinner during cache build, error display on failure
-- Dense rows mode (smaller font, reduced padding)
-- Theme color integration from SurferConfig
-
-**Sorting:**
-- Click-to-sort with ascending/descending toggle
-- Shift+click for multi-column sort
-- Sort indicators (▲/▼) with priority numbers for multi-column
-- `sort_spec_on_click()`, `sort_spec_on_shift_click()`, `sort_indicator()` helpers
-- Stable sorting using `row_id_at()` order as tie-breaker
-
-**Display filter (search):**
-- Filter bar UI with text input, mode selector (Contains/Exact/Regex/Fuzzy), case toggle
-- Live debounced search with cache invalidation
-- Row count display: "Showing N of M rows"
-- Invalid regex error display
-- `fuzzy_match()` for subsequence matching
-
-**Selection:**
-- Single and Multi selection modes
-- Click, Ctrl+click (toggle), Shift+click (range) selection
-- Selection persists across sort/filter changes
-- Selection count display: "N selected (M hidden)"
-- Selection cleared on waveform reload (generation change)
-- `TableSelection` with BTreeSet<TableRowId> and anchor for range selection
-
-**Keyboard navigation:**
-- Up/Down, Page Up/Down, Home/End navigation
-- Shift+navigation for selection extension
-- Enter to activate, Escape to clear selection
-- Ctrl+A to select all (Multi mode)
-- Ctrl+C to copy selected rows as TSV
-- Type-to-search with timeout buffer
-
-**Scroll behavior and polish:**
-- Scroll target computation after sort/filter/activation
-- Column resize via drag with min width enforcement
-- Column visibility toggle via context menu
-- Hidden columns bar when columns are hidden
-- Generation tracking for waveform reload detection
-
-**SignalChangeList model (`SignalChangeListModel`):**
-- Time and Value columns with proper formatting
-- `TableModelContext` for accessing WaveData, translators, time formatting
-- Lazy row building with `OnceLock<Vec<TransitionRow>>`
-- Field path handling for root and subfields
-- `on_activate` returns `TableAction::CursorSet(time)`
-- Context menu integration in menus.rs for variables
-- `table_view` command and keyboard shortcut
-- Error handling for missing data/variables
-
-**TransactionTrace model (`TransactionTraceModel`):**
-- Fixed columns: Start, End, Duration, Type, Generator
-- Dynamic attribute columns discovered from transaction data
-- Composite row_id encoding: `(gen_id << 40) | tx_id` for uniqueness across generators
-- Lazy row building with `OnceLock<TransactionData>` (same pattern as SignalChangeList)
-- `on_activate` returns `TableAction::FocusTransaction(tx_ref)` which focuses transaction and sets cursor
-- Time formatting using `TimeFormatter` with transaction container metadata
-- Context menu integration in transactions.rs for streams and generators
-- `transaction_table` command in command_parser.rs
-- `Message::OpenTransactionTable { stream, generator }` for UI integration
-- Note: FTR format uses lazy loading; transactions must be loaded via `AddStreamOrGenerator` before model access
-
-**Test coverage:**
-- 210+ unit and integration tests
-- Snapshot tests for rendering verification
-- All tests passing
-
----
-
-## Staged implementation plan
-
-### Stage 12: TransactionTrace model ✓ COMPLETE
-
-**Goal:** Implement the TransactionTrace table model for FTR transaction traces and wire it into the Surfer UI (context menu + keyboard command) while keeping cache builds async and consistent with existing table infrastructure.
-
-**Status:** Complete. All core functionality implemented and tested.
-
-**User experience:**
-- Right-click a transaction stream or generator in the transaction hierarchy and choose "Show transactions in table" to open a new table tile.
-- Right-click a focused transaction in the waveform view and choose "Show transaction in table" to open a table filtered to that generator, scrolled to the transaction.
-- Keyboard shortcut `Shift+T` (when transaction is focused) opens a transaction table for the focused transaction's generator.
-- Keyboard command `transaction_table` opens a transaction list for the currently focused transaction's generator.
-- Table shows columns: Start, End, Duration, Type, Generator, and dynamic attribute columns (in that order).
-- Activating a row (Enter/double-click) focuses the transaction in the waveform view and moves cursor to transaction start time.
-- On waveform reload, the table shows a loading state, cache is rebuilt, and selection clears.
-
-**Deliverables:**
-
-1. **Add `libsurfer/src/table/sources/transaction_trace.rs` with `TransactionTraceModel` implementing `TableModel`:**
-
-   ```rust
-   /// Scope reference for transaction trace queries.
-   /// - Root: all transactions in the container
-   /// - Stream(id): transactions in a specific stream
-   /// - Generator(stream_id, gen_id): transactions from a specific generator
-   pub enum TransactionScopeRef {
-       Root,
-       Stream(usize),
-       Generator { stream_id: usize, generator_id: usize },
-   }
-
-   pub struct TransactionTraceModel {
-       ctx: Arc<TableModelContext>,
-       scope: TransactionScopeRef,
-       /// Lazily built rows and schema (includes dynamic attribute columns)
-       data: OnceLock<TransactionData>,
-   }
-
-   struct TransactionData {
-       rows: Vec<TransactionRow>,
-       index: HashMap<TableRowId, usize>,
-       /// Attribute column names discovered from transactions
-       attribute_columns: Vec<String>,
-   }
-
-   struct TransactionRow {
-       /// Unique row ID: composite of (stream_id, generator_id, tx_index)
-       /// Encoded as: (stream_id << 40) | (generator_id << 20) | tx_index
-       row_id: TableRowId,
-       tx_ref: TransactionRef,
-       start_time: BigUint,
-       end_time: BigUint,
-       duration: BigUint,
-       tx_type: String,
-       generator_name: String,
-       /// Attribute values in same order as TransactionData.attribute_columns
-       attribute_values: Vec<String>,
-       // Pre-formatted strings for display and search
-       start_time_text: String,
-       end_time_text: String,
-       duration_text: String,
-       search_text: String,
-   }
-   ```
-
-2. **Extend `libsurfer/src/table/sources/mod.rs` to export the model.**
-
-3. **Implement TransactionTraceModel constructor with validation:**
-   - Check data availability (waves, transaction container)
-   - Validate stream scope exists
-   - Validate optional generator filter
-   - Defer attribute column discovery to lazy row building
-
-4. **Implement lazy row building (same pattern as SignalChangeListModel):**
-   - Triggered on first `schema()`, `row_count()`, or `row_id_at()` call
-   - Collect transactions based on scope (Root, Stream, Generator)
-   - For each transaction:
-     - Validate start/end times exist; skip with warning if malformed
-     - Compute composite row_id from (stream_id, generator_id, tx_index)
-     - Format times using `ctx.format_time()`
-     - Collect attribute names (for schema) and values
-     - Build search_text (capped at 1KB): type + generator + times + attribute values
-   - Discover attribute columns by collecting unique names across all transactions
-   - Sort rows by start time (base order for `row_id_at`)
-   - Build row index HashMap for O(1) lookup by TableRowId
-
-5. **Schema and TableModel trait implementation:**
-   - Fixed columns (in display order): Start, End, Duration, Type, Generator
-   - Dynamic attribute columns discovered during row building, appended after fixed columns
-   - Schema discovery: `schema()` triggers lazy row building if not already done, to discover attribute columns
-   - `row_id_at`: composite ID encoding (stream_id, generator_id, tx_index) for uniqueness across generators
-   - `sort_key`: Numeric for times/duration, Text for type/generator/attributes
-   - `on_activate`: `TableAction::FocusTransaction(tx_ref)` - focuses transaction in waveform and sets cursor to start time
-   - Error handling: skip individual malformed transactions with warning log, don't fail entire model
-
-6. **Wire up `TableModelSpec::TransactionTrace` in factory.**
-
-7. **Add default_view_config for TransactionTrace:**
-   - Title based on stream/generator name (e.g., "Transactions: AXI_Master")
-   - Default sort: ascending by start time (primary), ascending by row_id (stable secondary)
-   - Selection mode: Single
-   - Default column widths: Start/End/Duration auto-fit, Type 100px, Generator 120px
-
-8. **UI integration:**
-   - Context menu in transactions.rs: "Show transactions in table" for stream/generator (consistent with "Show in table view" for signals)
-   - Context menu for focused transaction: "Show transaction in table" (opens table filtered to generator, scrolls to transaction)
-   - `Message::OpenTransactionTable { scope: TransactionScopeRef, scroll_to: Option<TransactionRef> }` message
-   - `transaction_table` command in command_parser.rs
-   - Keyboard shortcut: `Shift+T` when transaction is focused (mirrors `Shift+V` for signal table_view)
-   - Handler for `TableAction::FocusTransaction` - calls existing `Message::FocusTransaction` and `Message::GoToTime`
-
-**Implemented Tests (12 tests):**
-
-Core model tests:
-- [x] `transaction_trace_model_spec_creates_model` - Model creation succeeds for Root scope
-- [x] `transaction_trace_model_has_fixed_columns` - Schema has Start, End, Duration, Type, Generator columns in order
-- [x] `transaction_trace_model_row_count_positive_for_root` - Root scope has transactions (requires streams to be loaded first)
-- [x] `transaction_trace_model_row_ids_are_unique` - All row IDs are unique across generators
-- [x] `transaction_trace_model_cells_return_text` - Cell method returns TableCell::Text for all columns
-- [x] `transaction_trace_model_on_activate_returns_focus_transaction` - Activating row returns FocusTransaction action
-- [x] `transaction_trace_model_search_text_non_empty` - Search text is non-empty for rows
-- [x] `transaction_trace_model_default_config_has_title` - Default config title contains "Transactions"
-
-Error handling tests:
-- [x] `transaction_trace_data_unavailable_without_transactions` - Returns DataUnavailable when no transaction data
-- [x] `transaction_trace_sort_key_numeric_for_times` - Start/End/Duration columns return numeric sort keys
-
-Snapshot tests:
-- [x] `table_transaction_trace_renders_columns` - Table with waveform view shows fixed columns
-- [x] `table_transaction_trace_for_generator` - Table filtered to specific generator
-
-**Implementation notes:**
-- FTR format uses lazy loading; test setup must add streams via `AddStreamOrGenerator` to trigger transaction loading
-- Composite row_id encoding: `(gen_id << 40) | tx_id` (simpler than original plan)
-- Uses existing `StreamScopeRef` enum instead of new `TransactionScopeRef`
-- Dynamic attribute columns discovered and appended after fixed columns
-- **Bug fix:** Generators must be sorted by ID before iterating to ensure deterministic column order (HashMap iteration is non-deterministic)
-
-**Actual Implementation Notes:**
-- `TransactionTraceModelWithData` wrapper pre-builds data during construction (works around OnceLock timing)
-- Constructor takes `&TableModelContext` and validates scope, builds data immediately
-- Uses existing `StreamScopeRef` enum (Root, Stream, Empty variants) instead of planned `TransactionScopeRef`
-- Uses existing `TransactionStreamRef` for optional generator filter
-- Row ID is composite: `(gen_id << 40) | tx_id` to ensure uniqueness across generators
-- Time formatting uses `TimeFormatter::new()` with transaction metadata timescale
-- `TableAction::FocusTransaction(tx_ref)` handler focuses transaction AND sets cursor to start time
-- `Message::OpenTransactionTable { stream, generator }` added for UI integration
-- Context menus added to transactions.rs for "Show transactions in table"
-- `transaction_table` command added to command_parser.rs
-- Search text capped at 1KB per row (MAX_SEARCH_TEXT_LEN constant)
-- FTR lazy loading: Tests must add streams via `AddStreamOrGenerator` before creating model (transactions loaded on-demand)
-- Test data: Uses `examples/my_db.ftr` with streams 1, 2, 3 and generators 4-8
-
----
-
-### Stage 12b: Stream-level "Show transactions in table" context menu
-
-**Goal:** Add "Show transactions in table" to the waveform item context menu for transaction streams (items where `gen_id` is `None`). Since tables are per-generator, selecting this option on a stream opens one table per generator in that stream.
-
-**Current state:** The context menu entry only appears for generators (`gen_id.is_some()`). Streams added to the waveform view have no table option.
-
-**Scope of changes:**
-
-1. **`libsurfer/src/menus.rs` — extend `item_context_menu`:**
-   - Add a new branch for `DisplayedItem::Stream` where `gen_id` is `None` (i.e. a stream, not a generator).
-   - On click, look up the stream's generators via `TransactionContainer::generators_in_stream()` using `StreamScopeRef::Stream(stream.transaction_stream_ref)`.
-   - Emit one `Message::OpenTransactionTable { generator }` per generator found.
-
-2. **`libsurfer/src/message.rs` — no changes needed.** The existing `OpenTransactionTable` message is per-generator; we simply emit multiple messages.
-
-3. **`libsurfer/src/lib.rs` — no handler changes needed.** Each `OpenTransactionTable` message already creates one table tile. Multiple messages produce multiple tiles.
-
-4. **`libsurfer/src/transactions.rs` — add stream-level context menu in sidebar:**
-   - In `draw_transaction_stream_variables`, the stream-level context menu currently only has "Add to waveform view".
-   - Add "Show transactions in table" that iterates the stream's generators and emits one `OpenTransactionTable` per generator.
-
-5. **Tests:**
-   - [ ] Unit test: `open_transaction_table_for_stream_creates_multiple_tiles` — send `OpenTransactionTable` for each generator in a stream, verify `table_tiles.len()` equals the number of generators.
-   - [ ] Verify the existing `open_transaction_table_creates_tile` test still passes (single generator case unchanged).
-   - [ ] Snapshot test: `table_transaction_trace_stream_opens_all_generators` — using `examples/my_db.ftr`, add `pipelined_stream` (stream 1) to the waveform view, then open transaction tables for both its generators (gen 4 `read` and gen 5 `write`) via two `AddTableTile` messages. Verify the rendered UI shows the waveform plus two table tabs, each with its own per-generator columns and data.
-
-**Implementation notes:**
-- `TransactionContainer::generators_in_stream(&StreamScopeRef::Stream(ref))` returns `Vec<TransactionStreamRef>` with `gen_id` populated for each generator — exactly what `OpenTransactionTable` needs.
-- The waveform item context menu needs access to `waves.inner.as_transactions()` to enumerate generators. This data is available via `self.user.waves`.
-- Each opened table gets its own title from `default_view_config` (e.g. "Transactions: read", "Transactions: write").
-
----
-
-### Stage 13: SearchResults model
-
-**Goal:** Implement source-level search producing a derived table.
-
-**Prerequisites:** Stages 1-11 complete.
-
-**Deliverables:**
-- Implement `SearchResultsModel` in `sources/search_results.rs`:
-  - Constructor: takes `TableSearchSpec` (source_query), searches across signals.
-  - Schema: columns for "Signal", "Time", "Value", "Context".
-  - Each row: one occurrence of search pattern in waveform data.
-  - `row_id_at(index)`: composite ID from signal + timestamp.
-  - `on_activate(row)`: return `TableAction::CursorSet` + highlight signal.
-- Wire up `TableModelSpec::SearchResults` in factory.
-- Search runs in worker thread (can be slow for large waveforms).
-- Show progress indicator for long searches.
-
-**Acceptance tests:**
-- [ ] Unit test: Search finds correct occurrences in test data.
-- [ ] Unit test: Results include signal name and context.
-- [ ] Integration test: Activating row jumps to time and highlights signal.
-- [ ] Integration test: Long search shows progress, can be cancelled.
-- [ ] UI snapshot test: SearchResults renders for sample search.
-
----
-
-### Stage 14: Custom model support
-
-**Goal:** Enable external/plugin models via Custom variant.
-
-**Prerequisites:** Stages 1-11 complete.
-
-**Deliverables:**
-- Define `CustomModelRegistry` for registering model factories by key.
-- Wire up `TableModelSpec::Custom` to look up factory by key.
-- Document API for creating custom models.
-- Example: WASM-based custom table model.
-
-**Acceptance tests:**
-- [ ] Unit test: Custom model factory registration works.
-- [ ] Unit test: Unknown custom key returns `ModelNotFound` error.
-- [ ] Integration test: Custom model renders in table tile.
-
----
-
-### Stage 15 (v2): AnalysisResults model
-
-**Goal:** Implement derived analysis metrics (deferred to v2).
-
-**Prerequisites:** Stages 1-11 complete, analysis framework designed.
-
-**Deliverables:**
-- Define `AnalysisKind` enum: `TopSpikes`, `LongestIdle`, `GlitchDetection`, etc.
-- Define `AnalysisParams` for configuring each analysis type.
-- Implement analysis workers that produce table rows.
-- Wire up `TableModelSpec::AnalysisResults` in factory.
-
-**Acceptance tests:**
-- [ ] To be defined when v2 analysis framework is designed.
-
----
-
-### Implementation order summary
-
-```
-Completed:
-  Stages 1-12: Core infrastructure + SignalChangeList + TransactionTrace models
-     ↓
-Next up (can be parallelized):
-  Stage 13 (SearchResults)
-  Stage 14 (Custom)
-     ↓
-v2 (deferred):
-  Stage 15 (AnalysisResults)
-```
-
----
-
-## Changelog
-
-- **Stages 1-11 complete:** Core table infrastructure with 200+ tests
-  - Types, traits, cache system, tile integration
-  - Virtual model for testing
-  - Full sorting, filtering, selection, keyboard navigation
-  - Scroll behavior, column resize/visibility
-  - SignalChangeList model with UI integration
-- **Stage 12 complete:** TransactionTrace model implemented
-  - Fixed columns: Start, End, Duration, Type, Generator
-  - Dynamic attribute columns discovered from transaction data
-  - Composite row_id encoding: `(gen_id << 40) | tx_id` for uniqueness across generators
-  - `TransactionTraceModelWithData` wrapper for pre-built data
-  - Context menus in transactions.rs for "Show transactions in table"
-  - `transaction_table` command in command_parser.rs
-  - `Message::OpenTransactionTable` for UI integration
-  - `TableAction::FocusTransaction` handler focuses transaction and sets cursor
-  - 10 unit tests covering core functionality
-  - Note: FTR lazy loading requires streams to be added before model access
-- **Stages 13-15:** Pending implementation
+## Definition of Done for Next Architecture Milestone
+- No steady-state model recreation during table interaction paths.
+- Explicit model key + context revision integrated with stale-safe async apply.
+- Cache/model invalidation rules are documented and covered by tests.
+- SearchResults stage is implemented with automated tests.
+- Existing table visual snapshots remain stable unless intentionally updated.
