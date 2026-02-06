@@ -2761,31 +2761,35 @@ impl SystemState {
                 tile_id,
                 include_header,
             } => {
-                let runtime = self.table_runtime.get(&tile_id)?;
-                let model = runtime.model.clone()?;
+                let Some(runtime) = self.table_runtime.get(&tile_id) else {
+                    return Some(());
+                };
+                let Some(model) = runtime.model.clone() else {
+                    return Some(());
+                };
+                let Some(cache_entry) = &runtime.cache else {
+                    return Some(());
+                };
+                let Some(cache) = cache_entry.get() else {
+                    return Some(());
+                };
+                let Some(tile_state) = self.user.table_tiles.get(&tile_id) else {
+                    return Some(());
+                };
 
-                if runtime.selection.is_empty() {
+                let schema = model.schema();
+                let tsv = table::build_table_copy_payload(
+                    model.as_ref(),
+                    &schema,
+                    &cache.row_ids,
+                    &runtime.selection,
+                    &tile_state.config.columns,
+                    include_header,
+                );
+
+                if tsv.is_empty() {
                     return Some(());
                 }
-
-                // Get visible columns from schema (all columns for now)
-                let schema = model.schema();
-                let visible_columns: Vec<_> =
-                    schema.columns.iter().map(|c| c.key.clone()).collect();
-
-                // Convert BTreeSet to Vec, preserving order
-                let selected_rows: Vec<_> = runtime.selection.rows.iter().copied().collect();
-
-                let tsv = if include_header {
-                    table::format_rows_as_tsv_with_header(
-                        model.as_ref(),
-                        &schema,
-                        &selected_rows,
-                        &visible_columns,
-                    )
-                } else {
-                    table::format_rows_as_tsv(model.as_ref(), &selected_rows, &visible_columns)
-                };
 
                 // Copy to clipboard if available
                 if let Some(ctx) = &self.context {

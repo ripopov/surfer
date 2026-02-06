@@ -812,3 +812,52 @@ pub fn format_rows_as_tsv_with_header(
 
     output
 }
+
+/// Builds clipboard payload for table copy operations.
+///
+/// Row export order follows `row_order` (display order from cache), filtered by `selection`.
+/// Column export order follows `columns_config` visibility/order. If `columns_config` is empty,
+/// all schema columns are exported in schema order.
+#[must_use]
+pub fn build_table_copy_payload(
+    model: &dyn super::model::TableModel,
+    schema: &super::model::TableSchema,
+    row_order: &[TableRowId],
+    selection: &super::model::TableSelection,
+    columns_config: &[super::model::TableColumnConfig],
+    include_header: bool,
+) -> String {
+    if selection.is_empty() {
+        return String::new();
+    }
+
+    let export_columns: Vec<super::model::TableColumnKey> = if columns_config.is_empty() {
+        schema
+            .columns
+            .iter()
+            .map(|column| column.key.clone())
+            .collect()
+    } else {
+        super::model::visible_columns(columns_config)
+    };
+
+    if export_columns.is_empty() {
+        return String::new();
+    }
+
+    let selected_rows: Vec<TableRowId> = row_order
+        .iter()
+        .copied()
+        .filter(|row_id| selection.rows.contains(row_id))
+        .collect();
+
+    if selected_rows.is_empty() {
+        return String::new();
+    }
+
+    if include_header {
+        format_rows_as_tsv_with_header(model, schema, &selected_rows, &export_columns)
+    } else {
+        format_rows_as_tsv(model, &selected_rows, &export_columns)
+    }
+}

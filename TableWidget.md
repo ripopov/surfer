@@ -226,7 +226,7 @@ sequenceDiagram
 - Enter activates anchor row.
 - Escape clears selection.
 - Ctrl/Cmd+A selects all visible rows in Multi mode.
-- Ctrl/Cmd+C copies selection as TSV; Shift modifier includes header row.
+- Ctrl/Cmd+C copies selection as TSV using current visible column order and cache display row order; Shift modifier includes header row.
 
 ### Activation Actions
 Model activation maps to:
@@ -395,7 +395,6 @@ The `TableModel` trait (`Send + Sync`) defines the contract for all model implem
 - Source-level search (`source_query`) is designed but not implemented yet.
 - Sticky header option is stored but currently non-functional as a toggle.
 - Column config initialization from schema defaults is incomplete for some runtime visibility workflows.
-- Copy-selection path currently derives columns from schema directly, not from current visibility config.
 
 ## Testing Strategy
 ### Principle

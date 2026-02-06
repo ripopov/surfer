@@ -208,6 +208,7 @@ pub fn draw_table_tile(
                                 ui,
                                 msgs,
                                 tile_id,
+                                table_area_id,
                                 model,
                                 cache,
                                 &tile_state.config.sort,
@@ -308,8 +309,12 @@ fn handle_keyboard_navigation(
         return;
     }
 
+    let copy_event = events
+        .iter()
+        .any(|event| matches!(event, egui::Event::Copy));
+
     // Handle Ctrl/Cmd+C - copy selection
-    if key_c && modifiers.command {
+    if (key_c && modifiers.command) || copy_event {
         msgs.push(Message::TableCopySelection {
             tile_id,
             include_header: modifiers.shift,
@@ -443,6 +448,7 @@ fn render_table(
     ui: &mut egui::Ui,
     msgs: &mut Vec<Message>,
     tile_id: TableTileId,
+    table_area_id: egui::Id,
     model: Arc<dyn TableModel>,
     cache: &TableCache,
     current_sort: &[TableSortSpec],
@@ -579,6 +585,9 @@ fn render_table(
                         );
 
                         if response.clicked() {
+                            response
+                                .ctx
+                                .memory_mut(|mem| mem.request_focus(table_area_id));
                             // Check for Shift modifier
                             let modifiers = ui.input(|i| i.modifiers);
                             let computed_sort = if modifiers.shift {
@@ -680,6 +689,9 @@ fn render_table(
                         if selection_mode != TableSelectionMode::None {
                             let response = row.response();
                             if response.clicked() {
+                                response
+                                    .ctx
+                                    .memory_mut(|mem| mem.request_focus(table_area_id));
                                 let modifiers = response.ctx.input(|i| i.modifiers);
                                 let update = match selection_mode {
                                     TableSelectionMode::None => None,

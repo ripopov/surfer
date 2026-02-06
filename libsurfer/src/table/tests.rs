@@ -2304,9 +2304,9 @@ fn selection_shift_click_sorted_order() {
 // ========================
 
 use super::{
-    TypeSearchState, find_type_search_match, format_rows_as_tsv, format_rows_as_tsv_with_header,
-    navigate_down, navigate_end, navigate_extend_selection, navigate_home, navigate_page_down,
-    navigate_page_up, navigate_up,
+    TypeSearchState, build_table_copy_payload, find_type_search_match, format_rows_as_tsv,
+    format_rows_as_tsv_with_header, navigate_down, navigate_end, navigate_extend_selection,
+    navigate_home, navigate_page_down, navigate_page_up, navigate_up,
 };
 
 #[test]
@@ -2950,6 +2950,165 @@ fn type_search_state_is_timed_out() {
 // Stage 9 Tests - Copy to Clipboard (TSV Format)
 // ========================
 
+#[derive(Clone)]
+struct ClipboardPayloadTestModel {
+    rows: Vec<TableRowId>,
+}
+
+impl ClipboardPayloadTestModel {
+    fn new(rows: Vec<TableRowId>) -> Self {
+        Self { rows }
+    }
+
+    fn cell_text(&self, row: TableRowId, col: usize) -> String {
+        match col {
+            0 => format!("A{}", row.0),
+            1 if row == TableRowId(2) => "B2\tX\nY".to_string(),
+            1 => format!("B{}", row.0),
+            2 => format!("C{}", row.0),
+            _ => String::new(),
+        }
+    }
+}
+
+impl TableModel for ClipboardPayloadTestModel {
+    fn schema(&self) -> TableSchema {
+        TableSchema {
+            columns: vec![
+                TableColumn {
+                    key: TableColumnKey::Str("a".to_string()),
+                    label: "A".to_string(),
+                    default_width: None,
+                    default_visible: true,
+                    default_resizable: true,
+                },
+                TableColumn {
+                    key: TableColumnKey::Str("b".to_string()),
+                    label: "B".to_string(),
+                    default_width: None,
+                    default_visible: true,
+                    default_resizable: true,
+                },
+                TableColumn {
+                    key: TableColumnKey::Str("c".to_string()),
+                    label: "C".to_string(),
+                    default_width: None,
+                    default_visible: true,
+                    default_resizable: true,
+                },
+            ],
+        }
+    }
+
+    fn row_count(&self) -> usize {
+        self.rows.len()
+    }
+
+    fn row_id_at(&self, index: usize) -> Option<TableRowId> {
+        self.rows.get(index).copied()
+    }
+
+    fn cell(&self, row: TableRowId, col: usize) -> TableCell {
+        TableCell::Text(self.cell_text(row, col))
+    }
+
+    fn sort_key(&self, row: TableRowId, col: usize) -> TableSortKey {
+        TableSortKey::Numeric((row.0 * 10 + col as u64) as f64)
+    }
+
+    fn search_text(&self, row: TableRowId) -> String {
+        format!("row{}", row.0)
+    }
+
+    fn on_activate(&self, _row: TableRowId) -> TableAction {
+        TableAction::None
+    }
+}
+
+fn copy_column(key: &str, visible: bool) -> TableColumnConfig {
+    TableColumnConfig {
+        key: TableColumnKey::Str(key.to_string()),
+        width: None,
+        visible,
+        resizable: true,
+    }
+}
+
+#[test]
+fn build_table_copy_payload_uses_visible_columns_and_display_row_order() {
+    let model = ClipboardPayloadTestModel::new(vec![TableRowId(1), TableRowId(2), TableRowId(3)]);
+    let schema = model.schema();
+    let row_order = vec![TableRowId(3), TableRowId(1), TableRowId(2)];
+    let mut selection = TableSelection::new();
+    selection.rows.insert(TableRowId(2));
+    selection.rows.insert(TableRowId(3));
+
+    let columns = vec![
+        copy_column("c", true),
+        copy_column("a", true),
+        copy_column("b", false),
+    ];
+
+    let tsv = build_table_copy_payload(&model, &schema, &row_order, &selection, &columns, false);
+    assert_eq!(tsv, "C3\tA3\nC2\tA2");
+}
+
+#[test]
+fn build_table_copy_payload_includes_header_only_when_requested() {
+    let model = ClipboardPayloadTestModel::new(vec![TableRowId(1), TableRowId(2), TableRowId(3)]);
+    let schema = model.schema();
+    let row_order = vec![TableRowId(3), TableRowId(2)];
+    let mut selection = TableSelection::new();
+    selection.rows.insert(TableRowId(2));
+    selection.rows.insert(TableRowId(3));
+    let columns = vec![copy_column("c", true), copy_column("a", true)];
+
+    let no_header =
+        build_table_copy_payload(&model, &schema, &row_order, &selection, &columns, false);
+    assert_eq!(no_header, "C3\tA3\nC2\tA2");
+
+    let with_header =
+        build_table_copy_payload(&model, &schema, &row_order, &selection, &columns, true);
+    assert_eq!(with_header, "C\tA\nC3\tA3\nC2\tA2");
+}
+
+#[test]
+fn build_table_copy_payload_falls_back_to_schema_when_config_is_empty() {
+    let model = ClipboardPayloadTestModel::new(vec![TableRowId(1), TableRowId(2), TableRowId(3)]);
+    let schema = model.schema();
+    let row_order = vec![TableRowId(1), TableRowId(2)];
+    let mut selection = TableSelection::new();
+    selection.rows.insert(TableRowId(1));
+
+    let tsv = build_table_copy_payload(&model, &schema, &row_order, &selection, &[], false);
+    assert_eq!(tsv, "A1\tB1\tC1");
+}
+
+#[test]
+fn build_table_copy_payload_sanitizes_tabs_and_newlines() {
+    let model = ClipboardPayloadTestModel::new(vec![TableRowId(1), TableRowId(2), TableRowId(3)]);
+    let schema = model.schema();
+    let row_order = vec![TableRowId(2)];
+    let mut selection = TableSelection::new();
+    selection.rows.insert(TableRowId(2));
+    let columns = vec![copy_column("b", true)];
+
+    let tsv = build_table_copy_payload(&model, &schema, &row_order, &selection, &columns, false);
+    assert_eq!(tsv, "B2 X Y");
+}
+
+#[test]
+fn build_table_copy_payload_empty_selection_returns_empty_string() {
+    let model = ClipboardPayloadTestModel::new(vec![TableRowId(1), TableRowId(2), TableRowId(3)]);
+    let schema = model.schema();
+    let row_order = vec![TableRowId(1), TableRowId(2)];
+    let selection = TableSelection::new();
+    let columns = vec![copy_column("a", true)];
+
+    let tsv = build_table_copy_payload(&model, &schema, &row_order, &selection, &columns, false);
+    assert!(tsv.is_empty());
+}
+
 #[test]
 fn format_rows_as_tsv_single_row() {
     let model = VirtualTableModel::new(5, 3, 42);
@@ -3347,132 +3506,213 @@ fn table_escape_clears_selection() {
 
 #[test]
 fn table_copy_selection_single_row() {
-    let mut state = SystemState::new_default_config().expect("state");
-    let spec = TableModelSpec::Virtual {
-        rows: 5,
-        columns: 3,
-        seed: 42,
-    };
-    state.update(Message::AddTableTile { spec });
+    let columns = vec![
+        copy_column("c", true),
+        copy_column("a", true),
+        copy_column("b", false),
+    ];
+    let (mut state, tile_id, ctx) = setup_table_copy_message_state(
+        columns,
+        vec![TableRowId(3), TableRowId(1), TableRowId(2)],
+        &[TableRowId(3)],
+    );
 
-    let tile_id = *state.user.table_tiles.keys().next().expect("tile exists");
-
-    // Initialize runtime
-    state
-        .table_runtime
-        .entry(tile_id)
-        .or_insert_with(TableRuntimeState::default);
-
-    // Select single row
-    let mut sel = TableSelection::new();
-    sel.rows.insert(TableRowId(2));
-    state.update(Message::SetTableSelection {
-        tile_id,
-        selection: sel,
-    });
-
-    // Copy to clipboard (no context available in test, so this is a no-op)
     state.update(Message::TableCopySelection {
         tile_id,
         include_header: false,
     });
 
-    // Verify: clipboard would contain TSV format
-    // (Actual clipboard interaction is platform-specific)
+    assert_eq!(copied_text_commands(&ctx), vec!["C3\tA3".to_string()]);
 }
 
 #[test]
 fn table_copy_selection_multiple_rows() {
-    let mut state = SystemState::new_default_config().expect("state");
-    let spec = TableModelSpec::Virtual {
-        rows: 10,
-        columns: 3,
-        seed: 42,
-    };
-    state.update(Message::AddTableTile { spec });
-
-    let tile_id = *state.user.table_tiles.keys().next().expect("tile exists");
-
-    // Initialize runtime
-    state
-        .table_runtime
-        .entry(tile_id)
-        .or_insert_with(TableRuntimeState::default);
-
-    // Select multiple rows
-    let mut sel = TableSelection::new();
-    sel.rows.insert(TableRowId(1));
-    sel.rows.insert(TableRowId(3));
-    sel.rows.insert(TableRowId(7));
-    state.update(Message::SetTableSelection {
-        tile_id,
-        selection: sel,
-    });
+    let columns = vec![
+        copy_column("c", true),
+        copy_column("a", true),
+        copy_column("b", false),
+    ];
+    let (mut state, tile_id, ctx) = setup_table_copy_message_state(
+        columns,
+        vec![TableRowId(3), TableRowId(1), TableRowId(2)],
+        &[TableRowId(2), TableRowId(3)],
+    );
 
     state.update(Message::TableCopySelection {
         tile_id,
         include_header: false,
     });
-    // Clipboard would have 3 lines
+
+    assert_eq!(
+        copied_text_commands(&ctx),
+        vec!["C3\tA3\nC2\tA2".to_string()]
+    );
 }
 
 #[test]
 fn table_copy_selection_with_header() {
-    let mut state = SystemState::new_default_config().expect("state");
-    let spec = TableModelSpec::Virtual {
-        rows: 5,
-        columns: 3,
-        seed: 42,
-    };
-    state.update(Message::AddTableTile { spec });
-
-    let tile_id = *state.user.table_tiles.keys().next().expect("tile exists");
-
-    // Initialize runtime
-    state
-        .table_runtime
-        .entry(tile_id)
-        .or_insert_with(TableRuntimeState::default);
-
-    let mut sel = TableSelection::new();
-    sel.rows.insert(TableRowId(0));
-    state.update(Message::SetTableSelection {
-        tile_id,
-        selection: sel,
-    });
+    let columns = vec![
+        copy_column("c", true),
+        copy_column("a", true),
+        copy_column("b", false),
+    ];
+    let (mut state, tile_id, ctx) = setup_table_copy_message_state(
+        columns,
+        vec![TableRowId(3), TableRowId(1), TableRowId(2)],
+        &[TableRowId(2), TableRowId(3)],
+    );
 
     state.update(Message::TableCopySelection {
         tile_id,
         include_header: true,
     });
-    // Clipboard would have header row + 1 data row
+
+    assert_eq!(
+        copied_text_commands(&ctx),
+        vec!["C\tA\nC3\tA3\nC2\tA2".to_string()]
+    );
 }
 
 #[test]
 fn table_copy_empty_selection_no_op() {
-    let mut state = SystemState::new_default_config().expect("state");
-    let spec = TableModelSpec::Virtual {
-        rows: 5,
-        columns: 3,
-        seed: 42,
-    };
-    state.update(Message::AddTableTile { spec });
+    let columns = vec![copy_column("a", true)];
+    let (mut state, tile_id, ctx) = setup_table_copy_message_state(
+        columns,
+        vec![TableRowId(1), TableRowId(2), TableRowId(3)],
+        &[],
+    );
 
-    let tile_id = *state.user.table_tiles.keys().next().expect("tile exists");
-
-    // Initialize runtime
-    state
-        .table_runtime
-        .entry(tile_id)
-        .or_insert_with(TableRuntimeState::default);
-
-    // No selection
     state.update(Message::TableCopySelection {
         tile_id,
         include_header: false,
     });
 
-    // Should not crash, clipboard unchanged
+    assert!(copied_text_commands(&ctx).is_empty());
+}
+
+#[test]
+fn table_copy_selection_no_op_when_model_or_cache_missing() {
+    let mut state = SystemState::new_default_config().expect("state");
+    let tile_id = TableTileId(900);
+    let mut config = TableViewConfig::default();
+    config.columns = vec![copy_column("a", true)];
+    state.user.table_tiles.insert(
+        tile_id,
+        TableTileState {
+            spec: TableModelSpec::Virtual {
+                rows: 3,
+                columns: 3,
+                seed: 0,
+            },
+            config,
+        },
+    );
+
+    let mut runtime = TableRuntimeState::default();
+    runtime.selection.rows.insert(TableRowId(1));
+    runtime.selection.anchor = Some(TableRowId(1));
+    state.table_runtime.insert(tile_id, runtime);
+
+    let ctx = Arc::new(egui::Context::default());
+    state.context = Some(ctx.clone());
+
+    // Missing model
+    state.update(Message::TableCopySelection {
+        tile_id,
+        include_header: false,
+    });
+    assert!(copied_text_commands(&ctx).is_empty());
+
+    let model: Arc<dyn TableModel> = Arc::new(ClipboardPayloadTestModel::new(vec![
+        TableRowId(1),
+        TableRowId(2),
+        TableRowId(3),
+    ]));
+    state.table_runtime.get_mut(&tile_id).unwrap().model = Some(model);
+
+    // Missing cache
+    state.update(Message::TableCopySelection {
+        tile_id,
+        include_header: false,
+    });
+    assert!(copied_text_commands(&ctx).is_empty());
+}
+
+fn copied_text_commands(ctx: &egui::Context) -> Vec<String> {
+    ctx.output(|output| {
+        output
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    })
+}
+
+fn setup_table_copy_message_state(
+    columns: Vec<TableColumnConfig>,
+    row_ids: Vec<TableRowId>,
+    selected_rows: &[TableRowId],
+) -> (SystemState, TableTileId, Arc<egui::Context>) {
+    let mut state = SystemState::new_default_config().expect("state");
+    let tile_id = TableTileId(901);
+
+    let mut config = TableViewConfig::default();
+    config.columns = columns;
+    state.user.table_tiles.insert(
+        tile_id,
+        TableTileState {
+            spec: TableModelSpec::Virtual {
+                rows: 3,
+                columns: 3,
+                seed: 0,
+            },
+            config,
+        },
+    );
+
+    let model: Arc<dyn TableModel> = Arc::new(ClipboardPayloadTestModel::new(vec![
+        TableRowId(1),
+        TableRowId(2),
+        TableRowId(3),
+    ]));
+    let cache_key = TableCacheKey {
+        model_key: TableModelKey(tile_id.0),
+        display_filter: TableSearchSpec::default(),
+        view_sort: vec![],
+        generation: 0,
+    };
+    let cache = TableCache {
+        row_index: build_row_index(&row_ids),
+        row_ids,
+        search_texts: None,
+    };
+    let cache_entry = Arc::new(TableCacheEntry::new(cache_key.clone(), 0, 0));
+    cache_entry.set(cache);
+
+    let mut selection = TableSelection::new();
+    for &row_id in selected_rows {
+        selection.rows.insert(row_id);
+    }
+    selection.anchor = selected_rows.first().copied();
+
+    state.table_runtime.insert(
+        tile_id,
+        TableRuntimeState {
+            cache_key: Some(cache_key),
+            cache: Some(cache_entry),
+            selection,
+            model: Some(model),
+            ..TableRuntimeState::default()
+        },
+    );
+
+    let ctx = Arc::new(egui::Context::default());
+    state.context = Some(ctx.clone());
+
+    (state, tile_id, ctx)
 }
 
 #[test]

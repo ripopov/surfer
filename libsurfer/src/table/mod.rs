@@ -6,8 +6,8 @@ pub mod view;
 pub use cache::{
     FILTER_DEBOUNCE_MS, FilterDraft, PendingScrollOp, TableCache, TableCacheEntry, TableCacheError,
     TableCacheKey, TableRuntimeState, TableScrollState, TypeSearchState, build_table_cache,
-    find_type_search_match_in_cache, format_rows_as_tsv, format_rows_as_tsv_with_header,
-    fuzzy_match,
+    build_table_copy_payload, find_type_search_match_in_cache, format_rows_as_tsv,
+    format_rows_as_tsv_with_header, fuzzy_match,
 };
 pub use model::{
     AnalysisKind, AnalysisParams, ColumnResizeResult, MIN_COLUMN_WIDTH, MaterializePurpose,
