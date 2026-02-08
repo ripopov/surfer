@@ -406,7 +406,6 @@ impl SystemState {
                         .default_width(40.)
                         .width_range(40.0..=max_width)
                         .show(ctx, |ui| {
-                            self.handle_pointer_in_ui(ui, &mut msgs);
                             let response = ScrollArea::both()
                                 .vertical_scroll_offset(scroll_offset)
                                 .show(ui, |ui| {
@@ -427,7 +426,6 @@ impl SystemState {
                     .width_range(100.0..=max_width)
                     .show(ctx, |ui| {
                         ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-                        self.handle_pointer_in_ui(ui, &mut msgs);
                         if self.show_default_timeline() {
                             ui.label(RichText::new("Time").italics());
                         }
@@ -461,7 +459,6 @@ impl SystemState {
                     .width_range(10.0..=max_width)
                     .show(ctx, |ui| {
                         ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-                        self.handle_pointer_in_ui(ui, &mut msgs);
                         let response = ScrollArea::both()
                             .auto_shrink([false; 2])
                             .vertical_scroll_offset(scroll_offset)
@@ -593,6 +590,21 @@ impl SystemState {
         }
     }
 
+    /// Add bottom padding so the last item isn’t clipped or covered by the scrollbar.
+    fn add_padding_for_last_item(
+        ui: &mut Ui,
+        last_info: Option<&ItemDrawingInfo>,
+        line_height: f32,
+    ) {
+        if let Some(info) = last_info {
+            let target_bottom = info.bottom() + line_height;
+            let next_y = ui.cursor().top();
+            if next_y < target_bottom {
+                ui.add_space(target_bottom - next_y);
+            }
+        }
+    }
+
     fn draw_item_focus_list(&self, ui: &mut Ui) {
         let Some(waves) = self.user.waves.as_ref() else {
             return;
@@ -604,8 +616,14 @@ impl SystemState {
                 if self.show_default_timeline() {
                     ui.add_space(ui.text_style_height(&TextStyle::Body) + 2.0);
                 }
-                for (vidx, _) in waves.items_tree.iter_visible().enumerate() {
-                    let vidx = VisibleItemIndex(vidx);
+                // drawing_infos accounts for height_scaling_factor
+                for drawing_info in waves.drawing_infos.iter() {
+                    let next_y = ui.cursor().top();
+                    // Align with the corresponding row in other panels
+                    if next_y < drawing_info.top() {
+                        ui.add_space(drawing_info.top() - next_y);
+                    }
+                    let vidx = drawing_info.vidx();
                     ui.scope(|ui| {
                         ui.style_mut().visuals.selection.bg_fill =
                             self.user.config.theme.accent_warn.background;
@@ -614,6 +632,11 @@ impl SystemState {
                         let _ = ui.selectable_label(true, get_alpha_focus_id(vidx, waves));
                     });
                 }
+                Self::add_padding_for_last_item(
+                    ui,
+                    waves.drawing_infos.last(),
+                    self.user.config.layout.waveforms_line_height,
+                );
             },
         );
     }
@@ -791,6 +814,11 @@ impl SystemState {
                     },
                 );
             }
+            Self::add_padding_for_last_item(
+                ui,
+                item_offsets.last(),
+                self.user.config.layout.waveforms_line_height,
+            );
         });
 
         self.user.waves.as_mut().unwrap().drawing_infos = item_offsets;
@@ -1510,6 +1538,11 @@ impl SystemState {
                     }
                 }
             }
+            Self::add_padding_for_last_item(
+                ui,
+                waves.drawing_infos.last(),
+                self.user.config.layout.waveforms_line_height,
+            );
         });
     }
 

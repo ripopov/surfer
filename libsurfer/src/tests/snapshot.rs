@@ -33,6 +33,11 @@ use crate::{
     wave_source::{LoadOptions, STATE_FILE_EXTENSION},
 };
 
+/// Default snapshot size
+const SNAPSHOT_WIDTH: f32 = 1280.0;
+const SNAPSHOT_HEIGHT: f32 = 720.0;
+const SNAPSHOT_SIZE: Vec2 = Vec2::new(SNAPSHOT_WIDTH, SNAPSHOT_HEIGHT);
+
 fn print_image(img: &DynamicImage) {
     if std::io::stdout().is_terminal() {
         let mut bytes = vec![];
@@ -190,7 +195,7 @@ pub(crate) fn render_and_compare_inner(
 }
 
 pub(crate) fn render_and_compare(filename: &Path, state: impl Fn() -> SystemState) {
-    render_and_compare_inner(filename, state, Vec2::new(1280., 720.), false, 0.99999);
+    render_and_compare_inner(filename, state, SNAPSHOT_SIZE, false, 0.99999);
 }
 
 macro_rules! snapshot_ui {
@@ -264,8 +269,22 @@ macro_rules! snapshot_ui_with_file_and_msgs {
             // make sure all the signals added by the proceeding messages are properly loaded
             wait_for_waves_fully_loaded(&mut state, 10);
 
-            for msg in $late_msgs {
-                state.update(msg);
+            let late_msgs: Vec<Message> = $late_msgs.into();
+            if !late_msgs.is_empty() {
+                // Do a preliminary draw to populate drawing_infos before processing late_msgs
+                let mut surface = create_surface((SNAPSHOT_WIDTH as i32, SNAPSHOT_HEIGHT as i32));
+                draw_onto_surface(
+                    &mut surface,
+                    |ctx| {
+                        setup_custom_font(ctx);
+                        state.draw(ctx, Some(SNAPSHOT_SIZE));
+                    },
+                    None,
+                );
+
+                for msg in late_msgs {
+                    state.update(msg);
+                }
             }
 
             state
@@ -588,8 +607,7 @@ snapshot_ui! {resizing_the_canvas_redraws, || {
     wait_for_waves_fully_loaded(&mut state, 10);
 
     // Render the UI once with the sidebar shown
-    let size = Vec2::new(1280., 720.);
-    let size_i = (size.x as i32, size.y as i32);
+    let size_i = (SNAPSHOT_WIDTH as i32, SNAPSHOT_HEIGHT as i32);
     let mut surface = create_surface(size_i);
     surface.canvas().clear(egui_skia_renderer::Color::BLACK);
 
@@ -599,7 +617,7 @@ snapshot_ui! {resizing_the_canvas_redraws, || {
             ctx.memory_mut(|mem| mem.options.tessellation_options.feathering = false);
             ctx.set_visuals(state.get_visuals());
 
-            state.draw(ctx, Some(size));
+            state.draw(ctx, Some(SNAPSHOT_SIZE));
         },
         None,
     );
@@ -639,11 +657,14 @@ snapshot_ui_with_file_and_msgs! {add_scope_as_group_recursively, "examples/picor
     Message::AddScopeAsGroup(ScopeRef::from_strs(&["testbench"]), true),
 ]}
 
-snapshot_ui_with_file_and_msgs! {vertical_scrolling_works, "examples/picorv32.vcd", [
-    Message::AddScope(ScopeRef::from_strs(&["testbench", "top", "mem"]), false),
-    Message::VerticalScroll(crate::MoveDir::Down, 5),
-    Message::VerticalScroll(crate::MoveDir::Up, 2),
-]}
+snapshot_ui_with_file_and_msgs! {vertical_scrolling_works, "examples/picorv32.vcd",
+    (|_state| {}),
+    [Message::AddScope(ScopeRef::from_strs(&["testbench", "top", "mem"]), false)],
+    [
+        Message::VerticalScroll(MoveDir::Down, 3),
+        Message::VerticalScroll(MoveDir::Up, 1),
+    ]
+}
 
 snapshot_ui_with_file_and_msgs! {vcd_with_empty_scope_loads, "examples/verilator_empty_scope.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["top_test"]), false),
@@ -907,6 +928,7 @@ snapshot_ui_with_file_and_msgs! {command_prompt_prev_command, "examples/counter.
 
 snapshot_ui_with_file_and_msgs! {command_prompt_focus, "examples/counter.vcd", [
     Message::AddScope(ScopeRef::from_strs(&["tb"]), false),
+    Message::ItemHeightScalingFactorChange(MessageTarget::Explicit(VisibleItemIndex(2)), 4.0),
     Message::ShowCommandPrompt("item_focus ".to_string(), None)
 ]}
 

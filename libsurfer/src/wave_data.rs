@@ -818,17 +818,21 @@ impl WaveData {
 
     /// Find the top-most of the currently visible items.
     #[must_use]
+    /// Returns the index of the item currently at the top of the visible area.
     pub fn get_top_item(&self) -> usize {
-        let default = if self.drawing_infos.is_empty() {
-            0
-        } else {
-            self.drawing_infos.len() - 1
-        };
+        if self.drawing_infos.is_empty() {
+            return 0;
+        }
+        // drawing_infos contains content-space positions from the last draw.
+        // The visible top is at: first_element_y + scroll_offset
+        let first_element_y = self.drawing_infos.first().unwrap().top();
+        let visible_top = first_element_y + self.scroll_offset;
+
         self.drawing_infos
             .iter()
             .enumerate()
-            .find(|(_, di)| di.top() >= self.top_item_draw_offset - 1.) // Subtract a bit of margin to avoid floating-point errors
-            .map_or(default, |(idx, _)| idx)
+            .find(|(_, di)| di.top() >= visible_top - 1.) // 1px margin for floating-point errors
+            .map_or(self.drawing_infos.len() - 1, |(idx, _)| idx)
     }
 
     /// Find the item at a given y-location.
@@ -855,17 +859,25 @@ impl WaveData {
         if self.drawing_infos.is_empty() {
             return;
         }
-        // Set scroll_offset to different between requested element and first element
         let first_element_y = self.drawing_infos.first().unwrap().top();
+        let last_element_bottom = self.drawing_infos.last().unwrap().bottom();
+        let content_height = last_element_bottom - first_element_y;
+
+        // Don't scroll if all content fits in viewport
+        let max_scroll = content_height - self.total_height;
+        if max_scroll <= 0.0 {
+            return;
+        }
+
         let item_y = self
             .drawing_infos
             .get(idx)
             .unwrap_or_else(|| self.drawing_infos.last().unwrap())
             .top();
-        // only scroll if new location is outside of visible area
-        if self.scroll_offset > self.total_height {
-            self.scroll_offset = item_y - first_element_y;
-        }
+        let target_scroll = item_y - first_element_y;
+
+        // Clamp scroll to valid range: [0, max_scroll]
+        self.scroll_offset = target_scroll.clamp(0.0, max_scroll);
     }
 
     /// Set cursor at next (or previous, if `next` is false) transition of `variable`. If `skip_zero` is true,
