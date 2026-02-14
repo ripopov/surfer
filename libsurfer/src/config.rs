@@ -1180,7 +1180,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+mod hex_color_tests {
     use super::*;
 
     #[test]
