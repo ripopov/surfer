@@ -121,6 +121,15 @@ pub trait Translator<VarId, ScopeId, Message>: Send + Sync {
         parse_numeric_string(&value_str, &self.name())
     }
 
+    /// Return the intrinsic finite numeric domain for this translator and variable.
+    ///
+    /// This is used by analog `Type Limits (No scaling)` mode.
+    /// Return `None` when this translator does not expose a well-defined numeric domain.
+    fn numeric_domain(&self, variable: &VariableMeta<VarId, ScopeId>) -> Option<(f64, f64)> {
+        let _ = variable;
+        None
+    }
+
     /// By default translators are stateless, but if they need to reload, they can
     /// do by defining this method.
     /// Long running translators should run the reloading in the background using `perform_work`
@@ -169,6 +178,14 @@ pub trait BasicTranslator<VarId, ScopeId>: Send + Sync {
         }
 
         parse_numeric_string(&val, &self.name())
+    }
+
+    /// Return the intrinsic finite numeric domain for this translator and bit width.
+    ///
+    /// This is used by analog `Type Limits (No scaling)` mode.
+    /// Return `None` when this translator does not expose a well-defined numeric domain.
+    fn basic_numeric_domain(&self, _num_bits: u32) -> Option<(f64, f64)> {
+        None
     }
 
     /// Return [`TranslationPreference`] based on if the translator can handle this variable.

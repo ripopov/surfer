@@ -2,19 +2,22 @@
 
 use crate::analog_signal_cache::{AnalogSignalCache, CacheQueryResult, is_nan_highimp};
 use crate::displayed_item::{
-    AnalogSettings, DisplayedFieldRef, DisplayedItemRef, DisplayedVariable,
+    AnalogSettings, AnalogYAxisScale, DisplayedFieldRef, DisplayedItemRef, DisplayedVariable,
 };
 use crate::drawing_canvas::{AnalogDrawingCommands, DrawingCommands, VariableDrawCommands};
 use crate::message::Message;
+use crate::message::MessageTarget;
 use crate::translation::TranslatorList;
 use crate::view::DrawingContext;
 use crate::viewport::Viewport;
+use crate::wave_container::VariableRefExt;
 use crate::wave_data::WaveData;
 use ecolor::Color32;
 use emath::{Align2, Pos2, Rect, Vec2};
 use epaint::{CornerRadius, PathShape, Stroke};
 use num::{BigInt, ToPrimitive};
 use std::collections::HashMap;
+use tracing::warn;
 
 pub enum AnalogDrawingCommand {
     /// Constant value from `start_px` to `end_px`.
@@ -42,10 +45,34 @@ pub(crate) fn variable_analog_draw_commands(
     viewport_idx: usize,
 ) -> Option<VariableDrawCommands> {
     let render_mode = displayed_variable.analog.as_ref()?;
+    let mut effective_settings = render_mode.settings;
+    let mut local_msgs = Vec::new();
 
     let wave_container = waves.inner.as_waves()?;
     let displayed_field_ref: DisplayedFieldRef = display_id.into();
+    let meta = wave_container
+        .variable_meta(&displayed_variable.variable_ref)
+        .ok()?;
     let translator = waves.variable_translator(&displayed_field_ref, translators);
+    let intrinsic_bounds = translator
+        .numeric_domain(&meta)
+        .and_then(|(min, max)| sanitize_range(min, max));
+
+    if effective_settings.y_axis_scale == AnalogYAxisScale::TypeLimits && intrinsic_bounds.is_none()
+    {
+        effective_settings.y_axis_scale = AnalogYAxisScale::Global;
+        if let Some(vidx) = waves.get_displayed_item_index(&display_id) {
+            local_msgs.push(Message::SetAnalogSettings(
+                MessageTarget::Explicit(vidx),
+                Some(effective_settings),
+            ));
+            warn!(
+                "Type Limits unavailable for '{}'; switched analog Y-axis scale to Global",
+                displayed_variable.variable_ref.full_path_string_no_index()
+            );
+        }
+    }
+
     let viewport = &waves.viewports[viewport_idx];
     let num_timestamps = waves.safe_num_timestamps();
 
@@ -73,7 +100,7 @@ pub(crate) fn variable_analog_draw_commands(
                     clock_edges: vec![],
                     display_id,
                     local_commands,
-                    local_msgs: vec![],
+                    local_msgs,
                 });
             }
         }
@@ -84,14 +111,15 @@ pub(crate) fn variable_analog_draw_commands(
                 vec![],
                 DrawingCommands::Analog(AnalogDrawingCommands::Loading),
             );
+            local_msgs.push(Message::BuildAnalogCache {
+                display_id,
+                cache_key,
+            });
             return Some(VariableDrawCommands {
                 clock_edges: vec![],
                 display_id,
                 local_commands,
-                local_msgs: vec![Message::BuildAnalogCache {
-                    display_id,
-                    cache_key,
-                }],
+                local_msgs,
             });
         }
     };
@@ -101,7 +129,8 @@ pub(crate) fn variable_analog_draw_commands(
         viewport,
         &num_timestamps,
         view_width,
-        render_mode.settings,
+        effective_settings,
+        intrinsic_bounds,
     )
     .build();
 
@@ -112,7 +141,7 @@ pub(crate) fn variable_analog_draw_commands(
         clock_edges: vec![],
         display_id,
         local_commands,
-        local_msgs: vec![],
+        local_msgs,
     })
 }
 
@@ -129,6 +158,7 @@ pub fn draw_analog(
         viewport_max,
         global_min,
         global_max,
+        intrinsic_bounds,
         values,
         min_valid_pixel,
         max_valid_pixel,
@@ -144,6 +174,7 @@ pub fn draw_analog(
         *viewport_max,
         *global_min,
         *global_max,
+        *intrinsic_bounds,
         analog_settings,
     );
 
@@ -200,24 +231,62 @@ fn select_value_range(
     viewport_max: f64,
     global_min: f64,
     global_max: f64,
+    intrinsic_bounds: Option<(f64, f64)>,
     settings: &AnalogSettings,
 ) -> (f64, f64) {
-    let (min, max) = match settings.y_axis_scale {
-        crate::displayed_item::AnalogYAxisScale::Viewport => (viewport_min, viewport_max),
-        crate::displayed_item::AnalogYAxisScale::Global => (global_min, global_max),
+    let pick_first_valid = |candidates: &[Option<(f64, f64)>]| {
+        candidates
+            .iter()
+            .filter_map(|candidate| candidate.and_then(|(min, max)| sanitize_range(min, max)))
+            .next()
+            .unwrap_or((-0.5, 0.5))
     };
 
-    // Handle all-NaN case: min=INFINITY, max=NEG_INFINITY
+    match settings.y_axis_scale {
+        AnalogYAxisScale::Viewport => pick_first_valid(&[
+            Some((viewport_min, viewport_max)),
+            Some((global_min, global_max)),
+        ]),
+        AnalogYAxisScale::Global => pick_first_valid(&[
+            Some((global_min, global_max)),
+            Some((viewport_min, viewport_max)),
+        ]),
+        AnalogYAxisScale::GlobalWithZero => pick_first_valid(&[
+            Some((global_min.min(0.0), global_max.max(0.0))),
+            Some((global_min, global_max)),
+            Some((viewport_min, viewport_max)),
+        ]),
+        AnalogYAxisScale::TypeLimits => pick_first_valid(&[
+            intrinsic_bounds,
+            Some((global_min, global_max)),
+            Some((viewport_min, viewport_max)),
+        ]),
+    }
+}
+
+fn stable_span(min: f64, max: f64) -> f64 {
+    (max * 0.5) - (min * 0.5)
+}
+
+fn sanitize_range(min: f64, max: f64) -> Option<(f64, f64)> {
     if !min.is_finite() || !max.is_finite() || min > max {
-        return (-0.5, 0.5);
+        return None;
     }
 
-    // Avoid division by zero
-    if (min - max).abs() < f64::EPSILON {
-        (min - 0.5, max + 0.5)
-    } else {
-        (min, max)
+    let span = stable_span(min, max);
+    if span.is_finite() && span.abs() > f64::EPSILON {
+        return Some((min, max));
     }
+
+    let expanded = (min - 0.5, max + 0.5);
+    let expanded_span = stable_span(expanded.0, expanded.1);
+
+    (expanded.0.is_finite()
+        && expanded.1.is_finite()
+        && expanded.0 <= expanded.1
+        && expanded_span.is_finite()
+        && expanded_span.abs() > f64::EPSILON)
+        .then_some(expanded)
 }
 
 /// Builds drawing commands by iterating viewport pixels.
@@ -230,6 +299,7 @@ struct CommandBuilder<'a> {
     max_valid_pixel: f32,
     output: CommandOutput,
     analog_settings: AnalogSettings,
+    intrinsic_bounds: Option<(f64, f64)>,
 }
 
 /// Accumulates commands and tracks value bounds.
@@ -315,6 +385,7 @@ impl<'a> CommandBuilder<'a> {
         num_timestamps: &'a BigInt,
         view_width: f32,
         analog_settings: AnalogSettings,
+        intrinsic_bounds: Option<(f64, f64)>,
     ) -> Self {
         let min_valid_pixel =
             viewport.pixel_from_time(&BigInt::from(0), view_width, num_timestamps);
@@ -329,6 +400,7 @@ impl<'a> CommandBuilder<'a> {
             max_valid_pixel,
             output: CommandOutput::new(),
             analog_settings,
+            intrinsic_bounds,
         }
     }
 
@@ -524,6 +596,7 @@ impl<'a> CommandBuilder<'a> {
             viewport_max: self.output.viewport_max,
             global_min: self.cache.global_min,
             global_max: self.cache.global_max,
+            intrinsic_bounds: self.intrinsic_bounds,
             values: self.output.commands,
             min_valid_pixel: self.min_valid_pixel,
             max_valid_pixel: self.max_valid_pixel,
@@ -643,11 +716,16 @@ impl RenderContext {
             self.min_val.is_finite() && self.max_val.is_finite(),
             "RenderContext min_val and max_val must be finite"
         );
-        let range = self.max_val - self.min_val;
-        if range.abs() <= f64::EPSILON {
-            0.5
+        let range = stable_span(self.min_val, self.max_val);
+        if !range.is_finite() || range.abs() <= f64::EPSILON {
+            return 0.5;
+        }
+
+        let normalized = ((value * 0.5) - (self.min_val * 0.5)) / range;
+        if normalized.is_finite() {
+            normalized.clamp(0.0, 1.0) as f32
         } else {
-            ((value - self.min_val) / range) as f32
+            0.5
         }
     }
 
@@ -930,5 +1008,74 @@ fn draw_amplitude_labels(render_ctx: &RenderContext, ctx: &mut DrawingContext) {
             .rect_filled(min_rect, CornerRadius::same(2), bg_color);
         ctx.painter
             .text(min_pos, Align2::LEFT_BOTTOM, min_text, font, text_color);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{select_value_range, stable_span};
+    use crate::displayed_item::{AnalogRenderStyle, AnalogSettings, AnalogYAxisScale};
+
+    fn settings(y_axis_scale: AnalogYAxisScale) -> AnalogSettings {
+        AnalogSettings::new(AnalogRenderStyle::Step, y_axis_scale)
+    }
+
+    #[test]
+    fn global_with_zero_positive_range() {
+        let (min, max) = select_value_range(
+            2.0,
+            10.0,
+            2.0,
+            10.0,
+            None,
+            &settings(AnalogYAxisScale::GlobalWithZero),
+        );
+        assert_eq!((min, max), (0.0, 10.0));
+    }
+
+    #[test]
+    fn global_with_zero_negative_range() {
+        let (min, max) = select_value_range(
+            -10.0,
+            -2.0,
+            -10.0,
+            -2.0,
+            None,
+            &settings(AnalogYAxisScale::GlobalWithZero),
+        );
+        assert_eq!((min, max), (-10.0, 0.0));
+    }
+
+    #[test]
+    fn type_limits_uses_intrinsic_domain() {
+        let (min, max) = select_value_range(
+            5.0,
+            6.0,
+            1.0,
+            2.0,
+            Some((-128.0, 127.0)),
+            &settings(AnalogYAxisScale::TypeLimits),
+        );
+        assert_eq!((min, max), (-128.0, 127.0));
+    }
+
+    #[test]
+    fn type_limits_falls_back_to_global_when_missing() {
+        let (min, max) = select_value_range(
+            5.0,
+            6.0,
+            1.0,
+            2.0,
+            None,
+            &settings(AnalogYAxisScale::TypeLimits),
+        );
+        assert_eq!((min, max), (1.0, 2.0));
+    }
+
+    #[test]
+    fn stable_span_handles_extreme_f64_bounds() {
+        let span = stable_span(-f64::MAX, f64::MAX);
+        assert!(span.is_finite());
+        assert!(span > 0.0);
     }
 }

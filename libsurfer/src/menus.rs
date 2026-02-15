@@ -628,28 +628,80 @@ impl SystemState {
             if let DisplayedItem::Variable(variable) = clicked_item
                 && wave_container.supports_analog()
             {
-                ui.menu_button("Analog", |ui| {
-                    use crate::displayed_item::AnalogSettings;
+                let type_limits_available = wave_container
+                    .variable_meta(&variable.variable_ref)
+                    .ok()
+                    .is_some_and(|meta| {
+                        let displayed_field_ref: DisplayedFieldRef = clicked_item_ref.into();
+                        waves
+                            .variable_translator_with_meta(
+                                &displayed_field_ref,
+                                &self.translators,
+                                &meta,
+                            )
+                            .numeric_domain(&meta)
+                            .is_some()
+                    });
+
+                let analog_menu_config = egui::containers::menu::MenuConfig::new()
+                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+
+                let _ = egui::containers::menu::SubMenuButton::new("Analog")
+                    .config(analog_menu_config)
+                    .ui(ui, |ui| {
+                    use crate::displayed_item::{
+                        AnalogRenderStyle, AnalogSettings, AnalogYAxisScale,
+                    };
                     let current = variable.analog.as_ref().map(|a| a.settings);
+                    let current_style = current.map(|s| s.render_style);
+                    let current_scale = current.map(|s| s.y_axis_scale);
 
-                    let options = [
-                        ("Off", None),
-                        ("Step (Viewport)", Some(AnalogSettings::step_viewport())),
-                        ("Step (Global)", Some(AnalogSettings::step_global())),
-                        (
-                            "Interpolated (Viewport)",
-                            Some(AnalogSettings::interpolated_viewport()),
-                        ),
-                        (
-                            "Interpolated (Global)",
-                            Some(AnalogSettings::interpolated_global()),
-                        ),
-                    ];
+                    ui.label("Draw style (applies and stays open)");
 
-                    for (label, config) in options {
-                        if ui.radio(current == config, label).clicked() && current != config {
-                            msgs.push(Message::SetAnalogSettings(group_target, config));
+                    if ui.radio(current.is_none(), "Off").clicked() && current.is_some() {
+                        msgs.push(Message::SetAnalogSettings(group_target, None));
+                    }
+
+                    for style in [AnalogRenderStyle::Step, AnalogRenderStyle::Interpolated] {
+                        let selected = current_style == Some(style);
+                        if ui.radio(selected, style.label()).clicked() && !selected {
+                            let mut next = current.unwrap_or_else(AnalogSettings::step_viewport);
+                            next.render_style = style;
+                            msgs.push(Message::SetAnalogSettings(group_target, Some(next)));
                         }
+                    }
+
+                    ui.separator();
+                    ui.label("Y-axis scale (applies and stays open)");
+
+                    for scale in [
+                        AnalogYAxisScale::Viewport,
+                        AnalogYAxisScale::Global,
+                        AnalogYAxisScale::GlobalWithZero,
+                        AnalogYAxisScale::TypeLimits,
+                    ] {
+                        let enabled = scale != AnalogYAxisScale::TypeLimits || type_limits_available;
+                        let mut response = ui.add_enabled(
+                            enabled,
+                            egui::RadioButton::new(current_scale == Some(scale), scale.label()),
+                        );
+
+                        if scale == AnalogYAxisScale::TypeLimits {
+                            response = response.on_hover_text(
+                                "Uses numeric limits of current translator/type; excludes NaN/Inf for floats.",
+                            );
+                        }
+
+                        if enabled && response.clicked() && current_scale != Some(scale) {
+                            let mut next = current.unwrap_or_else(AnalogSettings::step_viewport);
+                            next.y_axis_scale = scale;
+                            msgs.push(Message::SetAnalogSettings(group_target, Some(next)));
+                        }
+                    }
+
+                    ui.separator();
+                    if ui.button("Done").clicked() {
+                        ui.close_kind(egui::UiKind::Menu);
                     }
                 });
             }

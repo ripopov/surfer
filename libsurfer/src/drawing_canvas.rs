@@ -83,6 +83,8 @@ pub enum AnalogDrawingCommands {
         /// Global min/max across entire signal (used for global Y-axis scaling)
         global_min: f64,
         global_max: f64,
+        /// Intrinsic finite domain provided by the active translator/type.
+        intrinsic_bounds: Option<(f64, f64)>,
         /// Per-pixel drawing commands with flat spans and ranges
         values: Vec<AnalogDrawingCommand>,
         /// Pixel position of timestamp 0 (start of signal data).

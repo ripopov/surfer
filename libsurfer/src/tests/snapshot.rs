@@ -3087,6 +3087,86 @@ snapshot_ui_with_file_and_msgs! {analog_waveform_negive_amplitude, "examples/ana
     )
 ]}
 
+snapshot_ui_with_file_and_msgs! {analog_waveform_global_with_zero, "examples/analog_scaling_modes.vcd", [
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.neg8_limited"),
+        VariableRef::from_hierarchy_string("top.neg8_limited")
+    ]),
+
+    Message::VariableFormatChange(
+        MessageTarget::Explicit(DisplayedFieldRef {
+            item: DisplayedItemRef(1),
+            field: vec![],
+        }),
+        String::from("Signed"),
+    ),
+    Message::VariableFormatChange(
+        MessageTarget::Explicit(DisplayedFieldRef {
+            item: DisplayedItemRef(2),
+            field: vec![],
+        }),
+        String::from("Signed"),
+    ),
+
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        Some(crate::displayed_item::AnalogSettings::step_global()),
+    ),
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(1)),
+        Some(crate::displayed_item::AnalogSettings::step_global_with_zero()),
+    ),
+
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        6.0,
+    ),
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(1)),
+        6.0,
+    )
+]}
+
+snapshot_ui_with_file_and_msgs! {analog_waveform_type_limits_no_scaling, "examples/analog_scaling_modes.vcd", [
+    Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("top.neg8_limited"),
+        VariableRef::from_hierarchy_string("top.neg8_limited")
+    ]),
+
+    Message::VariableFormatChange(
+        MessageTarget::Explicit(DisplayedFieldRef {
+            item: DisplayedItemRef(1),
+            field: vec![],
+        }),
+        String::from("Signed"),
+    ),
+    Message::VariableFormatChange(
+        MessageTarget::Explicit(DisplayedFieldRef {
+            item: DisplayedItemRef(2),
+            field: vec![],
+        }),
+        String::from("Signed"),
+    ),
+
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        Some(crate::displayed_item::AnalogSettings::step_global()),
+    ),
+    Message::SetAnalogSettings(
+        MessageTarget::Explicit(VisibleItemIndex(1)),
+        Some(crate::displayed_item::AnalogSettings::step_type_limits()),
+    ),
+
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(0)),
+        6.0,
+    ),
+    Message::ItemHeightScalingFactorChange(
+        MessageTarget::Explicit(VisibleItemIndex(1)),
+        6.0,
+    ),
+]}
+
 snapshot_ui_with_file_and_msgs! {analog_waveform_ieee_inf_nan, "examples/analog_ieee_inf_nan.vcd", [
     Message::AddVariables(vec![
         VariableRef::from_hierarchy_string("top.reg32"),

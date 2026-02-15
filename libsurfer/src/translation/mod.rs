@@ -166,6 +166,15 @@ impl Translator<VarId, ScopeId, Message> for AnyTranslator {
             }
         }
     }
+
+    fn numeric_domain(&self, variable: &VariableMeta) -> Option<(f64, f64)> {
+        match self {
+            AnyTranslator::Full(t) => t.numeric_domain(variable),
+            AnyTranslator::Basic(t) => t.basic_numeric_domain(variable.num_bits.unwrap_or(0)),
+            #[cfg(feature = "python")]
+            AnyTranslator::Python(t) => t.basic_numeric_domain(variable.num_bits.unwrap_or(0)),
+        }
+    }
 }
 
 /// Look inside the config directory and inside "$(cwd)/.surfer" for user-defined decoders

@@ -48,6 +48,10 @@ impl BasicTranslator<VarId, ScopeId> for UnsignedTranslator {
         Some(parse_value_to_numeric(value, biguint_to_f64))
     }
 
+    fn basic_numeric_domain(&self, num_bits: u32) -> Option<(f64, f64)> {
+        unsigned_domain(num_bits)
+    }
+
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         if variable.has_unsigned_integer_type_name() {
             Ok(TranslationPreference::Prefer)
@@ -69,6 +73,10 @@ impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
     }
 
     fn basic_translate_numeric(&self, num_bits: u32, value: &VariableValue) -> Option<f64> {
+        if num_bits == 0 {
+            return Some(parse_value_to_numeric(value, biguint_to_f64));
+        }
+
         Some(parse_value_to_numeric(value, |v| {
             let signweight = BigUint::one() << (num_bits - 1);
             if v < &signweight {
@@ -78,6 +86,10 @@ impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
                 -biguint_to_f64(&v2)
             }
         }))
+    }
+
+    fn basic_numeric_domain(&self, num_bits: u32) -> Option<(f64, f64)> {
+        signed_domain(num_bits)
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -91,6 +103,10 @@ impl BasicTranslator<VarId, ScopeId> for SignedTranslator {
 
 /// Computes the signed value string for a given `BigUint` and bit width.
 fn compute_signed_value(v: &BigUint, num_bits: u32) -> String {
+    if num_bits == 0 {
+        return v.to_string();
+    }
+
     let signweight = BigUint::one() << (num_bits - 1);
     if v < &signweight {
         v.to_string()
@@ -98,6 +114,28 @@ fn compute_signed_value(v: &BigUint, num_bits: u32) -> String {
         let v2 = (signweight << 1) - v;
         format!("-{v2}")
     }
+}
+
+fn two_pow_saturating(bits: u32) -> f64 {
+    if bits >= f64::MAX_EXP as u32 {
+        f64::MAX
+    } else {
+        2_f64.powi(bits as i32)
+    }
+}
+
+fn unsigned_domain(num_bits: u32) -> Option<(f64, f64)> {
+    (num_bits > 0).then(|| {
+        let max = two_pow_saturating(num_bits) - 1.0;
+        (0.0, max.max(0.0))
+    })
+}
+
+fn signed_domain(num_bits: u32) -> Option<(f64, f64)> {
+    (num_bits > 0).then(|| {
+        let magnitude = two_pow_saturating(num_bits - 1);
+        (-magnitude, (magnitude - 1.0).min(f64::MAX))
+    })
 }
 
 pub struct SinglePrecisionTranslator {}
@@ -122,6 +160,11 @@ impl BasicTranslator<VarId, ScopeId> for SinglePrecisionTranslator {
         Some(parse_value_to_numeric(value, |v| {
             f64::from(f32::from_bits(v.iter_u32_digits().next().unwrap_or(0)))
         }))
+    }
+
+    fn basic_numeric_domain(&self, _num_bits: u32) -> Option<(f64, f64)> {
+        let max = f64::from(f32::MAX);
+        Some((-max, max))
     }
 
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
@@ -149,6 +192,10 @@ impl BasicTranslator<VarId, ScopeId> for DoublePrecisionTranslator {
         Some(parse_value_to_numeric(value, |v| {
             f64::from_bits(v.iter_u64_digits().next().unwrap_or(0))
         }))
+    }
+
+    fn basic_numeric_domain(&self, _num_bits: u32) -> Option<(f64, f64)> {
+        Some((-f64::MAX, f64::MAX))
     }
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         if variable.is_real() {
@@ -211,6 +258,11 @@ impl BasicTranslator<VarId, ScopeId> for HalfPrecisionTranslator {
             ))
         }))
     }
+
+    fn basic_numeric_domain(&self, _num_bits: u32) -> Option<(f64, f64)> {
+        let max = f64::from(f16::MAX);
+        Some((-max, max))
+    }
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 16)
     }
@@ -238,6 +290,11 @@ impl BasicTranslator<VarId, ScopeId> for BFloat16Translator {
                 v.iter_u32_digits().next().unwrap_or(0) as u16
             ))
         }))
+    }
+
+    fn basic_numeric_domain(&self, _num_bits: u32) -> Option<(f64, f64)> {
+        let max = f64::from(bf16::MAX);
+        Some((-max, max))
     }
     fn translates(&self, variable: &VariableMeta<VarId, ScopeId>) -> Result<TranslationPreference> {
         check_single_wordlength(variable.num_bits, 16)
@@ -635,6 +692,25 @@ mod test {
     }
 
     #[test]
+    fn signed_translation_zero_bits_is_stable() {
+        assert_eq!(
+            SignedTranslator {}
+                .basic_translate(0, &VariableValue::BigUint(BigUint::from(5u32)))
+                .0,
+            "5"
+        );
+    }
+
+    #[test]
+    fn signed_numeric_zero_bits_is_stable() {
+        assert_eq!(
+            SignedTranslator {}
+                .basic_translate_numeric(0, &VariableValue::BigUint(BigUint::from(5u32))),
+            Some(5.0)
+        );
+    }
+
+    #[test]
     fn unsigned_translation_from_string() {
         assert_eq!(
             UnsignedTranslator {}
@@ -672,6 +748,44 @@ mod test {
                 .0,
             "0"
         );
+    }
+
+    #[test]
+    fn signed_domain_8bit() {
+        assert_eq!(
+            SignedTranslator {}.basic_numeric_domain(8),
+            Some((-128.0, 127.0))
+        );
+    }
+
+    #[test]
+    fn unsigned_domain_16bit() {
+        assert_eq!(
+            UnsignedTranslator {}.basic_numeric_domain(16),
+            Some((0.0, 65_535.0))
+        );
+    }
+
+    #[test]
+    fn ieee_domain_is_finite_only() {
+        let single = SinglePrecisionTranslator {}
+            .basic_numeric_domain(32)
+            .unwrap();
+        assert_eq!(single.0, -f64::from(f32::MAX));
+        assert_eq!(single.1, f64::from(f32::MAX));
+        assert!(single.0.is_finite() && single.1.is_finite());
+
+        let double = DoublePrecisionTranslator {}
+            .basic_numeric_domain(64)
+            .unwrap();
+        assert_eq!(double.0, -f64::MAX);
+        assert_eq!(double.1, f64::MAX);
+        assert!(double.0.is_finite() && double.1.is_finite());
+    }
+
+    #[test]
+    fn unsupported_domain_returns_none() {
+        assert_eq!(Posit8Translator {}.basic_numeric_domain(8), None);
     }
 
     #[test]

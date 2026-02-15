@@ -1,0 +1,39 @@
+$date
+    Sun Feb 15 2026
+$end
+$version
+    Surfer analog scaling mode fixture
+$end
+$timescale 1ps $end
+$scope module top $end
+$var reg 8 ! neg8_limited $end
+$upscope $end
+$enddefinitions $end
+#0
+$dumpvars
+b10110000 !
+$end
+#1000
+b10110100 !
+#2000
+b10111000 !
+#3000
+b10111100 !
+#4000
+b11000000 !
+#5000
+b11000100 !
+#6000
+b11001000 !
+#7000
+b11001100 !
+#8000
+b11010000 !
+#9000
+b11010100 !
+#10000
+b11011000 !
+#11000
+b11001000 !
+#12000
+b10110000 !

@@ -78,11 +78,35 @@ pub enum AnalogRenderStyle {
     Interpolated,
 }
 
+impl AnalogRenderStyle {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Step => "Step",
+            Self::Interpolated => "Interpolated",
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Default)]
 pub enum AnalogYAxisScale {
     #[default]
     Viewport,
     Global,
+    GlobalWithZero,
+    TypeLimits,
+}
+
+impl AnalogYAxisScale {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Viewport => "Viewport",
+            Self::Global => "Global",
+            Self::GlobalWithZero => "Global + Zero",
+            Self::TypeLimits => "Type Limits (No scaling)",
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
@@ -93,35 +117,57 @@ pub struct AnalogSettings {
 
 impl AnalogSettings {
     #[must_use]
-    pub fn step_viewport() -> Self {
+    pub const fn new(render_style: AnalogRenderStyle, y_axis_scale: AnalogYAxisScale) -> Self {
         Self {
-            render_style: AnalogRenderStyle::Step,
-            y_axis_scale: AnalogYAxisScale::Viewport,
+            render_style,
+            y_axis_scale,
         }
+    }
+
+    #[must_use]
+    pub fn step_viewport() -> Self {
+        Self::new(AnalogRenderStyle::Step, AnalogYAxisScale::Viewport)
     }
 
     #[must_use]
     pub fn step_global() -> Self {
-        Self {
-            render_style: AnalogRenderStyle::Step,
-            y_axis_scale: AnalogYAxisScale::Global,
-        }
+        Self::new(AnalogRenderStyle::Step, AnalogYAxisScale::Global)
+    }
+
+    #[must_use]
+    pub fn step_global_with_zero() -> Self {
+        Self::new(AnalogRenderStyle::Step, AnalogYAxisScale::GlobalWithZero)
+    }
+
+    #[must_use]
+    pub fn step_type_limits() -> Self {
+        Self::new(AnalogRenderStyle::Step, AnalogYAxisScale::TypeLimits)
     }
 
     #[must_use]
     pub fn interpolated_viewport() -> Self {
-        Self {
-            render_style: AnalogRenderStyle::Interpolated,
-            y_axis_scale: AnalogYAxisScale::Viewport,
-        }
+        Self::new(AnalogRenderStyle::Interpolated, AnalogYAxisScale::Viewport)
     }
 
     #[must_use]
     pub fn interpolated_global() -> Self {
-        Self {
-            render_style: AnalogRenderStyle::Interpolated,
-            y_axis_scale: AnalogYAxisScale::Global,
-        }
+        Self::new(AnalogRenderStyle::Interpolated, AnalogYAxisScale::Global)
+    }
+
+    #[must_use]
+    pub fn interpolated_global_with_zero() -> Self {
+        Self::new(
+            AnalogRenderStyle::Interpolated,
+            AnalogYAxisScale::GlobalWithZero,
+        )
+    }
+
+    #[must_use]
+    pub fn interpolated_type_limits() -> Self {
+        Self::new(
+            AnalogRenderStyle::Interpolated,
+            AnalogYAxisScale::TypeLimits,
+        )
     }
 }
 
@@ -605,5 +651,41 @@ impl DisplayedItem {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AnalogRenderStyle, AnalogSettings, AnalogYAxisScale};
+
+    #[test]
+    fn analog_y_axis_scale_round_trips_new_variants() {
+        let global_with_zero = ron::to_string(&AnalogYAxisScale::GlobalWithZero).unwrap();
+        let type_limits = ron::to_string(&AnalogYAxisScale::TypeLimits).unwrap();
+
+        assert_eq!(
+            ron::from_str::<AnalogYAxisScale>(&global_with_zero).unwrap(),
+            AnalogYAxisScale::GlobalWithZero
+        );
+        assert_eq!(
+            ron::from_str::<AnalogYAxisScale>(&type_limits).unwrap(),
+            AnalogYAxisScale::TypeLimits
+        );
+    }
+
+    #[test]
+    fn analog_settings_round_trip_with_new_scales() {
+        let settings = AnalogSettings::new(
+            AnalogRenderStyle::Interpolated,
+            AnalogYAxisScale::GlobalWithZero,
+        );
+        let encoded = ron::to_string(&settings).unwrap();
+        let decoded = ron::from_str::<AnalogSettings>(&encoded).unwrap();
+        assert_eq!(decoded, settings);
+
+        let settings = AnalogSettings::new(AnalogRenderStyle::Step, AnalogYAxisScale::TypeLimits);
+        let encoded = ron::to_string(&settings).unwrap();
+        let decoded = ron::from_str::<AnalogSettings>(&encoded).unwrap();
+        assert_eq!(decoded, settings);
     }
 }
