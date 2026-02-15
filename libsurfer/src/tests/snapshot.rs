@@ -2696,6 +2696,7 @@ snapshot_ui_with_file_and_msgs! {wasm_translator_works, "examples/picorv32.vcd",
 ]}
 
 snapshot_ui_with_file_and_msgs! {analog_waveform_with_4state, "examples/analog.vcd", [
+    Message::SelectTheme(Some("light+".to_string())),
     Message::AddVariables(vec![
         VariableRef::from_hierarchy_string("top.clk_cnt"),
         VariableRef::from_hierarchy_string("top.sine_4state"),

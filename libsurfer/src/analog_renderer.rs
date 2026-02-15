@@ -849,13 +849,18 @@ fn format_amplitude_value(value: f64) -> String {
 
 fn draw_amplitude_labels(render_ctx: &RenderContext, ctx: &mut DrawingContext) {
     const SPLIT_LABEL_HEIGHT_THRESHOLD: f32 = 2.0;
-    const LABEL_ALPHA: f32 = 0.7;
     const BACKGROUND_ALPHA: u8 = 200;
 
     let text_size = ctx.cfg.text_size;
 
-    let text_color = render_ctx.stroke.color.gamma_multiply(LABEL_ALPHA);
-    let bg_color = Color32::from_rgba_unmultiplied(0, 0, 0, BACKGROUND_ALPHA);
+    let canvas_bg = ctx.theme.canvas_colors.background;
+    let text_color = ctx.theme.canvas_colors.foreground;
+    let bg_color = Color32::from_rgba_unmultiplied(
+        canvas_bg.r(),
+        canvas_bg.g(),
+        canvas_bg.b(),
+        BACKGROUND_ALPHA,
+    );
     let font = egui::FontId::monospace(text_size);
 
     if render_ctx.height_scale < SPLIT_LABEL_HEIGHT_THRESHOLD {
