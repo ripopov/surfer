@@ -1,0 +1,53 @@
+name: Deploy Surfer WASM to gh-pages
+
+on:
+  push:
+    branches:
+      - main
+      - 261-general-conversion-for-custom-hdl-types
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gh-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install trunk
+        run: cargo install trunk --locked
+
+      - name: Install wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.108 --locked
+
+      - name: Build Surfer WASM
+        working-directory: surfer
+        env:
+          RUSTFLAGS: --cfg=web_sys_unstable_apis
+        run: trunk build --config Trunk.toml index.html --release --public-url /surfer/
+
+      - name: Disable Jekyll
+        run: touch surfer/dist/.nojekyll
+
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: surfer/dist
+          publish_branch: gh-pages
+          force_orphan: true
