@@ -103,6 +103,7 @@ impl WaveData {
     ) {
         let color = theme.variable_dontcare;
         let max_timestamp = self.safe_max_timestamp();
+        let time_offset = self.time_offset();
         for g in self.graphics.values() {
             match g {
                 Graphic::TextArrow {
@@ -114,6 +115,7 @@ impl WaveData {
                         &from_point.x,
                         ctx.cfg.canvas_size.x,
                         &max_timestamp,
+                        time_offset,
                     );
                     let from_y = self.get_item_y(&from_point.y);
 
@@ -121,6 +123,7 @@ impl WaveData {
                         &to_point.x,
                         ctx.cfg.canvas_size.x,
                         &max_timestamp,
+                        time_offset,
                     );
                     let to_y = self.get_item_y(&to_point.y);
 
@@ -158,8 +161,12 @@ impl WaveData {
                     pos: (pos, dir),
                     text,
                 } => {
-                    let to_x =
-                        viewport.pixel_from_time(&pos.x, ctx.cfg.canvas_size.x, &max_timestamp);
+                    let to_x = viewport.pixel_from_time(
+                        &pos.x,
+                        ctx.cfg.canvas_size.x,
+                        &max_timestamp,
+                        time_offset,
+                    );
                     let to_y = self.get_item_y(&pos.y);
                     if let Some(to_y) = to_y {
                         ctx.painter.text(
@@ -184,12 +191,14 @@ impl WaveData {
                         &from_point.x,
                         ctx.cfg.canvas_size.x,
                         &max_timestamp,
+                        time_offset,
                     );
                     let from_y = self.get_item_y(&from_point.y);
                     let to_x = viewport.pixel_from_time(
                         &from_point.x,
                         ctx.cfg.canvas_size.x,
                         &max_timestamp,
+                        time_offset,
                     );
                     let to_y = self.get_item_y(&to_point.y);
 

@@ -250,6 +250,11 @@ impl WellenContainer {
     }
 
     #[must_use]
+    pub fn min_timestamp(&self) -> Option<BigUint> {
+        self.time_table.first().map(|t| BigUint::from(*t))
+    }
+
+    #[must_use]
     pub fn is_fully_loaded(&self) -> bool {
         (self.source.is_some() || self.server.is_some()) && self.signals_to_be_loaded.is_empty()
     }

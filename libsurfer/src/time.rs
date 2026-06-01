@@ -958,6 +958,7 @@ impl SystemState {
         viewport: &Viewport,
         cfg: &DrawConfig,
     ) -> Vec<(String, f32, i64)> {
+        let time_offset = waves.time_offset();
         get_ticks_internal(
             viewport,
             &waves.inner.metadata().timescale,
@@ -967,6 +968,7 @@ impl SystemState {
             &self.get_time_format(),
             self.user.config.theme.ticks.density,
             &waves.safe_max_timestamp(),
+            &time_offset,
         )
     }
 }
@@ -985,43 +987,46 @@ fn get_ticks_internal(
     time_format: &TimeFormat,
     density: f32,
     max_timestamp: &BigInt,
+    time_offset: &BigInt,
 ) -> Vec<(String, f32, i64)> {
     let char_width = text_size * (20. / 31.);
     let rightexp = viewport
         .curr_right
-        .absolute(max_timestamp)
+        .absolute(max_timestamp, time_offset)
         .inner()
         .abs()
         .log10()
         .round() as i16;
     let leftexp = viewport
         .curr_left
-        .absolute(max_timestamp)
+        .absolute(max_timestamp, time_offset)
         .inner()
         .abs()
         .log10()
         .round() as i16;
     let max_labelwidth = f32::from(rightexp.max(leftexp) + 3) * char_width;
     let max_labels = ((frame_width * density) / max_labelwidth).floor() + 2.;
+    let viewport_width = viewport.width_absolute(max_timestamp, time_offset);
     let scale = 10.0f64.powf(
-        ((viewport.curr_right - viewport.curr_left)
-            .absolute(max_timestamp)
-            .inner()
-            / f64::from(max_labels))
-        .log10()
-        .floor(),
+        (viewport_width.inner() / f64::from(max_labels))
+            .log10()
+            .floor(),
     );
 
     let mut ticks: Vec<(String, f32, i64)> = [].to_vec();
     for step in &TICK_STEPS {
         let scaled_step = scale * step;
-        let rounded_min_label_time =
-            (viewport.curr_left.absolute(max_timestamp).inner() / scaled_step).floor()
-                * scaled_step;
-        let high = ((viewport.curr_right.absolute(max_timestamp).inner() - rounded_min_label_time)
-            / scaled_step)
-            .ceil() as f32
-            + 1.;
+        let left_abs = viewport
+            .curr_left
+            .absolute(max_timestamp, time_offset)
+            .inner();
+        let right_abs = viewport
+            .curr_right
+            .absolute(max_timestamp, time_offset)
+            .inner();
+        let rounded_min_label_time = (left_abs / scaled_step).floor() * scaled_step;
+        let high = ((right_abs - rounded_min_label_time) / scaled_step).ceil() as f32 + 1.;
+
         if high <= max_labels {
             let time_formatter = TimeFormatter::new(timescale, wanted_timeunit, time_format);
             ticks = (0..high as i16)
@@ -1034,7 +1039,7 @@ fn get_ticks_internal(
                         // Time string
                         time_formatter.format(&tick),
                         // X position
-                        viewport.pixel_from_time(&tick, frame_width, max_timestamp),
+                        viewport.pixel_from_time(&tick, frame_width, max_timestamp, time_offset),
                         // Absolute time
                         tick.to_i64().unwrap_or_default(),
                     )
@@ -1863,6 +1868,7 @@ mod get_ticks_tests {
             &time_format,
             config.theme.ticks.density,
             &max_timestamp,
+            &BigInt::from(0),
         );
 
         assert!(!ticks.is_empty(), "expected at least one tick");
@@ -1925,6 +1931,7 @@ mod get_ticks_tests {
             &time_format,
             config.theme.ticks.density,
             &max_timestamp,
+            &BigInt::from(0),
         );
 
         assert!(!ticks.is_empty(), "expected ticks even for narrow view");

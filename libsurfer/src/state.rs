@@ -34,6 +34,7 @@ use egui::{
 use epaint::{CornerRadius, Stroke};
 use eyre::{Result, WrapErr as _};
 use itertools::Itertools;
+use num::{BigInt, Zero};
 use serde::{Deserialize, Serialize};
 use surfer_translation_types::Translator;
 use surver::SurverFileInfo;
@@ -385,6 +386,7 @@ impl SystemState {
                             inflight_caches: HashMap::new(),
                             annotation_groups: vec![],
                             annotation_list_visible: false,
+                            cached_time_offset: BigInt::zero(),
                         },
                         None,
                     ),
@@ -398,6 +400,12 @@ impl SystemState {
         self.invalidate_draw_commands();
 
         self.user.waves = Some(new_wave);
+
+        // Refresh time offset cache after loading waves
+        if let Some(waves) = &mut self.user.waves {
+            waves.refresh_time_offset(&self.user.config);
+        }
+
         // Update window title with waveform name
         let title = match &filename_for_title {
             WaveSource::File(path) => {
@@ -448,7 +456,7 @@ impl SystemState {
         let viewport = Viewport::new();
         let viewports = [viewport].to_vec();
 
-        let new_transaction_streams = WaveData {
+        let mut new_transaction_streams = WaveData {
             inner: DataContainer::Transactions(new_ftr),
             source: filename,
             format,
@@ -479,7 +487,10 @@ impl SystemState {
             inflight_caches: HashMap::new(),
             annotation_groups: vec![],
             annotation_list_visible: false,
+            cached_time_offset: BigInt::zero(),
         };
+
+        new_transaction_streams.refresh_time_offset(&self.user.config);
 
         self.invalidate_draw_commands();
 
@@ -631,6 +642,7 @@ impl SystemState {
 
         self.invalidate_draw_commands();
         if let Some(waves) = &mut self.user.waves {
+            waves.refresh_time_offset(&self.user.config);
             waves.update_viewports();
         }
     }

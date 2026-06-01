@@ -286,6 +286,10 @@ pub struct SurferLayout {
     /// Toolbar-specific layout settings
     #[serde(default)]
     toolbar: ToolbarLayout,
+    /// Enable time offset adjustment for waveforms which don't start at 0.
+    /// When enabled, the waveform canvas will be drawn from the first available time instead of from 0.
+    #[serde(default)]
+    pub enable_time_offset: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]

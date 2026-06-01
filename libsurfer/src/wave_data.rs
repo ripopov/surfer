@@ -106,6 +106,9 @@ pub struct WaveData {
     #[serde(skip)]
     pub inflight_caches:
         HashMap<AnalogCacheKey, std::sync::Arc<crate::analog_signal_cache::AnalogCacheEntry>>,
+    /// Cached effective time offset, updated on waveform load and config change
+    #[serde(skip, default)]
+    pub(crate) cached_time_offset: BigInt,
 }
 
 fn select_preferred_translator(var: &VariableMeta, translators: &TranslatorList) -> String {
@@ -242,6 +245,7 @@ impl WaveData {
             old_max_timestamp,
             cache_generation: self.cache_generation + 1, // Invalidate all existing caches
             inflight_caches: HashMap::new(),
+            cached_time_offset: BigInt::zero(),
         };
 
         new_wavedata.update_metadata(translators);
@@ -335,8 +339,10 @@ impl WaveData {
                 .to_bigint()
                 .unwrap();
             if new_max_timestamp != old_max_timestamp {
+                let time_offset = &self.cached_time_offset;
                 for viewport in &mut self.viewports {
-                    *viewport = viewport.clip_to(&old_max_timestamp, &new_max_timestamp);
+                    *viewport =
+                        viewport.clip_to(&old_max_timestamp, &new_max_timestamp, time_offset);
                 }
             }
         }
@@ -837,7 +843,11 @@ impl WaveData {
     pub fn go_to_cursor_if_not_in_view(&mut self) -> bool {
         if let Some(cursor) = &self.cursor {
             let max_timestamp = self.safe_max_timestamp();
-            self.viewports[0].go_to_cursor_if_not_in_view(cursor, &max_timestamp)
+            self.viewports[0].go_to_cursor_if_not_in_view(
+                cursor,
+                &max_timestamp,
+                &self.cached_time_offset,
+            )
         } else {
             false
         }
@@ -846,10 +856,12 @@ impl WaveData {
     #[inline]
     #[must_use]
     pub fn numbered_marker_location(&self, idx: u8, viewport: &Viewport, view_width: f32) -> f32 {
+        let time_offset = self.time_offset();
         viewport.pixel_from_time(
             self.numbered_marker_time(idx),
             view_width,
             &self.safe_max_timestamp(),
+            time_offset,
         )
     }
 
@@ -1078,6 +1090,24 @@ impl WaveData {
         self.max_timestamp().unwrap_or_else(BigInt::one)
     }
 
+    /// Returns the cached time offset value
+    #[must_use]
+    pub fn time_offset(&self) -> &BigInt {
+        &self.cached_time_offset
+    }
+
+    /// Updates the cached time offset based on current config
+    pub fn refresh_time_offset(&mut self, config: &crate::config::SurferConfig) {
+        self.cached_time_offset = if config.layout.enable_time_offset {
+            self.inner
+                .min_timestamp()
+                .map(|ts| ts.to_bigint().unwrap())
+                .unwrap_or_else(BigInt::zero)
+        } else {
+            BigInt::zero()
+        };
+    }
+
     #[must_use]
     pub fn get_displayed_item_index(
         &self,
@@ -1219,6 +1249,7 @@ mod tests {
             old_max_timestamp: None,
             cache_generation: 0,
             inflight_caches: HashMap::new(),
+            cached_time_offset: BigInt::from(0),
         }
     }
 

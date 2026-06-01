@@ -46,6 +46,7 @@ impl SystemState {
         let base_fill_color = self.user.config.theme.canvas_colors.foreground;
 
         // Draw rectangles for each viewport
+        let time_offset = waves.time_offset();
         waves
             .viewports
             .iter()
@@ -53,7 +54,7 @@ impl SystemState {
             .map(|(idx, viewport)| {
                 (
                     idx,
-                    get_viewport_rect(&ctx, &max_timestamp, &viewport_all, viewport),
+                    get_viewport_rect(&ctx, &max_timestamp, &viewport_all, viewport, time_offset),
                 )
             })
             .for_each(|(idx, rect)| {
@@ -98,7 +99,8 @@ impl SystemState {
             let pointer_pos_global = ui.input(|i| i.pointer.interact_pos());
             let pos = pointer_pos_global.map(|p| to_screen.inverse().transform_pos(p));
             if let Some(pos) = pos {
-                let timestamp = viewport_all.as_time_bigint(pos.x, frame_size.x, &max_timestamp);
+                let timestamp =
+                    viewport_all.as_time_bigint(pos.x, frame_size.x, &max_timestamp, time_offset);
                 msgs.push(Message::GoToTime(Some(timestamp), 0));
             }
         });
@@ -110,16 +112,19 @@ fn get_viewport_rect(
     max_timestamp: &num::BigInt,
     viewport_all: &Viewport,
     viewport: &Viewport,
+    time_offset: &num::BigInt,
 ) -> Rect {
     let minx = viewport_all.pixel_from_absolute_time(
-        viewport.curr_left.absolute(max_timestamp),
+        viewport.curr_left.absolute(max_timestamp, time_offset),
         ctx.cfg.canvas_size.x,
         max_timestamp,
+        time_offset,
     );
     let maxx = viewport_all.pixel_from_absolute_time(
-        viewport.curr_right.absolute(max_timestamp),
+        viewport.curr_right.absolute(max_timestamp, time_offset),
         ctx.cfg.canvas_size.x,
         max_timestamp,
+        time_offset,
     );
     let mut min = (ctx.to_screen)(minx, 0.);
     let mut max = (ctx.to_screen)(maxx, ctx.cfg.canvas_size.y);

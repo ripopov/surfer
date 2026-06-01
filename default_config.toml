@@ -50,6 +50,7 @@ fill_high_values = true
 draw_vector_unknowns_as_line = false
 trace_style = "Default"
 transition_value = "Next"
+enable_time_offset = false
 
 [layout.toolbar.row]
 menu = 0

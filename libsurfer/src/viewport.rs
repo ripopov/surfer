@@ -23,12 +23,13 @@ pub struct Relative(pub f64);
 
 impl Relative {
     #[must_use]
-    pub fn absolute(&self, max_timestamp: &BigInt) -> Absolute {
+    pub fn absolute(&self, max_timestamp: &BigInt, time_offset: &BigInt) -> Absolute {
         Absolute(
-            self.0
-                * max_timestamp
-                    .to_f64()
-                    .expect("Failed to convert timestamp to f64"),
+            time_offset.to_f64().unwrap()
+                + self.0
+                    * (max_timestamp - time_offset)
+                        .to_f64()
+                        .expect("Failed to convert timestamp to f64"),
         )
     }
 
@@ -63,10 +64,10 @@ pub struct Absolute(pub f64);
 
 impl Absolute {
     #[must_use]
-    pub fn relative(&self, max_timestamp: &BigInt) -> Relative {
+    pub fn relative(&self, max_timestamp: &BigInt, time_offset: &BigInt) -> Relative {
         Relative(
-            self.0
-                / max_timestamp
+            (self.0 - time_offset.to_f64().unwrap())
+                / (max_timestamp - time_offset)
                     .to_f64()
                     .expect("Failed to convert timestamp to f64"),
         )
@@ -144,32 +145,44 @@ impl Viewport {
         Self::default()
     }
     #[must_use]
-    pub fn left_edge_time(self, max_timestamp: &BigInt) -> BigInt {
-        BigInt::from(self.curr_left.absolute(max_timestamp).0 as i64)
+    pub fn left_edge_time(self, max_timestamp: &BigInt, time_offset: &BigInt) -> BigInt {
+        BigInt::from(self.curr_left.absolute(max_timestamp, time_offset).0 as i64)
     }
     #[must_use]
-    pub fn right_edge_time(self, max_timestamp: &BigInt) -> BigInt {
-        BigInt::from(self.curr_right.absolute(max_timestamp).0 as i64)
+    pub fn right_edge_time(self, max_timestamp: &BigInt, time_offset: &BigInt) -> BigInt {
+        BigInt::from(self.curr_right.absolute(max_timestamp, time_offset).0 as i64)
+    }
+
+    /// Converts x-pixel position to absolute time with time offset support
+    #[must_use]
+    pub fn as_absolute_time(
+        &self,
+        x: f64,
+        view_width: f32,
+        max_timestamp: &BigInt,
+        time_offset: &BigInt,
+    ) -> Absolute {
+        let time_spacing = self.width_absolute(max_timestamp, time_offset) / f64::from(view_width);
+        self.curr_left.absolute(max_timestamp, time_offset) + time_spacing * x
     }
 
     #[must_use]
-    pub fn as_absolute_time(&self, x: f64, view_width: f32, max_timestamp: &BigInt) -> Absolute {
-        let time_spacing = self.width_absolute(max_timestamp) / f64::from(view_width);
-
-        self.curr_left.absolute(max_timestamp) + time_spacing * x
-    }
-
-    #[must_use]
-    pub fn as_time_bigint(&self, x: f32, view_width: f32, max_timestamp: &BigInt) -> BigInt {
+    pub fn as_time_bigint(
+        &self,
+        x: f32,
+        view_width: f32,
+        max_timestamp: &BigInt,
+        time_offset: &BigInt,
+    ) -> BigInt {
         let Viewport {
             curr_left: left,
             curr_right: right,
             ..
         } = &self;
 
-        let big_right = BigRational::from_f64(right.absolute(max_timestamp).0)
+        let big_right = BigRational::from_f64(right.absolute(max_timestamp, time_offset).0)
             .unwrap_or_else(|| BigRational::from_u8(1).unwrap());
-        let big_left = BigRational::from_f64(left.absolute(max_timestamp).0)
+        let big_left = BigRational::from_f64(left.absolute(max_timestamp, time_offset).0)
             .unwrap_or_else(|| BigRational::from_u8(1).unwrap());
         let big_width =
             BigRational::from_f32(view_width).unwrap_or_else(|| BigRational::from_u8(1).unwrap());
@@ -179,28 +192,36 @@ impl Viewport {
         time.round().to_integer()
     }
 
-    /// Computes which x-pixel corresponds to the specified time adduming the viewport is rendered
+    /// Computes which x-pixel corresponds to the specified time assuming the viewport is rendered
     /// into a viewport of `view_width`
     #[must_use]
-    pub fn pixel_from_time(&self, time: &BigInt, view_width: f32, max_timestamp: &BigInt) -> f32 {
-        let distance_from_left =
-            Absolute(time.to_f64().unwrap()) - self.curr_left.absolute(max_timestamp);
+    pub fn pixel_from_time(
+        &self,
+        time: &BigInt,
+        view_width: f32,
+        max_timestamp: &BigInt,
+        time_offset: &BigInt,
+    ) -> f32 {
+        let distance_from_left = Absolute((time + time_offset).to_f64().unwrap())
+            - self.curr_left.absolute(max_timestamp, time_offset);
+        let width = self.width_absolute(max_timestamp, time_offset);
 
-        (((distance_from_left / self.width_absolute(max_timestamp)).0) * f64::from(view_width))
-            as f32
+        (((distance_from_left / width).0) * f64::from(view_width)) as f32
     }
 
+    /// Computes which x-pixel corresponds to the specified absolute time with time offset support
     #[must_use]
     pub fn pixel_from_absolute_time(
         &self,
         time: Absolute,
         view_width: f32,
         max_timestamp: &BigInt,
+        time_offset: &BigInt,
     ) -> f32 {
-        let distance_from_left = time - self.curr_left.absolute(max_timestamp);
+        let distance_from_left = time - self.curr_left.absolute(max_timestamp, time_offset);
+        let width = self.width_absolute(max_timestamp, time_offset);
 
-        (((distance_from_left / self.width_absolute(max_timestamp)).0) * f64::from(view_width))
-            as f32
+        (((distance_from_left / width).0) * f64::from(view_width)) as f32
     }
 
     /// Return new viewport for a different file length.
@@ -209,9 +230,14 @@ impl Viewport {
     /// will zoom in as much as needed to keep border margins. If the new waveform is
     /// too short, the viewport will be moved to the left as much as needed for the zoom level.
     #[must_use]
-    pub fn clip_to(&self, old_max_timestamp: &BigInt, new_max_timestamp: &BigInt) -> Viewport {
-        let left_timestamp = self.curr_left.absolute(old_max_timestamp);
-        let right_timestamp = self.curr_right.absolute(old_max_timestamp);
+    pub fn clip_to(
+        &self,
+        old_max_timestamp: &BigInt,
+        new_max_timestamp: &BigInt,
+        time_offset: &BigInt,
+    ) -> Viewport {
+        let left_timestamp = self.curr_left.absolute(old_max_timestamp, time_offset);
+        let right_timestamp = self.curr_right.absolute(old_max_timestamp, time_offset);
         let absolute_width = right_timestamp - left_timestamp;
 
         let new_absolute_width = new_max_timestamp
@@ -263,17 +289,18 @@ impl Viewport {
     }
 
     #[inline]
-    fn width_absolute(&self, max_timestamp: &BigInt) -> Absolute {
-        self.width().absolute(max_timestamp)
+    pub(crate) fn width_absolute(&self, max_timestamp: &BigInt, time_offset: &BigInt) -> Absolute {
+        self.curr_right.absolute(max_timestamp, time_offset)
+            - self.curr_left.absolute(max_timestamp, time_offset)
     }
 
-    pub fn go_to_time(&mut self, center: &BigInt, max_timestamp: &BigInt) {
+    pub fn go_to_time(&mut self, center: &BigInt, max_timestamp: &BigInt, time_offset: &BigInt) {
         let center_point: Absolute = center.into();
-        let half_width = self.half_width_absolute(max_timestamp);
+        let half_width = self.half_width_absolute(max_timestamp, time_offset);
 
-        let target_left = (center_point - half_width).relative(max_timestamp);
-        let target_right = (center_point + half_width).relative(max_timestamp);
-        self.set_viewport_to_clipped(target_left, target_right, max_timestamp);
+        let target_left = (center_point - half_width).relative(max_timestamp, time_offset);
+        let target_right = (center_point + half_width).relative(max_timestamp, time_offset);
+        self.set_viewport_to_clipped(target_left, target_right, max_timestamp, time_offset);
     }
 
     pub fn zoom_to_fit(&mut self) {
@@ -292,11 +319,33 @@ impl Viewport {
         self.set_target_right(Relative(1.0));
     }
 
+    pub fn zoom_to_time(
+        &mut self,
+        center: &BigInt,
+        delta: f64,
+        max_timestamp: &BigInt,
+        time_offset: &BigInt,
+    ) {
+        let center = Absolute::from(center);
+        let half_width = (self.curr_right.absolute(max_timestamp, time_offset)
+            - self.curr_left.absolute(max_timestamp, time_offset))
+            * delta
+            * 0.5;
+
+        self.set_viewport_to_clipped(
+            (center - half_width).relative(max_timestamp, time_offset),
+            (center + half_width).relative(max_timestamp, time_offset),
+            max_timestamp,
+            time_offset,
+        );
+    }
+
     pub fn handle_canvas_zoom(
         &mut self,
         mouse_ptr_timestamp: Option<BigInt>,
         delta: f64,
         max_timestamp: &BigInt,
+        time_offset: &BigInt,
     ) {
         // Zoom or scroll
         let Viewport {
@@ -306,7 +355,7 @@ impl Viewport {
         } = &self;
 
         let (target_left, target_right) = if let Some(mouse_location) =
-            mouse_ptr_timestamp.map(|t| Absolute::from(&t).relative(max_timestamp))
+            mouse_ptr_timestamp.map(|t| Absolute::from(&t).relative(max_timestamp, time_offset))
         {
             (
                 (*left - mouse_location) / Relative(delta) + mouse_location,
@@ -319,21 +368,7 @@ impl Viewport {
             (mid_point - offset, mid_point + offset)
         };
 
-        self.set_viewport_to_clipped(target_left, target_right, max_timestamp);
-    }
-
-    pub fn zoom_to_time(&mut self, center: &BigInt, delta: f64, max_timestamp: &BigInt) {
-        let center = Absolute::from(center);
-        let half_width = (self.curr_right.absolute(max_timestamp)
-            - self.curr_left.absolute(max_timestamp))
-            * delta
-            * 0.5;
-
-        self.set_viewport_to_clipped(
-            (center - half_width).relative(max_timestamp),
-            (center + half_width).relative(max_timestamp),
-            max_timestamp,
-        );
+        self.set_viewport_to_clipped(target_left, target_right, max_timestamp, time_offset);
     }
 
     pub fn handle_canvas_scroll(&mut self, deltay: f64) {
@@ -352,8 +387,9 @@ impl Viewport {
         target_left: Relative,
         target_right: Relative,
         max_timestamp: &BigInt,
+        time_offset: &BigInt,
     ) {
-        let rel_min_width = self.min_width.relative(max_timestamp);
+        let rel_min_width = self.min_width.relative(max_timestamp, time_offset);
 
         if (target_right - target_left) <= rel_min_width + Relative(f64::EPSILON) {
             let center = (target_left + target_right) * 0.5;
@@ -404,39 +440,57 @@ impl Viewport {
     }
 
     #[inline]
-    fn half_width_absolute(&self, max_timestamp: &BigInt) -> Absolute {
-        (self.width() * 0.5).absolute(max_timestamp)
+    fn half_width_absolute(&self, max_timestamp: &BigInt, time_offset: &BigInt) -> Absolute {
+        self.width_absolute(max_timestamp, time_offset) * 0.5
     }
 
-    pub fn zoom_to_range(&mut self, left: &BigInt, right: &BigInt, max_timestamp: &BigInt) {
+    pub fn zoom_to_range(
+        &mut self,
+        left: &BigInt,
+        right: &BigInt,
+        max_timestamp: &BigInt,
+        time_offset: &BigInt,
+    ) {
         self.set_viewport_to_clipped(
-            Absolute::from(left).relative(max_timestamp),
-            Absolute::from(right).relative(max_timestamp),
+            Absolute::from(left).relative(max_timestamp, time_offset),
+            Absolute::from(right).relative(max_timestamp, time_offset),
             max_timestamp,
+            time_offset,
         );
     }
 
-    pub fn go_to_cursor_if_not_in_view(&mut self, cursor: &BigInt, max_timestamp: &BigInt) -> bool {
+    pub fn go_to_cursor_if_not_in_view(
+        &mut self,
+        cursor: &BigInt,
+        max_timestamp: &BigInt,
+        time_offset: &BigInt,
+    ) -> bool {
         let fcursor = cursor.into();
-        if fcursor <= self.curr_left.absolute(max_timestamp)
-            || fcursor >= self.curr_right.absolute(max_timestamp)
+        if fcursor <= self.curr_left.absolute(max_timestamp, time_offset)
+            || fcursor >= self.curr_right.absolute(max_timestamp, time_offset)
         {
-            self.go_to_time_f64(fcursor, max_timestamp);
+            self.go_to_time_f64(fcursor, max_timestamp, time_offset);
             true
         } else {
             false
         }
     }
 
-    pub fn go_to_time_f64(&mut self, center: Absolute, max_timestamp: &BigInt) {
-        let half_width = (self.curr_right.absolute(max_timestamp)
-            - self.curr_left.absolute(max_timestamp))
-            * 0.5;
+    pub fn go_to_time_f64(
+        &mut self,
+        center: Absolute,
+        max_timestamp: &BigInt,
+        time_offset: &BigInt,
+    ) {
+        let half_width = (self.curr_right.absolute(max_timestamp, time_offset)
+            - self.curr_left.absolute(max_timestamp, time_offset))
+            / 2.;
 
         self.set_viewport_to_clipped(
-            (center - half_width).relative(max_timestamp),
-            (center + half_width).relative(max_timestamp),
+            (center - half_width).relative(max_timestamp, time_offset),
+            (center + half_width).relative(max_timestamp, time_offset),
             max_timestamp,
+            time_offset,
         );
     }
 
@@ -528,12 +582,22 @@ mod tests {
 
     #[test]
     fn relative_absolute_roundtrip() {
+        // Test with zero offset
         let n = bi(1000);
+        let offset = bi(0);
         let r = Relative(0.25);
-        let abs = r.absolute(&n);
+        let abs = r.absolute(&n, &offset);
         // 0.25 * 1000 = 250.0
         assert!((abs.0 - 250.0).abs() < 1e-9);
-        let back = abs.relative(&n);
+        let back = abs.relative(&n, &offset);
+        assert!((back.0 - r.0).abs() < 1e-9);
+
+        let offset = bi(500);
+        let r = Relative(0.25);
+        let abs = r.absolute(&n, &offset);
+        // 500 + 0.25 * (1000 - 500) = 500 + 125 = 625.0
+        assert!((abs.0 - 625.0).abs() < 1e-9);
+        let back = abs.relative(&n, &offset);
         assert!((back.0 - r.0).abs() < 1e-9);
     }
 
@@ -542,22 +606,32 @@ mod tests {
         let vp = Viewport::default();
         let n = bi(1000);
         let view_w = 1000.0_f32;
+
+        let time_offset = bi(0);
         let time_abs = Absolute(250.0);
-        let x1 = vp.pixel_from_absolute_time(time_abs, view_w, &n);
-        let x2 = vp.pixel_from_time(&bi(250), view_w, &n);
+        let x1 = vp.pixel_from_absolute_time(time_abs, view_w, &n, &time_offset);
+        let x2 = vp.pixel_from_time(&bi(250), view_w, &n, &time_offset);
         assert!((x1 - 250.0).abs() < 1e-6);
         assert!((x2 - 250.0).abs() < 1e-6);
+
+        let time_offset = bi(500);
+        let time_abs = Absolute(750.0); // 250 + 500 offset
+        let x1 = vp.pixel_from_absolute_time(time_abs, view_w, &n, &time_offset);
+        let x2 = vp.pixel_from_time(&bi(250), view_w, &n, &time_offset);
+        assert!((x1 - 500.0).abs() < 1e-6);
+        assert!((x2 - 500.0).abs() < 1e-6);
     }
 
     #[test]
     fn set_viewport_min_width_enforced() {
         let mut vp = Viewport::default();
         let n = bi(1000);
+        let offset = bi(0);
         // Try to set zero-width viewport at center
         let center = Relative(0.5);
-        vp.set_viewport_to_clipped(center, center, &n);
-        // width must be at least min_width.relative(n)
-        let rel_min = vp.min_width.relative(&n).0;
+        vp.set_viewport_to_clipped(center, center, &n, &offset);
+        // width must be at least min_width.relative_with_offset(n, offset)
+        let rel_min = vp.min_width.relative(&n, &offset).0;
         let width = (vp.curr_right - vp.curr_left).0;
         assert!(
             width + f64::EPSILON >= rel_min,
@@ -586,8 +660,9 @@ mod tests {
             ..Default::default()
         };
         let n = bi(1000);
+        let offset = bi(0);
         // request a move
-        vp.set_viewport_to_clipped(Relative(0.1), Relative(0.3), &n);
+        vp.set_viewport_to_clipped(Relative(0.1), Relative(0.3), &n, &offset);
         let mut t = 0.0;
         // step in a few frames
         while vp.is_moving() && t < 1.0 {
@@ -612,8 +687,9 @@ mod tests {
 
         let old_max_timestamp = bi(122055);
         let new_max_timestamp = bi(131445);
+        let time_offset = bi(0);
 
-        let clipped = vp.clip_to(&old_max_timestamp, &new_max_timestamp);
+        let clipped = vp.clip_to(&old_max_timestamp, &new_max_timestamp, &time_offset);
 
         assert!(
             clipped.curr_left.0 < clipped.curr_right.0,
@@ -634,8 +710,9 @@ mod tests {
 
         let old_max_timestamp = bi(1000);
         let new_max_timestamp = bi(2000); // file doubled in size
+        let time_offset = bi(0);
 
-        let clipped = vp.clip_to(&old_max_timestamp, &new_max_timestamp);
+        let clipped = vp.clip_to(&old_max_timestamp, &new_max_timestamp, &time_offset);
 
         // Must not be inverted
         assert!(
@@ -670,8 +747,9 @@ mod tests {
 
         let old_max_timestamp = bi(1000);
         let new_max_timestamp = bi(500); // file shrinks
+        let time_offset = bi(0);
 
-        let clipped = vp.clip_to(&old_max_timestamp, &new_max_timestamp);
+        let clipped = vp.clip_to(&old_max_timestamp, &new_max_timestamp, &time_offset);
 
         // Must not be inverted
         assert!(

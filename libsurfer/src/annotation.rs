@@ -496,6 +496,7 @@ impl WaveData {
                     &menu_time,
                     ctx.cfg.canvas_size.x,
                     &self.safe_max_timestamp(),
+                    self.time_offset(),
                 );
                 let temp_y = menu_position.y;
                 menu_position = (ctx.to_screen)(menu_position.x, menu_position.y);
@@ -535,7 +536,13 @@ impl SystemState {
                     let difference = (&right - &left) / 2;
                     left -= &difference;
                     right += difference;
-                    waves.viewports[viewport_idx].zoom_to_range(&left, &right, &max_timestamp);
+                    let time_offset = waves.time_offset().clone();
+                    waves.viewports[viewport_idx].zoom_to_range(
+                        &left,
+                        &right,
+                        &max_timestamp,
+                        &time_offset,
+                    );
 
                     if let Some(from_wave) = from_wave
                         && let Some(to_wave) = to_wave

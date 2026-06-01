@@ -618,6 +618,14 @@ impl WaveContainer {
                 .map(|t| t.as_femtoseconds()),
         }
     }
+    #[must_use]
+    pub fn min_timestamp(&self) -> Option<BigUint> {
+        match self {
+            WaveContainer::Wellen(f) => f.min_timestamp(),
+            WaveContainer::Empty => None,
+            WaveContainer::Cxxrtl(_) => None,
+        }
+    }
 
     #[must_use]
     pub fn scope_exists(&self, scope: &ScopeRef) -> bool {

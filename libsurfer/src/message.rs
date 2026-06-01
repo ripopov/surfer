@@ -366,6 +366,7 @@ pub enum Message {
     SetHierarchyStyle(HierarchyStyle),
     SetArrowKeyBindings(ArrowKeyBindings),
     SetPrimaryMouseDragBehavior(PrimaryMouseDrag),
+    SetTimeOffsetEnabled(bool),
     // Second argument is position to insert after, None inserts after focused item,
     // or last if no focused item
     AddDivider(Option<String>, Option<VisibleItemIndex>),

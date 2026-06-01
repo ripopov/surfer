@@ -49,6 +49,7 @@ pub(crate) fn variable_analog_draw_commands(
     let translator = waves.variable_translator(&displayed_field_ref, translators);
     let viewport = &waves.viewports[viewport_idx];
     let max_timestamp = waves.safe_max_timestamp();
+    let time_offset = waves.time_offset();
 
     let signal_id = wave_container
         .signal_id(&displayed_variable.variable_ref)
@@ -108,6 +109,7 @@ pub(crate) fn variable_analog_draw_commands(
         cache,
         viewport,
         &max_timestamp,
+        time_offset,
         view_width,
         render_mode.settings,
         type_limits,
@@ -247,6 +249,7 @@ struct CommandBuilder<'a> {
     cache: &'a AnalogSignalCache,
     viewport: &'a Viewport,
     max_timestamp: &'a BigInt,
+    time_offset: &'a BigInt,
     view_width: f32,
     min_valid_pixel: f32,
     max_valid_pixel: f32,
@@ -336,17 +339,21 @@ impl<'a> CommandBuilder<'a> {
         cache: &'a AnalogSignalCache,
         viewport: &'a Viewport,
         max_timestamp: &'a BigInt,
+        time_offset: &'a BigInt,
         view_width: f32,
         analog_settings: AnalogSettings,
         type_limits: Option<NumericRange>,
     ) -> Self {
-        let min_valid_pixel = viewport.pixel_from_time(&BigInt::from(0), view_width, max_timestamp);
-        let max_valid_pixel = viewport.pixel_from_time(max_timestamp, view_width, max_timestamp);
+        let min_valid_pixel =
+            viewport.pixel_from_time(&BigInt::from(0), view_width, max_timestamp, time_offset);
+        let max_valid_pixel =
+            viewport.pixel_from_time(max_timestamp, view_width, max_timestamp, time_offset);
 
         Self {
             cache,
             viewport,
             max_timestamp,
+            time_offset,
             view_width,
             min_valid_pixel,
             max_valid_pixel,
@@ -368,15 +375,19 @@ impl<'a> CommandBuilder<'a> {
 
     fn time_at_pixel(&self, px: f64) -> u64 {
         self.viewport
-            .as_absolute_time(px, self.view_width, self.max_timestamp)
+            .as_absolute_time(px, self.view_width, self.max_timestamp, self.time_offset)
             .0
             .to_u64()
             .unwrap_or(0)
     }
 
     fn pixel_at_time(&self, time: u64) -> f32 {
-        self.viewport
-            .pixel_from_time(&BigInt::from(time), self.view_width, self.max_timestamp)
+        self.viewport.pixel_from_time(
+            &BigInt::from(time),
+            self.view_width,
+            self.max_timestamp,
+            self.time_offset,
+        )
     }
 
     fn query(&self, time: u64) -> CacheQueryResult {
