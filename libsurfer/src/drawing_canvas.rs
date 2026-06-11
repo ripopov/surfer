@@ -111,9 +111,16 @@ impl DigitalDrawingCommands {
     }
 }
 
+/// Minimum on-screen width of the clickable area of a transaction. Transactions
+/// narrower than this (e.g. zero-duration events) get their hit area expanded to
+/// this width so they can still be hovered and clicked.
+const MIN_TRANSACTION_CLICK_WIDTH: f32 = 6.0;
+
 pub struct TxDrawingCommands {
     min: Pos2,
     max: Pos2,
+    /// Zero-duration transactions (events) are drawn as event markers instead of rectangles
+    is_zero_duration: bool,
     gen_ref: TransactionStreamRef, // makes it easier to later access the actual Transaction object
 }
 
@@ -641,6 +648,7 @@ impl SystemState {
                         TxDrawingCommands {
                             min,
                             max,
+                            is_zero_duration: start_time == end_time,
                             gen_ref: TransactionStreamRef::new_gen(
                                 tx_stream_ref.stream_id,
                                 generator.id,
@@ -1286,35 +1294,68 @@ impl SystemState {
                                 }
 
                                 let transaction_rect = Rect { min, max };
-                                if (max.x - min.x) > 1.0 {
-                                    let mut response =
-                                        ui.allocate_rect(transaction_rect, Sense::click());
+                                // Skip transactions that were clamped entirely off-canvas
+                                if max.x < min.x {
+                                    continue;
+                                }
 
-                                    response = handle_transaction_tooltip(
-                                        response,
-                                        waves,
-                                        &tx_draw_command.gen_ref,
-                                        tx_ref,
-                                    );
-
-                                    if response.clicked() {
-                                        msgs.push(Message::FocusTransaction(
-                                            Some(tx_ref.clone()),
-                                            None,
-                                        ));
-                                    }
-
-                                    let tx_fill_color = if is_transaction_focused {
-                                        // Complementary color for focused transaction
-                                        Color32::from_rgb(
-                                            255 - tx_color.r(),
-                                            255 - tx_color.g(),
-                                            255 - tx_color.b(),
+                                // Expand the hit area of narrow transactions (e.g.
+                                // zero-duration events) so they remain clickable
+                                let hit_rect =
+                                    if transaction_rect.width() < MIN_TRANSACTION_CLICK_WIDTH {
+                                        Rect::from_center_size(
+                                            transaction_rect.center(),
+                                            Vec2::new(
+                                                MIN_TRANSACTION_CLICK_WIDTH,
+                                                transaction_rect.height(),
+                                            ),
                                         )
                                     } else {
-                                        tx_color
+                                        transaction_rect
                                     };
 
+                                let mut response = ui.allocate_rect(hit_rect, Sense::click());
+
+                                response = handle_transaction_tooltip(
+                                    response,
+                                    waves,
+                                    &tx_draw_command.gen_ref,
+                                    tx_ref,
+                                );
+
+                                if response.clicked() {
+                                    msgs.push(Message::FocusTransaction(
+                                        Some(tx_ref.clone()),
+                                        None,
+                                    ));
+                                }
+
+                                // A color the user assigned to the stream row takes
+                                // precedence over the event default
+                                let base_color = if tx_draw_command.is_zero_duration {
+                                    color.unwrap_or(self.user.config.theme.transaction_event)
+                                } else {
+                                    tx_color
+                                };
+
+                                let tx_fill_color = if is_transaction_focused {
+                                    // Complementary color for focused transaction
+                                    Color32::from_rgb(
+                                        255 - base_color.r(),
+                                        255 - base_color.g(),
+                                        255 - base_color.b(),
+                                    )
+                                } else {
+                                    base_color
+                                };
+
+                                if tx_draw_command.is_zero_duration {
+                                    self.draw_transaction_event_marker(
+                                        transaction_rect,
+                                        tx_fill_color,
+                                        ctx,
+                                    );
+                                } else if transaction_rect.width() > 1.0 {
                                     let stroke =
                                         Stroke::new(1.5, tx_fill_color.gamma_multiply(1.2));
                                     ctx.painter.rect(
@@ -1325,7 +1366,7 @@ impl SystemState {
                                         epaint::StrokeKind::Middle,
                                     );
                                 } else {
-                                    let tx_fill_color = tx_color.gamma_multiply(1.2);
+                                    let tx_fill_color = tx_fill_color.gamma_multiply(1.2);
 
                                     let stroke = Stroke::new(1.5, tx_fill_color);
                                     ctx.painter.rect(
@@ -1602,6 +1643,28 @@ impl SystemState {
                 stroke,
             ));
         }
+    }
+
+    /// Draws a zero-duration transaction (event) as a diamond (milestone
+    /// marker) centered on the event time.
+    fn draw_transaction_event_marker(&self, rect: Rect, color: Color32, ctx: &DrawingContext) {
+        let center = rect.center();
+        let half_height = 0.5 * rect.height();
+        let half_width = (0.6 * half_height).min(5.0);
+
+        // An outline in the background color keeps the marker visible when it
+        // overlaps same-colored transaction rectangles in stream view
+        let stroke = Stroke::new(1.0, ctx.theme.canvas_colors.background);
+        ctx.painter.add(PathShape::convex_polygon(
+            vec![
+                Pos2::new(center.x, center.y - half_height),
+                Pos2::new(center.x + half_width, center.y),
+                Pos2::new(center.x, center.y + half_height),
+                Pos2::new(center.x - half_width, center.y),
+            ],
+            color,
+            stroke,
+        ));
     }
 
     /// Draws a curvy arrow from `start` to `end`.

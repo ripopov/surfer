@@ -20,6 +20,7 @@ variable_weak = "d7827e"
 variable_parameter = "286983"
 variable_event = "56949f"
 transaction_default = "56949f"
+transaction_event = "56949f"
 waveform_opacity = 0.2
 wide_opacity = 0.0
 cursor = { color = "575279", width = 2 }
