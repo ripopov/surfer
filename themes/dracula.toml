@@ -23,6 +23,7 @@ variable_weak = "6272a4"
 variable_parameter = "ff79c6"
 variable_event = "8be9fd"
 transaction_default = "50fa7b"
+transaction_event = "8be9fd"
 
 waveform_opacity = 0.2
 wide_opacity = 0.1

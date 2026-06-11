@@ -2733,6 +2733,17 @@ snapshot_ui_with_file_and_msgs! {tx_stream_multiple_viewport_works, "examples/my
     Message::FocusTransaction(Some(TransactionRef { id: TransactionId(34) }), None),
 ]}
 
+snapshot_ui_with_file_and_msgs! {zero_duration_transactions_render_as_event_markers, "examples/ftr_events.ftr", [
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_stream(StreamId(1), "i_test.CPU_Core".to_string())),
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(StreamId(1), GeneratorId(4), "instruction.events".to_string())),
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(StreamId(2), GeneratorId(6), "bus_transaction.events".to_string())),
+]}
+
+snapshot_ui_with_file_and_msgs! {focus_zero_duration_transaction, "examples/ftr_events.ftr", [
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(StreamId(1), GeneratorId(4), "instruction.events".to_string())),
+    Message::FocusTransaction(Some(TransactionRef { id: TransactionId(4) }), None),
+]}
+
 snapshot_ui_with_file_and_msgs! {parameter_in_scopes, "examples/picorv32.vcd", [
     Message::SetSidePanelVisible(true),
     Message::ExpandParameterSection,

@@ -574,6 +574,9 @@ pub struct SurferTheme {
     #[serde(deserialize_with = "deserialize_hex_color")]
     /// Default transaction color
     pub transaction_default: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    /// Default color for zero-duration transactions (events)
+    pub transaction_event: Color32,
     // Relation arrows of transactions
     pub relation_arrow: SurferRelationArrow,
     #[serde(deserialize_with = "deserialize_hex_color")]
