@@ -28,6 +28,7 @@ use crate::time::TimeFormatter;
 use crate::tooltips::handle_transaction_tooltip;
 use crate::trace_style::{TraceStyle, TraceValue};
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
+use crate::transaction_events::EventDisplayMode;
 use crate::translation::{TranslationResultExt, TranslatorList, ValueKindExt, VariableInfoExt};
 use crate::view::{DrawConfig, DrawingContext};
 use crate::wave_container::{QueryResult, VariableRefExt};
@@ -117,12 +118,152 @@ impl DigitalDrawingCommands {
 /// this width so they can still be hovered and clicked.
 const MIN_TRANSACTION_CLICK_WIDTH: f32 = 6.0;
 
+/// Event markers whose start positions are within this many pixels aggregate
+/// into one cluster glyph with a count badge.
+const EVENT_CLUSTER_MERGE_PX: f32 = 8.0;
+
+/// Minimum on-screen duration for an event to get a duration bracket along
+/// the bottom edge in addition to its diamond marker.
+const EVENT_DURATION_BRACKET_MIN_PX: f32 = 3.0;
+
+/// How a transaction is drawn on the canvas.
+pub enum TxDrawKind {
+    /// Ordinary transaction rectangle
+    Rect,
+    /// Diamond marker at the start time (zero-duration transactions and FTR
+    /// events). Non-zero durations additionally draw a bracket along the
+    /// bottom edge of the lane.
+    EventMarker {
+        /// Event recorded outside its parent's time range: drawn hollow with
+        /// a warning tint
+        out_of_range: bool,
+    },
+    /// Aggregated marker for events that share a pixel column. Clicking it
+    /// zooms the viewport to the covered time span.
+    EventCluster {
+        count: usize,
+        /// Per-event-name counts, in first-seen order
+        names: Vec<(String, usize)>,
+        time_span: (BigInt, BigInt),
+        contains_focused: bool,
+        any_out_of_range: bool,
+    },
+}
+
 pub struct TxDrawingCommands {
     min: Pos2,
     max: Pos2,
-    /// Zero-duration transactions (events) are drawn as event markers instead of rectangles
-    is_zero_duration: bool,
+    kind: TxDrawKind,
     gen_ref: TransactionStreamRef, // makes it easier to later access the actual Transaction object
+}
+
+/// Where a generator pass places its transactions within a displayed row.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EventPlacement {
+    /// The generator's own lanes (`tx.row`), shifted down by `lane_offset`
+    /// (used by the separate-row event mode)
+    OwnLanes { lane_offset: usize },
+    /// Each event draws on the lane of its parent transaction
+    ParentLanes,
+}
+
+/// One generator drawn into a displayed row.
+struct GeneratorPass<'a> {
+    generator: &'a TxGenerator,
+    placement: EventPlacement,
+    /// Apply FTR event semantics: marker clustering, out-of-range tinting,
+    /// and orphan handling
+    event_semantics: bool,
+}
+
+/// One event considered for cluster aggregation.
+struct EventClusterMember {
+    tx_ref: TransactionRef,
+    name: Option<String>,
+    min: Pos2,
+    max: Pos2,
+    start_time: BigInt,
+    end_time: BigInt,
+    out_of_range: bool,
+    focused: bool,
+}
+
+/// Accumulates events that share a pixel column on one lane.
+struct EventClusterAccum {
+    /// First member: provides the command identity and marker anchor
+    rep: TransactionRef,
+    anchor_px: f32,
+    min: Pos2,
+    max: Pos2,
+    count: usize,
+    names: Vec<(String, usize)>,
+    time_span: (BigInt, BigInt),
+    any_out_of_range: bool,
+    contains_focused: bool,
+}
+
+impl EventClusterAccum {
+    fn new(member: EventClusterMember) -> Self {
+        let mut accum = EventClusterAccum {
+            rep: member.tx_ref.clone(),
+            anchor_px: member.min.x,
+            min: member.min,
+            max: member.max,
+            count: 0,
+            names: vec![],
+            time_span: (member.start_time.clone(), member.end_time.clone()),
+            any_out_of_range: false,
+            contains_focused: false,
+        };
+        accum.merge(member);
+        accum
+    }
+
+    fn merge(&mut self, member: EventClusterMember) {
+        self.count += 1;
+        self.max.x = self.max.x.max(member.max.x);
+        self.time_span.1 = self.time_span.1.clone().max(member.end_time);
+        self.any_out_of_range |= member.out_of_range;
+        self.contains_focused |= member.focused;
+        let name = member.name.unwrap_or_default();
+        if let Some(entry) = self.names.iter_mut().find(|(n, _)| *n == name) {
+            entry.1 += 1;
+        } else {
+            self.names.push((name, 1));
+        }
+    }
+
+    /// Emits a single marker or a cluster command for the accumulated events.
+    fn emit(
+        self,
+        gen_ref: &TransactionStreamRef,
+        commands: &mut HashMap<TransactionRef, TxDrawingCommands>,
+        displayed_transactions: &mut Vec<TransactionRef>,
+    ) {
+        let kind = if self.count == 1 {
+            TxDrawKind::EventMarker {
+                out_of_range: self.any_out_of_range,
+            }
+        } else {
+            TxDrawKind::EventCluster {
+                count: self.count,
+                names: self.names,
+                time_span: self.time_span,
+                contains_focused: self.contains_focused,
+                any_out_of_range: self.any_out_of_range,
+            }
+        };
+        displayed_transactions.push(self.rep.clone());
+        commands.insert(
+            self.rep,
+            TxDrawingCommands {
+                min: self.min,
+                max: self.max,
+                kind,
+                gen_ref: gen_ref.clone(),
+            },
+        );
+    }
 }
 
 pub(crate) struct VariableDrawCommands {
@@ -520,13 +661,23 @@ impl SystemState {
         msgs: &mut Vec<Message>,
         viewport_idx: usize,
     ) -> Option<CachedDrawData> {
-        let mut draw_commands = HashMap::new();
+        let mut draw_commands: HashMap<
+            TransactionStreamRef,
+            HashMap<TransactionRef, TxDrawingCommands>,
+        > = HashMap::new();
         let mut stream_to_displayed_txs = HashMap::new();
         let mut inc_relation_tx_ids = vec![];
         let mut out_relation_tx_ids = vec![];
 
         let (focused_tx_ref, old_focused_tx) = &waves.focused_transaction;
         let mut new_focused_tx: Option<&Transaction> = None;
+        // The focused event was drawn on its parent's lane in some row, so
+        // the parent_of relation arrow would be noise
+        let mut focused_event_overlaid = false;
+
+        let events_enabled = self.user.config.behavior.ftr_events_enabled();
+        let container = waves.inner.as_transactions()?;
+        let event_index = container.event_index();
 
         let viewport = waves.viewports[viewport_idx];
         let num_timestamps = waves.safe_num_timestamps();
@@ -553,40 +704,72 @@ impl SystemState {
 
         for displayed_stream in displayed_streams {
             let tx_stream_ref = &displayed_stream.transaction_stream_ref;
-
-            let mut generators: Vec<&TxGenerator> = vec![];
             let mut displayed_transactions = vec![];
+            let mut row_commands: HashMap<TransactionRef, TxDrawingCommands> = HashMap::new();
 
-            if tx_stream_ref.is_stream() {
-                let stream = waves
-                    .inner
-                    .as_transactions()
-                    .unwrap()
-                    .get_stream(tx_stream_ref.stream_id)
-                    .unwrap();
-
-                for gen_id in &stream.generators {
-                    generators.push(
-                        waves
-                            .inner
-                            .as_transactions()
-                            .unwrap()
-                            .get_generator(*gen_id)
-                            .unwrap(),
-                    );
+            // Plan the generator passes for this row: every generator draws
+            // either on its own lanes or overlaid onto parent lanes
+            let mut passes: Vec<GeneratorPass> = vec![];
+            if let Some(gen_id) = tx_stream_ref.gen_id {
+                let generator = container.get_generator(gen_id)?;
+                passes.push(GeneratorPass {
+                    generator,
+                    placement: EventPlacement::OwnLanes { lane_offset: 0 },
+                    event_semantics: events_enabled
+                        && event_index.is_conforming_events_generator(gen_id),
+                });
+                if events_enabled
+                    && let Some(events_gen_id) = event_index.conforming_events_generator_of(gen_id)
+                    && let Some(events_generator) = container.get_generator(events_gen_id)
+                {
+                    match displayed_stream.event_display_mode {
+                        EventDisplayMode::Overlay => passes.push(GeneratorPass {
+                            generator: events_generator,
+                            placement: EventPlacement::ParentLanes,
+                            event_semantics: true,
+                        }),
+                        EventDisplayMode::SeparateRow => passes.push(GeneratorPass {
+                            generator: events_generator,
+                            placement: EventPlacement::OwnLanes {
+                                lane_offset: event_index.lane_count(gen_id),
+                            },
+                            event_semantics: true,
+                        }),
+                        EventDisplayMode::Hidden => {}
+                    }
                 }
             } else {
-                generators.push(
-                    waves
-                        .inner
-                        .as_transactions()
-                        .unwrap()
-                        .get_generator(tx_stream_ref.gen_id.unwrap())
-                        .unwrap(),
-                );
+                let stream = container.get_stream(tx_stream_ref.stream_id)?;
+                for gen_id in &stream.generators {
+                    let generator = container.get_generator(*gen_id)?;
+                    if events_enabled && event_index.is_conforming_events_generator(*gen_id) {
+                        // In whole-stream rows, events always overlay their
+                        // parent's lanes instead of occupying generator lanes
+                        if displayed_stream.event_display_mode != EventDisplayMode::Hidden {
+                            passes.push(GeneratorPass {
+                                generator,
+                                placement: EventPlacement::ParentLanes,
+                                event_semantics: true,
+                            });
+                        }
+                    } else {
+                        passes.push(GeneratorPass {
+                            generator,
+                            placement: EventPlacement::OwnLanes { lane_offset: 0 },
+                            event_semantics: false,
+                        });
+                    }
+                }
             }
 
-            for generator in generators {
+            for pass in passes {
+                let generator = pass.generator;
+                let gen_ref = TransactionStreamRef::new_gen(
+                    generator.stream_id,
+                    generator.id,
+                    generator.name.clone(),
+                );
+
                 // find first visible transaction
                 let first_visible_transaction_index =
                     match generator.transactions.binary_search_by_key(
@@ -602,6 +785,8 @@ impl SystemState {
                     .skip(first_visible_transaction_index);
 
                 let mut last_px = f32::NAN;
+                // Per-lane cluster accumulators for event passes
+                let mut clusters: HashMap<usize, EventClusterAccum> = HashMap::new();
 
                 for tx in transactions {
                     let start_time = tx.get_start_time();
@@ -632,38 +817,123 @@ impl SystemState {
                         &num_timestamps,
                     );
 
-                    // skip transactions that are rendered completely in the previous pixel
-                    if (min_px == max_px) && (min_px == last_px) {
-                        last_px = max_px;
+                    let tx_ref = TransactionRef { id: curr_tx_id };
+                    let event_info = pass
+                        .event_semantics
+                        .then(|| container.event_info(curr_tx_id))
+                        .flatten();
+                    if pass.event_semantics
+                        && pass.placement == EventPlacement::ParentLanes
+                        && event_info.is_none()
+                    {
                         continue;
                     }
-                    last_px = max_px;
 
-                    displayed_transactions.push(TransactionRef { id: curr_tx_id });
-                    let min = Pos2::new(min_px, cfg.line_height * tx.row as f32 + 4.0);
-                    let max = Pos2::new(max_px, cfg.line_height * (tx.row + 1) as f32 - 4.0);
+                    let lane = match pass.placement {
+                        EventPlacement::OwnLanes { lane_offset } => tx.row + lane_offset,
+                        // Overlay passes only reach conforming events, which
+                        // have a resolved parent lane.
+                        EventPlacement::ParentLanes => event_info
+                            .and_then(|info| {
+                                let (gen_id, idx) = event_index.lookup_tx(info.parent_tx)?;
+                                Some(container.get_generator(gen_id)?.transactions.get(idx)?.row)
+                            })
+                            .unwrap_or(0),
+                    };
+                    let lane_min_y = cfg.line_height * lane as f32 + 4.0;
+                    let lane_max_y = cfg.line_height * (lane + 1) as f32 - 4.0;
 
-                    let tx_ref = TransactionRef { id: curr_tx_id };
-                    draw_commands.insert(
-                        tx_ref,
-                        TxDrawingCommands {
-                            min,
-                            max,
-                            is_zero_duration: start_time == end_time,
-                            gen_ref: TransactionStreamRef::new_gen(
-                                tx_stream_ref.stream_id,
-                                generator.id,
-                                generator.name.clone(),
-                            ),
-                        },
-                    );
+                    if pass.event_semantics && event_info.is_some() {
+                        let is_focused = focused_tx_ref
+                            .as_ref()
+                            .is_some_and(|focused| focused.id == curr_tx_id);
+                        if is_focused && pass.placement == EventPlacement::ParentLanes {
+                            focused_event_overlaid = true;
+                        }
+                        let member = EventClusterMember {
+                            tx_ref,
+                            name: crate::transaction_events::event_name(tx),
+                            min: Pos2::new(min_px, lane_min_y),
+                            max: Pos2::new(max_px, lane_max_y),
+                            start_time: start_time.to_bigint().unwrap(),
+                            end_time: end_time.to_bigint().unwrap(),
+                            out_of_range: event_info.is_some_and(|info| info.out_of_range),
+                            focused: is_focused,
+                        };
+                        match clusters.entry(lane) {
+                            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                                if min_px - entry.get().anchor_px <= EVENT_CLUSTER_MERGE_PX {
+                                    entry.get_mut().merge(member);
+                                } else {
+                                    let full = entry.insert(EventClusterAccum::new(member));
+                                    full.emit(
+                                        &gen_ref,
+                                        &mut row_commands,
+                                        &mut displayed_transactions,
+                                    );
+                                }
+                            }
+                            std::collections::hash_map::Entry::Vacant(entry) => {
+                                entry.insert(EventClusterAccum::new(member));
+                            }
+                        }
+                    } else {
+                        // skip transactions that are rendered completely in the previous pixel
+                        if (min_px == max_px) && (min_px == last_px) {
+                            last_px = max_px;
+                            continue;
+                        }
+                        last_px = max_px;
+
+                        displayed_transactions.push(tx_ref.clone());
+                        row_commands.insert(
+                            tx_ref,
+                            TxDrawingCommands {
+                                min: Pos2::new(min_px, lane_min_y),
+                                max: Pos2::new(max_px, lane_max_y),
+                                kind: if start_time == end_time {
+                                    TxDrawKind::EventMarker {
+                                        out_of_range: false,
+                                    }
+                                } else {
+                                    TxDrawKind::Rect
+                                },
+                                gen_ref: gen_ref.clone(),
+                            },
+                        );
+                    }
+                }
+
+                for (_, accum) in clusters {
+                    accum.emit(&gen_ref, &mut row_commands, &mut displayed_transactions);
                 }
             }
+
+            draw_commands.insert(tx_stream_ref.clone(), row_commands);
             stream_to_displayed_txs.insert(tx_stream_ref.clone(), displayed_transactions);
         }
 
+        let focused_event_info = events_enabled
+            .then(|| {
+                focused_tx_ref
+                    .as_ref()
+                    .and_then(|focused| container.event_info(focused.id))
+            })
+            .flatten();
+        let parent_highlight_tx =
+            focused_event_info.map(|info| TransactionRef { id: info.parent_tx });
+
         if let Some(focused_tx) = new_focused_tx {
             for rel in &focused_tx.inc_relations {
+                // The parent_of link of an overlaid event reads as one unit
+                // with its parent: the parent gets a co-highlight instead of
+                // a relation arrow
+                let is_overlaid_parent_link = focused_event_overlaid
+                    && rel.name == crate::transaction_events::EVENT_PARENT_RELATION
+                    && focused_event_info.is_some_and(|info| info.parent_tx == rel.source_tx_id);
+                if is_overlaid_parent_link {
+                    continue;
+                }
                 inc_relation_tx_ids.push(TransactionRef {
                     id: rel.source_tx_id,
                 });
@@ -684,6 +954,7 @@ impl SystemState {
             stream_to_displayed_txs,
             inc_relation_tx_ids,
             out_relation_tx_ids,
+            parent_highlight_tx,
         }))
     }
 
@@ -1228,6 +1499,7 @@ impl SystemState {
         let stream_to_displayed_txs = &draw_data.stream_to_displayed_txs;
         let inc_relation_tx_ids = &draw_data.inc_relation_tx_ids;
         let out_relation_tx_ids = &draw_data.out_relation_tx_ids;
+        let parent_highlight_tx = &draw_data.parent_highlight_tx;
 
         let mut inc_relation_starts = vec![];
         let mut out_relation_starts = vec![];
@@ -1267,8 +1539,11 @@ impl SystemState {
                     if let Some(tx_refs) =
                         stream_to_displayed_txs.get(&stream.transaction_stream_ref)
                     {
+                        let row_commands = draw_commands.get(&stream.transaction_stream_ref);
                         for tx_ref in tx_refs {
-                            if let Some(tx_draw_command) = draw_commands.get(tx_ref) {
+                            if let Some(tx_draw_command) =
+                                row_commands.and_then(|commands| commands.get(tx_ref))
+                            {
                                 let mut min = tx_draw_command.min;
                                 let mut max = tx_draw_command.max;
 
@@ -1284,7 +1559,14 @@ impl SystemState {
                                     .focused_transaction
                                     .0
                                     .as_ref()
-                                    .is_some_and(|t| t == tx_ref);
+                                    .is_some_and(|t| t == tx_ref)
+                                    || matches!(
+                                        &tx_draw_command.kind,
+                                        TxDrawKind::EventCluster {
+                                            contains_focused: true,
+                                            ..
+                                        }
+                                    );
 
                                 if inc_relation_tx_ids.contains(tx_ref) {
                                     inc_relation_starts.push(start);
@@ -1315,25 +1597,13 @@ impl SystemState {
                                         transaction_rect
                                     };
 
-                                let mut response = ui.allocate_rect(hit_rect, Sense::click());
-
-                                response = handle_transaction_tooltip(
-                                    response,
-                                    waves,
-                                    &tx_draw_command.gen_ref,
-                                    tx_ref,
-                                );
-
-                                if response.clicked() {
-                                    msgs.push(Message::FocusTransaction(
-                                        Some(tx_ref.clone()),
-                                        None,
-                                    ));
-                                }
+                                let response = ui.allocate_rect(hit_rect, Sense::click());
 
                                 // A color the user assigned to the stream row takes
                                 // precedence over the event default
-                                let base_color = if tx_draw_command.is_zero_duration {
+                                let is_event_kind =
+                                    !matches!(&tx_draw_command.kind, TxDrawKind::Rect);
+                                let base_color = if is_event_kind {
                                     color.unwrap_or(self.user.config.theme.transaction_event)
                                 } else {
                                     tx_color
@@ -1350,33 +1620,155 @@ impl SystemState {
                                     base_color
                                 };
 
-                                if tx_draw_command.is_zero_duration {
-                                    self.draw_transaction_event_marker(
-                                        transaction_rect,
-                                        tx_fill_color,
-                                        ctx,
-                                    );
-                                } else if transaction_rect.width() > 1.0 {
-                                    let stroke =
-                                        Stroke::new(1.5, tx_fill_color.gamma_multiply(1.2));
-                                    ctx.painter.rect(
-                                        transaction_rect,
-                                        CornerRadius::same(5),
-                                        tx_fill_color,
-                                        stroke,
-                                        epaint::StrokeKind::Middle,
-                                    );
-                                } else {
-                                    let tx_fill_color = tx_fill_color.gamma_multiply(1.2);
+                                match &tx_draw_command.kind {
+                                    TxDrawKind::Rect => {
+                                        let response = handle_transaction_tooltip(
+                                            response,
+                                            waves,
+                                            &tx_draw_command.gen_ref,
+                                            tx_ref,
+                                        );
+                                        if response.clicked() {
+                                            msgs.push(Message::FocusTransaction(
+                                                Some(tx_ref.clone()),
+                                                None,
+                                            ));
+                                        }
 
-                                    let stroke = Stroke::new(1.5, tx_fill_color);
-                                    ctx.painter.rect(
-                                        transaction_rect,
-                                        CornerRadius::ZERO,
-                                        tx_fill_color,
-                                        stroke,
-                                        epaint::StrokeKind::Middle,
-                                    );
+                                        if transaction_rect.width() > 1.0 {
+                                            let stroke =
+                                                Stroke::new(1.5, tx_fill_color.gamma_multiply(1.2));
+                                            ctx.painter.rect(
+                                                transaction_rect,
+                                                CornerRadius::same(5),
+                                                tx_fill_color,
+                                                stroke,
+                                                epaint::StrokeKind::Middle,
+                                            );
+                                        } else {
+                                            let tx_fill_color = tx_fill_color.gamma_multiply(1.2);
+
+                                            let stroke = Stroke::new(1.5, tx_fill_color);
+                                            ctx.painter.rect(
+                                                transaction_rect,
+                                                CornerRadius::ZERO,
+                                                tx_fill_color,
+                                                stroke,
+                                                epaint::StrokeKind::Middle,
+                                            );
+                                        }
+
+                                        // Co-highlight the parent of a focused
+                                        // event so the pair reads as one unit
+                                        if parent_highlight_tx.as_ref() == Some(tx_ref) {
+                                            ctx.painter.rect_stroke(
+                                                transaction_rect.expand(1.5),
+                                                CornerRadius::same(5),
+                                                Stroke::new(
+                                                    2.0,
+                                                    self.user
+                                                        .config
+                                                        .theme
+                                                        .transaction_parent_highlight,
+                                                ),
+                                                epaint::StrokeKind::Outside,
+                                            );
+                                        }
+                                    }
+                                    TxDrawKind::EventMarker { out_of_range } => {
+                                        let response = handle_transaction_tooltip(
+                                            response,
+                                            waves,
+                                            &tx_draw_command.gen_ref,
+                                            tx_ref,
+                                        );
+                                        if response.clicked() {
+                                            msgs.push(Message::FocusTransaction(
+                                                Some(tx_ref.clone()),
+                                                None,
+                                            ));
+                                        }
+
+                                        let marker_color = if *out_of_range
+                                            && !is_transaction_focused
+                                        {
+                                            self.user.config.theme.transaction_event_out_of_range
+                                        } else {
+                                            tx_fill_color
+                                        };
+
+                                        // Bracket along the bottom edge for
+                                        // events with visible duration
+                                        if transaction_rect.width() > EVENT_DURATION_BRACKET_MIN_PX
+                                        {
+                                            ctx.painter.hline(
+                                                transaction_rect.min.x..=transaction_rect.max.x,
+                                                transaction_rect.max.y,
+                                                Stroke::new(2.0, marker_color),
+                                            );
+                                        }
+
+                                        let marker_rect = Rect {
+                                            min: transaction_rect.min,
+                                            max: Pos2::new(
+                                                transaction_rect.min.x,
+                                                transaction_rect.max.y,
+                                            ),
+                                        };
+                                        self.draw_transaction_event_marker(
+                                            marker_rect,
+                                            marker_color,
+                                            *out_of_range,
+                                            ctx,
+                                        );
+                                    }
+                                    TxDrawKind::EventCluster {
+                                        count,
+                                        names,
+                                        time_span,
+                                        any_out_of_range,
+                                        ..
+                                    } => {
+                                        let time_scale = waves
+                                            .inner
+                                            .as_transactions()
+                                            .map(|t| t.inner.time_scale.to_string())
+                                            .unwrap_or_default();
+                                        let response =
+                                            crate::tooltips::handle_event_cluster_tooltip(
+                                                response,
+                                                *count,
+                                                names,
+                                                time_span,
+                                                &time_scale,
+                                            );
+                                        if response.clicked() {
+                                            // Zoom in until the cluster
+                                            // resolves into individual markers
+                                            let (start, end) = time_span;
+                                            let span = end - start;
+                                            let padding = span.clone().max(BigInt::from(1));
+                                            msgs.push(Message::ZoomToRange {
+                                                start: start - &padding,
+                                                end: end + &padding,
+                                                viewport_idx,
+                                            });
+                                        }
+
+                                        let marker_color = if *any_out_of_range
+                                            && !is_transaction_focused
+                                        {
+                                            self.user.config.theme.transaction_event_out_of_range
+                                        } else {
+                                            tx_fill_color
+                                        };
+                                        self.draw_transaction_event_cluster(
+                                            transaction_rect,
+                                            marker_color,
+                                            *count,
+                                            ctx,
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -1661,14 +2053,54 @@ impl SystemState {
     }
 
     /// Draws a zero-duration transaction (event) as a diamond (milestone
-    /// marker) centered on the event time.
-    fn draw_transaction_event_marker(&self, rect: Rect, color: Color32, ctx: &DrawingContext) {
+    /// marker) centered on the event time. Out-of-range events draw hollow:
+    /// background fill with a warning-tinted outline.
+    fn draw_transaction_event_marker(
+        &self,
+        rect: Rect,
+        color: Color32,
+        hollow: bool,
+        ctx: &DrawingContext,
+    ) {
         let center = rect.center();
         let half_height = 0.5 * rect.height();
         let half_width = (0.6 * half_height).min(5.0);
 
-        // An outline in the background color keeps the marker visible when it
-        // overlaps same-colored transaction rectangles in stream view
+        let points = vec![
+            Pos2::new(center.x, center.y - half_height),
+            Pos2::new(center.x + half_width, center.y),
+            Pos2::new(center.x, center.y + half_height),
+            Pos2::new(center.x - half_width, center.y),
+        ];
+
+        if hollow {
+            ctx.painter.add(PathShape::convex_polygon(
+                points,
+                ctx.theme.canvas_colors.background,
+                Stroke::new(1.5, color),
+            ));
+        } else {
+            // An outline in the background color keeps the marker visible when
+            // it overlaps same-colored transaction rectangles in stream view
+            let stroke = Stroke::new(1.0, ctx.theme.canvas_colors.background);
+            ctx.painter
+                .add(PathShape::convex_polygon(points, color, stroke));
+        }
+    }
+
+    /// Draws an aggregated event cluster: a slightly larger diamond at the
+    /// cluster's first event plus a count badge.
+    fn draw_transaction_event_cluster(
+        &self,
+        rect: Rect,
+        color: Color32,
+        count: usize,
+        ctx: &DrawingContext,
+    ) {
+        let center = Pos2::new(rect.min.x, rect.center().y);
+        let half_height = 0.5 * rect.height();
+        let half_width = (0.8 * half_height).min(7.0);
+
         let stroke = Stroke::new(1.0, ctx.theme.canvas_colors.background);
         ctx.painter.add(PathShape::convex_polygon(
             vec![
@@ -1680,6 +2112,16 @@ impl SystemState {
             color,
             stroke,
         ));
+
+        // The count badge sits inside the diamond so neighboring clusters
+        // cannot overdraw it
+        ctx.painter.text(
+            center,
+            Align2::CENTER_CENTER,
+            count.to_string(),
+            FontId::proportional(0.7 * ctx.cfg.text_size),
+            ctx.theme.transaction_event_cluster,
+        );
     }
 
     /// Draws a curvy arrow from `start` to `end`.

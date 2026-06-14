@@ -21,6 +21,7 @@ use crate::item_drawing_info::ItemDrawingInfo;
 use crate::transaction_container::{
     StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
 };
+use crate::transaction_events::EventDisplayMode;
 use crate::transactions::calculate_rows_of_stream;
 use crate::translation::{DynTranslator, TranslatorList, VariableInfoExt};
 use crate::variable_name_type::VariableNameType;
@@ -320,7 +321,7 @@ impl WaveData {
                 .is_some_and(|stream| !stream.transactions_loaded);
             if needs_load {
                 info!("(Stream) Loading transactions into memory!");
-                match transactions.inner.load_stream_into_memory(stream_id) {
+                match transactions.load_stream(stream_id) {
                     Ok(()) => info!("(Stream {stream_id}) Finished loading transactions!"),
                     Err(e) => {
                         warn!("Failed to load transactions for stream {stream_id}: {e:?}")
@@ -733,10 +734,7 @@ impl WaveData {
         };
         if is_empty {
             info!("(Generator {gen_id}) Loading transactions into memory!");
-            match transactions
-                .inner
-                .load_stream_into_memory(gen_ref.stream_id)
-            {
+            match transactions.load_stream(gen_ref.stream_id) {
                 Ok(()) => info!("(Generator {gen_id}) Finished loading transactions!"),
                 Err(_) => return,
             }
@@ -755,12 +753,16 @@ impl WaveData {
             background_color: None,
             manual_name: None,
             rows: last_times_on_row.len(),
+            event_display_mode: EventDisplayMode::default(),
         });
 
         self.insert_item(new_gen, None, true);
     }
 
-    pub fn add_stream(&mut self, stream_ref: TransactionStreamRef) {
+    /// Adds a whole stream as one displayed row. With `fold_events`,
+    /// conforming `.events` generators do not get lanes of their own: their
+    /// events render overlaid on the parent generator's lanes instead.
+    pub fn add_stream(&mut self, stream_ref: TransactionStreamRef, fold_events: bool) {
         if self
             .inner
             .as_transactions_mut()
@@ -775,8 +777,7 @@ impl WaveData {
                 .inner
                 .as_transactions_mut()
                 .unwrap()
-                .inner
-                .load_stream_into_memory(stream_ref.stream_id)
+                .load_stream(stream_ref.stream_id)
             {
                 Ok(()) => info!(
                     "(Stream {}) Finished loading transactions!",
@@ -786,21 +787,19 @@ impl WaveData {
             }
         }
 
-        let stream = self
-            .inner
-            .as_transactions()
-            .unwrap()
-            .get_stream(stream_ref.stream_id)
-            .unwrap();
+        let transactions = self.inner.as_transactions().unwrap();
+        let stream = transactions.get_stream(stream_ref.stream_id).unwrap();
         let mut last_times_on_row = vec![(BigUint::ZERO, BigUint::ZERO)];
 
         for gen_id in &stream.generators {
-            let generator = self
-                .inner
-                .as_transactions()
-                .unwrap()
-                .get_generator(*gen_id)
-                .unwrap();
+            if fold_events
+                && transactions
+                    .event_index()
+                    .is_conforming_events_generator(*gen_id)
+            {
+                continue;
+            }
+            let generator = transactions.get_generator(*gen_id).unwrap();
             calculate_rows_of_stream(&generator.transactions, &mut last_times_on_row);
         }
 
@@ -811,12 +810,13 @@ impl WaveData {
             background_color: None,
             manual_name: None,
             rows: last_times_on_row.len(),
+            event_display_mode: EventDisplayMode::default(),
         });
 
         self.insert_item(new_stream, None, true);
     }
 
-    pub fn add_all_streams(&mut self) {
+    pub fn add_all_streams(&mut self, fold_events: bool) {
         let mut streams: Vec<(StreamId, String)> = vec![];
         for stream in self.inner.as_transactions().unwrap().get_streams() {
             streams.push((stream.id, stream.name.clone()));
@@ -826,8 +826,46 @@ impl WaveData {
             .into_iter()
             .sorted_by(|a, b| numeric_sort::cmp(&a.1, &b.1))
         {
-            self.add_stream(TransactionStreamRef::new_stream(id, name));
+            self.add_stream(TransactionStreamRef::new_stream(id, name), fold_events);
         }
+    }
+
+    /// Sets the FTR event presentation mode of a displayed stream row and
+    /// recomputes its lane count (separate-row mode reserves extra lanes
+    /// below the parent's lanes).
+    pub fn set_event_display_mode(
+        &mut self,
+        vidx: VisibleItemIndex,
+        mode: EventDisplayMode,
+    ) -> Option<()> {
+        let item_ref = self.items_tree.get_visible(vidx)?.item_ref;
+        let stream_ref = match self.displayed_items.get(&item_ref)? {
+            DisplayedItem::Stream(stream) => stream.transaction_stream_ref.clone(),
+            _ => return None,
+        };
+
+        let new_rows = stream_ref.gen_id.map(|gen_id| {
+            let index = self.inner.as_transactions().map(|t| t.event_index());
+            let parent_lanes = index.map_or(1, |index| index.lane_count(gen_id));
+            match (
+                mode,
+                index.and_then(|index| index.conforming_events_generator_of(gen_id)),
+            ) {
+                (EventDisplayMode::SeparateRow, Some(events_gen)) => {
+                    parent_lanes + index.map_or(1, |index| index.lane_count(events_gen))
+                }
+                _ => parent_lanes,
+            }
+        });
+
+        if let Some(DisplayedItem::Stream(stream)) = self.displayed_items.get_mut(&item_ref) {
+            stream.event_display_mode = mode;
+            // Whole-stream rows keep their lane count; events always overlay
+            if let Some(rows) = new_rows {
+                stream.rows = rows;
+            }
+        }
+        Some(())
     }
 
     /// Return an insert position based on item

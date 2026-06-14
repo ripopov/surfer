@@ -1,3 +1,4 @@
+pub mod event_table;
 pub mod multi_signal_change_list;
 pub mod multi_signal_index;
 pub mod signal_analysis;
@@ -6,6 +7,7 @@ mod signal_formatting;
 pub mod transaction_trace;
 pub mod virtual_model;
 
+pub use event_table::EventTableModel;
 pub use multi_signal_change_list::{MultiSignalChangeListModel, decode_signal_column_key};
 pub use multi_signal_index::{
     MergedIndex, SignalRuns, TransitionAtTime, dedup_multi_signal_entries,

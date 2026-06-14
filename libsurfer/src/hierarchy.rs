@@ -249,7 +249,11 @@ impl SystemState {
                         .show(ui, |ui| {
                             ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
 
-                            draw_transaction_variable_list(msgs, waves, ui, s);
+                            let options = crate::transactions::TransactionListOptions {
+                                events_enabled: self.user.config.behavior.ftr_events_enabled(),
+                                show_raw_event_generators: self.user.show_raw_event_generators,
+                            };
+                            draw_transaction_variable_list(msgs, waves, ui, s, &options);
                         });
                 }
             }

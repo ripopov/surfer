@@ -30,6 +30,7 @@ use crate::trace_style::TraceStyle;
 use crate::transaction_container::{
     StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
 };
+use crate::transaction_events::EventDisplayMode;
 use crate::translation::DynTranslator;
 use crate::viewport::ViewportStrategy;
 use crate::wave_data::ScopeType;
@@ -396,6 +397,19 @@ pub enum Message {
     MoveTransaction {
         next: bool,
     },
+    /// Move focus between FTR events: from a focused parent to its first/last
+    /// event, or from a focused event to a neighboring event of the same
+    /// parent (wrapping into neighboring parents' events at the ends).
+    MoveEvent {
+        next: bool,
+    },
+    /// Set how FTR events are presented on a displayed stream/generator row.
+    SetEventDisplayMode {
+        vidx: VisibleItemIndex,
+        mode: EventDisplayMode,
+    },
+    /// Show or hide raw `.events` generators in the hierarchy sidebar.
+    SetShowRawEventGenerators(bool),
     VariableValueToClipbord(MessageTarget<VisibleItemIndex>),
     VariableNameToClipboard(MessageTarget<VisibleItemIndex>),
     VariableFullNameToClipboard(MessageTarget<VisibleItemIndex>),
@@ -486,6 +500,11 @@ pub enum Message {
     },
     /// Open a transaction trace table for a specific generator
     OpenTransactionTable {
+        generator: TransactionStreamRef,
+    },
+    /// Open an FTR event table for a parent generator that has a matching
+    /// `.events` generator
+    OpenEventTable {
         generator: TransactionStreamRef,
     },
     /// Remove a table tile from the tile tree

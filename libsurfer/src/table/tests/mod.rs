@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 mod analysis_and_filter_draft;
+mod event_table;
 mod model_and_cache;
 mod multi_signal;
 mod scroll_columns;

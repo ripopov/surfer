@@ -100,6 +100,8 @@ keep_during_reload = true
 file_history_size = 10
 arrow_key_bindings = "Edge"
 primary_button_drag_behavior= "Cursor"
+# FTR transaction event convention support (event overlays, badges, tables)
+ftr_events_enabled = true
 
 [wcp]
 autostart = false

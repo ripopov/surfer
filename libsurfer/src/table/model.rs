@@ -1,7 +1,7 @@
 use super::cache::TableCacheError;
 use crate::config::SurferTheme;
 use crate::table::sources::{
-    MultiSignalChangeListModel, SignalAnalysisResultsModel, SignalChangeListModel,
+    EventTableModel, MultiSignalChangeListModel, SignalAnalysisResultsModel, SignalChangeListModel,
     TransactionTraceModelWithData, VirtualTableModel, infer_sampling_mode,
 };
 use crate::time::{TimeFormat, TimeUnit};
@@ -36,6 +36,12 @@ pub enum TableModelSpec {
     /// Transaction trace table for a specific generator.
     /// Each generator has its own attribute schema, so tables are per-generator.
     TransactionTrace {
+        generator: TransactionStreamRef,
+    },
+    /// FTR event table for a parent generator with a matching `.events`
+    /// generator. Rows are the events; the parent transaction and the
+    /// promoted `name` attribute are first-class columns.
+    EventTable {
         generator: TransactionStreamRef,
     },
     /// Source-level search that produces a derived table model from waveform data.
@@ -104,6 +110,8 @@ impl TableModelSpec {
                 TransactionTraceModelWithData::new(generator.clone(), ctx)
                     .map(|model| Arc::new(model) as Arc<dyn TableModel>)
             }
+            Self::EventTable { generator } => EventTableModel::new(generator.clone(), ctx)
+                .map(|model| Arc::new(model) as Arc<dyn TableModel>),
             Self::MultiSignalChangeList { variables } => {
                 MultiSignalChangeListModel::new(variables.clone(), ctx)
                     .map(|model| Arc::new(model) as Arc<dyn TableModel>)
@@ -147,6 +155,16 @@ impl TableModelSpec {
                 // Default sort: ascending by start time
                 sort: vec![TableSortSpec {
                     key: TableColumnKey::Str("start".to_string()),
+                    direction: TableSortDirection::Ascending,
+                }],
+                selection_mode: TableSelectionMode::Single,
+                activate_on_select: true,
+                ..Default::default()
+            },
+            Self::EventTable { generator } => TableViewConfig {
+                title: format!("Events: {}", generator.name),
+                sort: vec![TableSortSpec {
+                    key: TableColumnKey::Str("time".to_string()),
                     direction: TableSortDirection::Ascending,
                 }],
                 selection_mode: TableSelectionMode::Single,
@@ -231,6 +249,8 @@ pub struct TableModelContext<'a> {
     pub time_format: TimeFormat,
     pub theme: &'a SurferTheme,
     pub cache_generation: u64,
+    /// FTR transaction event convention support is enabled
+    pub ftr_events_enabled: bool,
 }
 
 /// Serializable view configuration.
