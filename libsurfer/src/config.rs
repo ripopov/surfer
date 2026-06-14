@@ -391,6 +391,15 @@ pub struct SurferBehavior {
     /// Whether dragging with primary mouse button will measure time or move cursor
     /// (press shift for the other)
     primary_button_drag_behavior: PrimaryMouseDrag,
+    /// Enable the FTR transaction event convention (event overlays, badges,
+    /// event tables). Escape hatch for traces that accidentally match the
+    /// `.events` naming convention.
+    #[serde(default = "default_true")]
+    ftr_events_enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl SurferBehavior {
@@ -407,6 +416,11 @@ impl SurferBehavior {
     #[must_use]
     pub fn arrow_key_bindings(&self) -> ArrowKeyBindings {
         self.arrow_key_bindings
+    }
+
+    #[must_use]
+    pub fn ftr_events_enabled(&self) -> bool {
+        self.ftr_events_enabled
     }
 }
 
@@ -566,6 +580,15 @@ pub struct SurferTheme {
     #[serde(deserialize_with = "deserialize_hex_color")]
     /// Default color for zero-duration transactions (events)
     pub transaction_event: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    /// Warning tint for events recorded outside their parent's time range
+    pub transaction_event_out_of_range: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    /// Count badge color on aggregated event cluster markers
+    pub transaction_event_cluster: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    /// Outline used to co-highlight the parent transaction of a focused event
+    pub transaction_parent_highlight: Color32,
     // Relation arrows of transactions
     pub relation_arrow: SurferRelationArrow,
     #[serde(deserialize_with = "deserialize_hex_color")]

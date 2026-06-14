@@ -153,6 +153,10 @@ pub struct UserState {
     pub(crate) tile_tree: SurferTileTree,
     #[serde(default)]
     pub(crate) table_tiles: HashMap<TableTileId, TableTileState>,
+    /// Show raw `.events` generators in the hierarchy sidebar instead of
+    /// folding them into their parent generator's presentation
+    #[serde(default)]
+    pub(crate) show_raw_event_generators: bool,
 
     // Path of last saved-to state file
     // Do not serialize as this causes a few issues and doesn't help:
@@ -254,6 +258,7 @@ impl Default for UserState {
             toolbar_group_rows: Vec::new(),
             tile_tree: SurferTileTree::default(),
             table_tiles: HashMap::new(),
+            show_raw_event_generators: false,
         }
     }
 }

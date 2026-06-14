@@ -14,6 +14,7 @@ use crate::wave_container::VariableMeta;
 
 use crate::config::SurferConfig;
 use crate::transaction_container::TransactionStreamRef;
+use crate::transaction_events::EventDisplayMode;
 use crate::wave_container::{FieldRef, VariableRef, VariableRefExt, WaveContainer};
 use crate::{
     marker::DEFAULT_MARKER_NAME, time::DEFAULT_TIMELINE_NAME, variable_name_type::VariableNameType,
@@ -349,6 +350,10 @@ pub struct DisplayedStream {
     pub display_name: String,
     pub manual_name: Option<String>,
     pub rows: usize,
+    /// How FTR events of this generator/stream are presented (overlaid on
+    /// parent bars, on separate lanes, or hidden)
+    #[serde(default)]
+    pub event_display_mode: EventDisplayMode,
 }
 
 impl DisplayedStream {
@@ -598,5 +603,52 @@ impl DisplayedItem {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transaction_events::EventDisplayMode;
+
+    /// State files written before the FTR event feature lack the
+    /// event_display_mode field and must load with the Overlay default.
+    #[test]
+    fn displayed_stream_event_display_mode_defaults_on_legacy_state() {
+        let legacy = r#"(
+            transaction_stream_ref: (
+                stream_id: StreamId(1),
+                gen_id: Some(GeneratorId(3)),
+                name: "instruction",
+            ),
+            color: None,
+            background_color: None,
+            display_name: "instruction",
+            manual_name: None,
+            rows: 4,
+        )"#;
+        let stream: DisplayedStream = ron::from_str(legacy).expect("legacy state should load");
+        assert_eq!(stream.event_display_mode, EventDisplayMode::Overlay);
+    }
+
+    /// The event display mode round-trips through the state file.
+    #[test]
+    fn displayed_stream_event_display_mode_round_trips() {
+        let stream = DisplayedStream {
+            transaction_stream_ref: crate::transaction_container::TransactionStreamRef::new_gen(
+                ftr_parser::types::StreamId(1),
+                ftr_parser::types::GeneratorId(3),
+                "instruction".to_string(),
+            ),
+            color: None,
+            background_color: None,
+            display_name: "instruction".to_string(),
+            manual_name: None,
+            rows: 4,
+            event_display_mode: EventDisplayMode::SeparateRow,
+        };
+        let serialized = ron::to_string(&stream).expect("serialize");
+        let restored: DisplayedStream = ron::from_str(&serialized).expect("deserialize");
+        assert_eq!(restored.event_display_mode, EventDisplayMode::SeparateRow);
     }
 }

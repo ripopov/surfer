@@ -354,6 +354,9 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
             "transition_previous",
             "transaction_next",
             "transaction_prev",
+            "event_next",
+            "event_prev",
+            "event_table",
             "copy_value",
             "frame_buffer_set_array",
             "frame_buffer_set_variable",
@@ -435,6 +438,33 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
             Some(TransactionStreamRef::new_gen(
                 stream_id,
                 gen_id,
+                generator.name.clone(),
+            ))
+        });
+
+    // The parent generator whose event table the focused transaction belongs
+    // to: the focused transaction's own generator when it has events, or the
+    // parent generator when an event is focused
+    let event_table_generator: Option<TransactionStreamRef> =
+        state.user.waves.as_ref().and_then(|waves| {
+            if !state.user.config.behavior.ftr_events_enabled() {
+                return None;
+            }
+            let transactions = waves.inner.as_transactions()?;
+            let index = transactions.event_index();
+            let (Some(tx_ref), _) = &waves.focused_transaction else {
+                return None;
+            };
+            let tx = transactions.get_transaction(tx_ref)?;
+            let parent_gen_id = match index.event_info(tx.get_tx_id()) {
+                Some(info) => info.parent_gen,
+                None => tx.get_gen_id(),
+            };
+            index.conforming_events_generator_of(parent_gen_id)?;
+            let generator = transactions.get_generator(parent_gen_id)?;
+            Some(TransactionStreamRef::new_gen(
+                generator.stream_id,
+                parent_gen_id,
                 generator.name.clone(),
             ))
         });
@@ -913,6 +943,15 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                 }
                 "transaction_prev" => {
                     Some(Command::Terminal(Message::MoveTransaction { next: false }))
+                }
+                "event_next" => Some(Command::Terminal(Message::MoveEvent { next: true })),
+                "event_prev" => Some(Command::Terminal(Message::MoveEvent { next: false })),
+                "event_table" => {
+                    // Opens an event table for the focused transaction's generator
+                    // (the focused transaction may be the parent or one of its events)
+                    event_table_generator
+                        .clone()
+                        .map(|generator| Command::Terminal(Message::OpenEventTable { generator }))
                 }
                 "copy_value" => single_word(
                     displayed_items.clone(),

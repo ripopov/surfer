@@ -2733,6 +2733,268 @@ snapshot_ui_with_file_and_msgs! {focus_zero_duration_transaction, "examples/ftr_
     Message::FocusTransaction(Some(TransactionRef { id: TransactionId(4) }), None),
 ]}
 
+// ===========================
+// FTR transaction event convention (FtrEventsSufer.md)
+// ===========================
+
+// Adding parent generators overlays their events as diamond markers on the
+// parent transaction bars (zero configuration)
+snapshot_ui_with_file_and_msgs! {ftr_events_overlay_on_parent_generators, "examples/ftr_events.ftr", [
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(StreamId(1), GeneratorId(3), "instruction".to_string())),
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(StreamId(2), GeneratorId(5), "bus_transaction".to_string())),
+]}
+
+// Separate-row mode reserves extra lanes below the parent's lanes for events
+snapshot_ui_with_file_and_msgs! {ftr_events_separate_row_mode, "examples/ftr_events.ftr", [
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(StreamId(1), GeneratorId(3), "instruction".to_string())),
+    Message::SetEventDisplayMode {
+        vidx: VisibleItemIndex(0),
+        mode: crate::transaction_events::EventDisplayMode::SeparateRow,
+    },
+]}
+
+// Hidden mode draws parent transactions only
+snapshot_ui_with_file_and_msgs! {ftr_events_hidden_mode, "examples/ftr_events.ftr", [
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(StreamId(1), GeneratorId(3), "instruction".to_string())),
+    Message::SetEventDisplayMode {
+        vidx: VisibleItemIndex(0),
+        mode: crate::transaction_events::EventDisplayMode::Hidden,
+    },
+]}
+
+// Focusing an overlaid event shows the event details card and co-highlights
+// the parent transaction (no relation arrow into the parent bar)
+snapshot_ui_with_file_and_msgs! {ftr_events_focus_event_card, "examples/ftr_events.ftr", [
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(StreamId(1), GeneratorId(3), "instruction".to_string())),
+    Message::FocusTransaction(Some(TransactionRef { id: TransactionId(3) }), None),
+]}
+
+// Focusing a parent transaction lists its events in the details panel and
+// shows relation names; parent_of links to events stay out of the relation
+// tables
+snapshot_ui_with_file_and_msgs! {ftr_events_focus_parent_events_section, "examples/ftr_events.ftr", [
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(StreamId(1), GeneratorId(3), "instruction".to_string())),
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(StreamId(2), GeneratorId(5), "bus_transaction".to_string())),
+    Message::FocusTransaction(Some(TransactionRef { id: TransactionId(13) }), None),
+]}
+
+// Event tables promote the name attribute and the resolved parent to columns
+snapshot_ui_with_file_and_msgs! {ftr_events_event_table, "examples/ftr_events.ftr", [
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(StreamId(1), GeneratorId(3), "instruction".to_string())),
+    Message::OpenEventTable {
+        generator: TransactionStreamRef::new_gen(StreamId(1), GeneratorId(3), "instruction".to_string()),
+    },
+]}
+
+// When many events map to the same pixel columns, markers aggregate into
+// cluster glyphs with count badges instead of a smear of overdrawn diamonds
+#[test]
+fn ftr_events_clusters_when_dense() {
+    use crate::transaction_events::test_util::{ftr_from_json, generator, stream, tx};
+    use serde_json::json;
+
+    render_and_compare(&PathBuf::from("ftr_events_clusters_when_dense"), || {
+        // 40 events packed into a 40 ns window of a 1000 ns trace: roughly
+        // one per pixel column, so they aggregate into clusters
+        let events: Vec<serde_json::Value> = (0..40u64)
+            .map(|i| {
+                let name = if i % 2 == 0 { "stall" } else { "retry" };
+                tx(
+                    100 + i as usize,
+                    11,
+                    400 + i,
+                    400 + i,
+                    Some(name),
+                    &[(1, 1)],
+                )
+            })
+            .collect();
+        let ftr = ftr_from_json(
+            json!({"1": stream(1, "cpu", &[10, 11])}),
+            json!({
+                "10": generator(10, 1, "work", json!([tx(1, 10, 100, 900, None, &[])])),
+                "11": generator(11, 1, "work.events", serde_json::Value::Array(events)),
+            }),
+        );
+        let container = crate::transaction_container::TransactionContainer::new(ftr);
+
+        let mut state = SystemState::new_default_config()
+            .unwrap()
+            .with_params(StartupParams::default());
+        state.update(Message::TransactionStreamsLoaded(
+            WaveSource::Data,
+            crate::wave_source::WaveFormat::Ftr,
+            container,
+            LoadOptions::Clear,
+        ));
+        for msg in [
+            Message::SetMenuVisible(false),
+            Message::SetSidePanelVisible(false),
+            Message::SetToolbarVisible(false),
+            Message::SetOverviewVisible(false),
+            Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(
+                StreamId(1),
+                GeneratorId(10),
+                "work".to_string(),
+            )),
+        ] {
+            state.update(msg);
+        }
+        state
+    });
+}
+
+// The hierarchy sidebar folds .events generators into their parent and shows
+// an event badge with the event count
+snapshot_ui_with_file_and_msgs! {ftr_events_sidebar_badges, "examples/ftr_events.ftr", [
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_stream(StreamId(1), "i_test.CPU_Core".to_string())),
+    Message::SetSidePanelVisible(true),
+    Message::SetActiveScope(Some(ScopeType::StreamScope(StreamScopeRef::Stream(
+        TransactionStreamRef::new_stream(StreamId(1), "i_test.CPU_Core".to_string()),
+    )))),
+]}
+
+// "Show raw event generators" restores the .events generators as dimmed
+// sidebar entries
+snapshot_ui_with_file_and_msgs! {ftr_events_sidebar_raw_generators, "examples/ftr_events.ftr", [
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_stream(StreamId(1), "i_test.CPU_Core".to_string())),
+    Message::SetSidePanelVisible(true),
+    Message::SetActiveScope(Some(ScopeType::StreamScope(StreamScopeRef::Stream(
+        TransactionStreamRef::new_stream(StreamId(1), "i_test.CPU_Core".to_string()),
+    )))),
+    Message::SetShowRawEventGenerators(true),
+]}
+
+// event_next/event_prev move from a parent into its events and wrap into the
+// neighboring parent's events at the ends
+#[test]
+fn ftr_event_navigation_moves_between_events() {
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/ftr_events.ftr")
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state.update(Message::AddStreamOrGenerator(
+        TransactionStreamRef::new_gen(StreamId(1), GeneratorId(3), "instruction".to_string()),
+    ));
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let focused_id = |state: &SystemState| {
+        state
+            .user
+            .waves
+            .as_ref()
+            .and_then(|waves| waves.focused_transaction.0.clone())
+            .map(|tx_ref| tx_ref.id)
+    };
+
+    // Parent tx#1 focused: event_next focuses its first event (tx#2)
+    state.update(Message::FocusTransaction(
+        Some(TransactionRef {
+            id: TransactionId(1),
+        }),
+        None,
+    ));
+    state.update(Message::MoveEvent { next: true });
+    assert_eq!(focused_id(&state), Some(TransactionId(2)));
+
+    // Stepping forward moves through the parent's events in time order
+    state.update(Message::MoveEvent { next: true });
+    assert_eq!(focused_id(&state), Some(TransactionId(3)));
+
+    // And back again
+    state.update(Message::MoveEvent { next: false });
+    assert_eq!(focused_id(&state), Some(TransactionId(2)));
+
+    // From the last event of tx#1 (tx#6), event_next wraps into the next
+    // parent's (tx#7) first event (tx#8)
+    state.update(Message::FocusTransaction(
+        Some(TransactionRef {
+            id: TransactionId(6),
+        }),
+        None,
+    ));
+    state.update(Message::MoveEvent { next: true });
+    assert_eq!(focused_id(&state), Some(TransactionId(8)));
+
+    // From the first event of tx#7, event_prev wraps back into tx#1's last
+    // event (tx#6)
+    state.update(Message::MoveEvent { next: false });
+    assert_eq!(focused_id(&state), Some(TransactionId(6)));
+}
+
+// Convention violations stay visible: out-of-range events draw as hollow
+// warning diamonds, non-zero durations get a bracket, orphans are not
+// overlaid without a parent lane, and the details card calls out the
+// violation
+#[test]
+fn ftr_events_violations_render() {
+    use crate::transaction_events::test_util::{ftr_from_json, generator, stream, tx};
+    use serde_json::json;
+
+    render_and_compare(&PathBuf::from("ftr_events_violations_render"), || {
+        let ftr = ftr_from_json(
+            json!({"1": stream(1, "cpu", &[10, 11])}),
+            json!({
+                "10": generator(10, 1, "work", json!([
+                    tx(1, 10, 100, 200, None, &[]),
+                    tx(5, 10, 300, 400, None, &[]),
+                ])),
+                "11": generator(11, 1, "work.events", json!([
+                    // out of range: before the parent's start
+                    tx(2, 11, 50, 50, Some("early"), &[(1, 1)]),
+                    // non-zero duration: bracket along the bottom edge
+                    tx(3, 11, 150, 190, Some("busy"), &[(1, 1)]),
+                    // orphan: no parent_of relation
+                    tx(4, 11, 250, 250, Some("lost"), &[]),
+                    // multiple parents: first one (5) wins
+                    tx(6, 11, 350, 350, Some("dual"), &[(5, 1), (1, 1)]),
+                ])),
+            }),
+        );
+        let container = crate::transaction_container::TransactionContainer::new(ftr);
+
+        let mut state = SystemState::new_default_config()
+            .unwrap()
+            .with_params(StartupParams::default());
+        state.update(Message::TransactionStreamsLoaded(
+            WaveSource::Data,
+            crate::wave_source::WaveFormat::Ftr,
+            container,
+            LoadOptions::Clear,
+        ));
+        for msg in [
+            Message::SetMenuVisible(false),
+            Message::SetSidePanelVisible(false),
+            Message::SetToolbarVisible(false),
+            Message::SetOverviewVisible(false),
+            Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(
+                StreamId(1),
+                GeneratorId(10),
+                "work".to_string(),
+            )),
+            // Focus the out-of-range event: details card shows the warning
+            Message::FocusTransaction(
+                Some(TransactionRef {
+                    id: TransactionId(2),
+                }),
+                None,
+            ),
+        ] {
+            state.update(msg);
+        }
+        state
+    });
+}
+
 snapshot_ui_with_file_and_msgs! {parameter_in_scopes, "examples/picorv32.vcd", [
     Message::SetSidePanelVisible(true),
     Message::ExpandParameterSection,

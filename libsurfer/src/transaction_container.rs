@@ -1,4 +1,5 @@
 use crate::time::{TimeScale, TimeUnit};
+use crate::transaction_events::{EventIndex, EventInfo};
 use crate::wave_container::MetaData;
 use ftr_parser::types::{
     FTR, GeneratorId, StreamId, Transaction, TransactionId, TxGenerator, TxStream,
@@ -12,9 +13,45 @@ use std::ops::Not;
 
 pub struct TransactionContainer {
     pub inner: FTR,
+    /// Index over the FTR event convention, rebuilt when streams are loaded.
+    /// Boxed to keep the container (and the messages carrying it) small.
+    event_index: Box<EventIndex>,
 }
 
 impl TransactionContainer {
+    #[must_use]
+    pub fn new(inner: FTR) -> Self {
+        let event_index = Box::new(EventIndex::build(&inner));
+        TransactionContainer { inner, event_index }
+    }
+
+    /// Loads a stream's transactions into memory and refreshes the event
+    /// index. All stream loading must go through here so the index stays
+    /// consistent with the loaded data.
+    pub fn load_stream(&mut self, stream_id: StreamId) -> Result<(), String> {
+        self.inner.load_stream_into_memory(stream_id)?;
+        *self.event_index = EventIndex::build(&self.inner);
+        Ok(())
+    }
+
+    /// The event structure index for this trace.
+    #[must_use]
+    pub fn event_index(&self) -> &EventIndex {
+        &self.event_index
+    }
+
+    /// Parent info for an event transaction; `None` for non-events and
+    /// orphan events.
+    #[must_use]
+    pub fn event_info(&self, tx_id: TransactionId) -> Option<&EventInfo> {
+        self.event_index.event_info(tx_id)
+    }
+
+    /// Events of a parent transaction, sorted by (start time, id).
+    #[must_use]
+    pub fn events_of_parent(&self, tx_id: TransactionId) -> &[TransactionId] {
+        self.event_index.events_of_parent(tx_id)
+    }
     #[must_use]
     pub fn get_streams(&self) -> Vec<&TxStream> {
         self.inner.tx_streams.values().collect()
@@ -37,11 +74,19 @@ impl TransactionContainer {
 
     #[must_use]
     pub fn get_transaction(&self, transaction_ref: &TransactionRef) -> Option<&Transaction> {
-        self.inner.tx_generators.values().find_map(|g| {
-            g.transactions
-                .iter()
-                .find(|tx| tx.get_tx_id() == transaction_ref.id)
-        })
+        // O(1) via the event index lookup, falling back to a scan in case
+        // the index has not seen the transaction (e.g. mid-load)
+        self.event_index
+            .lookup_tx(transaction_ref.id)
+            .and_then(|(gen_id, idx)| self.inner.tx_generators.get(&gen_id)?.transactions.get(idx))
+            .filter(|tx| tx.get_tx_id() == transaction_ref.id)
+            .or_else(|| {
+                self.inner.tx_generators.values().find_map(|g| {
+                    g.transactions
+                        .iter()
+                        .find(|tx| tx.get_tx_id() == transaction_ref.id)
+                })
+            })
     }
 
     #[must_use]

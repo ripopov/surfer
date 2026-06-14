@@ -36,6 +36,10 @@ variable_parameter = "#d4d4d4"
 variable_event = "#97cdf4"
 transaction_default = "#56c126"
 transaction_event = "#97cdf4"
+transaction_event_out_of_range = "#eba148"
+# Count badge inside cluster markers: dark for contrast on the light marker
+transaction_event_cluster = "#10202b"
+transaction_parent_highlight = "#e9da16"
 waveform_opacity = 0.2
 wide_opacity = 0.0
 cursor = { color = "#b63935", width = 2 }

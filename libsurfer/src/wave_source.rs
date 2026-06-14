@@ -475,7 +475,7 @@ impl SystemState {
             Ok(ftr) => Message::TransactionStreamsLoaded(
                 source,
                 format,
-                TransactionContainer { inner: ftr },
+                TransactionContainer::new(ftr),
                 load_options,
             ),
             Err(e) => Message::Error(Report::msg(e)),
@@ -499,7 +499,7 @@ impl SystemState {
             Ok(ftr) => Message::TransactionStreamsLoaded(
                 source,
                 WaveFormat::Ftr,
-                TransactionContainer { inner: ftr },
+                TransactionContainer::new(ftr),
                 load_options,
             ),
             Err(e) => Message::Error(Report::msg(e)),

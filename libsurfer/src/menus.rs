@@ -15,6 +15,7 @@ use crate::message::MessageTarget;
 use crate::table::{MultiSignalEntry, TableModelSpec};
 use crate::trace_style::TraceStyle;
 use crate::transaction_container::StreamScopeRef;
+use crate::transaction_events::EventDisplayMode;
 use crate::wave_container::{FieldRef, VariableRefExt};
 use crate::wave_data::ScopeType;
 use crate::wave_source::LoadOptions;
@@ -324,6 +325,18 @@ impl SystemState {
                 Message::SetDefaultTimeline(!self.show_default_timeline()),
             )
             .add_closing_menu(msgs, ui);
+            if self
+                .user
+                .waves
+                .as_ref()
+                .is_some_and(|waves| waves.inner.is_transactions())
+            {
+                b(
+                    "Toggle raw event generators",
+                    Message::SetShowRawEventGenerators(!self.user.show_raw_event_generators),
+                )
+                .add_closing_menu(msgs, ui);
+            }
             #[cfg(not(target_arch = "wasm32"))]
             b("Toggle full screen", Message::ToggleFullscreen)
                 .shortcut("F11")
@@ -710,10 +723,27 @@ impl SystemState {
         }
 
         if let DisplayedItem::Stream(stream) = clicked_item {
+            let events_enabled = self.user.config.behavior.ftr_events_enabled();
             if stream.transaction_stream_ref.gen_id.is_some() {
                 // Single generator — open one table
                 if ui.button("Show transactions in table").clicked() {
                     msgs.push(Message::OpenTransactionTable {
+                        generator: stream.transaction_stream_ref.clone(),
+                    });
+                    ui.close();
+                }
+                let has_events = events_enabled
+                    && waves.inner.as_transactions().is_some_and(|tc| {
+                        stream
+                            .transaction_stream_ref
+                            .gen_id
+                            .and_then(|gen_id| {
+                                tc.event_index().conforming_events_generator_of(gen_id)
+                            })
+                            .is_some()
+                    });
+                if has_events && ui.button("Show events in table").clicked() {
+                    msgs.push(Message::OpenEventTable {
                         generator: stream.transaction_stream_ref.clone(),
                     });
                     ui.close();
@@ -728,6 +758,38 @@ impl SystemState {
                     }
                     ui.close();
                 }
+            }
+
+            // Three-way event display control for rows whose generators
+            // carry FTR events
+            let row_has_events = events_enabled
+                && waves.inner.as_transactions().is_some_and(|tc| {
+                    let index = tc.event_index();
+                    match stream.transaction_stream_ref.gen_id {
+                        Some(gen_id) => index.conforming_events_generator_of(gen_id).is_some(),
+                        None => tc
+                            .get_stream(stream.transaction_stream_ref.stream_id)
+                            .is_some_and(|s| {
+                                s.generators
+                                    .iter()
+                                    .any(|gen_id| index.is_conforming_events_generator(*gen_id))
+                            }),
+                    }
+                });
+            if row_has_events {
+                ui.menu_button("Events", |ui| {
+                    for (mode, label) in [
+                        (EventDisplayMode::Overlay, "Overlay"),
+                        (EventDisplayMode::SeparateRow, "Separate row"),
+                        (EventDisplayMode::Hidden, "Hidden"),
+                    ] {
+                        ui.radio(stream.event_display_mode == mode, label)
+                            .clicked()
+                            .then(|| {
+                                msgs.push(Message::SetEventDisplayMode { vidx, mode });
+                            });
+                    }
+                });
             }
         }
 

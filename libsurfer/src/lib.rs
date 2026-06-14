@@ -57,6 +57,7 @@ pub mod toolbar;
 pub mod tooltips;
 pub mod trace_style;
 pub mod transaction_container;
+pub mod transaction_events;
 pub mod transactions;
 pub mod translation;
 pub mod util;
@@ -247,10 +248,15 @@ struct CachedWaveDrawData {
 }
 
 struct CachedTransactionDrawData {
-    pub draw_commands: HashMap<TransactionRef, TxDrawingCommands>,
+    /// Commands per displayed row: the same transaction can be drawn at
+    /// different lanes in different rows (e.g. an event overlaid on its
+    /// parent's row and on a raw `.events` generator row)
+    pub draw_commands: HashMap<TransactionStreamRef, HashMap<TransactionRef, TxDrawingCommands>>,
     pub stream_to_displayed_txs: HashMap<TransactionStreamRef, Vec<TransactionRef>>,
     pub inc_relation_tx_ids: Vec<TransactionRef>,
     pub out_relation_tx_ids: Vec<TransactionRef>,
+    /// Parent transaction to co-highlight while one of its events is focused
+    pub parent_highlight_tx: Option<TransactionRef>,
 }
 
 pub struct Channels {
@@ -425,24 +431,27 @@ impl SystemState {
                 };
                 self.save_current_canvas(undo_msg);
 
+                let fold_events = self.user.config.behavior.ftr_events_enabled();
                 let waves = self.user.waves.as_mut()?;
                 if s.gen_id.is_some() {
                     waves.add_generator(s);
                 } else {
-                    waves.add_stream(s);
+                    waves.add_stream(s, fold_events);
                 }
                 self.invalidate_draw_commands();
             }
             Message::AddStreamOrGeneratorFromName(scope, name) => {
                 self.save_current_canvas(format!("Add Stream/Generator from name: {}", &name));
+                let fold_events = self.user.config.behavior.ftr_events_enabled();
                 let waves = self.user.waves.as_mut()?;
-                waves.add_stream_or_generator_from_name(scope, name)?;
+                waves.add_stream_or_generator_from_name(scope, name, fold_events)?;
                 self.invalidate_draw_commands();
             }
             Message::AddAllFromStreamScope(scope_name) => {
                 self.save_current_canvas(format!("Add all from scope {}", scope_name.clone()));
+                let fold_events = self.user.config.behavior.ftr_events_enabled();
                 let waves = self.user.waves.as_mut()?;
-                waves.add_all_from_stream_scope(scope_name)?;
+                waves.add_all_from_stream_scope(scope_name, fold_events)?;
                 self.invalidate_draw_commands();
             }
             Message::InvalidateCount => self.user.count = None,
@@ -1176,6 +1185,26 @@ impl SystemState {
                 let waves = self.user.waves.as_mut()?;
                 waves.move_to_transaction(next)?;
                 self.invalidate_draw_commands();
+            }
+            Message::MoveEvent { next } => {
+                let undo_msg = if next {
+                    "Move to next event"
+                } else {
+                    "Move to previous event"
+                };
+                self.save_current_canvas(undo_msg.to_string());
+                let waves = self.user.waves.as_mut()?;
+                waves.move_to_event(next)?;
+                self.invalidate_draw_commands();
+            }
+            Message::SetEventDisplayMode { vidx, mode } => {
+                self.save_current_canvas(format!("Set event display mode to {mode:?}"));
+                let waves = self.user.waves.as_mut()?;
+                waves.set_event_display_mode(vidx, mode)?;
+                self.invalidate_draw_commands();
+            }
+            Message::SetShowRawEventGenerators(show) => {
+                self.user.show_raw_event_generators = show;
             }
             Message::ResetVariableFormat(displayed_field_ref) => {
                 let waves = self.user.waves.as_mut()?;
@@ -2308,6 +2337,7 @@ impl SystemState {
             | Message::EditSignalAnalysis { .. }
             | Message::OpenSignalChangeList { .. }
             | Message::OpenTransactionTable { .. }
+            | Message::OpenEventTable { .. }
             | Message::RemoveTableTile { .. }
             | Message::SetTableSort { .. }
             | Message::SetTableDisplayFilter { .. }
@@ -3076,6 +3106,7 @@ impl SystemState {
             time_format: self.get_time_format(),
             theme: &self.user.config.theme,
             cache_generation,
+            ftr_events_enabled: self.user.config.behavior.ftr_events_enabled(),
         }
     }
 }

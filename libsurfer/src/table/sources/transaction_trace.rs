@@ -19,6 +19,9 @@ const START_COLUMN_KEY: &str = "start";
 const END_COLUMN_KEY: &str = "end";
 const DURATION_COLUMN_KEY: &str = "duration";
 const TYPE_COLUMN_KEY: &str = "type";
+const EVENTS_COLUMN_KEY: &str = "events";
+/// Number of fixed columns before the optional events count column.
+const FIXED_COLUMNS: usize = 4;
 
 /// Maximum search text length per row to prevent memory bloat.
 const MAX_SEARCH_TEXT_LEN: usize = 1024;
@@ -38,6 +41,20 @@ struct TransactionData {
     index_by_id: HashMap<TableRowId, usize>,
     /// Attribute column names discovered from transactions, in discovery order.
     attribute_columns: Vec<String>,
+    /// The generator has a matching `.events` generator: an events count
+    /// column is shown between the fixed and the attribute columns.
+    has_events_column: bool,
+}
+
+impl TransactionData {
+    fn empty() -> Self {
+        TransactionData {
+            rows: vec![],
+            index_by_id: HashMap::new(),
+            attribute_columns: vec![],
+            has_events_column: false,
+        }
+    }
 }
 
 struct TransactionRow {
@@ -47,6 +64,8 @@ struct TransactionRow {
     end_time: BigUint,
     duration: BigUint,
     tx_type: String,
+    /// Number of FTR events recorded for this transaction
+    events_count: usize,
     /// Attribute values in same order as TransactionData.attribute_columns.
     attribute_values: Vec<String>,
     // Pre-formatted strings for display and search
@@ -106,11 +125,7 @@ impl TransactionTraceModel {
             // This should not fail since we validated in new(), but we need wave data.
             // Since we don't store ctx, we need to work with minimal data.
             // The actual data building is deferred until we have access via create_model.
-            TransactionData {
-                rows: vec![],
-                index_by_id: HashMap::new(),
-                attribute_columns: vec![],
-            }
+            TransactionData::empty()
         })
     }
 
@@ -118,36 +133,24 @@ impl TransactionTraceModel {
     /// This is called externally after model creation with access to wave data.
     fn build_data(&self, ctx: &TableModelContext<'_>) -> TransactionData {
         let Some(waves) = ctx.waves else {
-            return TransactionData {
-                rows: vec![],
-                index_by_id: HashMap::new(),
-                attribute_columns: vec![],
-            };
+            return TransactionData::empty();
         };
 
         let Some(transactions) = waves.inner.as_transactions() else {
-            return TransactionData {
-                rows: vec![],
-                index_by_id: HashMap::new(),
-                attribute_columns: vec![],
-            };
+            return TransactionData::empty();
         };
 
         let Some(gen_id) = self.generator.gen_id else {
-            return TransactionData {
-                rows: vec![],
-                index_by_id: HashMap::new(),
-                attribute_columns: vec![],
-            };
+            return TransactionData::empty();
         };
 
         let Some(generator) = transactions.get_generator(gen_id) else {
-            return TransactionData {
-                rows: vec![],
-                index_by_id: HashMap::new(),
-                attribute_columns: vec![],
-            };
+            return TransactionData::empty();
         };
+
+        let event_index = transactions.event_index();
+        let has_events_column =
+            ctx.ftr_events_enabled && event_index.conforming_events_generator_of(gen_id).is_some();
 
         let mut rows = Vec::new();
         let mut attribute_names_set = HashSet::new();
@@ -189,6 +192,12 @@ impl TransactionTraceModel {
             // Get transaction type - format as "tx#ID"
             let tx_type = format!("tx#{tx_id}");
 
+            let events_count = if has_events_column {
+                event_index.events_of_parent(tx_id).len()
+            } else {
+                0
+            };
+
             // Build attribute values in order
             let mut attribute_values = vec![String::new(); attribute_names_order.len()];
             for attr in tx.attributes.iter() {
@@ -219,6 +228,7 @@ impl TransactionTraceModel {
                 end_time,
                 duration,
                 tx_type,
+                events_count,
                 attribute_values,
                 start_time_text,
                 end_time_text,
@@ -241,6 +251,7 @@ impl TransactionTraceModel {
             rows,
             index_by_id,
             attribute_columns: attribute_names_order,
+            has_events_column,
         }
     }
 
@@ -288,6 +299,16 @@ impl TableModel for TransactionTraceModel {
             },
         ];
 
+        if data.has_events_column {
+            columns.push(TableColumn {
+                key: TableColumnKey::Str(EVENTS_COLUMN_KEY.to_string()),
+                label: "Events".to_string(),
+                default_width: Some(60.0),
+                default_visible: true,
+                default_resizable: true,
+            });
+        }
+
         // Add dynamic attribute columns
         for attr_name in &data.attribute_columns {
             columns.push(TableColumn {
@@ -311,6 +332,7 @@ impl TableModel for TransactionTraceModel {
     }
 
     fn cell(&self, row: TableRowId, col: usize) -> TableCell {
+        let data = self.data();
         let Some(row) = self.row_by_id(row) else {
             return TableCell::Text(String::new());
         };
@@ -320,9 +342,16 @@ impl TableModel for TransactionTraceModel {
             1 => TableCell::Text(row.end_time_text.clone()),
             2 => TableCell::Text(row.duration_text.clone()),
             3 => TableCell::Text(row.tx_type.clone()),
+            _ if data.has_events_column && col == FIXED_COLUMNS => {
+                TableCell::Text(if row.events_count == 0 {
+                    String::new()
+                } else {
+                    row.events_count.to_string()
+                })
+            }
             _ => {
                 // Attribute column
-                let attr_idx = col - 4;
+                let attr_idx = col - FIXED_COLUMNS - usize::from(data.has_events_column);
                 TableCell::Text(
                     row.attribute_values
                         .get(attr_idx)
@@ -364,9 +393,12 @@ impl TableModel for TransactionTraceModel {
                     .unwrap_or(TableSortKey::Text(row.duration_text.clone()))
             }
             3 => TableSortKey::Text(row.tx_type.clone()),
+            _ if self.data().has_events_column && col == FIXED_COLUMNS => {
+                TableSortKey::Numeric(row.events_count as f64)
+            }
             _ => {
                 // Attribute column - text
-                let attr_idx = col - 4;
+                let attr_idx = col - FIXED_COLUMNS - usize::from(self.data().has_events_column);
                 TableSortKey::Text(
                     row.attribute_values
                         .get(attr_idx)

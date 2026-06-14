@@ -136,7 +136,13 @@ impl SystemState {
                 }
             }
             Message::OpenTransactionTable { generator } => {
+                self.ensure_transaction_stream_loaded(&generator);
                 let spec = table::TableModelSpec::TransactionTrace { generator };
+                self.open_table_tile(spec);
+            }
+            Message::OpenEventTable { generator } => {
+                self.ensure_transaction_stream_loaded(&generator);
+                let spec = table::TableModelSpec::EventTable { generator };
                 self.open_table_tile(spec);
             }
             Message::RemoveTableTile { tile_id } => {
@@ -335,6 +341,27 @@ impl SystemState {
         }
 
         Some(())
+    }
+
+    /// Tables read transaction data directly, so the backing stream must be
+    /// in memory even when it was never added to the waveform view.
+    fn ensure_transaction_stream_loaded(
+        &mut self,
+        generator: &crate::transaction_container::TransactionStreamRef,
+    ) {
+        if let Some(waves) = self.user.waves.as_mut()
+            && let Some(transactions) = waves.inner.as_transactions_mut()
+        {
+            let needs_load = transactions
+                .get_stream(generator.stream_id)
+                .is_some_and(|stream| !stream.transactions_loaded);
+            if needs_load && let Err(e) = transactions.load_stream(generator.stream_id) {
+                tracing::warn!(
+                    "Failed to load transaction stream {}: {e}",
+                    generator.stream_id
+                );
+            }
+        }
     }
 
     fn handle_build_table_cache(
