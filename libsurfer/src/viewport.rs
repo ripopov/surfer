@@ -202,8 +202,8 @@ impl Viewport {
         max_timestamp: &BigInt,
         time_offset: &BigInt,
     ) -> f32 {
-        let distance_from_left = Absolute((time + time_offset).to_f64().unwrap())
-            - self.curr_left.absolute(max_timestamp, time_offset);
+        let distance_from_left =
+            Absolute(time.to_f64().unwrap()) - self.curr_left.absolute(max_timestamp, time_offset);
         let width = self.width_absolute(max_timestamp, time_offset);
 
         (((distance_from_left / width).0) * f64::from(view_width)) as f32
@@ -440,8 +440,12 @@ impl Viewport {
     }
 
     #[inline]
-    fn half_width_absolute(&self, max_timestamp: &BigInt, time_offset: &BigInt) -> Absolute {
-        self.width_absolute(max_timestamp, time_offset) * 0.5
+    fn half_width_absolute(
+        &self,
+        max_timestamp: &BigInt,
+        time_offset: &BigInt,
+    ) -> Absolute {
+        (self.width() * 0.5).absolute(max_timestamp, time_offset)
     }
 
     pub fn zoom_to_range(
@@ -617,7 +621,7 @@ mod tests {
         let time_offset = bi(500);
         let time_abs = Absolute(750.0); // 250 + 500 offset
         let x1 = vp.pixel_from_absolute_time(time_abs, view_w, &n, &time_offset);
-        let x2 = vp.pixel_from_time(&bi(250), view_w, &n, &time_offset);
+        let x2 = vp.pixel_from_time(&bi(750), view_w, &n, &time_offset);
         assert!((x1 - 500.0).abs() < 1e-6);
         assert!((x2 - 500.0).abs() < 1e-6);
     }
