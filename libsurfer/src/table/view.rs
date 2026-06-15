@@ -260,11 +260,10 @@ pub fn draw_table_tile(
     let selection_bg = theme.selected_elements_colors.background;
     let use_light_table_visuals = is_light_color(theme.primary_ui_color.background);
 
-    // Fill the full tile rect in light themes so transparent table rows inherit
-    // theme background instead of the renderer clear color.
-    if use_light_table_visuals {
-        ui.painter().rect_filled(ui.max_rect(), 0.0, header_bg);
-    }
+    // Fill the full tile rect so transparent table rows inherit the same
+    // surface color as the Scopes/Variables panels instead of whatever is
+    // behind the tile.
+    ui.painter().rect_filled(ui.max_rect(), 0.0, header_bg);
 
     // Get selection mode from config
     let selection_mode = tile_state.config.selection_mode;
