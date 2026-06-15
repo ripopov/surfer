@@ -235,4 +235,11 @@ impl SystemState {
             .draw_vector_unknowns_as_line
             .unwrap_or_else(|| self.user.config.layout.draw_vector_unknowns_as_line())
     }
+
+    #[inline]
+    pub fn enable_time_offset(&self) -> bool {
+        self.user
+            .enable_time_offset
+            .unwrap_or_else(|| self.user.config.layout.enable_time_offset())
+    }
 }

@@ -155,6 +155,8 @@ pub struct UserState {
     pub state_file: Option<PathBuf>,
 
     pub(crate) show_annotation_list: bool,
+    #[serde(default)]
+    pub(crate) enable_time_offset: Option<bool>,
 }
 
 // Impl needed since for loading we need to put State into a Message
@@ -204,6 +206,7 @@ impl Default for UserState {
             hierarchy_style: None,
             autoload_sibling_state_files: None,
             autoreload_files: None,
+            enable_time_offset: None,
             waves: None,
             drag_started: false,
             drag_source_idx: None,
@@ -399,11 +402,13 @@ impl SystemState {
         }
         self.invalidate_draw_commands();
 
+        // Get enable_time_offset before modifying self.user.waves
+        let enable_time_offset = self.enable_time_offset();
         self.user.waves = Some(new_wave);
 
         // Refresh time offset cache after loading waves
         if let Some(waves) = &mut self.user.waves {
-            waves.refresh_time_offset(&self.user.config);
+            waves.refresh_time_offset(enable_time_offset);
         }
 
         // Update window title with waveform name
@@ -490,7 +495,8 @@ impl SystemState {
             cached_time_offset: BigInt::zero(),
         };
 
-        new_transaction_streams.refresh_time_offset(&self.user.config);
+        let enable_time_offset = self.enable_time_offset();
+        new_transaction_streams.refresh_time_offset(enable_time_offset);
 
         self.invalidate_draw_commands();
 
@@ -640,9 +646,10 @@ impl SystemState {
         // use just loaded path since path is not part of the export as it might have changed anyways
         self.user.state_file = path;
 
+        let enable_time_offset = self.enable_time_offset();
         self.invalidate_draw_commands();
         if let Some(waves) = &mut self.user.waves {
-            waves.refresh_time_offset(&self.user.config);
+            waves.refresh_time_offset(enable_time_offset);
             waves.update_viewports();
         }
     }

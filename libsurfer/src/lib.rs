@@ -1366,6 +1366,7 @@ impl SystemState {
                 // for files using the `wellen` backend, parse the body in a second step
                 info!("Loaded the body of {source} in {:?}", start.elapsed());
                 self.progress_tracker = None;
+                let enable_time_offset = self.enable_time_offset();
                 let waves = self
                     .user
                     .waves
@@ -1408,7 +1409,7 @@ impl SystemState {
                 }
 
                 // Refresh time offset before updating viewports
-                waves.refresh_time_offset(&self.user.config);
+                waves.refresh_time_offset(enable_time_offset);
                 // update viewports, now that we have the time table
                 waves.update_viewports();
                 // make sure we redraw
@@ -1441,23 +1442,25 @@ impl SystemState {
             Message::WavesLoaded(filename, format, new_waves, load_options) => {
                 self.on_waves_loaded(filename, format, new_waves, load_options);
                 // here, the body and thus the number of timestamps is already loaded!
+                let enable_time_offset = self.enable_time_offset();
                 let waves = self
                     .user
                     .waves
                     .as_mut()
                     .expect("Waves should be loaded at this point!");
-                waves.refresh_time_offset(&self.user.config);
+                waves.refresh_time_offset(enable_time_offset);
                 waves.update_viewports();
                 self.progress_tracker = None;
             }
             Message::TransactionStreamsLoaded(filename, format, new_ftr, loaded_options) => {
                 self.on_transaction_streams_loaded(filename, format, new_ftr, loaded_options);
+                let enable_time_offset = self.enable_time_offset();
                 let waves = self
                     .user
                     .waves
                     .as_mut()
                     .expect("Waves should be loaded at this point!");
-                waves.refresh_time_offset(&self.user.config);
+                waves.refresh_time_offset(enable_time_offset);
                 waves.update_viewports();
             }
             Message::BlacklistTranslator(idx, translator) => {
@@ -1543,8 +1546,9 @@ impl SystemState {
                 self.user.config = config;
 
                 // Refresh time offset cache when config changes
+                let enable_time_offset = self.enable_time_offset();
                 if let Some(waves) = &mut self.user.waves {
-                    waves.refresh_time_offset(&self.user.config);
+                    waves.refresh_time_offset(enable_time_offset);
                 }
 
                 let ctx = &self.context.as_ref()?;
@@ -1559,8 +1563,9 @@ impl SystemState {
                 self.user.config = config;
 
                 // Refresh time offset cache when config changes
+                let enable_time_offset = self.enable_time_offset();
                 if let Some(waves) = &mut self.user.waves {
-                    waves.refresh_time_offset(&self.user.config);
+                    waves.refresh_time_offset(enable_time_offset);
                 }
 
                 let ctx = &self.context.as_ref()?;
@@ -1894,9 +1899,10 @@ impl SystemState {
                 self.user.primary_button_drag_behavior = Some(behavior);
             }
             Message::SetTimeOffsetEnabled(enabled) => {
-                self.user.config.layout.enable_time_offset = enabled;
+                self.user.enable_time_offset = Some(enabled);
+                let enable_time_offset = self.enable_time_offset();
                 if let Some(waves) = &mut self.user.waves {
-                    waves.refresh_time_offset(&self.user.config);
+                    waves.refresh_time_offset(enable_time_offset);
                     waves.update_viewports();
                 }
                 self.invalidate_draw_commands();

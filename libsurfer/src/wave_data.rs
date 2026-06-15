@@ -1097,8 +1097,8 @@ impl WaveData {
     }
 
     /// Updates the cached time offset based on current config
-    pub fn refresh_time_offset(&mut self, config: &crate::config::SurferConfig) {
-        self.cached_time_offset = if config.layout.enable_time_offset {
+    pub fn refresh_time_offset(&mut self, enable_time_offset: bool) {
+        self.cached_time_offset = if enable_time_offset {
             self.inner
                 .min_timestamp()
                 .map(|ts| ts.to_bigint().unwrap())

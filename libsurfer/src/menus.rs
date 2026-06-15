@@ -546,13 +546,13 @@ impl SystemState {
                 }
             });
             ui.radio(
-                self.user.config.layout.enable_time_offset,
+                self.enable_time_offset(),
                 "Enable time offset",
             )
             .clicked()
             .then(|| {
                 msgs.push(Message::SetTimeOffsetEnabled(
-                    !self.user.config.layout.enable_time_offset,
+                    !self.enable_time_offset(),
                 ));
             });
         });

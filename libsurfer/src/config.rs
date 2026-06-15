@@ -403,6 +403,10 @@ impl SurferLayout {
     pub fn toolbar_group_visibility(&self, id: &str) -> Option<bool> {
         self.toolbar.visibility.get(id).copied()
     }
+    #[must_use]
+    pub fn enable_time_offset(&self) -> bool {
+        self.enable_time_offset
+    }
 }
 
 #[derive(Debug, Deserialize)]
