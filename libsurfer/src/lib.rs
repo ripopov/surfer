@@ -1432,6 +1432,11 @@ impl SystemState {
             Message::ReloadSource(source, keep_unavailable) => {
                 self.reload_source(source, keep_unavailable);
             }
+            Message::RenameSource(source, label) => {
+                if let Some(waves) = &mut self.user.waves {
+                    waves.rename_source(source, label);
+                }
+            }
             Message::SetSurverStatus(_start, server, status) => {
                 self.user.surver_file_infos = Some(status.file_infos.clone());
                 info!(

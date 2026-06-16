@@ -473,6 +473,7 @@ impl SystemState {
                             inner: DataContainer::Waves(*new_waves),
                             source: filename,
                             format,
+                            primary_source_label: None,
                             sources: SourceStore::default(),
                             active_scope_source: SourceId::default(),
                             active_scope: None,
@@ -584,6 +585,7 @@ impl SystemState {
                         inner: DataContainer::Transactions(new_ftr),
                         source: filename,
                         format,
+                        primary_source_label: None,
                         sources: SourceStore::default(),
                         active_scope_source: SourceId::default(),
                         active_scope: None,
@@ -924,6 +926,10 @@ impl SystemState {
         mem::swap(
             &mut waves.focused_transaction,
             &mut new_waves.focused_transaction,
+        );
+        mem::swap(
+            &mut waves.primary_source_label,
+            &mut new_waves.primary_source_label,
         );
 
         mem::swap(&mut waves.annotations, &mut new_waves.annotations);

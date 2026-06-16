@@ -184,6 +184,45 @@ fn matching_timescale_sources_can_have_different_spans() {
 }
 
 #[test]
+fn source_rename_updates_primary_and_additive_labels() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let mut state = SystemState::new_default_config().unwrap();
+    state.update(Message::LoadFilesWithIntents(vec![
+        (
+            fixture("examples/fused_ftr_wave.vcd"),
+            LoadIntent::ReplaceSession,
+        ),
+        (fixture("examples/my_db.ftr"), LoadIntent::AddSource),
+    ]));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    state.update(Message::RenameSource(
+        SourceId::default(),
+        "waves".to_string(),
+    ));
+    state.update(Message::RenameSource(
+        SourceId(1),
+        "transactions".to_string(),
+    ));
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert_eq!(
+        waves.source_label_for(SourceId::default()).as_deref(),
+        Some("waves")
+    );
+    assert_eq!(
+        waves.source_label_for(SourceId(1)).as_deref(),
+        Some("transactions")
+    );
+}
+
+#[test]
 fn canvas_zoom_fit_ignores_loaded_sources_without_displayed_rows() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
