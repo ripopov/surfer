@@ -6,6 +6,7 @@ use tempfile::tempdir;
 
 use crate::{
     Message, MessageTarget, StartupParams, SystemState, WaveSource,
+    config::AutoLoad,
     data_container::DataContainer,
     displayed_item::DisplayedItem,
     displayed_item_tree::VisibleItemIndex,
@@ -1503,6 +1504,127 @@ fn reload_additive_ftr_source_preserves_other_sources_and_rows() {
             |item| matches!(item, DisplayedItem::Stream(stream) if stream.source == SourceId(1))
         ),
         "FTR stream row should stay attached to the reloaded source"
+    );
+}
+
+#[test]
+fn source_less_reload_waveform_targets_active_additive_source() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let tempdir = tempdir().expect("tempdir");
+    let additive_path = camino::Utf8PathBuf::from_path_buf(tempdir.path().join("additive.vcd"))
+        .expect("utf8 temp path");
+    std::fs::copy(
+        fixture("examples/fused_ftr_wave.vcd").as_std_path(),
+        additive_path.as_std_path(),
+    )
+    .expect("seed additive fixture");
+
+    let mut state = SystemState::new_default_config().unwrap();
+    state.update(Message::LoadFilesWithIntents(vec![
+        (fixture("examples/my_db.ftr"), LoadIntent::ReplaceSession),
+        (additive_path, LoadIntent::AddSource),
+    ]));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+    state.update(Message::SetActiveScopeFromSource(SourceId(1), None));
+
+    let (primary_generation_before, additive_generation_before) = {
+        let waves = state.user.waves.as_ref().expect("waves loaded");
+        (
+            waves.cache_generation,
+            waves
+                .sources
+                .source(SourceId(1))
+                .map(|source| source.cache_generation)
+                .expect("additive source generation"),
+        )
+    };
+
+    state.update(Message::ReloadWaveform(true));
+    wait_until(&mut state, "active additive source reload", |state| {
+        state
+            .user
+            .waves
+            .as_ref()
+            .and_then(|waves| waves.sources.source(SourceId(1)))
+            .is_some_and(|source| source.cache_generation > additive_generation_before)
+    });
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert_eq!(
+        waves.cache_generation, primary_generation_before,
+        "source-less reload should not reload the primary source when another source is active"
+    );
+}
+
+#[test]
+fn reload_suggestion_targets_primary_source_even_when_additive_source_is_active() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let tempdir = tempdir().expect("tempdir");
+    let primary_path = camino::Utf8PathBuf::from_path_buf(tempdir.path().join("primary.vcd"))
+        .expect("utf8 primary path");
+    let additive_path = camino::Utf8PathBuf::from_path_buf(tempdir.path().join("additive.vcd"))
+        .expect("utf8 additive path");
+    std::fs::copy(
+        fixture("examples/fused_ftr_wave.vcd").as_std_path(),
+        primary_path.as_std_path(),
+    )
+    .expect("seed primary fixture");
+    std::fs::copy(
+        fixture("examples/fused_ftr_wave.vcd").as_std_path(),
+        additive_path.as_std_path(),
+    )
+    .expect("seed additive fixture");
+
+    let mut state = SystemState::new_default_config().unwrap();
+    state.update(Message::LoadFilesWithIntents(vec![
+        (primary_path, LoadIntent::ReplaceSession),
+        (additive_path, LoadIntent::AddSource),
+    ]));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+    state.update(Message::SetActiveScopeFromSource(SourceId(1), None));
+    state.user.autoreload_files = Some(AutoLoad::Always);
+
+    let (primary_generation_before, additive_generation_before) = {
+        let waves = state.user.waves.as_ref().expect("waves loaded");
+        (
+            waves.cache_generation,
+            waves
+                .sources
+                .source(SourceId(1))
+                .map(|source| source.cache_generation)
+                .expect("additive source generation"),
+        )
+    };
+
+    state.update(Message::SuggestReloadWaveform);
+    wait_until(&mut state, "primary source reload suggestion", |state| {
+        state
+            .user
+            .waves
+            .as_ref()
+            .is_some_and(|waves| waves.cache_generation > primary_generation_before)
+    });
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert_eq!(
+        waves
+            .sources
+            .source(SourceId(1))
+            .map(|source| source.cache_generation),
+        Some(additive_generation_before),
+        "watcher-style reload suggestion should not reload the active additive source"
     );
 }
 

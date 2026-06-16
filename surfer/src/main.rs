@@ -188,13 +188,15 @@ mod main_impl {
                 }
             }
         }
-        // install a file watcher that emits a `SuggestReloadWaveform` message
+        // install a file watcher that emits a source-specific reload suggestion
         // whenever the user-provided file changes.
         let _watcher = match waves {
             Some(WaveSource::File(path)) => {
                 let sender = state.channels.msg_sender.clone();
                 FileWatcher::new(&path, move || {
-                    if let Err(e) = sender.send(Message::SuggestReloadWaveform) {
+                    if let Err(e) =
+                        sender.send(Message::SuggestReloadSource(libsurfer::source::SourceId(0)))
+                    {
                         error!("Message ReloadWaveform did not send:\n{e}");
                     }
                     // Force refresh UI to process messages. Otherwise, it is
