@@ -1438,20 +1438,20 @@ impl WaveData {
         stream_ref: TransactionStreamRef,
         fold_events: bool,
     ) {
-        if self
-            .transactions_for_source_mut(source)
-            .unwrap()
-            .get_stream(stream_ref.stream_id)
-            .unwrap()
-            .transactions_loaded
-            .not()
-        {
+        let Some(transactions) = self.transactions_for_source(source) else {
+            warn!("No transaction source {source} for add_stream");
+            return;
+        };
+        let Some(stream) = transactions.get_stream(stream_ref.stream_id) else {
+            warn!("No stream {} in {source}", stream_ref.stream_id);
+            return;
+        };
+        if stream.transactions_loaded.not() {
             info!("(Stream) Loading transactions into memory!");
-            match self
-                .transactions_for_source_mut(source)
-                .unwrap()
-                .load_stream(stream_ref.stream_id)
-            {
+            let Some(transactions) = self.transactions_for_source_mut(source) else {
+                return;
+            };
+            match transactions.load_stream(stream_ref.stream_id) {
                 Ok(()) => info!(
                     "(Stream {}) Finished loading transactions!",
                     stream_ref.stream_id
@@ -1460,8 +1460,12 @@ impl WaveData {
             }
         }
 
-        let transactions = self.transactions_for_source(source).unwrap();
-        let stream = transactions.get_stream(stream_ref.stream_id).unwrap();
+        let Some(transactions) = self.transactions_for_source(source) else {
+            return;
+        };
+        let Some(stream) = transactions.get_stream(stream_ref.stream_id) else {
+            return;
+        };
         let mut last_times_on_row = vec![(BigUint::ZERO, BigUint::ZERO)];
 
         for gen_id in &stream.generators {
@@ -1472,8 +1476,9 @@ impl WaveData {
             {
                 continue;
             }
-            let generator = transactions.get_generator(*gen_id).unwrap();
-            calculate_rows_of_stream(&generator.transactions, &mut last_times_on_row);
+            if let Some(generator) = transactions.get_generator(*gen_id) {
+                calculate_rows_of_stream(&generator.transactions, &mut last_times_on_row);
+            }
         }
 
         let new_stream = DisplayedItem::Stream(DisplayedStream {
@@ -1491,8 +1496,15 @@ impl WaveData {
     }
 
     pub fn add_all_streams(&mut self, fold_events: bool) {
+        self.add_all_streams_from_source(Self::primary_source_id(), fold_events);
+    }
+
+    pub fn add_all_streams_from_source(&mut self, source: SourceId, fold_events: bool) {
         let mut streams: Vec<(StreamId, String)> = vec![];
-        for stream in self.inner.as_transactions().unwrap().get_streams() {
+        let Some(transactions) = self.transactions_for_source(source) else {
+            return;
+        };
+        for stream in transactions.get_streams() {
             streams.push((stream.id, stream.name.clone()));
         }
 
@@ -1500,7 +1512,11 @@ impl WaveData {
             .into_iter()
             .sorted_by(|a, b| numeric_sort::cmp(&a.1, &b.1))
         {
-            self.add_stream(TransactionStreamRef::new_stream(id, name), fold_events);
+            self.add_stream_from_source(
+                source,
+                TransactionStreamRef::new_stream(id, name),
+                fold_events,
+            );
         }
     }
 

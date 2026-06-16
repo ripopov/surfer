@@ -1934,10 +1934,14 @@ impl SystemState {
                                         ..
                                     } => {
                                         let time_scale = waves
-                                            .inner
-                                            .as_transactions()
+                                            .transactions_for_source(displayed_stream.source)
                                             .map(|t| t.inner.time_scale.to_string())
                                             .unwrap_or_default();
+                                        let source_label = (waves.source_count() > 1)
+                                            .then(|| {
+                                                waves.source_label_for(displayed_stream.source)
+                                            })
+                                            .flatten();
                                         let response =
                                             crate::tooltips::handle_event_cluster_tooltip(
                                                 response,
@@ -1945,6 +1949,7 @@ impl SystemState {
                                                 names,
                                                 time_span,
                                                 &time_scale,
+                                                source_label.as_deref(),
                                             );
                                         if response.clicked() {
                                             // Zoom in until the cluster
