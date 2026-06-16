@@ -695,6 +695,64 @@ impl SystemState {
         }
     }
 
+    pub fn load_wave_from_url_with_intent(&mut self, url: String, intent: LoadIntent) {
+        if matches!(intent, LoadIntent::ReplaceSession) {
+            self.load_wave_from_url(url, LoadOptions::Clear, true, None);
+            return;
+        }
+
+        match url_to_wavesource(&url) {
+            #[cfg(not(target_arch = "wasm32"))]
+            Some(WaveSource::Cxxrtl(kind)) => {
+                self.update(Message::Error(anyhow!(
+                    "Cannot add or reload CXXRTL URL source with intent {intent:?}: {kind}"
+                )));
+            }
+            _ => {
+                let sender = self.channels.msg_sender.clone();
+                let url_ = url.clone();
+                perform_async_work(async move {
+                    let maybe_response = reqwest::get(&url)
+                        .map(|e| e.with_context(|| format!("Failed fetch download {url}")))
+                        .await;
+                    let response: reqwest::Response = match maybe_response {
+                        Ok(r) => r,
+                        Err(e) => {
+                            checked_send(&sender, Message::Error(e));
+                            return;
+                        }
+                    };
+
+                    if let Some(value) = response.headers().get(HTTP_SERVER_KEY)
+                        && matches!(value.to_str(), Ok(HTTP_SERVER_VALUE_SURFER))
+                    {
+                        checked_send(
+                            &sender,
+                            Message::Error(anyhow!(
+                                "Add Source and Reload Source for remote Surver waveform sources are not implemented yet: {url}"
+                            )),
+                        );
+                        return;
+                    }
+
+                    let bytes = response
+                        .bytes()
+                        .map(|e| e.with_context(|| format!("Failed to download {url}")))
+                        .await;
+
+                    let msg = match bytes {
+                        Ok(b) => Message::FileDownloadedWithIntent(url, b, intent),
+                        Err(e) => Message::Error(e),
+                    };
+                    checked_send(&sender, msg);
+                });
+
+                self.progress_tracker =
+                    Some(LoadProgress::new(LoadProgressStatus::Downloading(url_)));
+            }
+        }
+    }
+
     pub fn load_transactions_from_file(
         &mut self,
         filename: camino::Utf8PathBuf,

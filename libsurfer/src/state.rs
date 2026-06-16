@@ -289,9 +289,9 @@ impl SystemState {
             if idx == 0 {
                 match source {
                     WaveSource::Url(url) => {
-                        self.add_batch_message(Message::LoadWaveformFileFromUrl(
+                        self.add_batch_message(Message::LoadUrlWithIntent(
                             url,
-                            LoadOptions::KeepAll,
+                            LoadIntent::ReplaceSession,
                         ));
                     }
                     WaveSource::File(file) => {
@@ -317,9 +317,9 @@ impl SystemState {
                         ));
                     }
                     WaveSource::Url(url) => {
-                        self.add_batch_message(Message::LoadWaveformFileFromUrl(
+                        self.add_batch_message(Message::LoadUrlWithIntent(
                             url,
-                            LoadOptions::KeepAll,
+                            LoadIntent::AddSource,
                         ));
                     }
                     WaveSource::Data => error!("Attempted to add data at startup"),
