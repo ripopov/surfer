@@ -161,6 +161,30 @@ fn startup_waveform_and_ftr_sources_use_ordered_intents() {
 }
 
 #[test]
+fn startup_url_sources_use_ordered_intents() {
+    let first_url = "https://example.test/waves.vcd".to_string();
+    let second_url = "https://example.test/transactions.ftr".to_string();
+    let state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::Url(first_url.clone())),
+            additional_waves: vec![WaveSource::Url(second_url.clone())],
+            startup_commands: vec![],
+            ..Default::default()
+        });
+
+    assert_eq!(state.batch_messages.len(), 2);
+    assert!(matches!(
+        state.batch_messages.front(),
+        Some(Message::LoadUrlWithIntent(url, LoadIntent::ReplaceSession)) if url == &first_url
+    ));
+    assert!(matches!(
+        state.batch_messages.get(1),
+        Some(Message::LoadUrlWithIntent(url, LoadIntent::AddSource)) if url == &second_url
+    ));
+}
+
+#[test]
 fn ordered_multi_file_load_keeps_first_file_as_primary_source() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
@@ -897,6 +921,46 @@ fn load_data_with_intent_can_add_ftr_source() {
         waves.source_label_for(SourceId(1)).as_deref(),
         Some("File data")
     );
+}
+
+#[test]
+fn downloaded_url_ftr_can_be_added_as_source() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(fixture("examples/fused_ftr_wave.vcd"))),
+            startup_commands: vec![],
+            ..Default::default()
+        });
+
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+    let bytes = std::fs::read(fixture("examples/my_db.ftr").as_std_path()).expect("read ftr");
+    let url = "https://example.test/my_db.ftr".to_string();
+    state.update(Message::FileDownloadedWithIntent(
+        url.clone(),
+        bytes::Bytes::from(bytes),
+        LoadIntent::AddSource,
+    ));
+    wait_for_source_count(&mut state, 2);
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert!(waves.waves_for_source(SourceId::default()).is_some());
+    assert!(waves.transactions_for_source(SourceId(1)).is_some());
+    assert_eq!(
+        waves.source_label_for(SourceId(1)).as_deref(),
+        Some(url.as_str())
+    );
+    assert!(matches!(
+        waves.sources.source(SourceId(1)).map(|source| &source.source),
+        Some(WaveSource::Url(source_url)) if source_url == &url
+    ));
 }
 
 #[test]

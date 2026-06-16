@@ -1516,6 +1516,13 @@ impl SystemState {
                     .map_err(|e| error!("{e:#?}"))
                     .ok();
             }
+            Message::LoadUrlWithIntent(url, intent) => {
+                if matches!(intent, LoadIntent::ReplaceSession) {
+                    self.user.selected_server_file_index = None;
+                    *self.surver_selected_file.borrow_mut() = None;
+                }
+                self.load_wave_from_url_with_intent(url, intent);
+            }
             Message::LoadFilesWithIntents(files) => {
                 self.add_batch_messages(
                     files
@@ -2186,6 +2193,13 @@ impl SystemState {
             }
             Message::FileDownloaded(url, bytes, load_options) => {
                 self.load_from_bytes(WaveSource::Url(url), bytes.to_vec(), load_options);
+            }
+            Message::FileDownloadedWithIntent(url, bytes, intent) => {
+                if matches!(intent, LoadIntent::ReplaceSession) {
+                    self.user.selected_server_file_index = None;
+                    *self.surver_selected_file.borrow_mut() = None;
+                }
+                self.load_from_bytes_with_intent(WaveSource::Url(url), bytes.to_vec(), intent);
             }
             Message::CommandFileDownloaded(_url, bytes) => {
                 self.add_batch_commands(read_command_bytes(bytes.to_vec()));

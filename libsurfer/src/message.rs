@@ -175,6 +175,8 @@ pub enum Message {
     LoadFile(Utf8PathBuf, LoadOptions),
     /// Load file with explicit session/source intent.
     LoadFileWithIntent(Utf8PathBuf, LoadIntent),
+    /// Load URL with explicit session/source intent.
+    LoadUrlWithIntent(String, LoadIntent),
     /// Queue a set of file loads with explicit intents, preserving order.
     LoadFilesWithIntents(Vec<(Utf8PathBuf, LoadIntent)>),
     /// Close a source and remove or remap source-owned rows/tables.
@@ -297,6 +299,9 @@ pub enum Message {
     #[serde(skip)]
     /// Message sent when download of a waveform file is complete.
     FileDownloaded(String, Bytes, LoadOptions),
+    #[serde(skip)]
+    /// Message sent when download of a source URL is complete.
+    FileDownloadedWithIntent(String, Bytes, LoadIntent),
     #[serde(skip)]
     /// Message sent when download of a command file is complete.
     CommandFileDownloaded(String, Bytes),
