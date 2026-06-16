@@ -103,6 +103,28 @@ impl TransactionContainer {
     }
 
     #[must_use]
+    pub fn get_generator_from_name_or_qualified(
+        &self,
+        stream_id: Option<StreamId>,
+        gen_name: &str,
+    ) -> Option<&TxGenerator> {
+        self.get_generator_from_name(stream_id, gen_name.to_string())
+            .or_else(|| match stream_id {
+                Some(stream_id) => {
+                    let (_, name) = gen_name.rsplit_once('.')?;
+                    self.get_generator_from_name(Some(stream_id), name.to_string())
+                }
+                None => {
+                    let (stream_name, name) = gen_name.rsplit_once('.')?;
+                    let stream = self
+                        .get_stream_from_name(stream_name.to_string())
+                        .or_else(|| self.get_stream_from_name(format!("tr.{stream_name}")))?;
+                    self.get_generator_from_name(Some(stream.id), name.to_string())
+                }
+            })
+    }
+
+    #[must_use]
     pub fn get_transactions_from_generator(&self, gen_id: GeneratorId) -> Vec<TransactionId> {
         self.get_generator(gen_id)
             .unwrap()

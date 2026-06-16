@@ -614,6 +614,20 @@ impl SystemState {
                 )?;
                 self.invalidate_draw_commands();
             }
+            Message::AddStreamOrGeneratorFromNameFromSource(source, scope, name) => {
+                self.save_current_canvas(format!(
+                    "Add Stream/Generator from name: {name} from {source}"
+                ));
+                let fold_events = self.user.config.behavior.ftr_events_enabled();
+                let waves = self.user.waves.as_mut()?;
+                waves.add_stream_or_generator_from_name_from_source(
+                    source,
+                    scope,
+                    name,
+                    fold_events,
+                )?;
+                self.invalidate_draw_commands();
+            }
             Message::AddAllFromStreamScope(scope_name) => {
                 self.save_current_canvas(format!("Add all from scope {}", scope_name.clone()));
                 let fold_events = self.user.config.behavior.ftr_events_enabled();

@@ -634,7 +634,8 @@ impl SystemState {
                 .displayed_items
                 .values()
                 .any(|item| matches!(item, DisplayedItem::Stream(_)));
-            let draw_data = if has_stream_rows && (has_wave_rows || waves.source_count() > 1) {
+            let has_source_rows = has_wave_rows || has_stream_rows;
+            let draw_data = if has_source_rows && waves.source_count() > 1 {
                 self.generate_mixed_draw_commands(waves, cfg, msgs, viewport_idx)
             } else {
                 match waves.inner {

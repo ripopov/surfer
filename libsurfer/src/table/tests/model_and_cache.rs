@@ -60,6 +60,138 @@ fn table_model_spec_multi_signal_change_list_ron_round_trip() {
 }
 
 #[test]
+fn table_model_signal_change_list_source_defaults_on_legacy_state() {
+    let encoded = r#"
+SignalChangeList(
+    variable: (
+        path: (strs: ["tb"], id: None),
+        name: "clk",
+        id: None,
+        index: None,
+    ),
+    field: [],
+)
+"#;
+
+    let decoded: TableModelSpec =
+        ron::de::from_str(encoded).expect("deserialize legacy signal change-list spec");
+
+    assert_eq!(
+        decoded,
+        TableModelSpec::SignalChangeList {
+            source: crate::source::SourceId::default(),
+            variable: VariableRef::from_hierarchy_string("tb.clk"),
+            field: vec![],
+        }
+    );
+}
+
+#[test]
+fn table_model_transaction_trace_source_defaults_on_legacy_state() {
+    let encoded = r#"
+TransactionTrace(
+    generator: (
+        stream_id: StreamId(1),
+        gen_id: Some(GeneratorId(4)),
+        name: "read",
+    ),
+)
+"#;
+
+    let decoded: TableModelSpec =
+        ron::de::from_str(encoded).expect("deserialize legacy transaction trace spec");
+
+    assert_eq!(
+        decoded,
+        TableModelSpec::TransactionTrace {
+            source: crate::source::SourceId::default(),
+            generator: crate::transaction_container::TransactionStreamRef::new_gen(
+                ftr_parser::types::StreamId(1),
+                ftr_parser::types::GeneratorId(4),
+                "read".to_string(),
+            ),
+        }
+    );
+}
+
+#[test]
+fn table_model_event_table_source_defaults_on_legacy_state() {
+    let encoded = r#"
+EventTable(
+    generator: (
+        stream_id: StreamId(1),
+        gen_id: Some(GeneratorId(4)),
+        name: "read",
+    ),
+)
+"#;
+
+    let decoded: TableModelSpec =
+        ron::de::from_str(encoded).expect("deserialize legacy event table spec");
+
+    assert_eq!(
+        decoded,
+        TableModelSpec::EventTable {
+            source: crate::source::SourceId::default(),
+            generator: crate::transaction_container::TransactionStreamRef::new_gen(
+                ftr_parser::types::StreamId(1),
+                ftr_parser::types::GeneratorId(4),
+                "read".to_string(),
+            ),
+        }
+    );
+}
+
+#[test]
+fn table_model_multi_signal_entries_source_defaults_on_legacy_state() {
+    let encoded = r#"
+MultiSignalChangeList(
+    variables: [
+        (
+            variable: (
+                path: (strs: ["tb"], id: None),
+                name: "clk",
+                id: None,
+                index: None,
+            ),
+            field: [],
+        ),
+        (
+            variable: (
+                path: (strs: ["tb", "dut"], id: None),
+                name: "counter",
+                id: None,
+                index: None,
+            ),
+            field: ["value"],
+        ),
+    ],
+)
+"#;
+
+    let decoded: TableModelSpec =
+        ron::de::from_str(encoded).expect("deserialize legacy multi-signal spec");
+
+    assert_eq!(
+        decoded,
+        TableModelSpec::MultiSignalChangeList {
+            variables: vec![
+                MultiSignalEntry {
+                    source: crate::source::SourceId::default(),
+                    variable: VariableRef::from_hierarchy_string("tb.clk"),
+                    field: vec![],
+                },
+                MultiSignalEntry {
+                    source: crate::source::SourceId::default(),
+                    variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
+                    field: vec!["value".to_string()],
+                },
+            ],
+        }
+    );
+}
+
+#[test]
 fn multi_signal_change_list_default_view_config_deterministic() {
     let state = SystemState::new_default_config().expect("state");
     let ctx = state.table_model_context();
@@ -290,6 +422,114 @@ fn signal_analysis_config_ron_round_trip() {
         ron::de::from_str(&encoded).expect("deserialize SignalAnalysisConfig");
 
     assert_eq!(config, decoded);
+}
+
+#[test]
+fn signal_analysis_config_sources_default_on_legacy_state() {
+    let encoded = r#"
+(
+    sampling: (
+        signal: (
+            path: (strs: ["tb"], id: None),
+            name: "clk",
+            id: None,
+            index: None,
+        ),
+    ),
+    signals: [
+        (
+            variable: (
+                path: (strs: ["tb"], id: None),
+                name: "data_out",
+                id: None,
+                index: None,
+            ),
+            field: [],
+            translator: "Unsigned",
+        ),
+    ],
+    run_revision: 7,
+)
+"#;
+
+    let decoded: SignalAnalysisConfig =
+        ron::de::from_str(encoded).expect("deserialize legacy signal-analysis config");
+
+    assert_eq!(
+        decoded,
+        SignalAnalysisConfig {
+            sampling: SignalAnalysisSamplingConfig {
+                source: crate::source::SourceId::default(),
+                signal: VariableRef::from_hierarchy_string("tb.clk"),
+            },
+            signals: vec![SignalAnalysisSignal {
+                source: crate::source::SourceId::default(),
+                variable: VariableRef::from_hierarchy_string("tb.data_out"),
+                field: vec![],
+                translator: "Unsigned".to_string(),
+            }],
+            run_revision: 7,
+        }
+    );
+}
+
+#[test]
+fn table_model_analysis_results_sources_default_on_legacy_state() {
+    let encoded = r#"
+AnalysisResults(
+    kind: SignalAnalysisV1,
+    params: SignalAnalysisV1(
+        config: (
+            sampling: (
+                signal: (
+                    path: (strs: ["tb"], id: None),
+                    name: "clk",
+                    id: None,
+                    index: None,
+                ),
+            ),
+            signals: [
+                (
+                    variable: (
+                        path: (strs: ["tb"], id: None),
+                        name: "data_out",
+                        id: None,
+                        index: None,
+                    ),
+                    field: [],
+                    translator: "Unsigned",
+                ),
+            ],
+            run_revision: 0,
+        ),
+    ),
+)
+"#;
+
+    let decoded: TableModelSpec =
+        ron::de::from_str(encoded).expect("deserialize legacy analysis table spec");
+
+    assert_eq!(
+        decoded,
+        TableModelSpec::AnalysisResults {
+            kind: AnalysisKind::SignalAnalysisV1,
+            params: AnalysisParams::SignalAnalysisV1 {
+                config: SignalAnalysisConfig {
+                    sampling: SignalAnalysisSamplingConfig {
+                        source: crate::source::SourceId::default(),
+                        signal: VariableRef::from_hierarchy_string("tb.clk"),
+                    },
+                    signals: vec![SignalAnalysisSignal {
+                        source: crate::source::SourceId::default(),
+                        variable: VariableRef::from_hierarchy_string("tb.data_out"),
+                        field: vec![],
+                        translator: "Unsigned".to_string(),
+                    }],
+                    run_revision: 0,
+                },
+            },
+        }
+    );
 }
 
 #[test]
