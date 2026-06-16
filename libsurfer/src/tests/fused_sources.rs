@@ -983,6 +983,134 @@ fn downloaded_url_ftr_can_be_added_as_source() {
 }
 
 #[test]
+fn downloaded_url_ftr_can_reload_existing_source() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(fixture("examples/fused_ftr_wave.vcd"))),
+            startup_commands: vec![],
+            ..Default::default()
+        });
+
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+    let bytes = std::fs::read(fixture("examples/my_db.ftr").as_std_path()).expect("read ftr");
+    let url = "https://example.test/my_db.ftr".to_string();
+    state.update(Message::FileDownloadedWithIntent(
+        url.clone(),
+        bytes::Bytes::from(bytes.clone()),
+        LoadIntent::AddSource,
+    ));
+    wait_for_source_count(&mut state, 2);
+
+    let (primary_generation_before, source_generation_before) = {
+        let waves = state.user.waves.as_ref().expect("waves loaded");
+        (
+            waves.cache_generation,
+            waves
+                .sources
+                .source(SourceId(1))
+                .map(|source| source.cache_generation)
+                .expect("url source generation"),
+        )
+    };
+
+    state.update(Message::FileDownloadedWithIntent(
+        url.clone(),
+        bytes::Bytes::from(bytes),
+        LoadIntent::ReloadSource {
+            source: SourceId(1),
+            keep_unavailable: true,
+        },
+    ));
+    wait_until(&mut state, "URL-backed FTR reload", |state| {
+        state
+            .user
+            .waves
+            .as_ref()
+            .and_then(|waves| waves.sources.source(SourceId(1)))
+            .is_some_and(|source| source.cache_generation > source_generation_before)
+    });
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert_eq!(waves.cache_generation, primary_generation_before);
+    let reloaded = waves.sources.source(SourceId(1)).expect("url source");
+    assert!(
+        reloaded.cache_generation > source_generation_before,
+        "URL-backed FTR reload should invalidate only the reloaded source"
+    );
+    assert_eq!(reloaded.source, WaveSource::Url(url));
+    assert!(waves.transactions_for_source(SourceId(1)).is_some());
+}
+
+#[test]
+fn stale_downloaded_url_reload_is_ignored() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(fixture("examples/fused_ftr_wave.vcd"))),
+            startup_commands: vec![],
+            ..Default::default()
+        });
+
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+    let bytes = std::fs::read(fixture("examples/my_db.ftr").as_std_path()).expect("read ftr");
+    let url = "https://example.test/my_db.ftr".to_string();
+    state.update(Message::FileDownloadedWithIntent(
+        url.clone(),
+        bytes::Bytes::from(bytes.clone()),
+        LoadIntent::AddSource,
+    ));
+    wait_for_source_count(&mut state, 2);
+
+    let stale_request = LoadRequestId(100);
+    let current_request = LoadRequestId(101);
+    let source_generation_before = {
+        let waves = state.user.waves.as_mut().expect("waves loaded");
+        waves.mark_source_load_request(SourceId(1), current_request);
+        waves
+            .sources
+            .source(SourceId(1))
+            .map(|source| source.cache_generation)
+            .expect("url source generation")
+    };
+
+    state.update(Message::FileDownloadedWithIntentForRequest(
+        url,
+        bytes::Bytes::from(bytes),
+        LoadIntent::ReloadSource {
+            source: SourceId(1),
+            keep_unavailable: true,
+        },
+        stale_request,
+    ));
+    state.handle_async_messages();
+    state.handle_batch_commands();
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    let source = waves.sources.source(SourceId(1)).expect("url source");
+    assert_eq!(
+        source.cache_generation, source_generation_before,
+        "stale URL reload data must not replace the current source"
+    );
+    assert_eq!(source.active_load_request, Some(current_request));
+    assert!(matches!(source.load_state, SourceLoadState::Pending));
+}
+
+#[test]
 fn dropping_multiple_files_on_empty_session_replaces_then_adds_sources() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)

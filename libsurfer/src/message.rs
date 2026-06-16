@@ -299,6 +299,12 @@ pub enum Message {
     /// Message sent when download of a source URL is complete.
     FileDownloadedWithIntent(String, Bytes, LoadIntent),
     #[serde(skip)]
+    /// Message sent when download of a source URL is complete for a tracked reload request.
+    FileDownloadedWithIntentForRequest(String, Bytes, LoadIntent, LoadRequestId),
+    #[serde(skip)]
+    /// Message sent when download of a source URL fails.
+    FileDownloadFailedWithIntent(String, LoadIntent, Option<LoadRequestId>, eyre::Error),
+    #[serde(skip)]
     /// Message sent when download of a command file is complete.
     CommandFileDownloaded(String, Bytes),
     ReloadConfig,
