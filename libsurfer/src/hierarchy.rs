@@ -56,7 +56,7 @@ pub enum ScopeExpandType {
     CollapseAll,
 }
 
-use crate::source::{SourceId, TimeDomain, format_time_domain, source_label};
+use crate::source::{SourceId, SourceLoadState, TimeDomain, format_time_domain, source_label};
 use crate::variable_filter::VariableNameFilterType;
 use crate::wave_source::WaveSource;
 
@@ -73,6 +73,26 @@ struct SourceHeader<'a> {
     rename_label: &'a str,
     format: crate::WaveFormat,
     time_domain: Option<&'a TimeDomain>,
+    load_state: SourceLoadState,
+}
+
+fn source_header_text(
+    label: &str,
+    format: crate::WaveFormat,
+    time_domain: Option<&TimeDomain>,
+    load_state: &SourceLoadState,
+) -> String {
+    let mut text = format!("{label}  {format}");
+    if let Some(time_domain) = time_domain {
+        text.push_str("  ");
+        text.push_str(&format_time_domain(time_domain));
+    }
+    match load_state {
+        SourceLoadState::Loaded => {}
+        SourceLoadState::Pending => text.push_str("  Loading"),
+        SourceLoadState::Error(_) => text.push_str("  Error"),
+    }
+    text
 }
 
 /// Cache key for `draw_all_variables`. The cache is rebuilt whenever any field changes.
@@ -495,6 +515,7 @@ impl SystemState {
                     &primary_label,
                     &primary_rename_label,
                     waves.format,
+                    SourceLoadState::Loaded,
                     &waves.inner,
                     &options,
                     ui,
@@ -511,6 +532,7 @@ impl SystemState {
                         &label,
                         &source.label,
                         source.format,
+                        source.load_state.clone(),
                         &source.inner,
                         &options,
                         ui,
@@ -528,6 +550,7 @@ impl SystemState {
         label: &str,
         rename_label: &str,
         format: crate::WaveFormat,
+        load_state: SourceLoadState,
         inner: &DataContainer,
         options: &crate::transactions::TransactionListOptions,
         ui: &mut Ui,
@@ -540,6 +563,7 @@ impl SystemState {
                 rename_label,
                 format,
                 time_domain: TimeDomain::from_container(inner).as_ref(),
+                load_state,
             },
             ui,
         );
@@ -563,13 +587,17 @@ impl SystemState {
     }
 
     fn draw_source_header(&self, msgs: &mut Vec<Message>, header: SourceHeader<'_>, ui: &mut Ui) {
-        let mut text = format!("{}  {}", header.label, header.format);
-        if let Some(time_domain) = header.time_domain {
-            text.push_str("  ");
-            text.push_str(&format_time_domain(time_domain));
+        let mut response = ui.label(source_header_text(
+            header.label,
+            header.format,
+            header.time_domain,
+            &header.load_state,
+        ));
+        if let SourceLoadState::Error(error) = &header.load_state
+            && !error.is_empty()
+        {
+            response = response.on_hover_text(format!("Source failed to load: {error}"));
         }
-
-        let response = ui.label(text);
         response.context_menu(|ui| {
             if ui.button("Reload Source").clicked() {
                 msgs.push(Message::ReloadSource(header.source, true));
@@ -581,8 +609,7 @@ impl SystemState {
                     msgs.push(Message::RenameSource(header.source, edited_label));
                 }
             });
-            if header.source != WaveData::primary_source_id() && ui.button("Close Source").clicked()
-            {
+            if ui.button("Close Source").clicked() {
                 msgs.push(Message::CloseSource(header.source));
                 ui.close();
             }
@@ -612,6 +639,7 @@ impl SystemState {
                     rename_label: &primary_rename_label,
                     format: wave.format,
                     time_domain: TimeDomain::from_container(&wave.inner).as_ref(),
+                    load_state: SourceLoadState::Loaded,
                 },
                 ui,
             );
@@ -661,6 +689,7 @@ impl SystemState {
                         rename_label: &source.label,
                         format: source.format,
                         time_domain: source.time_domain.as_ref(),
+                        load_state: source.load_state.clone(),
                     },
                     ui,
                 );
@@ -1267,5 +1296,53 @@ impl SystemState {
             }
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        time::{TimeScale, TimeUnit},
+        wave_source::WaveFormat,
+    };
+
+    use super::*;
+
+    #[test]
+    fn source_header_text_keeps_loaded_state_unmarked() {
+        assert_eq!(
+            source_header_text("waves.vcd", WaveFormat::Vcd, None, &SourceLoadState::Loaded),
+            "waves.vcd  VCD"
+        );
+    }
+
+    #[test]
+    fn source_header_text_marks_pending_and_error_states() {
+        let domain = TimeDomain {
+            timescale: TimeScale {
+                unit: TimeUnit::NanoSeconds,
+                multiplier: Some(1),
+            },
+            max_timestamp: 42u32.into(),
+        };
+
+        assert_eq!(
+            source_header_text(
+                "waves.vcd",
+                WaveFormat::Vcd,
+                Some(&domain),
+                &SourceLoadState::Pending,
+            ),
+            "waves.vcd  VCD  1 ns, 0..42  Loading"
+        );
+        assert_eq!(
+            source_header_text(
+                "trace.ftr",
+                WaveFormat::Ftr,
+                None,
+                &SourceLoadState::Error("parse failed".to_string()),
+            ),
+            "trace.ftr  FTR  Error"
+        );
     }
 }

@@ -28,6 +28,7 @@ use crate::item_drawing_info::{
 };
 use crate::menus::generic_context_menu;
 use crate::message::Message;
+use crate::source::SourceId;
 use crate::system_state::SystemState;
 use crate::time::{TimeFormatter, time_string};
 use crate::tooltips::variable_tooltip_text;
@@ -1296,6 +1297,18 @@ impl SystemState {
     ) -> LayoutJob {
         let mut layout_job = LayoutJob::default();
 
+        if let Some(source_cue) = self.source_cue_for_item(displayed_item, field) {
+            RichText::new(source_cue)
+                .color(foreground.gamma_multiply(0.6))
+                .line_height(Some(self.user.config.layout.waveforms_line_height))
+                .append_to(
+                    &mut layout_job,
+                    ui.style(),
+                    FontSelection::Default,
+                    Align::Center,
+                );
+        }
+
         match displayed_item {
             DisplayedItem::Variable(var) if field.is_some() => {
                 let field = field.unwrap();
@@ -1322,6 +1335,38 @@ impl SystemState {
         }
 
         layout_job
+    }
+
+    fn source_cue_for_item(
+        &self,
+        displayed_item: &DisplayedItem,
+        field: Option<&FieldRef>,
+    ) -> Option<String> {
+        let waves = self.user.waves.as_ref()?;
+        if waves.source_count() <= 1 || field.is_some_and(|field| !field.field.is_empty()) {
+            return None;
+        }
+
+        let source = Self::displayed_item_source(displayed_item)?;
+        let item_name = displayed_item.name();
+        let has_same_name_from_other_source = waves.displayed_items.values().any(|other| {
+            Self::displayed_item_source(other).is_some_and(|other_source| other_source != source)
+                && other.name() == item_name
+        });
+
+        has_same_name_from_other_source.then(|| format!("s{} ", source.0))
+    }
+
+    fn displayed_item_source(displayed_item: &DisplayedItem) -> Option<SourceId> {
+        match displayed_item {
+            DisplayedItem::Variable(variable) => Some(variable.source),
+            DisplayedItem::Placeholder(placeholder) => Some(placeholder.source),
+            DisplayedItem::Stream(stream) => Some(stream.source),
+            DisplayedItem::Divider(_)
+            | DisplayedItem::Marker(_)
+            | DisplayedItem::TimeLine(_)
+            | DisplayedItem::Group(_) => None,
+        }
     }
 
     /// Builds layout for a variable's root name (not a subfield).

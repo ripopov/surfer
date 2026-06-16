@@ -637,6 +637,7 @@ mod tests {
             rows: 4,
         )"#;
         let stream: DisplayedStream = ron::from_str(legacy).expect("legacy state should load");
+        assert_eq!(stream.source, SourceId::default());
         assert_eq!(stream.event_display_mode, EventDisplayMode::Overlay);
     }
 

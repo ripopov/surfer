@@ -12,12 +12,13 @@ use crate::displayed_item_tree::VisibleItemIndex;
 use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation, ScopeExpandType};
 use crate::keyboard_shortcuts::ShortcutAction;
 use crate::message::MessageTarget;
+use crate::source::SourceId;
 use crate::table::{MultiSignalEntry, TableModelSpec};
 use crate::trace_style::TraceStyle;
-use crate::transaction_container::StreamScopeRef;
+use crate::transaction_container::{StreamScopeRef, TransactionStreamRef};
 use crate::transaction_events::EventDisplayMode;
 use crate::wave_container::{FieldRef, VariableRefExt};
-use crate::wave_data::ScopeType;
+use crate::wave_data::{ScopeType, WaveData};
 use crate::wave_source::LoadOptions;
 use crate::{
     SystemState,
@@ -589,6 +590,21 @@ impl SystemState {
             .map(|node| (node.item_ref, &waves.displayed_items[&node.item_ref]))
             .unwrap();
 
+        if let Some(source) = source_for_context_item(clicked_item)
+            && waves.source_count() > 1
+        {
+            if ui.button("Show Source").clicked() {
+                msgs.extend(show_source_messages(source));
+                ui.close();
+            }
+            if let Some(reveal_messages) = reveal_in_hierarchy_messages(waves, clicked_item, path)
+                && ui.button("Reveal in Hierarchy").clicked()
+            {
+                msgs.extend(reveal_messages);
+                ui.close();
+            }
+        }
+
         if let Some(path) = path {
             let dfr = DisplayedFieldRef {
                 item: clicked_item_ref,
@@ -1141,6 +1157,72 @@ impl SystemState {
     }
 }
 
+fn source_for_context_item(item: &DisplayedItem) -> Option<SourceId> {
+    match item {
+        DisplayedItem::Variable(variable) => Some(variable.source),
+        DisplayedItem::Placeholder(placeholder) => Some(placeholder.source),
+        DisplayedItem::Stream(stream) => Some(stream.source),
+        DisplayedItem::Divider(_)
+        | DisplayedItem::Marker(_)
+        | DisplayedItem::TimeLine(_)
+        | DisplayedItem::Group(_) => None,
+    }
+}
+
+fn show_source_messages(source: SourceId) -> Vec<Message> {
+    vec![
+        Message::SetSidePanelVisible(true),
+        Message::SetActiveScopeFromSource(source, None),
+    ]
+}
+
+fn reveal_in_hierarchy_messages(
+    waves: &WaveData,
+    item: &DisplayedItem,
+    path: Option<&FieldRef>,
+) -> Option<Vec<Message>> {
+    match item {
+        DisplayedItem::Variable(variable) => {
+            let scope = path
+                .map(|path| path.root.path.clone())
+                .unwrap_or_else(|| variable.variable_ref.path.clone());
+            Some(vec![
+                Message::SetSidePanelVisible(true),
+                Message::SetHierarchyStyle(HierarchyStyle::Tree),
+                Message::SetActiveScopeFromSource(
+                    variable.source,
+                    Some(ScopeType::WaveScope(scope.clone())),
+                ),
+                Message::ExpandScope(ScopeExpandType::ExpandSpecific(scope)),
+            ])
+        }
+        DisplayedItem::Stream(stream) => {
+            let transactions = waves.transactions_for_source(stream.source)?;
+            let stream_name = transactions
+                .get_stream(stream.transaction_stream_ref.stream_id)
+                .map(|stream| stream.name.clone())
+                .unwrap_or_else(|| stream.transaction_stream_ref.name.clone());
+            let stream_ref = TransactionStreamRef::new_stream(
+                stream.transaction_stream_ref.stream_id,
+                stream_name,
+            );
+            Some(vec![
+                Message::SetSidePanelVisible(true),
+                Message::SetHierarchyStyle(HierarchyStyle::Separate),
+                Message::SetActiveScopeFromSource(
+                    stream.source,
+                    Some(ScopeType::StreamScope(StreamScopeRef::Stream(stream_ref))),
+                ),
+            ])
+        }
+        DisplayedItem::Placeholder(_)
+        | DisplayedItem::Divider(_)
+        | DisplayedItem::Marker(_)
+        | DisplayedItem::TimeLine(_)
+        | DisplayedItem::Group(_) => None,
+    }
+}
+
 pub fn generic_context_menu(msgs: &mut Vec<Message>, response: &egui::Response) {
     response.context_menu(|ui| {
         if ui.button("Add divider").clicked() {
@@ -1150,4 +1232,145 @@ pub fn generic_context_menu(msgs: &mut Vec<Message>, response: &egui::Response) 
             msgs.push(Message::AddTimeLine(None));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use ftr_parser::types::{GeneratorId, StreamId};
+    use project_root::get_project_root;
+
+    use super::*;
+    use crate::{
+        StartupParams, WaveSource,
+        displayed_item::DisplayedItem,
+        wave_container::{FieldRefExt, VariableRef, VariableRefExt},
+    };
+
+    fn fixture(path: &str) -> camino::Utf8PathBuf {
+        get_project_root().unwrap().join(path).try_into().unwrap()
+    }
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn show_source_messages_open_side_panel_and_select_source() {
+        let messages = show_source_messages(SourceId(7));
+        assert!(matches!(
+            messages.first(),
+            Some(Message::SetSidePanelVisible(true))
+        ));
+        assert!(matches!(
+            messages.get(1),
+            Some(Message::SetActiveScopeFromSource(SourceId(7), None))
+        ));
+    }
+
+    #[test]
+    fn reveal_variable_in_hierarchy_selects_source_scope_and_expands_tree() {
+        let runtime = runtime();
+        let _guard = runtime.enter();
+        let mut state = SystemState::new_default_config()
+            .unwrap()
+            .with_params(StartupParams {
+                waves: Some(WaveSource::File(fixture("examples/fused_ftr_wave.vcd"))),
+                startup_commands: vec![],
+                ..Default::default()
+            });
+        crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+        state.update(Message::AddVariables(vec![
+            VariableRef::from_hierarchy_string("tb.clk"),
+        ]));
+        crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+        let waves = state.user.waves.as_ref().expect("waves loaded");
+        let item = waves
+            .displayed_items
+            .values()
+            .find(|item| matches!(item, DisplayedItem::Variable(_)))
+            .expect("variable row");
+        let DisplayedItem::Variable(variable) = item else {
+            unreachable!();
+        };
+        let field = FieldRef::without_fields(variable.variable_ref.clone());
+        let messages = reveal_in_hierarchy_messages(waves, item, Some(&field))
+            .expect("variable reveal messages");
+
+        assert!(matches!(
+            messages.first(),
+            Some(Message::SetSidePanelVisible(true))
+        ));
+        assert!(matches!(
+            messages.get(1),
+            Some(Message::SetHierarchyStyle(HierarchyStyle::Tree))
+        ));
+        assert!(matches!(
+            messages.get(2),
+            Some(Message::SetActiveScopeFromSource(
+                SourceId(0),
+                Some(ScopeType::WaveScope(scope)),
+            )) if scope == &VariableRef::from_hierarchy_string("tb.clk").path
+        ));
+        assert!(matches!(
+            messages.get(3),
+            Some(Message::ExpandScope(ScopeExpandType::ExpandSpecific(scope)))
+                if scope == &VariableRef::from_hierarchy_string("tb.clk").path
+        ));
+    }
+
+    #[test]
+    fn reveal_transaction_row_selects_owning_stream_scope() {
+        let runtime = runtime();
+        let _guard = runtime.enter();
+        let mut state = SystemState::new_default_config()
+            .unwrap()
+            .with_params(StartupParams {
+                waves: Some(WaveSource::File(fixture("examples/my_db.ftr"))),
+                startup_commands: vec![],
+                ..Default::default()
+            });
+        crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+        state.update(Message::AddStreamOrGenerator(
+            TransactionStreamRef::new_gen(
+                StreamId(1),
+                GeneratorId(4),
+                "pipelined_stream.read".to_string(),
+            ),
+        ));
+
+        let waves = state.user.waves.as_ref().expect("waves loaded");
+        let item = waves
+            .displayed_items
+            .values()
+            .find(|item| matches!(item, DisplayedItem::Stream(_)))
+            .expect("stream row");
+        let messages =
+            reveal_in_hierarchy_messages(waves, item, None).expect("stream reveal messages");
+
+        assert!(matches!(
+            messages.first(),
+            Some(Message::SetSidePanelVisible(true))
+        ));
+        assert!(matches!(
+            messages.get(1),
+            Some(Message::SetHierarchyStyle(HierarchyStyle::Separate))
+        ));
+        let Some(Message::SetActiveScopeFromSource(
+            SourceId(0),
+            Some(ScopeType::StreamScope(StreamScopeRef::Stream(stream))),
+        )) = messages.get(2)
+        else {
+            panic!("expected stream active-scope message, got {messages:?}");
+        };
+        assert_eq!(stream.stream_id, StreamId(1));
+        assert!(stream.gen_id.is_none());
+        assert_eq!(stream.name, "tr.pipelined_stream");
+    }
 }
