@@ -1676,11 +1676,8 @@ impl SystemState {
                     } => {
                         if self.source_load_request_is_current(source_id, request)
                             && let Some(waves) = self.user.waves.as_mut()
-                            && let Some(loaded_source) = waves.sources.source_mut(source_id)
                         {
-                            loaded_source.load_state =
-                                crate::source::SourceLoadState::Error(err.to_string());
-                            loaded_source.active_load_request = None;
+                            waves.mark_source_load_error(source_id, err.to_string());
                         }
                     }
                     LoadIntent::ReplaceSession => {}
@@ -2051,6 +2048,7 @@ impl SystemState {
                         }
                     }
                     Err(err) => {
+                        waves.mark_source_load_error(source_id, err.to_string());
                         let details = match (existing_domain, candidate_domain) {
                             (Some(existing), Some(candidate)) => format!(
                                 "\nExisting session: {}\nCandidate source: {}",
@@ -3734,12 +3732,10 @@ impl SystemState {
         source: SourceId,
         request: LoadRequestId,
     ) -> bool {
-        source == WaveData::primary_source_id()
-            || self
-                .user
-                .waves
-                .as_ref()
-                .is_some_and(|waves| waves.source_load_request_matches(source, request))
+        self.user
+            .waves
+            .as_ref()
+            .is_some_and(|waves| waves.source_load_request_matches(source, request))
     }
 
     fn reload_source(&mut self, source: SourceId, keep_unavailable: bool) {
