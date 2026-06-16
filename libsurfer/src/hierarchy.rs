@@ -474,11 +474,14 @@ impl SystemState {
             .id_salt("variables_grouped_by_source")
             .show(ui, |ui| {
                 ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+                let primary_label = waves
+                    .source_label_for(WaveData::primary_source_id())
+                    .unwrap_or_else(|| source_label(&waves.source));
                 self.draw_all_variables_for_source(
                     msgs,
                     waves,
                     WaveData::primary_source_id(),
-                    &source_label(&waves.source),
+                    &primary_label,
                     waves.format,
                     &waves.inner,
                     &options,
@@ -560,6 +563,12 @@ impl SystemState {
                 msgs.push(Message::ReloadSource(source, true));
                 ui.close();
             }
+            ui.menu_button("Rename Source", |ui| {
+                let mut edited_label = label.to_string();
+                if ui.text_edit_singleline(&mut edited_label).changed() {
+                    msgs.push(Message::RenameSource(source, edited_label));
+                }
+            });
             if source != WaveData::primary_source_id() && ui.button("Close Source").clicked() {
                 msgs.push(Message::CloseSource(source));
                 ui.close();
@@ -576,10 +585,13 @@ impl SystemState {
     ) {
         let show_source_headers = wave.source_count() > 1;
         if show_source_headers {
+            let primary_label = wave
+                .source_label_for(WaveData::primary_source_id())
+                .unwrap_or_else(|| source_label(&wave.source));
             self.draw_source_header(
                 msgs,
                 WaveData::primary_source_id(),
-                &source_label(&wave.source),
+                &primary_label,
                 wave.format,
                 TimeDomain::from_container(&wave.inner).as_ref(),
                 ui,

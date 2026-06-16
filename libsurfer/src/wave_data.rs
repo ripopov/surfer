@@ -64,6 +64,8 @@ pub struct WaveData {
     pub source: WaveSource,
     pub format: WaveFormat,
     #[serde(default)]
+    pub primary_source_label: Option<String>,
+    #[serde(default)]
     pub sources: SourceStore,
     #[serde(default)]
     pub active_scope_source: SourceId,
@@ -253,12 +255,29 @@ impl WaveData {
     #[must_use]
     pub fn source_label_for(&self, source: SourceId) -> Option<String> {
         if source == Self::primary_source_id() {
-            Some(crate::source::source_label(&self.source))
+            Some(
+                self.primary_source_label
+                    .clone()
+                    .unwrap_or_else(|| crate::source::source_label(&self.source)),
+            )
         } else {
             self.sources
                 .source(source)
                 .map(|source| source.label.clone())
         }
+    }
+
+    pub fn rename_source(&mut self, source: SourceId, label: String) -> Option<()> {
+        let label = label.trim();
+        if label.is_empty() {
+            return None;
+        }
+        if source == Self::primary_source_id() {
+            self.primary_source_label = Some(label.to_string());
+        } else {
+            self.sources.source_mut(source)?.label = label.to_string();
+        }
+        Some(())
     }
 
     #[must_use]
@@ -769,6 +788,7 @@ impl WaveData {
             inner,
             source,
             format,
+            primary_source_label: None,
             sources,
             active_scope_source: Self::primary_source_id(),
             active_scope,
@@ -820,6 +840,7 @@ impl WaveData {
             inner,
             source,
             format,
+            primary_source_label: None,
             sources,
             active_scope_source: Self::primary_source_id(),
             active_scope: self.active_scope.take(),
@@ -1981,6 +2002,7 @@ mod tests {
             inner: DataContainer::Empty,
             source: WaveSource::Data,
             format: WaveFormat::Vcd,
+            primary_source_label: None,
             sources: SourceStore::default(),
             active_scope_source: SourceId::default(),
             active_scope: None,

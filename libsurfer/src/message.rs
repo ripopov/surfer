@@ -180,6 +180,8 @@ pub enum Message {
     CloseSource(SourceId),
     /// Reload one source from its locator without replacing the whole session.
     ReloadSource(SourceId, bool),
+    /// Rename the display label for a loaded source.
+    RenameSource(SourceId, String),
     /// Load file from URL.
     LoadWaveformFileFromUrl(String, LoadOptions),
     /// Load file from data.

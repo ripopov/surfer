@@ -2079,6 +2079,13 @@ snapshot_ui_with_files_and_msgs! {fused_wave_ftr_hierarchy_variables, ["examples
     Message::SetHierarchyStyle(HierarchyStyle::Variables),
 ]}
 
+snapshot_ui_with_files_and_msgs! {fused_wave_ftr_renamed_hierarchy_tree, ["examples/fused_ftr_wave.vcd", "examples/my_db.ftr"], [
+    Message::RenameSource(SourceId::default(), "waves".to_string()),
+    Message::RenameSource(SourceId(1), "transactions".to_string()),
+    Message::SetSidePanelVisible(true),
+    Message::SetHierarchyStyle(HierarchyStyle::Tree),
+]}
+
 snapshot_ui_with_files_and_msgs! {fused_wave_wave_hierarchy_tree, ["examples/fused_ftr_wave.vcd", "examples/fused_ftr_wave.vcd"], [
     Message::SetSidePanelVisible(true),
     Message::SetHierarchyStyle(HierarchyStyle::Tree),
