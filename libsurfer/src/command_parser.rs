@@ -179,6 +179,31 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
         w.data_container_for_source(w.active_scope_source)
             .is_some_and(crate::data_container::DataContainer::is_transactions)
     });
+    let source_entries = state.user.waves.as_ref().map_or_else(Vec::new, |waves| {
+        waves
+            .source_ids()
+            .into_iter()
+            .filter_map(|source| waves.source_label_for(source).map(|label| (source, label)))
+            .collect_vec()
+    });
+    let source_suggestions = source_entries
+        .iter()
+        .flat_map(|(source, label)| [format!("s{}", source.0), label.clone()])
+        .unique()
+        .collect_vec();
+    let source_is_transaction = state.user.waves.as_ref().map_or_else(Vec::new, |waves| {
+        source_entries
+            .iter()
+            .map(|(source, _)| {
+                (
+                    *source,
+                    waves
+                        .data_container_for_source(*source)
+                        .is_some_and(crate::data_container::DataContainer::is_transactions),
+                )
+            })
+            .collect_vec()
+    });
 
     fn files_with_ext(matches: fn(&str) -> bool) -> Vec<String> {
         if let Ok(res) = fs::read_dir(".") {
@@ -255,6 +280,36 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
             .collect()
     }
 
+    fn resolve_source_token(
+        token: &str,
+        source_entries: &[(crate::source::SourceId, String)],
+    ) -> Option<crate::source::SourceId> {
+        if let Some(id) = token
+            .strip_prefix('s')
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(crate::source::SourceId)
+            && source_entries.iter().any(|(source, _)| *source == id)
+        {
+            return Some(id);
+        }
+
+        source_entries
+            .iter()
+            .find_map(|(source, label)| (label == token).then_some(*source))
+    }
+
+    fn is_transaction_source(
+        source: crate::source::SourceId,
+        source_is_transaction: &[(crate::source::SourceId, bool)],
+    ) -> bool {
+        source_is_transaction
+            .iter()
+            .find_map(|(candidate, is_transaction)| {
+                (*candidate == source).then_some(*is_transaction)
+            })
+            .unwrap_or(false)
+    }
+
     let wcp_start_or_stop = if state
         .wcp_running_signal
         .load(std::sync::atomic::Ordering::Relaxed)
@@ -280,6 +335,9 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
             "run_command_file",
             "run_command_file_from_url",
             "switch_file",
+            "add_signal",
+            "add_transaction",
+            "set_active_scope",
             "variable_add",
             "generator_add",
             "item_focus",
@@ -490,6 +548,9 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
             let scopes = scopes.clone();
             let active_scope = active_scope.clone();
             let is_transaction_container = is_transaction_container;
+            let source_entries = source_entries.clone();
+            let source_suggestions = source_suggestions.clone();
+            let source_is_transaction = source_is_transaction.clone();
             match query {
                 "load_file" => single_word_delayed_suggestions(
                     Box::new(all_wave_files),
@@ -777,6 +838,93 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                         )))
                     }),
                 ),
+                "add_signal" => Some(Command::NonTerminal(
+                    ParamGreed::Custom(&separate_at_space),
+                    source_suggestions.clone(),
+                    Box::new({
+                        let source_entries = source_entries.clone();
+                        let source_is_transaction = source_is_transaction.clone();
+                        move |source_token, _| {
+                            let source = resolve_source_token(source_token, &source_entries)?;
+                            if is_transaction_source(source, &source_is_transaction) {
+                                return None;
+                            }
+                            Some(Command::NonTerminal(
+                                ParamGreed::Rest,
+                                vec![],
+                                Box::new(move |name, _| {
+                                    Some(Command::Terminal(Message::AddVariablesFromSource(
+                                        source,
+                                        vec![VariableRef::from_hierarchy_string(name)],
+                                    )))
+                                }),
+                            ))
+                        }
+                    }),
+                )),
+                "add_transaction" => Some(Command::NonTerminal(
+                    ParamGreed::Custom(&separate_at_space),
+                    source_suggestions.clone(),
+                    Box::new({
+                        let source_entries = source_entries.clone();
+                        let source_is_transaction = source_is_transaction.clone();
+                        move |source_token, _| {
+                            let source = resolve_source_token(source_token, &source_entries)?;
+                            if !is_transaction_source(source, &source_is_transaction) {
+                                return None;
+                            }
+                            Some(Command::NonTerminal(
+                                ParamGreed::Rest,
+                                vec![],
+                                Box::new(move |name, _| {
+                                    Some(Command::Terminal(
+                                        Message::AddStreamOrGeneratorFromNameFromSource(
+                                            source,
+                                            None,
+                                            name.to_string(),
+                                        ),
+                                    ))
+                                }),
+                            ))
+                        }
+                    }),
+                )),
+                "set_active_scope" => Some(Command::NonTerminal(
+                    ParamGreed::Custom(&separate_at_space),
+                    source_suggestions.clone(),
+                    Box::new({
+                        let source_entries = source_entries.clone();
+                        let source_is_transaction = source_is_transaction.clone();
+                        move |source_token, _| {
+                            let source = resolve_source_token(source_token, &source_entries)?;
+                            let is_transaction =
+                                is_transaction_source(source, &source_is_transaction);
+                            Some(Command::NonTerminal(
+                                ParamGreed::Rest,
+                                vec![],
+                                Box::new(move |scope_name, _| {
+                                    let scope = if is_transaction {
+                                        if scope_name == "tr" {
+                                            ScopeType::StreamScope(StreamScopeRef::Root)
+                                        } else {
+                                            ScopeType::StreamScope(StreamScopeRef::Empty(
+                                                scope_name.to_string(),
+                                            ))
+                                        }
+                                    } else {
+                                        ScopeType::WaveScope(ScopeRef::from_hierarchy_string(
+                                            scope_name,
+                                        ))
+                                    };
+                                    Some(Command::Terminal(Message::SetActiveScopeFromSource(
+                                        source,
+                                        Some(scope),
+                                    )))
+                                }),
+                            ))
+                        }
+                    }),
+                )),
                 // Variable commands
                 "variable_add" | "generator_add" => {
                     if is_transaction_container {

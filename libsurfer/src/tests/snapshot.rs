@@ -29,7 +29,7 @@ use crate::{
     hierarchy::{HierarchyStyle, ParameterDisplayLocation, ScopeExpandType},
     message::MessageTarget,
     setup_custom_font,
-    source::{LoadRequestId, SourceId, SourceLoadState},
+    source::{LoadRequestId, SourceId, SourceLoadState, SourceTransactionRef},
     state::UserState,
     trace_style::TraceStyle,
     transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef},
@@ -2905,11 +2905,48 @@ snapshot_ui_with_files_and_msgs! {fused_wave_ftr_unequal_span_mixed_canvas, ["ex
     Message::ZoomToFit { viewport_idx: 0 },
 ]}
 
+snapshot_ui_with_files_and_msgs! {fused_ftr_first_wave_only_canvas, ["examples/my_db.ftr", "examples/fused_ftr_wave.vcd"], [
+    Message::AddVariablesFromSource(
+        SourceId(1),
+        vec![VariableRef::from_hierarchy_string("tb.clk")]
+    ),
+    Message::ZoomToFit { viewport_idx: 0 },
+]}
+
 snapshot_ui_with_files_and_msgs! {fused_duplicate_signal_rows_show_source_cues, ["examples/fused_ftr_wave.vcd", "examples/fused_ftr_wave.vcd"], [
     Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.clk")]),
     Message::AddVariablesFromSource(
         SourceId(1),
         vec![VariableRef::from_hierarchy_string("tb.clk")]
+    ),
+    Message::ZoomToFit { viewport_idx: 0 },
+]}
+
+snapshot_ui_with_files_and_msgs! {fused_duplicate_ftr_rows_keep_source_identity, ["examples/my_db.ftr", "examples/my_db.ftr"], [
+    Message::AddStreamOrGeneratorFromSource(
+        SourceId::default(),
+        TransactionStreamRef::new_gen(
+            StreamId(1),
+            GeneratorId(4),
+            "pipelined_stream.read".to_string()
+        )
+    ),
+    Message::AddStreamOrGeneratorFromSource(
+        SourceId(1),
+        TransactionStreamRef::new_gen(
+            StreamId(1),
+            GeneratorId(4),
+            "pipelined_stream.read".to_string()
+        )
+    ),
+    Message::FocusTransactionFromSource(
+        Some(SourceTransactionRef::new(
+            SourceId(1),
+            TransactionRef {
+                id: TransactionId(4),
+            },
+        )),
+        None,
     ),
     Message::ZoomToFit { viewport_idx: 0 },
 ]}

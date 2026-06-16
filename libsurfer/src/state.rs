@@ -295,7 +295,10 @@ impl SystemState {
                         ));
                     }
                     WaveSource::File(file) => {
-                        self.add_batch_message(Message::LoadFile(file, LoadOptions::KeepAll));
+                        self.add_batch_message(Message::LoadFileWithIntent(
+                            file,
+                            crate::wave_source::LoadIntent::ReplaceSession,
+                        ));
                     }
                     WaveSource::Data => error!("Attempted to load data at startup"),
                     WaveSource::Cxxrtl(url) => {

@@ -145,7 +145,7 @@ impl WaveData {
             }
             Some(StreamScopeRef::Stream(stream)) => {
                 let (stream_id, id, name) = inner
-                    .get_generator_from_name(Some(stream.stream_id), name)
+                    .get_generator_from_name_or_qualified(Some(stream.stream_id), &name)
                     .map(|g| (g.stream_id, g.id, g.name.clone()))?;
 
                 self.add_generator_from_source(
@@ -156,7 +156,7 @@ impl WaveData {
             Some(StreamScopeRef::Empty(_)) => {}
             None => {
                 let (stream_id, id, name) = inner
-                    .get_generator_from_name(None, name)
+                    .get_generator_from_name_or_qualified(None, &name)
                     .map(|g| (g.stream_id, g.id, g.name.clone()))?;
 
                 self.add_generator_from_source(

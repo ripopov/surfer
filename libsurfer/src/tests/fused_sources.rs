@@ -133,6 +133,34 @@ fn startup_additional_ftr_source_is_loaded_additively() {
 }
 
 #[test]
+fn startup_waveform_and_ftr_sources_use_ordered_intents() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let primary = fixture("examples/fused_ftr_wave.vcd");
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(primary.clone())),
+            additional_waves: vec![WaveSource::File(fixture("examples/my_db.ftr"))],
+            startup_commands: vec![],
+            ..Default::default()
+        });
+
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert_eq!(waves.source_count(), 2);
+    assert_eq!(waves.source, WaveSource::File(primary));
+    assert!(waves.waves_for_source(SourceId::default()).is_some());
+    assert!(waves.transactions_for_source(SourceId(1)).is_some());
+}
+
+#[test]
 fn ordered_multi_file_load_keeps_first_file_as_primary_source() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
@@ -542,6 +570,159 @@ fn source_less_add_all_from_stream_scope_uses_active_ftr_source() {
 }
 
 #[test]
+fn command_add_signal_targets_explicit_source() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let mut state = SystemState::new_default_config().unwrap();
+    state.update(Message::LoadFilesWithIntents(vec![
+        (
+            fixture("examples/fused_ftr_wave.vcd"),
+            LoadIntent::ReplaceSession,
+        ),
+        (fixture("examples/my_db.ftr"), LoadIntent::AddSource),
+    ]));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    let message = crate::fzcmd::parse_command(
+        "add_signal s0 tb.clk",
+        crate::command_parser::get_parser(&state),
+    )
+    .expect("parse add_signal command");
+    let Message::AddVariablesFromSource(source, variables) = message else {
+        panic!("expected source-qualified signal add command");
+    };
+    assert_eq!(source, SourceId::default());
+    assert_eq!(
+        variables,
+        vec![VariableRef::from_hierarchy_string("tb.clk")]
+    );
+
+    let message = crate::fzcmd::parse_command(
+        "add_signal fused_ftr_wave.vcd tb.counter",
+        crate::command_parser::get_parser(&state),
+    )
+    .expect("parse add_signal command with source label");
+    let Message::AddVariablesFromSource(source, variables) = message else {
+        panic!("expected source-qualified signal add command");
+    };
+    assert_eq!(source, SourceId::default());
+    assert_eq!(
+        variables,
+        vec![VariableRef::from_hierarchy_string("tb.counter")]
+    );
+
+    assert!(matches!(
+        crate::fzcmd::parse_command(
+            "add_signal s1 tb.clk",
+            crate::command_parser::get_parser(&state),
+        ),
+        Err(crate::fzcmd::ParseError::InvalidParameter(source)) if source == "s1"
+    ));
+}
+
+#[test]
+fn command_add_transaction_targets_explicit_source() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let mut state = SystemState::new_default_config().unwrap();
+    state.update(Message::LoadFilesWithIntents(vec![
+        (
+            fixture("examples/fused_ftr_wave.vcd"),
+            LoadIntent::ReplaceSession,
+        ),
+        (fixture("examples/my_db.ftr"), LoadIntent::AddSource),
+    ]));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    let message = crate::fzcmd::parse_command(
+        "add_transaction s1 pipelined_stream.read",
+        crate::command_parser::get_parser(&state),
+    )
+    .expect("parse add_transaction command");
+    let Message::AddStreamOrGeneratorFromNameFromSource(source, scope, name) = message else {
+        panic!("expected source-qualified transaction add command");
+    };
+    assert_eq!(source, SourceId(1));
+    assert!(scope.is_none());
+    assert_eq!(name, "pipelined_stream.read");
+
+    state.update(Message::AddStreamOrGeneratorFromNameFromSource(
+        source, scope, name,
+    ));
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert!(
+        waves.displayed_items.values().any(|item| matches!(
+            item,
+            DisplayedItem::Stream(stream)
+                if stream.source == SourceId(1)
+                    && stream.transaction_stream_ref.gen_id == Some(GeneratorId(4))
+        )),
+        "source-qualified transaction command should add from the requested source"
+    );
+
+    assert!(matches!(
+        crate::fzcmd::parse_command(
+            "add_transaction s0 read",
+            crate::command_parser::get_parser(&state),
+        ),
+        Err(crate::fzcmd::ParseError::InvalidParameter(source)) if source == "s0"
+    ));
+}
+
+#[test]
+fn command_set_active_scope_targets_explicit_source() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let mut state = SystemState::new_default_config().unwrap();
+    state.update(Message::LoadFilesWithIntents(vec![
+        (
+            fixture("examples/fused_ftr_wave.vcd"),
+            LoadIntent::ReplaceSession,
+        ),
+        (fixture("examples/my_db.ftr"), LoadIntent::AddSource),
+    ]));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    let message = crate::fzcmd::parse_command(
+        "set_active_scope s1 tr.pipelined_stream",
+        crate::command_parser::get_parser(&state),
+    )
+    .expect("parse set_active_scope command");
+    let Message::SetActiveScopeFromSource(source, Some(ScopeType::StreamScope(scope))) = &message
+    else {
+        panic!("expected source-qualified active stream scope command");
+    };
+    assert_eq!(*source, SourceId(1));
+    assert!(
+        matches!(scope, crate::transaction_container::StreamScopeRef::Empty(name) if name == "tr.pipelined_stream")
+    );
+
+    state.update(message);
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert_eq!(waves.active_scope_source, SourceId(1));
+    assert!(matches!(
+        waves.active_scope.as_ref(),
+        Some(ScopeType::StreamScope(crate::transaction_container::StreamScopeRef::Stream(stream)))
+            if stream.name == "tr.pipelined_stream"
+    ));
+}
+
+#[test]
 fn canvas_zoom_fit_ignores_loaded_sources_without_displayed_rows() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
@@ -716,6 +897,44 @@ fn load_data_with_intent_can_add_ftr_source() {
         waves.source_label_for(SourceId(1)).as_deref(),
         Some("File data")
     );
+}
+
+#[test]
+fn dropping_multiple_files_on_empty_session_replaces_then_adds_sources() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let primary = fixture("examples/fused_ftr_wave.vcd");
+    let ftr = fixture("examples/my_db.ftr");
+    let mut state = SystemState::new_default_config().unwrap();
+
+    state.update(Message::FilesDropped(vec![
+        egui::DroppedFile {
+            path: Some(primary.clone().into_std_path_buf()),
+            name: "fused_ftr_wave.vcd".to_string(),
+            mime: String::new(),
+            last_modified: None,
+            bytes: None,
+        },
+        egui::DroppedFile {
+            path: Some(ftr.into_std_path_buf()),
+            name: "my_db.ftr".to_string(),
+            mime: String::new(),
+            last_modified: None,
+            bytes: None,
+        },
+    ]));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert_eq!(waves.source_count(), 2);
+    assert_eq!(waves.source, WaveSource::File(primary));
+    assert!(waves.waves_for_source(SourceId::default()).is_some());
+    assert!(waves.transactions_for_source(SourceId(1)).is_some());
 }
 
 #[test]

@@ -105,6 +105,7 @@ pub enum Message {
     AddStreamOrGenerator(TransactionStreamRef),
     AddStreamOrGeneratorFromSource(SourceId, TransactionStreamRef),
     AddStreamOrGeneratorFromName(Option<StreamScopeRef>, String),
+    AddStreamOrGeneratorFromNameFromSource(SourceId, Option<StreamScopeRef>, String),
     AddAllFromStreamScope(String),
     /// Reset the repeat command counter.
     InvalidateCount,
