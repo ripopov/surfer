@@ -22,13 +22,14 @@ use crate::{
     async_util::AsyncJob,
     clock_highlighting::ClockHighlightType,
     config::{SurferConfig, TransitionValue},
+    data_container::DataContainer,
     displayed_item::{DisplayedFieldRef, DisplayedItemRef},
     displayed_item_tree::VisibleItemIndex,
     graphics::{Direction, GrPoint, Graphic, GraphicId, GraphicsY},
     hierarchy::{HierarchyStyle, ParameterDisplayLocation, ScopeExpandType},
     message::MessageTarget,
     setup_custom_font,
-    source::SourceId,
+    source::{LoadRequestId, SourceId, SourceLoadState},
     state::UserState,
     trace_style::TraceStyle,
     transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef},
@@ -36,7 +37,7 @@ use crate::{
     variable_name_type::VariableNameType,
     wave_container::{ScopeRef, ScopeRefExt, VariableRef, VariableRefExt},
     wave_data::ScopeType,
-    wave_source::{LoadIntent, LoadOptions, STATE_FILE_EXTENSION},
+    wave_source::{LoadIntent, LoadOptions, STATE_FILE_EXTENSION, WaveFormat},
 };
 
 /// Default snapshot size
@@ -2102,6 +2103,66 @@ snapshot_ui_with_files_and_msgs! {fused_wave_wave_hierarchy_separate_source, ["e
     ),
 ]}
 
+snapshot_ui!(fused_source_headers_show_load_states, || {
+    let project_root = get_project_root().unwrap();
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                project_root
+                    .join("examples/fused_ftr_wave.vcd")
+                    .try_into()
+                    .unwrap(),
+            )),
+            startup_commands: vec![],
+            ..Default::default()
+        });
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    let waves = state.user.waves.as_mut().expect("waves loaded");
+    waves.add_pending_source(
+        WaveSource::File(
+            project_root
+                .join("examples/loading.vcd")
+                .try_into()
+                .unwrap(),
+        ),
+        WaveFormat::Vcd,
+        DataContainer::Empty,
+        LoadRequestId(100),
+    );
+    let error_source = waves.add_pending_source(
+        WaveSource::File(
+            project_root
+                .join("examples/rejected.ftr")
+                .try_into()
+                .unwrap(),
+        ),
+        WaveFormat::Ftr,
+        DataContainer::Empty,
+        LoadRequestId(101),
+    );
+    let source = waves
+        .sources
+        .source_mut(error_source)
+        .expect("injected error source");
+    source.load_state = SourceLoadState::Error("header parse failed".to_string());
+    source.active_load_request = None;
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(true));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::CloseOpenSiblingStateFileDialog {
+        load_state: false,
+        do_not_show_again: true,
+    });
+    state.update(Message::SetHierarchyStyle(HierarchyStyle::Tree));
+
+    state
+});
+
 // makes sure that variables that are not part of a scope are properly displayed in the hierarchy tree view
 snapshot_ui_with_file_and_msgs! {hierarchy_tree_with_root_vars, "examples/atxmega256a3u-bmda-jtag_short.vcd", [
     Message::SetSidePanelVisible(true),
@@ -2831,6 +2892,38 @@ snapshot_ui_with_files_and_msgs! {fused_wave_ftr_unequal_span_mixed_canvas, ["ex
         )
     ),
     Message::ZoomToFit { viewport_idx: 0 },
+]}
+
+snapshot_ui_with_files_and_msgs! {fused_duplicate_signal_rows_show_source_cues, ["examples/fused_ftr_wave.vcd", "examples/fused_ftr_wave.vcd"], [
+    Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.clk")]),
+    Message::AddVariablesFromSource(
+        SourceId(1),
+        vec![VariableRef::from_hierarchy_string("tb.clk")]
+    ),
+    Message::ZoomToFit { viewport_idx: 0 },
+]}
+
+snapshot_ui_with_files_and_msgs! {fused_wave_ftr_mixed_tables, ["examples/fused_ftr_wave.vcd", "examples/my_db.ftr"], [
+    Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.clk")]),
+    Message::AddStreamOrGeneratorFromSource(
+        SourceId(1),
+        TransactionStreamRef::new_gen(
+            StreamId(1),
+            GeneratorId(4),
+            "pipelined_stream.read".to_string()
+        )
+    ),
+    Message::OpenSignalChangeList {
+        target: MessageTarget::Explicit(VisibleItemIndex(0)),
+    },
+    Message::OpenTransactionTable {
+        source: SourceId(1),
+        generator: TransactionStreamRef::new_gen(
+            StreamId(1),
+            GeneratorId(4),
+            "pipelined_stream.read".to_string()
+        ),
+    },
 ]}
 
 snapshot_ui_with_file_and_msgs! {add_stream_from_name, "examples/my_db.ftr", [
