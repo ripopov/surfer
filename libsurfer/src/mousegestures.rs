@@ -123,7 +123,7 @@ impl SystemState {
                 let x_pixel = waves.viewports[viewport_idx].pixel_from_time(
                     time,
                     ctx.cfg.canvas_size.x,
-                    &waves.safe_num_timestamps(),
+                    &waves.safe_canvas_num_timestamps(),
                 );
                 start_location.x = x_pixel;
             }
@@ -178,7 +178,7 @@ impl SystemState {
         ui: &Context,
         y_offset: f32,
     ) {
-        let num_timestamps = waves.safe_num_timestamps();
+        let num_timestamps = waves.safe_canvas_num_timestamps();
         let Some(end_location) = pointer_pos_canvas else {
             return;
         };
@@ -690,7 +690,7 @@ impl SystemState {
         } else {
             (current_location.x, start_location.x)
         };
-        let num_timestamps = waves.safe_num_timestamps();
+        let num_timestamps = waves.safe_canvas_num_timestamps();
         let start_time = waves.viewports[viewport_idx].as_time_bigint(minx, width, &num_timestamps);
         let end_time = waves.viewports[viewport_idx].as_time_bigint(maxx, width, &num_timestamps);
         let diff_time = &end_time - &start_time;
@@ -774,7 +774,7 @@ impl SystemState {
                     let x = waves.viewports[viewport_idx].pixel_from_time(
                         &snap_time,
                         frame_width,
-                        &waves.safe_num_timestamps(),
+                        &waves.safe_canvas_num_timestamps(),
                     );
                     current_location.x = x;
                 }

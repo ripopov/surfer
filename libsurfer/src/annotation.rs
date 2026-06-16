@@ -493,7 +493,7 @@ impl WaveData {
                 menu_position.x = viewport.pixel_from_time(
                     &menu_time,
                     ctx.cfg.canvas_size.x,
-                    &self.safe_num_timestamps(),
+                    &self.safe_canvas_num_timestamps(),
                 );
                 let temp_y = menu_position.y;
                 menu_position = (ctx.to_screen)(menu_position.x, menu_position.y);

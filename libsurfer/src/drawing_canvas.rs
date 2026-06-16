@@ -363,7 +363,7 @@ fn variable_digital_draw_commands(
     let mut clock_edges = vec![];
     let mut local_msgs = vec![];
     let displayed_field_ref: DisplayedFieldRef = display_id.into();
-    let num_timestamps = waves.safe_num_timestamps();
+    let num_timestamps = waves.safe_canvas_num_timestamps();
 
     let mut local_commands: HashMap<Vec<String>, DigitalDrawingCommands> = HashMap::new();
 
@@ -529,9 +529,9 @@ impl SystemState {
         viewport_idx: usize,
         cfg: &DrawConfig,
     ) -> Option<f32> {
-        let session_domain = waves.sources.common_time_domain()?;
+        let canvas_max_timestamp = waves.canvas_num_timestamps()?.to_biguint()?;
         let source_domain = waves.time_domain_for_source(source)?;
-        if source_domain.max_timestamp >= session_domain.max_timestamp {
+        if source_domain.max_timestamp >= canvas_max_timestamp {
             return None;
         }
 
@@ -539,7 +539,7 @@ impl SystemState {
         Some(waves.viewports[viewport_idx].pixel_from_time(
             &source_end,
             cfg.canvas_size.x - 1.0,
-            &waves.safe_num_timestamps(),
+            &waves.safe_canvas_num_timestamps(),
         ))
     }
 
@@ -590,6 +590,22 @@ impl SystemState {
                 hatch_stroke,
             );
             hatch_x += 8.0;
+        }
+    }
+
+    fn draw_tick_lines(
+        &self,
+        waves: &WaveData,
+        ticks: &[(String, f32, i64)],
+        ctx: &mut DrawingContext,
+    ) {
+        if ticks.is_empty() || !self.show_ticks() {
+            return;
+        }
+
+        let stroke = Stroke::from(&self.user.config.theme.ticks.style);
+        for (_, x, _) in ticks {
+            waves.draw_tick_line(*x, ctx, &stroke);
         }
     }
 
@@ -694,7 +710,7 @@ impl SystemState {
     ) -> Option<CachedDrawData> {
         let mut draw_commands = HashMap::new();
 
-        let num_timestamps = waves.safe_num_timestamps();
+        let num_timestamps = waves.safe_canvas_num_timestamps();
         let max_time = num_timestamps.to_f64().unwrap_or(f64::MAX);
         let mut clock_edges_by_clock = vec![];
         let viewport = waves.viewports[viewport_idx];
@@ -832,7 +848,7 @@ impl SystemState {
         let event_index = container.event_index();
 
         let viewport = waves.viewports[viewport_idx];
-        let num_timestamps = waves.safe_num_timestamps();
+        let num_timestamps = waves.safe_canvas_num_timestamps();
 
         let displayed_streams = waves
             .items_tree
@@ -1181,7 +1197,7 @@ impl SystemState {
         let pointer_pos_global = ui.input(|i| i.pointer.interact_pos());
         let pointer_pos_mouse_gesture = pointer_pos_global
             .map(|p| self.transform_pos(to_screen, p, default_timeline_height, false));
-        let num_timestamps = waves.safe_num_timestamps();
+        let num_timestamps = waves.safe_canvas_num_timestamps();
 
         if response.clicked_by(PointerButton::Primary)
             || response.clicked_by(PointerButton::Secondary)
@@ -1341,6 +1357,9 @@ impl SystemState {
             self.draw_background(drawing_info, &ctx, background_color);
         }
 
+        let ticks = self.get_ticks_for_viewport_idx(waves, viewport_idx, &cfg);
+        self.draw_tick_lines(waves, &ticks, &mut ctx);
+
         #[cfg(feature = "performance_plot")]
         self.timing.borrow_mut().start("Wave drawing");
 
@@ -1474,13 +1493,6 @@ impl SystemState {
         let draw_clock_rising_marker =
             draw_clock_edges && self.user.config.theme.clock_rising_marker;
         let ticks = &draw_data.ticks;
-        if !ticks.is_empty() && self.show_ticks() {
-            let stroke = Stroke::from(&self.user.config.theme.ticks.style);
-
-            for (_, x, _) in ticks {
-                waves.draw_tick_line(*x, ctx, &stroke);
-            }
-        }
 
         if draw_clock_edges {
             draw_clock_edge_marks(clock_edges, ctx, &self.user.config);
@@ -1691,14 +1703,6 @@ impl SystemState {
         let mut focused_transaction_start: Option<Pos2> = None;
 
         let ticks = self.get_ticks_for_viewport_idx(waves, viewport_idx, ctx.cfg);
-
-        if !ticks.is_empty() && self.show_ticks() {
-            let stroke = Stroke::from(&self.user.config.theme.ticks.style);
-
-            for (_, x, _) in &ticks {
-                waves.draw_tick_line(*x, ctx, &stroke);
-            }
-        }
 
         // Draws the surrounding border of the stream
         let border_stroke = Stroke::new(
@@ -2442,7 +2446,7 @@ impl SystemState {
     ) -> Option<BigInt> {
         let pos = pointer_pos_canvas?;
         let viewport = &waves.viewports[viewport_idx];
-        let num_timestamps = waves.safe_num_timestamps();
+        let num_timestamps = waves.safe_canvas_num_timestamps();
         let timestamp = viewport.as_time_bigint(pos.x, frame_width, &num_timestamps);
         if let Some(utimestamp) = timestamp.to_biguint()
             && let Some(item_ref) = waves.item_ref_at_canvas_y(pos.y)
@@ -2486,7 +2490,7 @@ impl SystemState {
         let x = waves.viewports[viewport_idx].pixel_from_time(
             time,
             ctx.cfg.canvas_size.x,
-            &waves.safe_num_timestamps(),
+            &waves.safe_canvas_num_timestamps(),
         );
 
         draw_vertical_line(x, ctx, &self.user.config.theme.cursor);

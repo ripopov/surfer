@@ -55,7 +55,7 @@ pub(crate) fn variable_analog_draw_commands(
         waves.variable_translator(&displayed_field_ref, translators)
     };
     let viewport = &waves.viewports[viewport_idx];
-    let num_timestamps = waves.safe_num_timestamps();
+    let num_timestamps = waves.safe_canvas_num_timestamps();
 
     let signal_id = wave_container
         .signal_id(&displayed_variable.variable_ref)

@@ -45,14 +45,14 @@ impl WaveData {
 
     pub fn draw_cursor(&self, theme: &SurferTheme, ctx: &mut DrawingContext, viewport: &Viewport) {
         if let Some(marker) = &self.cursor {
-            let num_timestamps = self.safe_num_timestamps();
+            let num_timestamps = self.safe_canvas_num_timestamps();
             let x = viewport.pixel_from_time(marker, ctx.cfg.canvas_size.x, &num_timestamps);
             draw_vertical_line(x, ctx, &theme.cursor);
         }
     }
 
     pub fn draw_markers(&self, theme: &SurferTheme, ctx: &mut DrawingContext, viewport: &Viewport) {
-        let num_timestamps = self.safe_num_timestamps();
+        let num_timestamps = self.safe_canvas_num_timestamps();
         for (idx, marker) in &self.markers {
             let color = self.get_marker_color(*idx, theme);
             let stroke = Stroke {

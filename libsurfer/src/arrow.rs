@@ -208,7 +208,7 @@ impl Annotatable for ArrowAnnotation {
             arrow_annotation.is_selected();
         }
 
-        let num_timestamps: BigInt = waves.safe_num_timestamps();
+        let num_timestamps: BigInt = waves.safe_canvas_num_timestamps();
         let viewport = waves.viewports[viewport_idx];
         let frame_width = ctx.cfg.canvas_size.x;
 
@@ -319,7 +319,7 @@ impl Annotatable for ArrowAnnotation {
         waves: &WaveData,
         _offset: f32,
     ) -> Pos2 {
-        let num_timestamps = waves.safe_num_timestamps();
+        let num_timestamps = waves.safe_canvas_num_timestamps();
         let mut x;
         let mut y = match self.to.attached_item.as_ref() {
             Some(item_ref) => item_center_y(waves, item_ref).unwrap_or(0.),
@@ -508,7 +508,7 @@ impl ArrowAnnotation {
         ctx: &DrawingContext,
         offset_y: f32,
     ) -> Option<Pos2> {
-        let num_timestamps = waves.safe_num_timestamps();
+        let num_timestamps = waves.safe_canvas_num_timestamps();
 
         let to_x = viewport.pixel_from_time(&self.to.time, ctx.cfg.canvas_size.x, &num_timestamps);
         let to_y = self.to.screen_pos.y;

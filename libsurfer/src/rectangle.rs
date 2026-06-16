@@ -71,7 +71,7 @@ impl RectAnnotation {
         ctx: &DrawingContext,
         y_offset: f32,
     ) -> Option<Pos2> {
-        let num_timestamps = waves.safe_num_timestamps();
+        let num_timestamps = waves.safe_canvas_num_timestamps();
 
         let x = viewport.pixel_from_time(&self.from.time, ctx.cfg.canvas_size.x, &num_timestamps);
 
@@ -120,7 +120,7 @@ impl RectAnnotation {
         y_offset: f32,
     ) {
         let viewport = waves.viewports[viewport_idx];
-        let num_timestamps = waves.safe_num_timestamps();
+        let num_timestamps = waves.safe_canvas_num_timestamps();
 
         //Update size and coloring from theme and whether it selected or not
         self.annotation_data.stroke = Stroke::new(
@@ -305,7 +305,7 @@ impl Annotatable for RectAnnotation {
         waves: &WaveData,
         offset: f32,
     ) -> Pos2 {
-        let num_timestamps = waves.safe_num_timestamps();
+        let num_timestamps = waves.safe_canvas_num_timestamps();
         let x = viewport.pixel_from_time(&self.to.time, ctx.cfg.canvas_size.x, &num_timestamps);
         let y = calculate_y(self.to.wave.as_ref(), waves).unwrap() + offset;
         (ctx.to_screen)(x, y)
