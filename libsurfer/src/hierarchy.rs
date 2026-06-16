@@ -1200,11 +1200,18 @@ impl SystemState {
                         // reference into the closure so we don't call `variable_meta` again.
                         let tooltip_meta = meta;
                         let tooltip_var = variable.clone();
+                        let tooltip_source_label = self
+                            .user
+                            .waves
+                            .as_ref()
+                            .filter(|waves| waves.source_count() > 1)
+                            .and_then(|waves| waves.source_label_for(source));
                         response = response.on_hover_ui(move |ui| {
                             ui.set_max_width(ui.spacing().tooltip_width);
                             ui.add(egui::Label::new(variable_tooltip_text(
                                 tooltip_meta,
                                 &tooltip_var,
+                                tooltip_source_label.as_deref(),
                             )));
                         });
                     }

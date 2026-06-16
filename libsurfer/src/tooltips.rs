@@ -6,7 +6,7 @@ use num::BigUint;
 
 use crate::{
     source::SourceId,
-    transaction_container::{TransactionRef, TransactionStreamRef},
+    transaction_container::{TransactionContainer, TransactionRef, TransactionStreamRef},
     wave_container::{ScopeRef, VariableMeta, VariableRef, VariableRefExt, WaveContainer},
     wave_data::WaveData,
 };
@@ -28,10 +28,16 @@ fn find_transaction<'a>(
 }
 
 #[must_use]
-pub(crate) fn variable_tooltip_text(meta: Option<&VariableMeta>, variable: &VariableRef) -> String {
+pub(crate) fn variable_tooltip_text(
+    meta: Option<&VariableMeta>,
+    variable: &VariableRef,
+    source_label: Option<&str>,
+) -> String {
+    let source_prefix = source_label.map_or_else(String::new, |label| format!("Source: {label}\n"));
     if let Some(meta) = meta {
         format!(
-            "{}\nNum bits: {}\nType: {}\nDirection: {}",
+            "{}{}\nNum bits: {}\nType: {}\nDirection: {}",
+            source_prefix,
             variable.full_path_string(),
             meta.num_bits
                 .map_or_else(|| "unknown".to_string(), |bits| bits.to_string()),
@@ -43,7 +49,7 @@ pub(crate) fn variable_tooltip_text(meta: Option<&VariableMeta>, variable: &Vari
                 .map_or_else(|| "unknown".to_string(), |direction| format!("{direction}"))
         )
     } else {
-        variable.full_path_string()
+        format!("{}{}", source_prefix, variable.full_path_string())
     }
 }
 
@@ -83,7 +89,9 @@ pub(crate) fn handle_transaction_tooltip_for_source(
         .on_hover_ui(|ui| {
             if let Some(tx) = find_transaction(waves, source, gen_ref, tx_ref) {
                 ui.set_max_width(ui.spacing().tooltip_width);
-                ui.add(egui::Label::new(transaction_tooltip_text(waves, tx)));
+                ui.add(egui::Label::new(transaction_tooltip_text(
+                    waves, source, tx,
+                )));
             } else {
                 ui.label("Transaction unavailable");
             }
@@ -110,9 +118,13 @@ pub(crate) fn handle_event_cluster_tooltip(
     names: &[(String, usize)],
     time_span: &(num::BigInt, num::BigInt),
     time_scale: &str,
+    source_label: Option<&str>,
 ) -> Response {
     response.on_hover_ui(|ui| {
         ui.set_max_width(ui.spacing().tooltip_width);
+        if let Some(source_label) = source_label {
+            ui.label(format!("Source: {source_label}"));
+        }
         let breakdown = names
             .iter()
             .map(|(name, n)| {
@@ -127,57 +139,59 @@ pub(crate) fn handle_event_cluster_tooltip(
     })
 }
 
-fn transaction_tooltip_text(waves: &WaveData, tx: &Transaction) -> String {
-    let time_scale = waves
-        .inner
-        .as_transactions()
-        .map(|t| t.inner.time_scale.to_string())
-        .unwrap_or_default();
+fn transaction_tooltip_text(waves: &WaveData, source: SourceId, tx: &Transaction) -> String {
+    let Some(transactions) = waves.transactions_for_source(source) else {
+        return format!("tx#{}: Transaction source unavailable", tx.event.tx_id);
+    };
+    let time_scale = transactions.inner.time_scale.to_string();
+    let source_prefix = (waves.source_count() > 1)
+        .then(|| waves.source_label_for(source))
+        .flatten()
+        .map_or_else(String::new, |label| format!("Source: {label}\n"));
 
-    if let Some(text) = event_tooltip_text(waves, tx, &time_scale) {
-        return text;
+    if let Some(text) = event_tooltip_text(transactions, tx, &time_scale) {
+        return format!("{source_prefix}{text}");
     }
 
     let mut text = format!(
-        "tx#{}: {}{} - {}{}\nType: {}",
+        "{source_prefix}tx#{}: {}{} - {}{}\nType: {}",
         tx.event.tx_id,
         tx.event.start_time,
         time_scale,
         tx.event.end_time,
         time_scale,
-        waves
-            .inner
-            .as_transactions()
-            .and_then(|t| t.get_generator(tx.get_gen_id()))
+        transactions
+            .get_generator(tx.get_gen_id())
             .map_or_else(|| "unknown".to_string(), |g| g.name.clone()),
     );
 
     // One summary line for the transaction's events
-    if let Some(transactions) = waves.inner.as_transactions() {
-        let events = transactions.events_of_parent(tx.get_tx_id());
-        if !events.is_empty() {
-            let names = events
-                .iter()
-                .filter_map(|event_id| {
-                    transactions
-                        .get_transaction(&TransactionRef { id: *event_id })
-                        .and_then(crate::transaction_events::event_name)
-                })
-                .collect::<Vec<_>>();
-            let mut summary = names.iter().take(3).join(", ");
-            if names.len() > 3 {
-                summary.push_str(&format!(" +{} more", names.len() - 3));
-            }
-            text.push_str(&format!("\nevents: {} ({summary})", events.len()));
+    let events = transactions.events_of_parent(tx.get_tx_id());
+    if !events.is_empty() {
+        let names = events
+            .iter()
+            .filter_map(|event_id| {
+                transactions
+                    .get_transaction(&TransactionRef { id: *event_id })
+                    .and_then(crate::transaction_events::event_name)
+            })
+            .collect::<Vec<_>>();
+        let mut summary = names.iter().take(3).join(", ");
+        if names.len() > 3 {
+            summary.push_str(&format!(" +{} more", names.len() - 3));
         }
+        text.push_str(&format!("\nevents: {} ({summary})", events.len()));
     }
     text
 }
 
 /// Event-specific tooltip: the event name leads, followed by time, duration,
 /// a parent summary, and any convention violations.
-fn event_tooltip_text(waves: &WaveData, tx: &Transaction, time_scale: &str) -> Option<String> {
-    let transactions = waves.inner.as_transactions()?;
+fn event_tooltip_text(
+    transactions: &TransactionContainer,
+    tx: &Transaction,
+    time_scale: &str,
+) -> Option<String> {
     let index = transactions.event_index();
     let tx_id = tx.get_tx_id();
     if !index.is_events_generator(tx.get_gen_id()) {
@@ -247,4 +261,91 @@ fn transaction_tooltip_table(ui: &mut Ui, tx: &Transaction) {
                 }
             });
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use ftr_parser::types::{GeneratorId, StreamId};
+    use project_root::get_project_root;
+
+    use super::*;
+    use crate::{
+        Message, StartupParams, SystemState,
+        transaction_container::TransactionStreamRef,
+        wave_source::{LoadIntent, WaveFormat},
+    };
+
+    fn fixture(path: &str) -> camino::Utf8PathBuf {
+        get_project_root().unwrap().join(path).try_into().unwrap()
+    }
+
+    #[test]
+    fn variable_tooltip_includes_source_label_when_provided() {
+        let variable = VariableRef::from_hierarchy_string("tb.clk");
+        let tooltip = variable_tooltip_text(None, &variable, Some("waves.vcd"));
+
+        assert!(tooltip.starts_with("Source: waves.vcd\n"));
+        assert!(tooltip.contains("tb.clk"));
+    }
+
+    #[test]
+    fn additive_ftr_transaction_tooltip_uses_its_source_container() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let _guard = runtime.enter();
+
+        let mut state = SystemState::new_default_config()
+            .unwrap()
+            .with_params(StartupParams::default());
+        state.update(Message::LoadFilesWithIntents(vec![
+            (
+                fixture("examples/fused_ftr_wave.vcd"),
+                LoadIntent::ReplaceSession,
+            ),
+            (fixture("examples/my_db.ftr"), LoadIntent::AddSource),
+        ]));
+        crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+        state.update(Message::AddStreamOrGeneratorFromSource(
+            SourceId(1),
+            TransactionStreamRef::new_gen(
+                StreamId(1),
+                GeneratorId(4),
+                "pipelined_stream.read".to_string(),
+            ),
+        ));
+        crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+        let waves = state.user.waves.as_ref().expect("waves loaded");
+        assert_eq!(waves.format, WaveFormat::Vcd);
+        let transactions = waves
+            .transactions_for_source(SourceId(1))
+            .expect("additive FTR source");
+        let tx = transactions
+            .get_generator(GeneratorId(4))
+            .expect("read generator")
+            .transactions
+            .first()
+            .expect("transaction");
+
+        let tooltip = transaction_tooltip_text(waves, SourceId(1), tx);
+        assert!(
+            tooltip.starts_with("Source: my_db.ftr\n"),
+            "expected additive source label in tooltip, got: {tooltip}"
+        );
+        assert!(
+            tooltip.contains("Type: read"),
+            "expected additive-source generator name in tooltip, got: {tooltip}"
+        );
+        assert!(
+            !tooltip.contains("Type: unknown"),
+            "tooltip must not fall back to the primary VCD container: {tooltip}"
+        );
+        assert!(
+            tooltip.to_ascii_lowercase().contains("ns"),
+            "expected additive FTR time scale in tooltip, got: {tooltip}"
+        );
+    }
 }

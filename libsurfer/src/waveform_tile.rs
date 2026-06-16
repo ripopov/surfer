@@ -930,15 +930,29 @@ impl SystemState {
 
         if self.show_tooltip() {
             variable_label = variable_label.on_hover_ui(|ui| {
-                let tooltip = if self.user.waves.is_some() {
+                let source = match displayed_item {
+                    DisplayedItem::Variable(variable) => Some(variable.source),
+                    _ => None,
+                };
+                let tooltip = if let Some(waves) = &self.user.waves {
+                    let source_label = source
+                        .filter(|_| waves.source_count() > 1)
+                        .and_then(|source| waves.source_label_for(source));
                     if field.field.is_empty() {
                         if let Some(meta) = meta {
-                            variable_tooltip_text(Some(meta), &field.root)
+                            variable_tooltip_text(Some(meta), &field.root, source_label.as_deref())
                         } else {
-                            let wave_container =
-                                self.user.waves.as_ref().unwrap().inner.as_waves().unwrap();
-                            let meta = wave_container.variable_meta(&field.root).ok();
-                            variable_tooltip_text(meta.as_ref(), &field.root)
+                            let meta = source
+                                .and_then(|source| waves.waves_for_source(source))
+                                .or_else(|| waves.inner.as_waves())
+                                .and_then(|wave_container| {
+                                    wave_container.variable_meta(&field.root).ok()
+                                });
+                            variable_tooltip_text(
+                                meta.as_ref(),
+                                &field.root,
+                                source_label.as_deref(),
+                            )
                         }
                     } else {
                         "From translator".to_string()

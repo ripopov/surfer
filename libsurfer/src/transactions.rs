@@ -115,14 +115,30 @@ impl WaveData {
         name: String,
         fold_events: bool,
     ) -> Option<()> {
-        let inner = self.inner.as_transactions()?;
+        self.add_stream_or_generator_from_name_from_source(
+            WaveData::primary_source_id(),
+            scope,
+            name,
+            fold_events,
+        )
+    }
+
+    pub fn add_stream_or_generator_from_name_from_source(
+        &mut self,
+        source: SourceId,
+        scope: Option<StreamScopeRef>,
+        name: String,
+        fold_events: bool,
+    ) -> Option<()> {
+        let inner = self.transactions_for_source(source)?;
         match scope {
             Some(StreamScopeRef::Root) => {
                 let (stream_id, name) = inner
                     .get_stream_from_name(name)
                     .map(|s| (s.id, s.name.clone()))?;
 
-                self.add_stream(
+                self.add_stream_from_source(
+                    source,
                     TransactionStreamRef::new_stream(stream_id, name),
                     fold_events,
                 );
@@ -132,7 +148,10 @@ impl WaveData {
                     .get_generator_from_name(Some(stream.stream_id), name)
                     .map(|g| (g.stream_id, g.id, g.name.clone()))?;
 
-                self.add_generator(TransactionStreamRef::new_gen(stream_id, id, name));
+                self.add_generator_from_source(
+                    source,
+                    TransactionStreamRef::new_gen(stream_id, id, name),
+                );
             }
             Some(StreamScopeRef::Empty(_)) => {}
             None => {
@@ -140,7 +159,10 @@ impl WaveData {
                     .get_generator_from_name(None, name)
                     .map(|g| (g.stream_id, g.id, g.name.clone()))?;
 
-                self.add_generator(TransactionStreamRef::new_gen(stream_id, id, name));
+                self.add_generator_from_source(
+                    source,
+                    TransactionStreamRef::new_gen(stream_id, id, name),
+                );
             }
         }
         Some(())
@@ -154,21 +176,36 @@ impl WaveData {
         scope_name: String,
         fold_events: bool,
     ) -> Option<()> {
+        self.add_all_from_stream_scope_from_source(
+            WaveData::primary_source_id(),
+            scope_name,
+            fold_events,
+        )
+    }
+
+    pub fn add_all_from_stream_scope_from_source(
+        &mut self,
+        source: SourceId,
+        scope_name: String,
+        fold_events: bool,
+    ) -> Option<()> {
         if scope_name == "tr" {
-            self.add_all_streams(fold_events);
+            self.add_all_streams_from_source(source, fold_events);
         } else {
             let stream_id = {
-                let inner = self.inner.as_transactions()?;
+                let inner = self.transactions_for_source(source)?;
                 inner.get_stream_from_name(scope_name.clone())?.id
             };
             let needs_load = self
-                .inner
-                .as_transactions()?
+                .transactions_for_source(source)?
                 .get_stream(stream_id)
                 .is_some_and(|stream| !stream.transactions_loaded);
             if needs_load {
                 info!("(Stream {stream_id}) Loading transactions into memory!");
-                match self.inner.as_transactions_mut()?.load_stream(stream_id) {
+                match self
+                    .transactions_for_source_mut(source)?
+                    .load_stream(stream_id)
+                {
                     Ok(()) => info!("(Stream {stream_id}) Finished loading transactions!"),
                     Err(e) => {
                         warn!("Failed to load transactions for stream {stream_id}: {e:?}");
@@ -177,7 +214,7 @@ impl WaveData {
                 }
             }
 
-            let inner = self.inner.as_transactions()?;
+            let inner = self.transactions_for_source(source)?;
             let stream = inner.get_stream(stream_id)?;
             let gens = stream
                 .generators
@@ -192,7 +229,10 @@ impl WaveData {
                 .collect_vec();
 
             for (stream_id, id, name) in gens {
-                self.add_generator(TransactionStreamRef::new_gen(stream_id, id, name.clone()));
+                self.add_generator_from_source(
+                    source,
+                    TransactionStreamRef::new_gen(stream_id, id, name.clone()),
+                );
             }
         }
         Some(())

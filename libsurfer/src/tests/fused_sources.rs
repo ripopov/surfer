@@ -273,6 +273,89 @@ fn duplicate_source_labels_are_disambiguated_only_when_needed() {
 }
 
 #[test]
+fn source_less_add_variable_uses_active_wave_source() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(fixture("examples/my_db.ftr"))),
+            startup_commands: vec![],
+            ..Default::default()
+        });
+
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+    state.update(Message::LoadFileWithIntent(
+        fixture("examples/fused_ftr_wave.vcd"),
+        LoadIntent::AddSource,
+    ));
+    wait_for_source_count(&mut state, 2);
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    state.update(Message::SetActiveScopeFromSource(
+        SourceId(1),
+        Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"]))),
+    ));
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert!(
+        waves.displayed_items.values().any(
+            |item| matches!(item, DisplayedItem::Variable(variable) if variable.source == SourceId(1))
+        ),
+        "source-less AddVariables should use the active waveform source"
+    );
+    assert!(
+        waves.displayed_items.values().all(
+            |item| !matches!(item, DisplayedItem::Variable(variable) if variable.source == SourceId::default())
+        ),
+        "source-less AddVariables must not fall back to the primary FTR source"
+    );
+}
+
+#[test]
+fn source_less_add_transaction_by_name_uses_active_ftr_source() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let mut state = SystemState::new_default_config().unwrap();
+    state.update(Message::LoadFilesWithIntents(vec![
+        (
+            fixture("examples/fused_ftr_wave.vcd"),
+            LoadIntent::ReplaceSession,
+        ),
+        (fixture("examples/my_db.ftr"), LoadIntent::AddSource),
+    ]));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    state.update(Message::SetActiveScopeFromSource(SourceId(1), None));
+    state.update(Message::AddStreamOrGeneratorFromName(
+        None,
+        "read".to_string(),
+    ));
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert!(
+        waves.displayed_items.values().any(
+            |item| matches!(item, DisplayedItem::Stream(stream) if stream.source == SourceId(1))
+        ),
+        "source-less AddStreamOrGeneratorFromName should use the active FTR source"
+    );
+}
+
+#[test]
 fn canvas_zoom_fit_ignores_loaded_sources_without_displayed_rows() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)

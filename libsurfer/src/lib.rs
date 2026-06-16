@@ -352,10 +352,21 @@ impl SystemState {
                     };
                     self.save_current_canvas(undo_msg);
                     if let Some(waves) = self.user.waves.as_mut() {
-                        if let (Some(cmd), _) =
-                            waves.add_variables(&self.translators, vars, None, true, false, None)
-                        {
-                            self.load_variables(cmd);
+                        let source = waves.active_scope_source;
+                        if let (Some(cmd), _) = waves.add_variables_from_source(
+                            source,
+                            &self.translators,
+                            vars,
+                            None,
+                            true,
+                            false,
+                            None,
+                        ) {
+                            if source == WaveData::primary_source_id() {
+                                self.load_variables(cmd);
+                            } else {
+                                self.load_variables_for_source(source, cmd);
+                            }
                         }
                         self.invalidate_draw_commands();
                     } else {
@@ -416,14 +427,30 @@ impl SystemState {
             Message::AddScope(scope, recursive) => {
                 self.save_current_canvas(format!("Add scope {}", scope.name()));
 
-                let vars = self.get_scope(&scope, recursive);
+                let source = self
+                    .user
+                    .waves
+                    .as_ref()
+                    .map(|waves| waves.active_scope_source)
+                    .unwrap_or_else(WaveData::primary_source_id);
+                let vars = self.get_scope_from_source(source, scope, recursive);
                 let waves = self.user.waves.as_mut()?;
 
                 // TODO add parameter to add_variables, insert to (self.drag_target_idx, self.drag_source_idx)
-                if let (Some(cmd), _) =
-                    waves.add_variables(&self.translators, vars, None, true, false, None)
-                {
-                    self.load_variables(cmd);
+                if let (Some(cmd), _) = waves.add_variables_from_source(
+                    source,
+                    &self.translators,
+                    vars,
+                    None,
+                    true,
+                    false,
+                    None,
+                ) {
+                    if source == WaveData::primary_source_id() {
+                        self.load_variables(cmd);
+                    } else {
+                        self.load_variables_for_source(source, cmd);
+                    }
                 }
 
                 self.invalidate_draw_commands();
@@ -449,7 +476,13 @@ impl SystemState {
                 self.invalidate_draw_commands();
             }
             Message::AddScopeEventsRecursive(scope) => {
-                let vars = self.get_scope_vcd_events(scope.clone(), true);
+                let source = self
+                    .user
+                    .waves
+                    .as_ref()
+                    .map(|waves| waves.active_scope_source)
+                    .unwrap_or_else(WaveData::primary_source_id);
+                let vars = self.get_scope_vcd_events_from_source(source, scope.clone(), true);
                 if vars.is_empty() {
                     warn!("No event variables found in scope {scope}");
                 } else {
@@ -457,10 +490,20 @@ impl SystemState {
                     let waves = self.user.waves.as_mut()?;
 
                     // TODO add parameter to add_variables, insert to (self.drag_target_idx, self.drag_source_idx)
-                    if let (Some(cmd), _) =
-                        waves.add_variables(&self.translators, vars, None, true, false, None)
-                    {
-                        self.load_variables(cmd);
+                    if let (Some(cmd), _) = waves.add_variables_from_source(
+                        source,
+                        &self.translators,
+                        vars,
+                        None,
+                        true,
+                        false,
+                        None,
+                    ) {
+                        if source == WaveData::primary_source_id() {
+                            self.load_variables(cmd);
+                        } else {
+                            self.load_variables_for_source(source, cmd);
+                        }
                     }
 
                     self.invalidate_draw_commands();
@@ -495,10 +538,11 @@ impl SystemState {
             Message::AddScopeAsGroup(scope, recursive) => {
                 self.save_current_canvas(format!("Add scope {} as group", scope.name()));
                 let waves = self.user.waves.as_mut()?;
+                let source = waves.active_scope_source;
                 let passed_or_focused = waves.insert_position(waves.focused_item);
                 let target = passed_or_focused.unwrap_or_else(|| waves.end_insert_position());
 
-                self.add_scope_as_group(&scope, target, recursive, None);
+                self.add_scope_as_group_from_source(source, &scope, target, recursive, None);
                 self.invalidate_draw_commands();
 
                 self.user.waves.as_mut()?.compute_variable_display_names();
@@ -534,10 +578,11 @@ impl SystemState {
 
                 let fold_events = self.user.config.behavior.ftr_events_enabled();
                 let waves = self.user.waves.as_mut()?;
+                let source = waves.active_scope_source;
                 if s.gen_id.is_some() {
-                    waves.add_generator(s);
+                    waves.add_generator_from_source(source, s);
                 } else {
-                    waves.add_stream(s, fold_events);
+                    waves.add_stream_from_source(source, s, fold_events);
                 }
                 self.invalidate_draw_commands();
             }
@@ -562,14 +607,21 @@ impl SystemState {
                 self.save_current_canvas(format!("Add Stream/Generator from name: {}", &name));
                 let fold_events = self.user.config.behavior.ftr_events_enabled();
                 let waves = self.user.waves.as_mut()?;
-                waves.add_stream_or_generator_from_name(scope, name, fold_events)?;
+                let source = waves.active_scope_source;
+                waves.add_stream_or_generator_from_name_from_source(
+                    source,
+                    scope,
+                    name,
+                    fold_events,
+                )?;
                 self.invalidate_draw_commands();
             }
             Message::AddAllFromStreamScope(scope_name) => {
                 self.save_current_canvas(format!("Add all from scope {}", scope_name.clone()));
                 let fold_events = self.user.config.behavior.ftr_events_enabled();
                 let waves = self.user.waves.as_mut()?;
-                waves.add_all_from_stream_scope(scope_name, fold_events)?;
+                let source = waves.active_scope_source;
+                waves.add_all_from_stream_scope_from_source(source, scope_name, fold_events)?;
                 self.invalidate_draw_commands();
             }
             Message::InvalidateCount => self.user.count = None,

@@ -358,14 +358,6 @@ impl SystemState {
         self.collect_scope_variables(source, &scope, recursive, ScopeVariableSelection::All)
     }
 
-    pub(crate) fn get_scope_vcd_events(
-        &mut self,
-        scope: ScopeRef,
-        recursive: bool,
-    ) -> Vec<VariableRef> {
-        self.get_scope_vcd_events_from_source(WaveData::primary_source_id(), scope, recursive)
-    }
-
     pub(crate) fn get_scope_vcd_events_from_source(
         &mut self,
         source: SourceId,
