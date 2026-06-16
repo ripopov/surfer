@@ -1,12 +1,14 @@
 use ftr_parser::types::{GeneratorId, StreamId, TransactionId};
 use num::BigInt;
 use project_root::get_project_root;
+use std::sync::Arc;
 use tempfile::tempdir;
 
 use crate::{
-    Message, StartupParams, SystemState, WaveSource,
+    Message, MessageTarget, StartupParams, SystemState, WaveSource,
     data_container::DataContainer,
     displayed_item::DisplayedItem,
+    displayed_item_tree::VisibleItemIndex,
     source::{LoadRequestId, SourceId, SourceLoadState, SourceTransactionRef},
     table::sources::decode_signal_column_key,
     table::{
@@ -223,6 +225,54 @@ fn source_rename_updates_primary_and_additive_labels() {
 }
 
 #[test]
+fn duplicate_source_labels_are_disambiguated_only_when_needed() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let mut state = SystemState::new_default_config().unwrap();
+    state.update(Message::LoadFilesWithIntents(vec![
+        (
+            fixture("examples/fused_ftr_wave.vcd"),
+            LoadIntent::ReplaceSession,
+        ),
+        (
+            fixture("examples/fused_ftr_wave.vcd"),
+            LoadIntent::AddSource,
+        ),
+    ]));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert_eq!(
+        waves.source_label_for(SourceId::default()).as_deref(),
+        Some("fused_ftr_wave.vcd (source 0)")
+    );
+    assert_eq!(
+        waves.source_label_for(SourceId(1)).as_deref(),
+        Some("fused_ftr_wave.vcd (source 1)")
+    );
+
+    state.update(Message::RenameSource(
+        SourceId(1),
+        "second-wave".to_string(),
+    ));
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert_eq!(
+        waves.source_label_for(SourceId::default()).as_deref(),
+        Some("fused_ftr_wave.vcd")
+    );
+    assert_eq!(
+        waves.source_label_for(SourceId(1)).as_deref(),
+        Some("second-wave")
+    );
+}
+
+#[test]
 fn canvas_zoom_fit_ignores_loaded_sources_without_displayed_rows() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
@@ -328,6 +378,75 @@ fn source_load_request_tokens_reject_stale_additive_source_responses() {
 
     assert!(!state.source_load_request_is_current(source_id, old_request));
     assert!(state.source_load_request_is_current(source_id, new_request));
+}
+
+#[test]
+fn dropped_in_memory_ftr_can_be_added_as_source() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(fixture("examples/fused_ftr_wave.vcd"))),
+            startup_commands: vec![],
+            ..Default::default()
+        });
+
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+    let ftr_path = fixture("examples/my_db.ftr");
+    let bytes = std::fs::read(ftr_path.as_std_path()).expect("read ftr fixture");
+    state.update(Message::FilesDropped(vec![egui::DroppedFile {
+        path: Some(ftr_path.into_std_path_buf()),
+        name: "my_db.ftr".to_string(),
+        mime: String::new(),
+        last_modified: None,
+        bytes: Some(Arc::from(bytes)),
+    }]));
+    wait_for_source_count(&mut state, 2);
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert!(waves.waves_for_source(SourceId::default()).is_some());
+    assert!(waves.transactions_for_source(SourceId(1)).is_some());
+    assert_eq!(
+        waves.source_label_for(SourceId(1)).as_deref(),
+        Some("Dropped file (my_db.ftr)")
+    );
+}
+
+#[test]
+fn load_data_with_intent_can_add_ftr_source() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(fixture("examples/fused_ftr_wave.vcd"))),
+            startup_commands: vec![],
+            ..Default::default()
+        });
+
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+    let bytes = std::fs::read(fixture("examples/my_db.ftr").as_std_path()).expect("read ftr");
+    state.update(Message::LoadDataWithIntent(bytes, LoadIntent::AddSource));
+    wait_for_source_count(&mut state, 2);
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert!(waves.waves_for_source(SourceId::default()).is_some());
+    assert!(waves.transactions_for_source(SourceId(1)).is_some());
+    assert_eq!(
+        waves.source_label_for(SourceId(1)).as_deref(),
+        Some("File data")
+    );
 }
 
 #[test]
@@ -570,6 +689,163 @@ fn close_additive_source_removes_rows_tables_and_focus() {
 }
 
 #[test]
+fn close_primary_source_promotes_additive_source_and_remaps_tables() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let mut state = SystemState::new_default_config().unwrap();
+    state.update(Message::LoadFilesWithIntents(vec![
+        (
+            fixture("examples/fused_ftr_wave.vcd"),
+            LoadIntent::ReplaceSession,
+        ),
+        (fixture("examples/my_db.ftr"), LoadIntent::AddSource),
+    ]));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    state.update(Message::AddVariablesFromSource(
+        SourceId::default(),
+        vec![VariableRef::from_hierarchy_string("tb.clk")],
+    ));
+    let generator = TransactionStreamRef::new_gen(
+        StreamId(1),
+        GeneratorId(4),
+        "pipelined_stream.read".to_string(),
+    );
+    state.update(Message::AddStreamOrGeneratorFromSource(
+        SourceId(1),
+        generator.clone(),
+    ));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+    state.update(Message::OpenSignalChangeList {
+        target: MessageTarget::Explicit(VisibleItemIndex(0)),
+    });
+    state.update(Message::OpenTransactionTable {
+        source: SourceId(1),
+        generator: generator.clone(),
+    });
+    state.update(Message::SetActiveScopeFromSource(SourceId(1), None));
+    state.update(Message::FocusTransactionFromSource(
+        Some(SourceTransactionRef::new(
+            SourceId(1),
+            TransactionRef {
+                id: TransactionId(4),
+            },
+        )),
+        None,
+    ));
+
+    assert_eq!(state.user.table_tiles.len(), 2);
+
+    state.update(Message::CloseSource(SourceId::default()));
+
+    let waves = state.user.waves.as_ref().expect("promoted source");
+    assert_eq!(waves.source_count(), 1);
+    assert!(waves.transactions_for_source(SourceId::default()).is_some());
+    assert!(
+        waves
+            .displayed_items
+            .values()
+            .all(|item| !matches!(item, DisplayedItem::Variable(variable) if variable.source == SourceId::default())),
+        "closing the primary source should remove its waveform rows"
+    );
+    assert!(
+        waves.displayed_items.values().any(
+            |item| matches!(item, DisplayedItem::Stream(stream) if stream.source == SourceId::default())
+        ),
+        "promoted FTR rows should be remapped to the primary source id"
+    );
+    assert_eq!(waves.active_scope_source, SourceId::default());
+    assert_eq!(
+        waves
+            .focused_transaction
+            .0
+            .as_ref()
+            .map(|focused| focused.source),
+        Some(SourceId::default())
+    );
+
+    assert_eq!(state.user.table_tiles.len(), 1);
+    let spec = state
+        .user
+        .table_tiles
+        .values()
+        .next()
+        .expect("remaining transaction table")
+        .spec
+        .clone();
+    let TableModelSpec::TransactionTrace { source, generator } = spec else {
+        panic!("expected promoted transaction table");
+    };
+    assert_eq!(source, SourceId::default());
+    assert_eq!(generator.gen_id, Some(GeneratorId(4)));
+
+    let ctx = state.table_model_context();
+    let model = TableModelSpec::TransactionTrace { source, generator }
+        .create_model(&ctx)
+        .expect("promoted transaction table model");
+    assert!(model.row_count() > 0);
+}
+
+#[test]
+fn close_only_primary_source_clears_session_and_tables() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(fixture("examples/fused_ftr_wave.vcd"))),
+            startup_commands: vec![],
+            ..Default::default()
+        });
+
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+    state.update(Message::OpenSignalChangeList {
+        target: MessageTarget::Explicit(VisibleItemIndex(0)),
+    });
+
+    assert!(state.user.waves.is_some());
+    assert_eq!(state.user.table_tiles.len(), 1);
+    assert!(
+        state.user.tile_tree.tree.tiles.iter().any(|(_, tile)| {
+            matches!(
+                tile,
+                egui_tiles::Tile::Pane(crate::tiles::SurferPane::Table(_))
+            )
+        }),
+        "expected a table pane before closing the only source"
+    );
+
+    state.update(Message::CloseSource(SourceId::default()));
+
+    assert!(state.user.waves.is_none());
+    assert!(state.user.previous_waves.is_none());
+    assert!(state.user.table_tiles.is_empty());
+    assert!(
+        !state.user.tile_tree.tree.tiles.iter().any(|(_, tile)| {
+            matches!(
+                tile,
+                egui_tiles::Tile::Pane(crate::tiles::SurferPane::Table(_))
+            )
+        }),
+        "closing the only source should remove source-owned table panes"
+    );
+}
+
+#[test]
 fn reload_additive_ftr_source_preserves_other_sources_and_rows() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
@@ -658,6 +934,167 @@ fn reload_additive_ftr_source_preserves_other_sources_and_rows() {
         ),
         "FTR stream row should stay attached to the reloaded source"
     );
+}
+
+#[test]
+fn reload_primary_wave_source_preserves_additive_sources_and_rows() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let tempdir = tempdir().expect("tempdir");
+    let reload_path = camino::Utf8PathBuf::from_path_buf(tempdir.path().join("primary.vcd"))
+        .expect("utf8 temp path");
+    std::fs::copy(
+        fixture("examples/fused_ftr_wave.vcd").as_std_path(),
+        reload_path.as_std_path(),
+    )
+    .expect("seed primary fixture");
+
+    let mut state = SystemState::new_default_config().unwrap();
+    state.update(Message::LoadFilesWithIntents(vec![
+        (reload_path, LoadIntent::ReplaceSession),
+        (fixture("examples/my_db.ftr"), LoadIntent::AddSource),
+    ]));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    state.update(Message::AddVariablesFromSource(
+        SourceId::default(),
+        vec![VariableRef::from_hierarchy_string("tb.clk")],
+    ));
+    let generator = TransactionStreamRef::new_gen(
+        StreamId(1),
+        GeneratorId(4),
+        "pipelined_stream.read".to_string(),
+    );
+    state.update(Message::AddStreamOrGeneratorFromSource(
+        SourceId(1),
+        generator.clone(),
+    ));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    let primary_signal_spec = TableModelSpec::SignalChangeList {
+        source: SourceId::default(),
+        variable: VariableRef::from_hierarchy_string("tb.clk"),
+        field: vec![],
+    };
+    let ftr_table_spec = TableModelSpec::TransactionTrace {
+        source: SourceId(1),
+        generator,
+    };
+    let primary_generation_before =
+        primary_signal_spec.cache_generation(&state.table_model_context());
+    let ftr_generation_before = ftr_table_spec.cache_generation(&state.table_model_context());
+    let old_generation = state
+        .user
+        .waves
+        .as_ref()
+        .map(|waves| waves.cache_generation)
+        .expect("primary source generation");
+
+    state.update(Message::ReloadSource(SourceId::default(), true));
+    wait_until(&mut state, "primary waveform reload", |state| {
+        state
+            .user
+            .waves
+            .as_ref()
+            .is_some_and(|waves| waves.cache_generation > old_generation)
+    });
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert!(
+        primary_signal_spec.cache_generation(&state.table_model_context())
+            > primary_generation_before,
+        "reloading the primary waveform source should invalidate primary-source signal tables"
+    );
+    assert_eq!(
+        ftr_table_spec.cache_generation(&state.table_model_context()),
+        ftr_generation_before,
+        "reloading the primary waveform source should not invalidate additive FTR tables"
+    );
+    assert_eq!(waves.source_count(), 2);
+    assert!(waves.waves_for_source(SourceId::default()).is_some());
+    assert!(waves.transactions_for_source(SourceId(1)).is_some());
+    assert!(
+        waves.displayed_items.values().any(
+            |item| matches!(item, DisplayedItem::Variable(variable) if variable.source == SourceId::default())
+        ),
+        "primary waveform row should survive primary reload"
+    );
+    assert!(
+        waves.displayed_items.values().any(
+            |item| matches!(item, DisplayedItem::Stream(stream) if stream.source == SourceId(1))
+        ),
+        "additive FTR row should survive primary reload"
+    );
+}
+
+#[test]
+fn reload_primary_wave_source_rejects_mismatched_time_domain_without_replacing_old_source() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let tempdir = tempdir().expect("tempdir");
+    let reload_path = camino::Utf8PathBuf::from_path_buf(tempdir.path().join("primary.vcd"))
+        .expect("utf8 temp path");
+    std::fs::copy(
+        fixture("examples/fused_ftr_wave.vcd").as_std_path(),
+        reload_path.as_std_path(),
+    )
+    .expect("seed primary fixture");
+
+    let mut state = SystemState::new_default_config().unwrap();
+    state.update(Message::LoadFilesWithIntents(vec![
+        (reload_path.clone(), LoadIntent::ReplaceSession),
+        (fixture("examples/my_db.ftr"), LoadIntent::AddSource),
+    ]));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+    state.update(Message::AddVariablesFromSource(
+        SourceId::default(),
+        vec![VariableRef::from_hierarchy_string("tb.clk")],
+    ));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    let (old_generation, old_domain) = {
+        let waves = state.user.waves.as_ref().expect("waves loaded");
+        (
+            waves.cache_generation,
+            waves.time_domain_for_source(SourceId::default()),
+        )
+    };
+
+    std::fs::copy(
+        fixture("examples/counter.vcd").as_std_path(),
+        reload_path.as_std_path(),
+    )
+    .expect("replace primary fixture with mismatched domain");
+
+    state.update(Message::ReloadSource(SourceId::default(), true));
+    wait_until(&mut state, "primary reload mismatch error", |state| {
+        state.user.show_logs
+    });
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert_eq!(waves.cache_generation, old_generation);
+    assert_eq!(
+        waves.time_domain_for_source(SourceId::default()),
+        old_domain
+    );
+    assert_eq!(waves.source_count(), 2);
+    assert!(
+        waves.displayed_items.values().any(
+            |item| matches!(item, DisplayedItem::Variable(variable) if variable.source == SourceId::default())
+        ),
+        "rejected primary reload should keep rows from the old source"
+    );
+    assert!(waves.transactions_for_source(SourceId(1)).is_some());
 }
 
 #[test]

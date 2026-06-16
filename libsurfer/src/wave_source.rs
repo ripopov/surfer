@@ -187,6 +187,12 @@ fn wave_format_hint_from_filename(filename: &Utf8PathBuf) -> WaveFormat {
     }
 }
 
+fn wave_format_hint_from_source(source: &WaveSource) -> WaveFormat {
+    source
+        .path()
+        .map_or(WaveFormat::Vcd, wave_format_hint_from_filename)
+}
+
 #[derive(Debug, Deserialize, PartialEq, Eq, Clone, Copy)]
 pub enum LoadOptions {
     Clear,
@@ -297,6 +303,19 @@ impl SystemState {
             self.load_transactions_from_bytes(source, bytes, load_options);
         } else {
             self.load_wave_from_bytes(source, bytes, load_options);
+        }
+    }
+
+    pub fn load_from_bytes_with_intent(
+        &mut self,
+        source: WaveSource,
+        bytes: Vec<u8>,
+        intent: LoadIntent,
+    ) {
+        if parse::is_ftr(&mut Cursor::new(&bytes)).is_ok_and(|is_ftr| is_ftr) {
+            self.load_transactions_from_bytes_with_intent(source, bytes, intent);
+        } else {
+            self.load_wave_from_bytes_with_intent(source, bytes, intent);
         }
     }
 
@@ -416,35 +435,40 @@ impl SystemState {
         Ok(())
     }
 
+    pub fn load_from_data_with_intent(&mut self, data: Vec<u8>, intent: LoadIntent) -> Result<()> {
+        self.load_from_bytes_with_intent(WaveSource::Data, data, intent);
+        Ok(())
+    }
+
     pub fn load_from_dropped_files(&mut self, files: Vec<egui::DroppedFile>) -> Result<()> {
         if files.len() == 1 {
             return self.load_from_dropped(files.into_iter().next().unwrap());
         }
 
-        let mut load_requests = Vec::new();
+        let mut messages = Vec::new();
         let starts_empty = self.user.waves.is_none();
-        for file in files {
-            if file.bytes.is_some() {
-                self.load_from_dropped(file)?;
-                continue;
-            }
-
-            let Some(path) = file.path.and_then(|path| Utf8PathBuf::try_from(path).ok()) else {
-                self.update(Message::Error(anyhow!(
-                    "Unknown how to load dropped file without path or bytes"
-                )));
-                continue;
-            };
-            let intent = if starts_empty && load_requests.is_empty() {
+        for (idx, file) in files.into_iter().enumerate() {
+            let intent = if starts_empty && idx == 0 {
                 LoadIntent::ReplaceSession
             } else {
                 LoadIntent::AddSource
             };
-            load_requests.push((path, intent));
+            if file.bytes.is_some() {
+                messages.push(Message::FileDroppedWithIntent(file, intent));
+                continue;
+            }
+
+            let Some(path) = file.path.and_then(|path| Utf8PathBuf::try_from(path).ok()) else {
+                messages.push(Message::Error(anyhow!(
+                    "Unknown how to load dropped file without path or bytes"
+                )));
+                continue;
+            };
+            messages.push(Message::LoadFileWithIntent(path, intent));
         }
 
-        if !load_requests.is_empty() {
-            self.add_batch_message(Message::LoadFilesWithIntents(load_requests));
+        if !messages.is_empty() {
+            self.add_batch_messages(messages);
         }
 
         Ok(())
@@ -459,7 +483,7 @@ impl SystemState {
         self.load_from_dropped_with_intent(file, intent)
     }
 
-    fn load_from_dropped_with_intent(
+    pub(crate) fn load_from_dropped_with_intent(
         &mut self,
         file: egui::DroppedFile,
         intent: LoadIntent,
@@ -514,9 +538,11 @@ impl SystemState {
                                 );
                             }
                             LoadIntent::AddSource => {
-                                return Err(anyhow!(
-                                    "Add Source for dropped in-memory files is not implemented yet"
-                                ));
+                                self.load_from_bytes_with_intent(
+                                    WaveSource::DragAndDrop(Some(path)),
+                                    bytes.to_vec(),
+                                    intent,
+                                );
                             }
                         }
                     }
@@ -543,9 +569,11 @@ impl SystemState {
                             );
                         }
                         LoadIntent::AddSource => {
-                            return Err(anyhow!(
-                                "Add Source for dropped in-memory files is not implemented yet"
-                            ));
+                            self.load_from_bytes_with_intent(
+                                WaveSource::DragAndDrop(path),
+                                bytes.to_vec(),
+                                intent,
+                            );
                         }
                     }
                 }
@@ -744,6 +772,30 @@ impl SystemState {
         checked_send(&sender, msg);
     }
 
+    pub fn load_transactions_from_bytes_with_intent(
+        &mut self,
+        source: WaveSource,
+        bytes: Vec<u8>,
+        intent: LoadIntent,
+    ) {
+        let sender = self.channels.msg_sender.clone();
+
+        let result = parse::parse_ftr_from_bytes(bytes);
+
+        info!("Done with loading ftr file");
+
+        let msg = match result {
+            Ok(ftr) => Message::TransactionStreamsLoadedWithIntent(
+                source,
+                WaveFormat::Ftr,
+                TransactionContainer::new(ftr),
+                intent,
+            ),
+            Err(e) => Message::Error(Report::msg(e)),
+        };
+        checked_send(&sender, msg);
+    }
+
     /// uses the server status in order to display a loading bar
     pub fn server_status_to_progress(&mut self, server: &str, file_info: &SurverFileInfo) {
         // once the body is loaded, we are no longer interested in the status
@@ -838,6 +890,70 @@ impl SystemState {
                     HeaderResult::LocalBytes(Box::new(header)),
                 ),
                 Err(e) => Message::Error(e),
+            };
+            checked_send(&sender, msg);
+        });
+
+        self.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::ReadingHeader(
+            source_copy,
+        )));
+    }
+
+    pub fn load_wave_from_bytes_with_intent(
+        &mut self,
+        source: WaveSource,
+        bytes: Vec<u8>,
+        intent: LoadIntent,
+    ) {
+        let start = web_time::Instant::now();
+        let sender = self.channels.msg_sender.clone();
+        let source_copy = source.clone();
+        let request = self.next_load_request_id();
+        let pending_source = match intent {
+            LoadIntent::AddSource if self.user.waves.is_some() => {
+                let format_hint = wave_format_hint_from_source(&source);
+                self.user.waves.as_mut().map(|waves| {
+                    waves.add_pending_source(
+                        source.clone(),
+                        format_hint,
+                        DataContainer::Empty,
+                        request,
+                    )
+                })
+            }
+            LoadIntent::ReloadSource {
+                source: source_id, ..
+            } => {
+                if let Some(waves) = self.user.waves.as_mut() {
+                    waves.mark_source_load_request(source_id, request);
+                }
+                Some(source_id)
+            }
+            LoadIntent::ReplaceSession | LoadIntent::AddSource => None,
+        };
+
+        perform_work(move || {
+            let header_result =
+                wellen::viewers::read_header(Cursor::new(bytes), &WELLEN_SURFER_DEFAULT_OPTIONS)
+                    .map_err(|e| anyhow!("{e:?}"))
+                    .with_context(|| format!("Failed to parse wave file: {source}"));
+
+            let msg = match header_result {
+                Ok(header) => Message::WaveHeaderLoadedWithIntent(
+                    start,
+                    request,
+                    pending_source,
+                    source,
+                    intent,
+                    HeaderResult::LocalBytes(Box::new(header)),
+                ),
+                Err(e) => Message::WaveHeaderLoadFailedWithIntent(
+                    request,
+                    pending_source,
+                    source,
+                    intent,
+                    e,
+                ),
             };
             checked_send(&sender, msg);
         });

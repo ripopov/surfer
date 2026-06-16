@@ -1402,6 +1402,15 @@ impl SystemState {
                 *self.surver_selected_file.borrow_mut() = None;
                 self.load_from_data(data, load_options).ok();
             }
+            Message::LoadDataWithIntent(data, intent) => {
+                if matches!(intent, LoadIntent::ReplaceSession) {
+                    self.user.selected_server_file_index = None;
+                    *self.surver_selected_file.borrow_mut() = None;
+                }
+                self.load_from_data_with_intent(data, intent)
+                    .map_err(|e| error!("{e:#?}"))
+                    .ok();
+            }
             #[cfg(feature = "python")]
             Message::LoadPythonTranslator(filename) => {
                 try_log_error!(
@@ -1498,6 +1507,11 @@ impl SystemState {
             }
             Message::FileDropped(dropped_file) => {
                 self.load_from_dropped(dropped_file)
+                    .map_err(|e| error!("{e:#?}"))
+                    .ok();
+            }
+            Message::FileDroppedWithIntent(dropped_file, intent) => {
+                self.load_from_dropped_with_intent(dropped_file, intent)
                     .map_err(|e| error!("{e:#?}"))
                     .ok();
             }
@@ -3708,11 +3722,6 @@ impl SystemState {
     }
 
     fn close_source(&mut self, source: SourceId) {
-        if source == WaveData::primary_source_id() {
-            warn!("Ignoring CloseSource for the primary source; open a new file to replace it");
-            return;
-        }
-
         let table_tiles_to_remove = self
             .user
             .table_tiles
@@ -3721,6 +3730,39 @@ impl SystemState {
             .collect_vec();
         for tile_id in table_tiles_to_remove {
             self.update(Message::RemoveTableTile { tile_id });
+        }
+
+        if source == WaveData::primary_source_id() {
+            let Some(waves) = self.user.waves.as_ref() else {
+                return;
+            };
+
+            if waves.source_count() > 1 {
+                let Some(source_map) = self
+                    .user
+                    .waves
+                    .as_mut()
+                    .and_then(WaveData::promote_first_additive_source_to_primary)
+                else {
+                    self.update(Message::Error(eyre::eyre!(
+                        "Cannot close primary source because no additive source can be promoted"
+                    )));
+                    return;
+                };
+                for tile in self.user.table_tiles.values_mut() {
+                    tile.spec.remap_sources(&source_map);
+                }
+                self.table_runtime.clear();
+                self.all_variable_rows_cache = None;
+                self.invalidate_draw_commands();
+                return;
+            }
+
+            self.user.waves = None;
+            self.user.previous_waves = None;
+            self.all_variable_rows_cache = None;
+            self.invalidate_draw_commands();
+            return;
         }
 
         let Some(waves) = self.user.waves.as_mut() else {

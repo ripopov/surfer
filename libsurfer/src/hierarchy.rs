@@ -67,6 +67,14 @@ pub(crate) struct VariableListRow {
     pub(crate) name_info: Option<VariableNameInfo>,
 }
 
+struct SourceHeader<'a> {
+    source: SourceId,
+    label: &'a str,
+    rename_label: &'a str,
+    format: crate::WaveFormat,
+    time_domain: Option<&'a TimeDomain>,
+}
+
 /// Cache key for `draw_all_variables`. The cache is rebuilt whenever any field changes.
 #[derive(PartialEq)]
 pub(crate) struct AllVariableCacheKey {
@@ -477,11 +485,15 @@ impl SystemState {
                 let primary_label = waves
                     .source_label_for(WaveData::primary_source_id())
                     .unwrap_or_else(|| source_label(&waves.source));
+                let primary_rename_label = waves
+                    .source_base_label_for(WaveData::primary_source_id())
+                    .unwrap_or_else(|| source_label(&waves.source));
                 self.draw_all_variables_for_source(
                     msgs,
                     waves,
                     WaveData::primary_source_id(),
                     &primary_label,
+                    &primary_rename_label,
                     waves.format,
                     &waves.inner,
                     &options,
@@ -489,10 +501,14 @@ impl SystemState {
                 );
                 for source in &waves.sources.sources {
                     ui.separator();
+                    let label = waves
+                        .source_label_for(source.id)
+                        .unwrap_or_else(|| source.label.clone());
                     self.draw_all_variables_for_source(
                         msgs,
                         waves,
                         source.id,
+                        &label,
                         &source.label,
                         source.format,
                         &source.inner,
@@ -510,6 +526,7 @@ impl SystemState {
         waves: &WaveData,
         source: SourceId,
         label: &str,
+        rename_label: &str,
         format: crate::WaveFormat,
         inner: &DataContainer,
         options: &crate::transactions::TransactionListOptions,
@@ -517,10 +534,13 @@ impl SystemState {
     ) {
         self.draw_source_header(
             msgs,
-            source,
-            label,
-            format,
-            TimeDomain::from_container(inner).as_ref(),
+            SourceHeader {
+                source,
+                label,
+                rename_label,
+                format,
+                time_domain: TimeDomain::from_container(inner).as_ref(),
+            },
             ui,
         );
         match inner {
@@ -542,17 +562,9 @@ impl SystemState {
         }
     }
 
-    fn draw_source_header(
-        &self,
-        msgs: &mut Vec<Message>,
-        source: SourceId,
-        label: &str,
-        format: crate::WaveFormat,
-        time_domain: Option<&TimeDomain>,
-        ui: &mut Ui,
-    ) {
-        let mut text = format!("{label}  {format}");
-        if let Some(time_domain) = time_domain {
+    fn draw_source_header(&self, msgs: &mut Vec<Message>, header: SourceHeader<'_>, ui: &mut Ui) {
+        let mut text = format!("{}  {}", header.label, header.format);
+        if let Some(time_domain) = header.time_domain {
             text.push_str("  ");
             text.push_str(&format_time_domain(time_domain));
         }
@@ -560,17 +572,18 @@ impl SystemState {
         let response = ui.label(text);
         response.context_menu(|ui| {
             if ui.button("Reload Source").clicked() {
-                msgs.push(Message::ReloadSource(source, true));
+                msgs.push(Message::ReloadSource(header.source, true));
                 ui.close();
             }
             ui.menu_button("Rename Source", |ui| {
-                let mut edited_label = label.to_string();
+                let mut edited_label = header.rename_label.to_string();
                 if ui.text_edit_singleline(&mut edited_label).changed() {
-                    msgs.push(Message::RenameSource(source, edited_label));
+                    msgs.push(Message::RenameSource(header.source, edited_label));
                 }
             });
-            if source != WaveData::primary_source_id() && ui.button("Close Source").clicked() {
-                msgs.push(Message::CloseSource(source));
+            if header.source != WaveData::primary_source_id() && ui.button("Close Source").clicked()
+            {
+                msgs.push(Message::CloseSource(header.source));
                 ui.close();
             }
         });
@@ -588,12 +601,18 @@ impl SystemState {
             let primary_label = wave
                 .source_label_for(WaveData::primary_source_id())
                 .unwrap_or_else(|| source_label(&wave.source));
+            let primary_rename_label = wave
+                .source_base_label_for(WaveData::primary_source_id())
+                .unwrap_or_else(|| source_label(&wave.source));
             self.draw_source_header(
                 msgs,
-                WaveData::primary_source_id(),
-                &primary_label,
-                wave.format,
-                TimeDomain::from_container(&wave.inner).as_ref(),
+                SourceHeader {
+                    source: WaveData::primary_source_id(),
+                    label: &primary_label,
+                    rename_label: &primary_rename_label,
+                    format: wave.format,
+                    time_domain: TimeDomain::from_container(&wave.inner).as_ref(),
+                },
                 ui,
             );
         }
@@ -631,12 +650,18 @@ impl SystemState {
         for source in &wave.sources.sources {
             if show_source_headers {
                 ui.separator();
+                let label = wave
+                    .source_label_for(source.id)
+                    .unwrap_or_else(|| source.label.clone());
                 self.draw_source_header(
                     msgs,
-                    source.id,
-                    &source.label,
-                    source.format,
-                    source.time_domain.as_ref(),
+                    SourceHeader {
+                        source: source.id,
+                        label: &label,
+                        rename_label: &source.label,
+                        format: source.format,
+                        time_domain: source.time_domain.as_ref(),
+                    },
                     ui,
                 );
             }
