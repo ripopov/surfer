@@ -2206,7 +2206,7 @@ impl SystemState {
             Message::ReloadWaveform(keep_unavailable) => {
                 let waves = self.user.waves.as_ref()?;
                 if waves.source_count() > 1 {
-                    self.reload_source(WaveData::primary_source_id(), keep_unavailable);
+                    self.reload_source(self.reload_target_source(), keep_unavailable);
                     return None;
                 }
                 let options = if keep_unavailable {
@@ -2245,11 +2245,15 @@ impl SystemState {
                     waves.compute_variable_display_names();
                 }
             }
-            Message::SuggestReloadWaveform => match self.autoreload_files() {
-                AutoLoad::Always => self.update(Message::ReloadWaveform(true))?,
+            Message::SuggestReloadWaveform => {
+                self.update(Message::SuggestReloadSource(WaveData::primary_source_id()))?;
+            }
+            Message::SuggestReloadSource(source) => match self.autoreload_files() {
+                AutoLoad::Always => self.update(Message::ReloadSource(source, true))?,
                 AutoLoad::Never => (),
                 AutoLoad::Ask => {
-                    self.user.show_reload_suggestion = Some(ReloadWaveformDialog::default());
+                    self.user.show_reload_suggestion =
+                        Some(ReloadWaveformDialog::for_source(source));
                 }
             },
             Message::CloseReloadWaveformDialog {
@@ -2261,9 +2265,18 @@ impl SystemState {
                     // some setting.
                     self.user.autoreload_files = Some(AutoLoad::from_bool(reload_file));
                 }
+                let source = self
+                    .user
+                    .show_reload_suggestion
+                    .as_ref()
+                    .and_then(ReloadWaveformDialog::source);
                 self.user.show_reload_suggestion = None;
                 if reload_file {
-                    self.update(Message::ReloadWaveform(true));
+                    if let Some(source) = source {
+                        self.update(Message::ReloadSource(source, true));
+                    } else {
+                        self.update(Message::ReloadWaveform(true));
+                    }
                 }
             }
             Message::UpdateReloadWaveformDialog(dialog) => {
@@ -3751,6 +3764,18 @@ impl SystemState {
             .waves
             .as_ref()
             .is_some_and(|waves| waves.source_load_request_matches(source, request))
+    }
+
+    fn reload_target_source(&self) -> SourceId {
+        self.user
+            .waves
+            .as_ref()
+            .and_then(|waves| {
+                waves
+                    .data_container_for_source(waves.active_scope_source)
+                    .map(|_| waves.active_scope_source)
+            })
+            .unwrap_or_else(WaveData::primary_source_id)
     }
 
     fn reload_source(&mut self, source: SourceId, keep_unavailable: bool) {

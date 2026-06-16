@@ -11,8 +11,24 @@ use emath::Align;
 
 #[derive(Debug, Default, Copy, Clone)]
 pub struct ReloadWaveformDialog {
+    source: Option<SourceId>,
     /// `true` to persist the setting returned by the dialog.
     do_not_show_again: bool,
+}
+
+impl ReloadWaveformDialog {
+    #[must_use]
+    pub fn for_source(source: SourceId) -> Self {
+        Self {
+            source: Some(source),
+            do_not_show_again: false,
+        }
+    }
+
+    #[must_use]
+    pub fn source(&self) -> Option<SourceId> {
+        self.source
+    }
 }
 
 #[derive(Debug, Default, Copy, Clone)]
@@ -307,6 +323,7 @@ pub(crate) fn draw_reload_waveform_dialog(
                     });
                 } else if do_not_show_again != dialog.do_not_show_again {
                     msgs.push(Message::UpdateReloadWaveformDialog(ReloadWaveformDialog {
+                        source: dialog.source,
                         do_not_show_again,
                     }));
                 }
