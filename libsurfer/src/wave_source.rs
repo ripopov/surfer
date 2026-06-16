@@ -709,6 +709,16 @@ impl SystemState {
                 )));
             }
             _ => {
+                let request = match intent {
+                    LoadIntent::ReloadSource { source, .. } => {
+                        let request = self.next_load_request_id();
+                        if let Some(waves) = self.user.waves.as_mut() {
+                            waves.mark_source_load_request(source, request);
+                        }
+                        Some(request)
+                    }
+                    LoadIntent::ReplaceSession | LoadIntent::AddSource => None,
+                };
                 let sender = self.channels.msg_sender.clone();
                 let url_ = url.clone();
                 perform_async_work(async move {
@@ -718,7 +728,10 @@ impl SystemState {
                     let response: reqwest::Response = match maybe_response {
                         Ok(r) => r,
                         Err(e) => {
-                            checked_send(&sender, Message::Error(e));
+                            checked_send(
+                                &sender,
+                                Message::FileDownloadFailedWithIntent(url, intent, request, e),
+                            );
                             return;
                         }
                     };
@@ -728,9 +741,14 @@ impl SystemState {
                     {
                         checked_send(
                             &sender,
-                            Message::Error(anyhow!(
-                                "Add Source and Reload Source for remote Surver waveform sources are not implemented yet: {url}"
-                            )),
+                            Message::FileDownloadFailedWithIntent(
+                                url,
+                                intent,
+                                request,
+                                anyhow!(
+                                    "Add Source and Reload Source for remote Surver waveform sources are not implemented yet"
+                                ),
+                            ),
                         );
                         return;
                     }
@@ -741,8 +759,13 @@ impl SystemState {
                         .await;
 
                     let msg = match bytes {
-                        Ok(b) => Message::FileDownloadedWithIntent(url, b, intent),
-                        Err(e) => Message::Error(e),
+                        Ok(b) => match request {
+                            Some(request) => {
+                                Message::FileDownloadedWithIntentForRequest(url, b, intent, request)
+                            }
+                            None => Message::FileDownloadedWithIntent(url, b, intent),
+                        },
+                        Err(e) => Message::FileDownloadFailedWithIntent(url, intent, request, e),
                     };
                     checked_send(&sender, msg);
                 });

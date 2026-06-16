@@ -2199,6 +2199,38 @@ impl SystemState {
                 }
                 self.load_from_bytes_with_intent(WaveSource::Url(url), bytes.to_vec(), intent);
             }
+            Message::FileDownloadedWithIntentForRequest(url, bytes, intent, request) => {
+                if let LoadIntent::ReloadSource { source, .. } = intent
+                    && !self.source_load_request_is_current(source, request)
+                {
+                    info!("Dropping stale URL download for reload of {source} from {url}");
+                    return None;
+                }
+                if matches!(intent, LoadIntent::ReplaceSession) {
+                    self.user.selected_server_file_index = None;
+                    *self.surver_selected_file.borrow_mut() = None;
+                }
+                self.load_from_bytes_with_intent(WaveSource::Url(url), bytes.to_vec(), intent);
+            }
+            Message::FileDownloadFailedWithIntent(url, intent, request, err) => {
+                self.progress_tracker = None;
+                if let LoadIntent::ReloadSource { source, .. } = intent {
+                    if let Some(request) = request
+                        && !self.source_load_request_is_current(source, request)
+                    {
+                        info!(
+                            "Dropping stale URL download error for reload of {source} from {url}"
+                        );
+                        return None;
+                    }
+                    if let Some(waves) = self.user.waves.as_mut() {
+                        waves.mark_source_load_error(source, err.to_string());
+                    }
+                }
+                self.update(Message::Error(
+                    err.wrap_err(format!("Failed to download {url}")),
+                ));
+            }
             Message::CommandFileDownloaded(_url, bytes) => {
                 self.add_batch_commands(read_command_bytes(bytes.to_vec()));
                 self.progress_tracker = None;
@@ -3800,9 +3832,7 @@ impl SystemState {
                     .ok();
             }
             WaveSource::Url(url) => {
-                self.update(Message::Error(eyre::eyre!(
-                    "Reload Source for remote sources is not implemented yet: {url}"
-                )));
+                self.load_wave_from_url_with_intent(url, intent);
             }
             WaveSource::Data | WaveSource::DragAndDrop(None) | WaveSource::Cxxrtl(_) => {
                 self.update(Message::Error(eyre::eyre!(
