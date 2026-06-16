@@ -46,6 +46,22 @@ impl WaveData {
 
         // Single pass: update display names for all items using the precomputed map
         for Node { item_ref, .. } in self.items_tree.iter() {
+            let index_suffix = if self.display_variable_indices {
+                self.displayed_items
+                    .get(item_ref)
+                    .and_then(|item| match item {
+                        DisplayedItem::Variable(variable) => self
+                            .waves_for_source(variable.source)
+                            .and_then(|waves| waves.variable_meta(&variable.variable_ref).ok())
+                            .and_then(|meta| meta.index),
+                        _ => None,
+                    })
+                    .map(|index| format!(" {index}"))
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+
             self.displayed_items
                 .entry(*item_ref)
                 .and_modify(|item| match item {
@@ -58,18 +74,9 @@ impl WaveData {
                                 .cloned()
                                 .unwrap_or_else(|| variable.variable_ref.name.clone()),
                         };
-                        if self.display_variable_indices {
-                            let index = self
-                                .inner
-                                .as_waves()
-                                .unwrap()
-                                .variable_meta(&variable.variable_ref)
-                                .ok()
-                                .as_ref()
-                                .and_then(|meta| meta.index)
-                                .map(|index| format!(" {index}"))
-                                .unwrap_or_default();
-                            variable.display_name = format!("{}{}", variable.display_name, index);
+                        if !index_suffix.is_empty() {
+                            variable.display_name =
+                                format!("{}{}", variable.display_name, index_suffix);
                         }
                     }
                     DisplayedItem::Divider(_) => {}

@@ -55,6 +55,7 @@ fn transaction_trace_model_spec_creates_model() {
     let state = load_ftr_state();
 
     let spec = TableModelSpec::TransactionTrace {
+        source: crate::source::SourceId::default(),
         generator: test_generator_ref(),
     };
 
@@ -70,6 +71,7 @@ fn transaction_trace_model_has_fixed_columns() {
     let state = load_ftr_state();
 
     let spec = TableModelSpec::TransactionTrace {
+        source: crate::source::SourceId::default(),
         generator: test_generator_ref(),
     };
 
@@ -95,6 +97,7 @@ fn transaction_trace_model_row_count_positive() {
     let state = load_ftr_state();
 
     let spec = TableModelSpec::TransactionTrace {
+        source: crate::source::SourceId::default(),
         generator: test_generator_ref(),
     };
 
@@ -111,6 +114,7 @@ fn transaction_trace_model_row_ids_are_unique() {
     let state = load_ftr_state();
 
     let spec = TableModelSpec::TransactionTrace {
+        source: crate::source::SourceId::default(),
         generator: test_generator_ref(),
     };
 
@@ -131,6 +135,7 @@ fn transaction_trace_model_on_activate_returns_focus_transaction() {
     let state = load_ftr_state();
 
     let spec = TableModelSpec::TransactionTrace {
+        source: crate::source::SourceId::default(),
         generator: test_generator_ref(),
     };
 
@@ -140,7 +145,8 @@ fn transaction_trace_model_on_activate_returns_focus_transaction() {
     if let Some(row_id) = model.row_id_at(0) {
         let action = model.on_activate(row_id);
         match action {
-            TableAction::FocusTransaction(tx_ref) => {
+            TableAction::FocusTransaction(source, tx_ref) => {
+                assert_eq!(source, crate::source::SourceId::default());
                 // Verify the transaction ref is valid
                 assert!(tx_ref.id.0 < usize::MAX, "tx_ref should have valid id");
             }
@@ -156,6 +162,7 @@ fn transaction_trace_model_default_config_has_title() {
     let state = load_ftr_state();
 
     let spec = TableModelSpec::TransactionTrace {
+        source: crate::source::SourceId::default(),
         generator: test_generator_ref(),
     };
 
@@ -181,6 +188,7 @@ fn open_transaction_table_creates_tile() {
     let mut state = load_ftr_state();
 
     state.update(Message::OpenTransactionTable {
+        source: crate::source::SourceId::default(),
         generator: test_generator_ref(),
     });
 
@@ -191,7 +199,7 @@ fn open_transaction_table_creates_tile() {
     );
     let tile_state = state.user.table_tiles.values().next().expect("tile state");
     match &tile_state.spec {
-        TableModelSpec::TransactionTrace { generator } => {
+        TableModelSpec::TransactionTrace { generator, .. } => {
             assert_eq!(generator.name, "read");
             assert_eq!(generator.gen_id, Some(GeneratorId(4)));
         }
@@ -206,6 +214,7 @@ fn transaction_trace_model_cells_return_text() {
     let state = load_ftr_state();
 
     let spec = TableModelSpec::TransactionTrace {
+        source: crate::source::SourceId::default(),
         generator: test_generator_ref(),
     };
 
@@ -235,6 +244,7 @@ fn transaction_trace_model_search_text_non_empty() {
     let state = load_ftr_state();
 
     let spec = TableModelSpec::TransactionTrace {
+        source: crate::source::SourceId::default(),
         generator: test_generator_ref(),
     };
 
@@ -254,6 +264,7 @@ fn transaction_trace_sort_key_numeric_for_times() {
     let state = load_ftr_state();
 
     let spec = TableModelSpec::TransactionTrace {
+        source: crate::source::SourceId::default(),
         generator: test_generator_ref(),
     };
 
@@ -285,6 +296,7 @@ fn transaction_trace_data_unavailable_without_transactions() {
     let state = load_counter_state();
 
     let spec = TableModelSpec::TransactionTrace {
+        source: crate::source::SourceId::default(),
         generator: test_generator_ref(),
     };
 
@@ -326,7 +338,10 @@ fn open_transaction_table_for_stream_creates_multiple_tiles() {
 
     // Emit one OpenTransactionTable per generator (simulates stream-level menu click)
     for gen_ref in generators {
-        state.update(Message::OpenTransactionTable { generator: gen_ref });
+        state.update(Message::OpenTransactionTable {
+            source: crate::source::SourceId::default(),
+            generator: gen_ref,
+        });
     }
 
     assert_eq!(
@@ -338,7 +353,7 @@ fn open_transaction_table_for_stream_creates_multiple_tiles() {
     // Verify each tile has gen_id set
     for tile_state in state.user.table_tiles.values() {
         match &tile_state.spec {
-            TableModelSpec::TransactionTrace { generator } => {
+            TableModelSpec::TransactionTrace { generator, .. } => {
                 assert!(
                     generator.gen_id.is_some(),
                     "Each tile should reference a specific generator"

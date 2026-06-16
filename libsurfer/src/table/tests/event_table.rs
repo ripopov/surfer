@@ -56,6 +56,7 @@ fn event_table_model_spec_creates_model() {
     let state = load_events_state();
 
     let spec = TableModelSpec::EventTable {
+        source: crate::source::SourceId::default(),
         generator: instruction_generator_ref(),
     };
     let ctx = state.table_model_context();
@@ -71,6 +72,7 @@ fn event_table_rejects_generator_without_events() {
 
     // The events generator itself has no events generator of its own
     let spec = TableModelSpec::EventTable {
+        source: crate::source::SourceId::default(),
         generator: TransactionStreamRef::new_gen(
             StreamId(1),
             GeneratorId(4),
@@ -88,6 +90,7 @@ fn event_table_has_promoted_columns() {
     let state = load_events_state();
 
     let spec = TableModelSpec::EventTable {
+        source: crate::source::SourceId::default(),
         generator: instruction_generator_ref(),
     };
     let ctx = state.table_model_context();
@@ -120,6 +123,7 @@ fn event_table_rows_have_names_and_parents() {
     let state = load_events_state();
 
     let spec = TableModelSpec::EventTable {
+        source: crate::source::SourceId::default(),
         generator: instruction_generator_ref(),
     };
     let ctx = state.table_model_context();
@@ -143,6 +147,7 @@ fn event_table_activation_focuses_event() {
     let state = load_events_state();
 
     let spec = TableModelSpec::EventTable {
+        source: crate::source::SourceId::default(),
         generator: instruction_generator_ref(),
     };
     let ctx = state.table_model_context();
@@ -150,7 +155,8 @@ fn event_table_activation_focuses_event() {
 
     let first = model.row_id_at(0).expect("row");
     match model.on_activate(first) {
-        TableAction::FocusTransaction(tx_ref) => {
+        TableAction::FocusTransaction(source, tx_ref) => {
+            assert_eq!(source, crate::source::SourceId::default());
             assert_eq!(tx_ref.id, TransactionId(2));
         }
         other => panic!("expected FocusTransaction, got {other:?}"),
@@ -164,6 +170,7 @@ fn event_table_search_text_includes_name_and_parent() {
     let state = load_events_state();
 
     let spec = TableModelSpec::EventTable {
+        source: crate::source::SourceId::default(),
         generator: instruction_generator_ref(),
     };
     let ctx = state.table_model_context();
@@ -182,6 +189,7 @@ fn transaction_trace_gains_events_count_column() {
     let state = load_events_state();
 
     let spec = TableModelSpec::TransactionTrace {
+        source: crate::source::SourceId::default(),
         generator: instruction_generator_ref(),
     };
     let ctx = state.table_model_context();
@@ -215,6 +223,7 @@ fn transaction_trace_without_events_has_no_events_column() {
 
     // The raw events generator has no events generator of its own
     let spec = TableModelSpec::TransactionTrace {
+        source: crate::source::SourceId::default(),
         generator: TransactionStreamRef::new_gen(
             StreamId(1),
             GeneratorId(4),

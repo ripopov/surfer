@@ -9,6 +9,7 @@ use std::sync::Arc;
 use crate::analog_signal_cache::AnalogCacheEntry;
 use surfer_translation_types::VariableInfo;
 
+use crate::source::SourceId;
 use crate::translation::DynTranslator;
 use crate::wave_container::VariableMeta;
 
@@ -170,6 +171,8 @@ impl AnalogVarState {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct DisplayedVariable {
+    #[serde(default)]
+    pub source: SourceId,
     pub variable_ref: VariableRef,
     #[serde(skip)]
     pub info: VariableInfo,
@@ -235,6 +238,7 @@ impl DisplayedVariable {
     pub fn into_placeholder(mut self) -> DisplayedPlaceholder {
         self.variable_ref.clear_id(); // placeholders do not refer to currently loaded variables
         DisplayedPlaceholder {
+            source: self.source,
             variable_ref: self.variable_ref,
             color: self.color,
             background_color: self.background_color,
@@ -299,6 +303,8 @@ pub struct DisplayedTimeLine {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct DisplayedPlaceholder {
+    #[serde(default)]
+    pub source: SourceId,
     pub variable_ref: VariableRef,
     pub color: Option<String>,
     pub background_color: Option<String>,
@@ -319,6 +325,7 @@ impl DisplayedPlaceholder {
         updated_variable_ref: VariableRef,
     ) -> DisplayedVariable {
         DisplayedVariable {
+            source: self.source,
             variable_ref: updated_variable_ref,
             info: variable_info,
             color: self.color,
@@ -344,6 +351,8 @@ impl DisplayedPlaceholder {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct DisplayedStream {
+    #[serde(default)]
+    pub source: SourceId,
     pub transaction_stream_ref: TransactionStreamRef,
     pub color: Option<String>,
     pub background_color: Option<String>,
@@ -635,6 +644,7 @@ mod tests {
     #[test]
     fn displayed_stream_event_display_mode_round_trips() {
         let stream = DisplayedStream {
+            source: SourceId::default(),
             transaction_stream_ref: crate::transaction_container::TransactionStreamRef::new_gen(
                 ftr_parser::types::StreamId(1),
                 ftr_parser::types::GeneratorId(3),

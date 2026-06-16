@@ -8,6 +8,7 @@ fn signal_change_list_model_basic_rows() {
     let state = load_counter_state_with_variable("tb.clk");
     let ctx = state.table_model_context();
     let spec = TableModelSpec::SignalChangeList {
+        source: crate::source::SourceId::default(),
         variable: VariableRef::from_hierarchy_string("tb.clk"),
         field: vec![],
     };
@@ -58,6 +59,7 @@ fn signal_change_list_model_missing_field_path_uses_em_dash() {
     let state = load_counter_state_with_variable("tb.dut.counter");
     let ctx = state.table_model_context();
     let spec = TableModelSpec::SignalChangeList {
+        source: crate::source::SourceId::default(),
         variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
         field: vec!["missing".to_string()],
     };
@@ -77,6 +79,7 @@ fn signal_change_list_model_errors() {
     let state = SystemState::new_default_config().expect("state");
     let ctx = state.table_model_context();
     let spec = TableModelSpec::SignalChangeList {
+        source: crate::source::SourceId::default(),
         variable: VariableRef::from_hierarchy_string("tb.clk"),
         field: vec![],
     };
@@ -88,6 +91,7 @@ fn signal_change_list_model_errors() {
     let state = load_counter_state();
     let ctx = state.table_model_context();
     let missing_spec = TableModelSpec::SignalChangeList {
+        source: crate::source::SourceId::default(),
         variable: VariableRef::from_hierarchy_string("tb.nope"),
         field: vec![],
     };
@@ -113,9 +117,11 @@ fn signal_analysis_model_requires_loaded_signals() {
         params: AnalysisParams::SignalAnalysisV1 {
             config: SignalAnalysisConfig {
                 sampling: SignalAnalysisSamplingConfig {
+                    source: crate::source::SourceId::default(),
                     signal: VariableRef::from_hierarchy_string("tb.clk"),
                 },
                 signals: vec![SignalAnalysisSignal {
+                    source: crate::source::SourceId::default(),
                     variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                     field: vec![],
                     translator: "Unsigned".to_string(),
@@ -150,9 +156,11 @@ fn signal_analysis_model_schema_rows_sort_search_and_activation() {
         params: AnalysisParams::SignalAnalysisV1 {
             config: SignalAnalysisConfig {
                 sampling: SignalAnalysisSamplingConfig {
+                    source: crate::source::SourceId::default(),
                     signal: VariableRef::from_hierarchy_string("tb.clk"),
                 },
                 signals: vec![SignalAnalysisSignal {
+                    source: crate::source::SourceId::default(),
                     variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                     field: vec![],
                     translator: "Unsigned".to_string(),
@@ -237,9 +245,11 @@ fn signal_analysis_model_intervals_and_activation_use_interval_end() {
         params: AnalysisParams::SignalAnalysisV1 {
             config: SignalAnalysisConfig {
                 sampling: SignalAnalysisSamplingConfig {
+                    source: crate::source::SourceId::default(),
                     signal: VariableRef::from_hierarchy_string("tb.clk"),
                 },
                 signals: vec![SignalAnalysisSignal {
+                    source: crate::source::SourceId::default(),
                     variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                     field: vec![],
                     translator: "Unsigned".to_string(),
@@ -276,9 +286,11 @@ fn signal_analysis_model_non_empty_field_disables_numeric_metrics() {
         params: AnalysisParams::SignalAnalysisV1 {
             config: SignalAnalysisConfig {
                 sampling: SignalAnalysisSamplingConfig {
+                    source: crate::source::SourceId::default(),
                     signal: VariableRef::from_hierarchy_string("tb.clk"),
                 },
                 signals: vec![SignalAnalysisSignal {
+                    source: crate::source::SourceId::default(),
                     variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                     field: vec!["value".to_string()],
                     translator: "Unsigned".to_string(),
@@ -309,9 +321,11 @@ fn analysis_results_default_view_config_sets_sort_and_activation() {
         params: AnalysisParams::SignalAnalysisV1 {
             config: SignalAnalysisConfig {
                 sampling: SignalAnalysisSamplingConfig {
+                    source: crate::source::SourceId::default(),
                     signal: VariableRef::from_hierarchy_string("tb.clk"),
                 },
                 signals: vec![SignalAnalysisSignal {
+                    source: crate::source::SourceId::default(),
                     variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                     field: vec![],
                     translator: "Unsigned".to_string(),
@@ -341,9 +355,11 @@ fn run_signal_analysis_creates_analysis_tile_and_preloads_signals() {
     let mut state = load_counter_state();
     let config = SignalAnalysisConfig {
         sampling: SignalAnalysisSamplingConfig {
+            source: crate::source::SourceId::default(),
             signal: VariableRef::from_hierarchy_string("tb.clk"),
         },
         signals: vec![SignalAnalysisSignal {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
             field: vec![],
             translator: "Unsigned".to_string(),
@@ -412,9 +428,11 @@ fn signal_analysis_table_tile_state_round_trips_through_user_state_ron() {
     let mut state = load_counter_state();
     let config = SignalAnalysisConfig {
         sampling: SignalAnalysisSamplingConfig {
+            source: crate::source::SourceId::default(),
             signal: VariableRef::from_hierarchy_string("tb.clk"),
         },
         signals: vec![SignalAnalysisSignal {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
             field: vec![],
             translator: "Unsigned".to_string(),
@@ -451,9 +469,11 @@ fn signal_analysis_build_table_cache_flow_completes_after_run() {
     let mut state = load_counter_state();
     let config = SignalAnalysisConfig {
         sampling: SignalAnalysisSamplingConfig {
+            source: crate::source::SourceId::default(),
             signal: VariableRef::from_hierarchy_string("tb.clk"),
         },
         signals: vec![SignalAnalysisSignal {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
             field: vec![],
             translator: "Unsigned".to_string(),
@@ -532,9 +552,11 @@ fn signal_analysis_sort_reuses_cached_model() {
     let mut state = load_counter_state();
     let config = SignalAnalysisConfig {
         sampling: SignalAnalysisSamplingConfig {
+            source: crate::source::SourceId::default(),
             signal: VariableRef::from_hierarchy_string("tb.clk"),
         },
         signals: vec![SignalAnalysisSignal {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
             field: vec![],
             translator: "Unsigned".to_string(),
@@ -665,9 +687,11 @@ fn signal_analysis_model_key_changes_on_refresh_run_revision() {
     let mut state = load_counter_state();
     let config = SignalAnalysisConfig {
         sampling: SignalAnalysisSamplingConfig {
+            source: crate::source::SourceId::default(),
             signal: VariableRef::from_hierarchy_string("tb.clk"),
         },
         signals: vec![SignalAnalysisSignal {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
             field: vec![],
             translator: "Unsigned".to_string(),
@@ -713,9 +737,11 @@ fn refresh_signal_analysis_rebuilds_with_current_markers() {
     let mut state = load_counter_state();
     let config = SignalAnalysisConfig {
         sampling: SignalAnalysisSamplingConfig {
+            source: crate::source::SourceId::default(),
             signal: VariableRef::from_hierarchy_string("tb.clk"),
         },
         signals: vec![SignalAnalysisSignal {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
             field: vec![],
             translator: "Unsigned".to_string(),
@@ -784,9 +810,11 @@ fn edit_signal_analysis_run_updates_existing_tile_and_bumps_revision() {
     let mut state = load_counter_state();
     let config = SignalAnalysisConfig {
         sampling: SignalAnalysisSamplingConfig {
+            source: crate::source::SourceId::default(),
             signal: VariableRef::from_hierarchy_string("tb.clk"),
         },
         signals: vec![SignalAnalysisSignal {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
             field: vec![],
             translator: "Unsigned".to_string(),
@@ -1012,7 +1040,7 @@ fn open_signal_analysis_wizard_defaults_sampling_to_first_one_bit_signal() {
     let clk_ref = VariableRef::from_hierarchy_string("tb.clk");
     assert_eq!(dialog.sampling_signal, clk_ref);
     assert_eq!(
-        state.signal_analysis_sampling_mode(&dialog.sampling_signal),
+        state.signal_analysis_sampling_mode(dialog.sampling_source, &dialog.sampling_signal),
         Some(SignalAnalysisSamplingMode::PosEdge)
     );
 }
@@ -1048,7 +1076,9 @@ fn open_signal_change_list_adds_table_tile_for_focused_item() {
     assert_eq!(state.user.table_tiles.len(), 1);
     let tile_state = state.user.table_tiles.values().next().expect("tile state");
     match &tile_state.spec {
-        TableModelSpec::SignalChangeList { variable, field } => {
+        TableModelSpec::SignalChangeList {
+            variable, field, ..
+        } => {
             assert_eq!(
                 variable.full_path_string(),
                 VariableRef::from_hierarchy_string("tb.clk").full_path_string()
@@ -1082,6 +1112,7 @@ fn table_activate_selection_moves_cursor() {
     let _guard = _runtime.enter();
     let mut state = load_counter_state_with_variable("tb.clk");
     let spec = TableModelSpec::SignalChangeList {
+        source: crate::source::SourceId::default(),
         variable: VariableRef::from_hierarchy_string("tb.clk"),
         field: vec![],
     };
@@ -1121,9 +1152,11 @@ fn signal_analysis_selection_moves_cursor_to_interval_end() {
     state.update(Message::RunSignalAnalysis {
         config: SignalAnalysisConfig {
             sampling: SignalAnalysisSamplingConfig {
+                source: crate::source::SourceId::default(),
                 signal: VariableRef::from_hierarchy_string("tb.clk"),
             },
             signals: vec![SignalAnalysisSignal {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                 field: vec![],
                 translator: "Unsigned".to_string(),
@@ -1168,6 +1201,7 @@ fn signal_change_selection_moves_cursor() {
     let _guard = _runtime.enter();
     let mut state = load_counter_state_with_variable("tb.clk");
     let spec = TableModelSpec::SignalChangeList {
+        source: crate::source::SourceId::default(),
         variable: VariableRef::from_hierarchy_string("tb.clk"),
         field: vec![],
     };

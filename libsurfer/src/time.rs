@@ -23,7 +23,7 @@ use crate::{
     view::{DrawConfig, DrawingContext},
 };
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct TimeScale {
     pub unit: TimeUnit,
     pub multiplier: Option<u32>,

@@ -25,10 +25,12 @@ fn multi_signal_model_creation_with_valid_signals() {
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.clk"),
                 field: vec![],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                 field: vec![],
             },
@@ -56,8 +58,8 @@ fn multi_signal_model_creation_with_valid_signals() {
     for col in &schema.columns[1..] {
         if let TableColumnKey::Str(key) = &col.key {
             assert!(
-                key.starts_with("sig:v1:"),
-                "signal column key should start with sig:v1: prefix, got: {key}"
+                key.starts_with("sig:v2:"),
+                "signal column key should start with sig:v2: prefix, got: {key}"
             );
         } else {
             panic!("signal column key should be Str variant");
@@ -81,10 +83,12 @@ fn multi_signal_model_skips_missing_signals_warns() {
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.nonexistent"),
                 field: vec![],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.clk"),
                 field: vec![],
             },
@@ -112,10 +116,12 @@ fn multi_signal_model_all_invalid_signals_returns_error() {
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.nonexistent1"),
                 field: vec![],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.nonexistent2"),
                 field: vec![],
             },
@@ -139,18 +145,18 @@ fn multi_signal_model_column_key_stable_and_reversible() {
     let path = "tb.dut.counter";
     let field = vec!["value".to_string()];
 
-    let key1 = encode_signal_column_key(path, &field);
-    let key2 = encode_signal_column_key(path, &field);
+    let key1 = encode_signal_column_key(crate::source::SourceId::default(), path, &field);
+    let key2 = encode_signal_column_key(crate::source::SourceId::default(), path, &field);
     assert_eq!(key1, key2, "column key should be deterministic");
 
-    let (decoded_path, decoded_field) =
+    let (_decoded_source, decoded_path, decoded_field) =
         decode_signal_column_key(&key1).expect("should decode successfully");
     assert_eq!(decoded_path, path);
     assert_eq!(decoded_field, field);
 
     // Verify empty field
-    let key_empty = encode_signal_column_key("tb.clk", &[]);
-    let (decoded_path2, decoded_field2) =
+    let key_empty = encode_signal_column_key(crate::source::SourceId::default(), "tb.clk", &[]);
+    let (_decoded_source, decoded_path2, decoded_field2) =
         decode_signal_column_key(&key_empty).expect("should decode empty field");
     assert_eq!(decoded_path2, "tb.clk");
     assert!(decoded_field2.is_empty());
@@ -169,6 +175,7 @@ fn multi_signal_model_on_activate_sets_cursor() {
     let ctx = state.table_model_context();
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![MultiSignalEntry {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.clk"),
             field: vec![],
         }],
@@ -202,6 +209,7 @@ fn multi_signal_model_time_column_rendering() {
     let ctx = state.table_model_context();
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![MultiSignalEntry {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.clk"),
             field: vec![],
         }],
@@ -239,6 +247,7 @@ fn multi_signal_model_uses_lazy_search_mode() {
     let ctx = state.table_model_context();
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![MultiSignalEntry {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.clk"),
             field: vec![],
         }],
@@ -267,10 +276,12 @@ fn multi_signal_model_row_ids_match_merged_timeline() {
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.clk"),
                 field: vec![],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                 field: vec![],
             },
@@ -294,6 +305,7 @@ fn multi_signal_model_row_ids_match_merged_timeline() {
 
     // Verify merged timeline has at least as many rows as either single signal
     let clk_spec = TableModelSpec::SignalChangeList {
+        source: crate::source::SourceId::default(),
         variable: VariableRef::from_hierarchy_string("tb.clk"),
         field: vec![],
     };
@@ -336,10 +348,12 @@ fn multi_signal_transition_held_nodata_classification() {
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.clk"),
                 field: vec![],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                 field: vec![],
             },
@@ -401,6 +415,7 @@ fn multi_signal_cell_value_matches_query_variable() {
     // Build multi-signal model with clk
     let multi_spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![MultiSignalEntry {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.clk"),
             field: vec![],
         }],
@@ -408,6 +423,7 @@ fn multi_signal_cell_value_matches_query_variable() {
 
     // Build single-signal model with clk for comparison
     let single_spec = TableModelSpec::SignalChangeList {
+        source: crate::source::SourceId::default(),
         variable: VariableRef::from_hierarchy_string("tb.clk"),
         field: vec![],
     };
@@ -459,10 +475,12 @@ fn multi_signal_nodata_renders_em_dash() {
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.clk"),
                 field: vec![],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                 field: vec![],
             },
@@ -515,10 +533,12 @@ fn multi_signal_sort_key_numeric_vs_text() {
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.clk"),
                 field: vec![],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                 field: vec![],
             },
@@ -582,10 +602,12 @@ fn multi_signal_search_text_includes_all_columns() {
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.clk"),
                 field: vec![],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                 field: vec![],
             },
@@ -633,10 +655,12 @@ fn multi_signal_held_value_matches_previous_transition() {
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.clk"),
                 field: vec![],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                 field: vec![],
             },
@@ -686,6 +710,7 @@ fn multi_signal_out_of_bounds_column_returns_empty() {
     let ctx = state.table_model_context();
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![MultiSignalEntry {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.clk"),
             field: vec![],
         }],
@@ -728,10 +753,12 @@ fn multi_signal_materialize_window_limited_to_requested_rows() {
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.clk"),
                 field: vec![],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                 field: vec![],
             },
@@ -790,6 +817,7 @@ fn multi_signal_materialize_window_cache_reuse_on_same_viewport() {
     let ctx = state.table_model_context();
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![MultiSignalEntry {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.clk"),
             field: vec![],
         }],
@@ -833,10 +861,12 @@ fn multi_signal_materialize_window_cache_invalidated_on_different_params() {
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.clk"),
                 field: vec![],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                 field: vec![],
             },
@@ -897,6 +927,7 @@ fn multi_signal_cell_uses_cached_window_after_materialize() {
     let ctx = state.table_model_context();
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![MultiSignalEntry {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.clk"),
             field: vec![],
         }],
@@ -938,10 +969,12 @@ fn multi_signal_clipboard_uses_window_materialization() {
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.clk"),
                 field: vec![],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                 field: vec![],
             },
@@ -1000,6 +1033,7 @@ fn multi_signal_materialize_window_search_probe() {
     let ctx = state.table_model_context();
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![MultiSignalEntry {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.clk"),
             field: vec![],
         }],
@@ -1199,6 +1233,7 @@ fn collect_selected_variable_entries(waves: &crate::wave_data::WaveData) -> Vec<
             let item = waves.displayed_items.get(&node.item_ref)?;
             if let DisplayedItem::Variable(var) = item {
                 Some(MultiSignalEntry {
+                    source: crate::source::SourceId::default(),
                     variable: var.variable_ref.clone(),
                     field: vec![],
                 })
@@ -1317,10 +1352,12 @@ fn add_table_tile_multi_signal_creates_tile() {
         spec: TableModelSpec::MultiSignalChangeList {
             variables: vec![
                 MultiSignalEntry {
+                    source: crate::source::SourceId::default(),
                     variable: VariableRef::from_hierarchy_string("tb.clk"),
                     field: vec![],
                 },
                 MultiSignalEntry {
+                    source: crate::source::SourceId::default(),
                     variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                     field: vec![],
                 },
@@ -1355,10 +1392,11 @@ fn drill_down_column_key_to_single_signal_spec() {
     // VariableRef and field for a SignalChangeList spec.
     let full_path = "tb.dut.counter";
     let field: Vec<String> = vec![];
-    let column_key = encode_signal_column_key(full_path, &field);
+    let column_key =
+        encode_signal_column_key(crate::source::SourceId::default(), full_path, &field);
 
     // Decode the key (as the drill-down code in view.rs does)
-    let (decoded_path, decoded_field) =
+    let (_decoded_source, decoded_path, decoded_field) =
         decode_signal_column_key(&column_key).expect("should decode signal column key");
 
     assert_eq!(decoded_path, full_path);
@@ -1366,12 +1404,15 @@ fn drill_down_column_key_to_single_signal_spec() {
 
     // Construct the spec that the drill-down would produce
     let spec = TableModelSpec::SignalChangeList {
+        source: crate::source::SourceId::default(),
         variable: VariableRef::from_hierarchy_string(&decoded_path),
         field: decoded_field,
     };
 
     match &spec {
-        TableModelSpec::SignalChangeList { variable, field } => {
+        TableModelSpec::SignalChangeList {
+            variable, field, ..
+        } => {
             assert_eq!(
                 variable,
                 &VariableRef::from_hierarchy_string("tb.dut.counter")
@@ -1387,18 +1428,22 @@ fn drill_down_column_key_with_field_to_single_signal_spec() {
     // Verify drill-down for a signal with sub-fields
     let full_path = "tb.dut.bus";
     let field = vec!["data".to_string(), "valid".to_string()];
-    let column_key = encode_signal_column_key(full_path, &field);
+    let column_key =
+        encode_signal_column_key(crate::source::SourceId::default(), full_path, &field);
 
-    let (decoded_path, decoded_field) =
+    let (_decoded_source, decoded_path, decoded_field) =
         decode_signal_column_key(&column_key).expect("should decode");
 
     let spec = TableModelSpec::SignalChangeList {
+        source: crate::source::SourceId::default(),
         variable: VariableRef::from_hierarchy_string(&decoded_path),
         field: decoded_field.clone(),
     };
 
     match &spec {
-        TableModelSpec::SignalChangeList { variable, field } => {
+        TableModelSpec::SignalChangeList {
+            variable, field, ..
+        } => {
             assert_eq!(variable, &VariableRef::from_hierarchy_string("tb.dut.bus"));
             assert_eq!(field, &["data", "valid"]);
         }

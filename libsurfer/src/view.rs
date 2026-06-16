@@ -229,13 +229,14 @@ impl SystemState {
             draw_open_sibling_state_file_dialog(&ctx, dialog, &mut msgs);
         }
 
-        if let Some(sampling_signal) = self
+        if let Some((sampling_source, sampling_signal)) = self
             .user
             .show_signal_analysis_wizard
             .as_ref()
-            .map(|dialog| dialog.sampling_signal.clone())
+            .map(|dialog| (dialog.sampling_source, dialog.sampling_signal.clone()))
         {
-            let resolved_mode = self.signal_analysis_sampling_mode(&sampling_signal);
+            let resolved_mode =
+                self.signal_analysis_sampling_mode(sampling_source, &sampling_signal);
             if let Some(dialog) = self.user.show_signal_analysis_wizard.as_mut()
                 && draw_signal_analysis_wizard_dialog(&ctx, dialog, resolved_mode, &mut msgs)
             {
@@ -333,10 +334,10 @@ impl SystemState {
         }
 
         ctx.input(|i| {
-            i.raw.dropped_files.iter().for_each(|file| {
+            if !i.raw.dropped_files.is_empty() {
                 info!("Got dropped file");
-                msgs.push(Message::FileDropped(file.clone()));
-            });
+                msgs.push(Message::FilesDropped(i.raw.dropped_files.clone()));
+            }
         });
 
         // If some dialogs are open, skip decoding keypresses

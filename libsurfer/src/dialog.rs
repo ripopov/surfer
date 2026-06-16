@@ -1,4 +1,5 @@
 use crate::message::Message;
+use crate::source::SourceId;
 use crate::table::{
     SignalAnalysisConfig, SignalAnalysisSamplingConfig, SignalAnalysisSamplingMode,
     SignalAnalysisSignal,
@@ -21,12 +22,14 @@ pub struct OpenSiblingStateFileDialog {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignalAnalysisWizardSamplingOption {
+    pub source: SourceId,
     pub variable: VariableRef,
     pub display_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignalAnalysisWizardSignal {
+    pub source: SourceId,
     pub variable: VariableRef,
     pub display_name: String,
     pub include: bool,
@@ -36,6 +39,7 @@ pub struct SignalAnalysisWizardSignal {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignalAnalysisWizardDialog {
     pub sampling_options: Vec<SignalAnalysisWizardSamplingOption>,
+    pub sampling_source: SourceId,
     pub sampling_signal: VariableRef,
     pub signals: Vec<SignalAnalysisWizardSignal>,
     pub translators: Vec<String>,
@@ -74,6 +78,7 @@ impl SignalAnalysisWizardDialog {
             .iter()
             .filter(|signal| signal.include)
             .map(|signal| SignalAnalysisSignal {
+                source: signal.source,
                 variable: signal.variable.clone(),
                 field: vec![],
                 translator: signal.translator.clone(),
@@ -86,6 +91,7 @@ impl SignalAnalysisWizardDialog {
 
         Some(SignalAnalysisConfig {
             sampling: SignalAnalysisSamplingConfig {
+                source: self.sampling_source,
                 signal: self.sampling_signal.clone(),
             },
             signals,
@@ -109,7 +115,9 @@ pub(crate) fn draw_signal_analysis_wizard_dialog(
     let selected_sampling_label = dialog
         .sampling_options
         .iter()
-        .find(|option| option.variable == dialog.sampling_signal)
+        .find(|option| {
+            option.source == dialog.sampling_source && option.variable == dialog.sampling_signal
+        })
         .map_or_else(
             || dialog.sampling_signal.full_path_string(),
             |option| option.display_name.clone(),
@@ -133,11 +141,15 @@ pub(crate) fn draw_signal_analysis_wizard_dialog(
                 .selected_text(selected_sampling_label)
                 .show_ui(ui, |ui| {
                     for option in &dialog.sampling_options {
-                        ui.selectable_value(
-                            &mut dialog.sampling_signal,
-                            option.variable.clone(),
-                            option.display_name.clone(),
-                        );
+                        let selected = option.source == dialog.sampling_source
+                            && option.variable == dialog.sampling_signal;
+                        if ui
+                            .selectable_label(selected, option.display_name.clone())
+                            .clicked()
+                        {
+                            dialog.sampling_source = option.source;
+                            dialog.sampling_signal = option.variable.clone();
+                        }
                     }
                 });
 

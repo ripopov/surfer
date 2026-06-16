@@ -353,6 +353,7 @@ impl StartupParams {
     fn from_url(url: UrlArgs) -> Self {
         Self {
             waves: url.load_url.map(WaveSource::Url),
+            additional_waves: vec![],
             wcp_initiate: None,
             startup_commands: url.startup_commands.map(|c| vec![c]).unwrap_or_default(),
         }

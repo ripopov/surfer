@@ -146,10 +146,11 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
         .waves
         .as_ref()
         .and_then(|waves| {
-            waves
-                .active_scope
-                .as_ref()
-                .map(|scope| waves.inner.variables_in_scope(scope))
+            waves.active_scope.as_ref().and_then(|scope| {
+                waves
+                    .data_container_for_source(waves.active_scope_source)
+                    .map(|inner| inner.variables_in_scope(scope))
+            })
         })
         .unwrap_or_default();
 
@@ -174,11 +175,10 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
         .as_ref()
         .and_then(|w| w.active_scope.clone());
 
-    let is_transaction_container = state
-        .user
-        .waves
-        .as_ref()
-        .is_some_and(|w| w.inner.is_transactions());
+    let is_transaction_container = state.user.waves.as_ref().is_some_and(|w| {
+        w.data_container_for_source(w.active_scope_source)
+            .is_some_and(crate::data_container::DataContainer::is_transactions)
+    });
 
     fn files_with_ext(matches: fn(&str) -> bool) -> Vec<String> {
         if let Ok(res) = fs::read_dir(".") {
@@ -429,13 +429,13 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
 
     // Pre-compute transaction table data for focused transaction (if any)
     // Returns the generator ref if a transaction is focused
-    let transaction_table_generator: Option<TransactionStreamRef> =
+    let transaction_table_generator: Option<(crate::source::SourceId, TransactionStreamRef)> =
         state.user.waves.as_ref().and_then(|waves| {
-            let transactions = waves.inner.as_transactions()?;
             let (Some(tx_ref), _) = &waves.focused_transaction else {
                 return None;
             };
-            let tx = transactions.get_transaction(tx_ref)?;
+            let transactions = waves.transactions_for_source(tx_ref.source)?;
+            let tx = transactions.get_transaction(&tx_ref.inner)?;
             let gen_id = tx.get_gen_id();
             let generator = transactions.get_generator(gen_id)?;
             // Find the stream for this generator
@@ -445,37 +445,39 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                 .find(|s| s.generators.contains(&gen_id))
                 .map(|s| s.id)
                 .unwrap_or(ftr_parser::types::StreamId(0));
-            Some(TransactionStreamRef::new_gen(
-                stream_id,
-                gen_id,
-                generator.name.clone(),
+            Some((
+                tx_ref.source,
+                TransactionStreamRef::new_gen(stream_id, gen_id, generator.name.clone()),
             ))
         });
 
     // The parent generator whose event table the focused transaction belongs
     // to: the focused transaction's own generator when it has events, or the
     // parent generator when an event is focused
-    let event_table_generator: Option<TransactionStreamRef> =
+    let event_table_generator: Option<(crate::source::SourceId, TransactionStreamRef)> =
         state.user.waves.as_ref().and_then(|waves| {
             if !state.user.config.behavior.ftr_events_enabled() {
                 return None;
             }
-            let transactions = waves.inner.as_transactions()?;
-            let index = transactions.event_index();
             let (Some(tx_ref), _) = &waves.focused_transaction else {
                 return None;
             };
-            let tx = transactions.get_transaction(tx_ref)?;
+            let transactions = waves.transactions_for_source(tx_ref.source)?;
+            let index = transactions.event_index();
+            let tx = transactions.get_transaction(&tx_ref.inner)?;
             let parent_gen_id = match index.event_info(tx.get_tx_id()) {
                 Some(info) => info.parent_gen,
                 None => tx.get_gen_id(),
             };
             index.conforming_events_generator_of(parent_gen_id)?;
             let generator = transactions.get_generator(parent_gen_id)?;
-            Some(TransactionStreamRef::new_gen(
-                generator.stream_id,
-                parent_gen_id,
-                generator.name.clone(),
+            Some((
+                tx_ref.source,
+                TransactionStreamRef::new_gen(
+                    generator.stream_id,
+                    parent_gen_id,
+                    generator.name.clone(),
+                ),
             ))
         });
 
@@ -952,9 +954,11 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                 "transaction_table" => {
                     // Opens a transaction table for the focused transaction's generator
                     // Requires a transaction to be focused
-                    transaction_table_generator.clone().map(|generator| {
-                        Command::Terminal(Message::OpenTransactionTable { generator })
-                    })
+                    transaction_table_generator
+                        .clone()
+                        .map(|(source, generator)| {
+                            Command::Terminal(Message::OpenTransactionTable { source, generator })
+                        })
                 }
                 "transition_next" => single_word(
                     displayed_items.clone(),
@@ -995,9 +999,9 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                 "event_table" => {
                     // Opens an event table for the focused transaction's generator
                     // (the focused transaction may be the parent or one of its events)
-                    event_table_generator
-                        .clone()
-                        .map(|generator| Command::Terminal(Message::OpenEventTable { generator }))
+                    event_table_generator.clone().map(|(source, generator)| {
+                        Command::Terminal(Message::OpenEventTable { source, generator })
+                    })
                 }
                 "copy_value" => single_word(
                     displayed_items.clone(),

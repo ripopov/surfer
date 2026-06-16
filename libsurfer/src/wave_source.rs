@@ -8,6 +8,7 @@ use std::sync::atomic::AtomicU64;
 use crate::async_util::{perform_async_work, perform_work};
 use crate::channels::checked_send;
 use crate::cxxrtl_container::CxxrtlContainer;
+use crate::data_container::DataContainer;
 use crate::file_dialog::OpenMode;
 use crate::remote::{get_hierarchy_from_server, get_server_status, server_reload};
 use crate::transactions::TRANSACTIONS_FILE_EXTENSION;
@@ -22,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 use web_time::Instant;
 
+use crate::source::{LoadRequestId, SourceId};
 use crate::transaction_container::TransactionContainer;
 use crate::wave_container::WaveContainer;
 use crate::wellen::{
@@ -177,11 +179,29 @@ impl Display for WaveFormat {
     }
 }
 
+fn wave_format_hint_from_filename(filename: &Utf8PathBuf) -> WaveFormat {
+    match get_multi_extension(filename).as_deref() {
+        Some("fst") => WaveFormat::Fst,
+        Some("ghw") => WaveFormat::Ghw,
+        _ => WaveFormat::Vcd,
+    }
+}
+
 #[derive(Debug, Deserialize, PartialEq, Eq, Clone, Copy)]
 pub enum LoadOptions {
     Clear,
     KeepAvailable,
     KeepAll,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone, Copy, Serialize)]
+pub enum LoadIntent {
+    ReplaceSession,
+    AddSource,
+    ReloadSource {
+        source: SourceId,
+        keep_unavailable: bool,
+    },
 }
 
 impl From<(OpenMode, bool)> for LoadOptions {
@@ -190,6 +210,7 @@ impl From<(OpenMode, bool)> for LoadOptions {
             (OpenMode::Open, _) => LoadOptions::Clear,
             (OpenMode::Switch, false) => LoadOptions::KeepAvailable,
             (OpenMode::Switch, true) => LoadOptions::KeepAll,
+            (OpenMode::AddSource | OpenMode::OpenMultipleSources, _) => LoadOptions::Clear,
         }
     }
 }
@@ -218,6 +239,34 @@ pub enum LoadProgressStatus {
 }
 
 impl SystemState {
+    pub fn load_from_file_with_intent(
+        &mut self,
+        filename: Utf8PathBuf,
+        intent: LoadIntent,
+    ) -> Result<()> {
+        match intent {
+            LoadIntent::ReplaceSession => self.load_from_file(filename, LoadOptions::Clear),
+            LoadIntent::ReloadSource { .. } | LoadIntent::AddSource => {
+                match get_multi_extension(&filename) {
+                    Some(ext) if ext.as_str() == STATE_FILE_EXTENSION => match intent {
+                        LoadIntent::AddSource => {
+                            self.load_state_file(Some(filename.into_std_path_buf()));
+                            Ok(())
+                        }
+                        LoadIntent::ReloadSource { .. } => Err(anyhow!(
+                            "Cannot reload a source from a state file: {filename}"
+                        )),
+                        LoadIntent::ReplaceSession => unreachable!(),
+                    },
+                    Some(ext) if ext.as_str() == TRANSACTIONS_FILE_EXTENSION => {
+                        self.load_transactions_from_file_with_intent(filename, intent)
+                    }
+                    _ => self.load_wave_from_file_with_intent(filename, intent),
+                }
+            }
+        }
+    }
+
     pub fn load_from_file(
         &mut self,
         filename: Utf8PathBuf,
@@ -292,12 +341,129 @@ impl SystemState {
         Ok(())
     }
 
+    pub fn load_wave_from_file_with_intent(
+        &mut self,
+        filename: Utf8PathBuf,
+        intent: LoadIntent,
+    ) -> Result<()> {
+        info!("Loading a waveform file with intent {intent:?}: {filename}");
+        let start = web_time::Instant::now();
+        let source = WaveSource::File(filename.clone());
+        let source_copy = source.clone();
+        let sender = self.channels.msg_sender.clone();
+        if !filename.exists() {
+            let msg = Message::Error(anyhow!("Waveform file is missing: {filename}"));
+            checked_send(&sender, msg);
+            return Ok(());
+        }
+        let request = self.next_load_request_id();
+        let pending_source = match intent {
+            LoadIntent::AddSource if self.user.waves.is_some() => {
+                let format_hint = wave_format_hint_from_filename(&filename);
+                self.user.waves.as_mut().map(|waves| {
+                    waves.add_pending_source(
+                        source.clone(),
+                        format_hint,
+                        DataContainer::Empty,
+                        request,
+                    )
+                })
+            }
+            LoadIntent::ReloadSource { source, .. } => {
+                if let Some(waves) = self.user.waves.as_mut() {
+                    waves.mark_source_load_request(source, request);
+                }
+                Some(source)
+            }
+            LoadIntent::ReplaceSession | LoadIntent::AddSource => None,
+        };
+        perform_work(move || {
+            let header_result = wellen::viewers::read_header_from_file(
+                filename.as_str(),
+                &WELLEN_SURFER_DEFAULT_OPTIONS,
+            )
+            .map_err(|e| anyhow!("{e:?}"))
+            .with_context(|| format!("Failed to parse wave file: {source}"));
+
+            let msg = match header_result {
+                Ok(header) => Message::WaveHeaderLoadedWithIntent(
+                    start,
+                    request,
+                    pending_source,
+                    source,
+                    intent,
+                    HeaderResult::LocalFile(Box::new(header)),
+                ),
+                Err(e) => Message::WaveHeaderLoadFailedWithIntent(
+                    request,
+                    pending_source,
+                    source,
+                    intent,
+                    e,
+                ),
+            };
+            checked_send(&sender, msg);
+        });
+
+        self.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::ReadingHeader(
+            source_copy,
+        )));
+        Ok(())
+    }
+
     pub fn load_from_data(&mut self, data: Vec<u8>, load_options: LoadOptions) -> Result<()> {
         self.load_from_bytes(WaveSource::Data, data, load_options);
         Ok(())
     }
 
+    pub fn load_from_dropped_files(&mut self, files: Vec<egui::DroppedFile>) -> Result<()> {
+        if files.len() == 1 {
+            return self.load_from_dropped(files.into_iter().next().unwrap());
+        }
+
+        let mut load_requests = Vec::new();
+        let starts_empty = self.user.waves.is_none();
+        for file in files {
+            if file.bytes.is_some() {
+                self.load_from_dropped(file)?;
+                continue;
+            }
+
+            let Some(path) = file.path.and_then(|path| Utf8PathBuf::try_from(path).ok()) else {
+                self.update(Message::Error(anyhow!(
+                    "Unknown how to load dropped file without path or bytes"
+                )));
+                continue;
+            };
+            let intent = if starts_empty && load_requests.is_empty() {
+                LoadIntent::ReplaceSession
+            } else {
+                LoadIntent::AddSource
+            };
+            load_requests.push((path, intent));
+        }
+
+        if !load_requests.is_empty() {
+            self.add_batch_message(Message::LoadFilesWithIntents(load_requests));
+        }
+
+        Ok(())
+    }
+
     pub fn load_from_dropped(&mut self, file: egui::DroppedFile) -> Result<()> {
+        let intent = if self.user.waves.is_some() {
+            LoadIntent::AddSource
+        } else {
+            LoadIntent::ReplaceSession
+        };
+        self.load_from_dropped_with_intent(file, intent)
+    }
+
+    fn load_from_dropped_with_intent(
+        &mut self,
+        file: egui::DroppedFile,
+        intent: LoadIntent,
+    ) -> Result<()> {
         info!("Got a dropped file");
 
         let path = file.path.and_then(|x| Utf8PathBuf::try_from(x).ok());
@@ -326,23 +492,67 @@ impl SystemState {
                             );
                         });
                     } else {
-                        self.load_from_bytes(
-                            WaveSource::DragAndDrop(Some(path)),
-                            bytes.to_vec(),
-                            LoadOptions::Clear,
-                        );
+                        match intent {
+                            LoadIntent::ReplaceSession => {
+                                self.load_from_bytes(
+                                    WaveSource::DragAndDrop(Some(path)),
+                                    bytes.to_vec(),
+                                    LoadOptions::Clear,
+                                );
+                            }
+                            LoadIntent::ReloadSource {
+                                keep_unavailable, ..
+                            } => {
+                                self.load_from_bytes(
+                                    WaveSource::DragAndDrop(Some(path)),
+                                    bytes.to_vec(),
+                                    if keep_unavailable {
+                                        LoadOptions::KeepAll
+                                    } else {
+                                        LoadOptions::KeepAvailable
+                                    },
+                                );
+                            }
+                            LoadIntent::AddSource => {
+                                return Err(anyhow!(
+                                    "Add Source for dropped in-memory files is not implemented yet"
+                                ));
+                            }
+                        }
                     }
                 } else {
-                    self.load_from_bytes(
-                        WaveSource::DragAndDrop(path),
-                        bytes.to_vec(),
-                        LoadOptions::Clear,
-                    );
+                    match intent {
+                        LoadIntent::ReplaceSession => {
+                            self.load_from_bytes(
+                                WaveSource::DragAndDrop(path),
+                                bytes.to_vec(),
+                                LoadOptions::Clear,
+                            );
+                        }
+                        LoadIntent::ReloadSource {
+                            keep_unavailable, ..
+                        } => {
+                            self.load_from_bytes(
+                                WaveSource::DragAndDrop(path),
+                                bytes.to_vec(),
+                                if keep_unavailable {
+                                    LoadOptions::KeepAll
+                                } else {
+                                    LoadOptions::KeepAvailable
+                                },
+                            );
+                        }
+                        LoadIntent::AddSource => {
+                            return Err(anyhow!(
+                                "Add Source for dropped in-memory files is not implemented yet"
+                            ));
+                        }
+                    }
                 }
                 Ok(())
             }
         } else if let Some(path) = path {
-            self.load_from_file(path, LoadOptions::Clear)
+            self.load_from_file_with_intent(path, intent)
         } else {
             Err(anyhow!(
                 "Unknown how to load dropped file w/o path or bytes"
@@ -477,6 +687,33 @@ impl SystemState {
                 format,
                 TransactionContainer::new(ftr),
                 load_options,
+            ),
+            Err(e) => Message::Error(Report::msg(e)),
+        };
+        checked_send(&sender, msg);
+        Ok(())
+    }
+
+    pub fn load_transactions_from_file_with_intent(
+        &mut self,
+        filename: camino::Utf8PathBuf,
+        intent: LoadIntent,
+    ) -> Result<()> {
+        info!("Loading a transaction file: {filename}");
+        let sender = self.channels.msg_sender.clone();
+        let source = WaveSource::File(filename.clone());
+        let format = WaveFormat::Ftr;
+
+        let result = ftr_parser::parse::parse_ftr(filename.into_std_path_buf());
+
+        info!("Done with loading ftr file");
+
+        let msg = match result {
+            Ok(ftr) => Message::TransactionStreamsLoadedWithIntent(
+                source,
+                format,
+                TransactionContainer::new(ftr),
+                intent,
             ),
             Err(e) => Message::Error(Report::msg(e)),
         };
@@ -664,6 +901,114 @@ impl SystemState {
         )));
     }
 
+    pub fn load_wave_body_for_source<
+        R: std::io::BufRead + std::io::Seek + Sync + Send + 'static,
+    >(
+        &mut self,
+        request: LoadRequestId,
+        source_id: SourceId,
+        source: WaveSource,
+        cont: wellen::viewers::ReadBodyContinuation<R>,
+        body_len: u64,
+        hierarchy: Arc<wellen::Hierarchy>,
+    ) {
+        let start = web_time::Instant::now();
+        let sender = self.channels.msg_sender.clone();
+        let source_copy = source.clone();
+        let progress = Arc::new(AtomicU64::new(0));
+        let progress_copy = progress.clone();
+        let pool = Self::get_thread_pool();
+
+        perform_work(move || {
+            let action = || {
+                let p = Some(progress_copy);
+                let body_result = wellen::viewers::read_body(cont, &hierarchy, p)
+                    .map_err(|e| anyhow!("{e:?}"))
+                    .with_context(|| format!("Failed to parse body of wave file: {source}"));
+
+                let msg = match body_result {
+                    Ok(body) => Message::WaveBodyLoadedForSource(
+                        start,
+                        request,
+                        source_id,
+                        source,
+                        BodyResult::Local(body),
+                    ),
+                    Err(e) => Message::Error(e),
+                };
+                checked_send(&sender, msg);
+            };
+            if let Some(pool) = pool {
+                pool.install(action);
+            } else {
+                action();
+            }
+        });
+
+        self.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::ReadingBody(
+            source_copy,
+            body_len,
+            progress,
+        )));
+    }
+
+    pub fn load_wave_body_for_reloaded_source<
+        R: std::io::BufRead + std::io::Seek + Sync + Send + 'static,
+    >(
+        &mut self,
+        request: LoadRequestId,
+        source_id: SourceId,
+        source: WaveSource,
+        format: WaveFormat,
+        new_waves: Box<WaveContainer>,
+        cont: wellen::viewers::ReadBodyContinuation<R>,
+        body_len: u64,
+        hierarchy: Arc<wellen::Hierarchy>,
+        keep_unavailable: bool,
+    ) {
+        let start = web_time::Instant::now();
+        let sender = self.channels.msg_sender.clone();
+        let source_copy = source.clone();
+        let progress = Arc::new(AtomicU64::new(0));
+        let progress_copy = progress.clone();
+        let pool = Self::get_thread_pool();
+
+        perform_work(move || {
+            let action = || {
+                let p = Some(progress_copy);
+                let body_result = wellen::viewers::read_body(cont, &hierarchy, p)
+                    .map_err(|e| anyhow!("{e:?}"))
+                    .with_context(|| format!("Failed to parse body of wave file: {source}"));
+
+                let msg = match body_result {
+                    Ok(body) => Message::WaveBodyLoadedForReloadedSource(
+                        start,
+                        request,
+                        source_id,
+                        source,
+                        format,
+                        new_waves,
+                        BodyResult::Local(body),
+                        keep_unavailable,
+                    ),
+                    Err(e) => Message::Error(e),
+                };
+                checked_send(&sender, msg);
+            };
+            if let Some(pool) = pool {
+                pool.install(action);
+            } else {
+                action();
+            }
+        });
+
+        self.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::ReadingBody(
+            source_copy,
+            body_len,
+            progress,
+        )));
+    }
+
     pub fn load_variables(&mut self, cmd: LoadSignalsCmd) {
         let (signals, from_unique_id, payload) = cmd.destruct();
         if signals.is_empty() {
@@ -711,6 +1056,69 @@ impl SystemState {
                         Ok(loaded) => {
                             let res = LoadSignalsResult::remote(server, loaded, from_unique_id);
                             Message::SignalsLoaded(start, res)
+                        }
+                        Err(e) => Message::Error(e),
+                    };
+                    checked_send(&sender, msg);
+                });
+            }
+        }
+
+        self.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::LoadingVariables(
+            num_signals,
+        )));
+    }
+
+    pub fn load_variables_for_source(&mut self, source_id: SourceId, cmd: LoadSignalsCmd) {
+        let (signals, from_unique_id, payload) = cmd.destruct();
+        if signals.is_empty() {
+            return;
+        }
+        let num_signals = signals.len() as u64;
+        let start = web_time::Instant::now();
+        let sender = self.channels.msg_sender.clone();
+        let max_url_length = self.user.config.max_url_length;
+        match payload {
+            LoadSignalPayload::Local(mut source, hierarchy) => {
+                let pool = Self::get_thread_pool();
+
+                perform_work(move || {
+                    let action = || {
+                        let loaded = source.load_signals(&signals, &hierarchy, true);
+                        let res = LoadSignalsResult::local(source, loaded, from_unique_id);
+                        checked_send(
+                            &sender,
+                            Message::SignalsLoadedForSource(source_id, start, res),
+                        );
+                    };
+                    if let Some(pool) = pool {
+                        pool.install(action);
+                    } else {
+                        action();
+                    }
+                });
+            }
+            LoadSignalPayload::Remote(server, file_index) => {
+                perform_async_work(async move {
+                    let res =
+                        crate::remote::get_signals(
+                            server.clone(),
+                            &signals,
+                            max_url_length,
+                            file_index,
+                        )
+                        .await
+                        .map_err(|e| anyhow!("{e:?}"))
+                        .with_context(|| {
+                            format!(
+                                "Failed to retrieve signals from remote server {server} file index {file_index}"
+                            )
+                        });
+
+                    let msg = match res {
+                        Ok(loaded) => {
+                            let res = LoadSignalsResult::remote(server, loaded, from_unique_id);
+                            Message::SignalsLoadedForSource(source_id, start, res)
                         }
                         Err(e) => Message::Error(e),
                     };

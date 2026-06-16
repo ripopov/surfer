@@ -44,9 +44,16 @@ pub(crate) fn variable_analog_draw_commands(
 ) -> Option<VariableDrawCommands> {
     let render_mode = displayed_variable.analog.as_ref()?;
 
-    let wave_container = waves.inner.as_waves()?;
     let displayed_field_ref: DisplayedFieldRef = display_id.into();
-    let translator = waves.variable_translator(&displayed_field_ref, translators);
+    let wave_container = waves.waves_for_source(displayed_variable.source)?;
+    let meta = wave_container
+        .variable_meta(&displayed_variable.variable_ref)
+        .ok();
+    let translator = if let Some(meta) = &meta {
+        waves.variable_translator_with_meta(&displayed_field_ref, translators, meta)
+    } else {
+        waves.variable_translator(&displayed_field_ref, translators)
+    };
     let viewport = &waves.viewports[viewport_idx];
     let num_timestamps = waves.safe_num_timestamps();
 
@@ -99,9 +106,6 @@ pub(crate) fn variable_analog_draw_commands(
         }
     };
 
-    let meta = wave_container
-        .variable_meta(&displayed_variable.variable_ref)
-        .ok();
     let type_limits = meta.as_ref().and_then(|m| translator.numeric_range(m));
 
     let analog_commands = CommandBuilder::new(

@@ -15,6 +15,7 @@ use crate::{
     frame_buffer::FrameBufferSettings,
     hierarchy::{HierarchyStyle, ParameterDisplayLocation},
     message::Message,
+    source::{SourceId, SourceStore, format_time_domain},
     system_state::SystemState,
     table::{TableTileId, TableTileState},
     tiles::SurferTileTree,
@@ -25,7 +26,7 @@ use crate::{
     viewport::Viewport,
     wave_container::{ScopeRef, VariableRef, WaveContainer},
     wave_data::WaveData,
-    wave_source::{LoadOptions, WaveFormat, WaveSource},
+    wave_source::{LoadIntent, LoadOptions, WaveFormat, WaveSource},
 };
 use egui::{
     Visuals,
@@ -93,6 +94,8 @@ pub struct UserState {
     pub(crate) drag_target_idx: Option<crate::displayed_item_tree::TargetPosition>,
 
     pub(crate) previous_waves: Option<WaveData>,
+    #[serde(skip, default)]
+    pub(crate) pending_state_restore: Option<PendingStateRestore>,
 
     /// Count argument for movements
     pub(crate) count: Option<String>,
@@ -169,6 +172,11 @@ pub struct UserState {
     pub(crate) show_annotation_list: bool,
 }
 
+pub(crate) struct PendingStateRestore {
+    waves: WaveData,
+    sources: Vec<(SourceId, WaveSource)>,
+}
+
 // Impl needed since for loading we need to put State into a Message
 // Snip out the actual contents to not completely spam the terminal
 impl std::fmt::Debug for UserState {
@@ -222,6 +230,7 @@ impl Default for UserState {
             drag_source_idx: None,
             drag_target_idx: None,
             previous_waves: None,
+            pending_state_restore: None,
             count: None,
             blacklisted_translators: HashSet::new(),
             show_about: false,
@@ -271,21 +280,52 @@ impl SystemState {
         // we turn the waveform argument and any startup command file into batch commands
         self.batch_messages = VecDeque::new();
 
-        match args.waves {
-            Some(WaveSource::Url(url)) => {
-                self.add_batch_message(Message::LoadWaveformFileFromUrl(url, LoadOptions::KeepAll));
+        for (idx, source) in args
+            .waves
+            .into_iter()
+            .chain(args.additional_waves)
+            .enumerate()
+        {
+            if idx == 0 {
+                match source {
+                    WaveSource::Url(url) => {
+                        self.add_batch_message(Message::LoadWaveformFileFromUrl(
+                            url,
+                            LoadOptions::KeepAll,
+                        ));
+                    }
+                    WaveSource::File(file) => {
+                        self.add_batch_message(Message::LoadFile(file, LoadOptions::KeepAll));
+                    }
+                    WaveSource::Data => error!("Attempted to load data at startup"),
+                    WaveSource::Cxxrtl(url) => {
+                        self.add_batch_message(Message::SetupCxxrtl(url));
+                    }
+                    WaveSource::DragAndDrop(_) => {
+                        error!("Attempted to load from drag and drop at startup (how?)");
+                    }
+                }
+            } else {
+                match source {
+                    WaveSource::File(file) => {
+                        self.add_batch_message(Message::LoadFileWithIntent(
+                            file,
+                            crate::wave_source::LoadIntent::AddSource,
+                        ));
+                    }
+                    WaveSource::Url(url) => {
+                        self.add_batch_message(Message::LoadWaveformFileFromUrl(
+                            url,
+                            LoadOptions::KeepAll,
+                        ));
+                    }
+                    WaveSource::Data => error!("Attempted to add data at startup"),
+                    WaveSource::Cxxrtl(_) => error!("Attempted to add CXXRTL source at startup"),
+                    WaveSource::DragAndDrop(_) => {
+                        error!("Attempted to add drag-and-drop source at startup")
+                    }
+                }
             }
-            Some(WaveSource::File(file)) => {
-                self.add_batch_message(Message::LoadFile(file, LoadOptions::KeepAll));
-            }
-            Some(WaveSource::Data) => error!("Attempted to load data at startup"),
-            Some(WaveSource::Cxxrtl(url)) => {
-                self.add_batch_message(Message::SetupCxxrtl(url));
-            }
-            Some(WaveSource::DragAndDrop(_)) => {
-                error!("Attempted to load from drag and drop at startup (how?)");
-            }
-            None => {}
         }
 
         if let Some(port) = args.wcp_initiate {
@@ -306,7 +346,16 @@ impl SystemState {
     }
 
     pub(crate) fn get_scope(&mut self, scope: &ScopeRef, recursive: bool) -> Vec<VariableRef> {
-        self.collect_scope_variables(scope, recursive, ScopeVariableSelection::All)
+        self.get_scope_from_source(WaveData::primary_source_id(), scope.clone(), recursive)
+    }
+
+    pub(crate) fn get_scope_from_source(
+        &mut self,
+        source: SourceId,
+        scope: ScopeRef,
+        recursive: bool,
+    ) -> Vec<VariableRef> {
+        self.collect_scope_variables(source, &scope, recursive, ScopeVariableSelection::All)
     }
 
     pub(crate) fn get_scope_vcd_events(
@@ -314,11 +363,26 @@ impl SystemState {
         scope: ScopeRef,
         recursive: bool,
     ) -> Vec<VariableRef> {
-        self.collect_scope_variables(&scope, recursive, ScopeVariableSelection::VcdEventOnly)
+        self.get_scope_vcd_events_from_source(WaveData::primary_source_id(), scope, recursive)
+    }
+
+    pub(crate) fn get_scope_vcd_events_from_source(
+        &mut self,
+        source: SourceId,
+        scope: ScopeRef,
+        recursive: bool,
+    ) -> Vec<VariableRef> {
+        self.collect_scope_variables(
+            source,
+            &scope,
+            recursive,
+            ScopeVariableSelection::VcdEventOnly,
+        )
     }
 
     fn collect_scope_variables(
         &mut self,
+        source: SourceId,
         scope: &ScopeRef,
         recursive: bool,
         selection: ScopeVariableSelection,
@@ -327,7 +391,10 @@ impl SystemState {
             return vec![];
         };
 
-        let wave_cont = waves.inner.as_waves().unwrap();
+        let Some(wave_cont) = waves.waves_for_source(source) else {
+            warn!("Cannot collect variables from {source}: waveform source not found");
+            return vec![];
+        };
 
         let children = wave_cont.child_scopes(scope);
         let mut variables = wave_cont
@@ -353,7 +420,7 @@ impl SystemState {
 
         if recursive && let Ok(children) = children {
             for child in children {
-                variables.append(&mut self.collect_scope_variables(&child, true, selection));
+                variables.append(&mut self.collect_scope_variables(source, &child, true, selection));
             }
         }
 
@@ -406,6 +473,8 @@ impl SystemState {
                             inner: DataContainer::Waves(*new_waves),
                             source: filename,
                             format,
+                            sources: SourceStore::default(),
+                            active_scope_source: SourceId::default(),
                             active_scope: None,
                             items_tree: DisplayedItemTree::default(),
                             displayed_items: HashMap::new(),
@@ -515,6 +584,8 @@ impl SystemState {
                         inner: DataContainer::Transactions(new_ftr),
                         source: filename,
                         format,
+                        sources: SourceStore::default(),
+                        active_scope_source: SourceId::default(),
                         active_scope: None,
                         items_tree: DisplayedItemTree::default(),
                         displayed_items: HashMap::new(),
@@ -561,7 +632,109 @@ impl SystemState {
         }
     }
 
-    fn record_file_history(&mut self, source: &WaveSource) {
+    pub(crate) fn on_transaction_streams_loaded_with_intent(
+        &mut self,
+        filename: WaveSource,
+        format: WaveFormat,
+        new_ftr: TransactionContainer,
+        intent: crate::wave_source::LoadIntent,
+    ) {
+        match intent {
+            crate::wave_source::LoadIntent::ReplaceSession => {
+                self.on_transaction_streams_loaded(filename, format, new_ftr, LoadOptions::Clear);
+            }
+            crate::wave_source::LoadIntent::ReloadSource {
+                source,
+                keep_unavailable,
+            } => {
+                self.record_file_history(&filename);
+                let source_label = filename.to_string();
+                let candidate_container = DataContainer::Transactions(new_ftr);
+                let candidate_domain =
+                    crate::source::TimeDomain::from_container(&candidate_container);
+                let Some(waves) = self.user.waves.as_mut() else {
+                    self.update(Message::Error(eyre::eyre!(
+                        "Cannot reload {source_label}. No session is loaded"
+                    )));
+                    return;
+                };
+                let existing_domain = waves.sources.session_time_domain.clone();
+                match waves.replace_source(
+                    source,
+                    filename.clone(),
+                    format,
+                    candidate_container,
+                    keep_unavailable,
+                    &self.translators,
+                ) {
+                    Ok(Some(cmd)) => self.load_variables_for_source(source, cmd),
+                    Ok(None) => {
+                        info!("Reloaded transaction source {source_label} as {source}");
+                        self.user.config.theme.alt_frequency = 0;
+                        self.invalidate_draw_commands();
+                    }
+                    Err(err) => {
+                        let details = match (existing_domain, candidate_domain) {
+                            (Some(existing), Some(candidate)) => format!(
+                                "\nExisting session: {}\nCandidate source: {}",
+                                format_time_domain(&existing),
+                                format_time_domain(&candidate)
+                            ),
+                            _ => String::new(),
+                        };
+                        self.update(Message::Error(eyre::eyre!(
+                            "Cannot reload {source_label}. {err}{details}"
+                        )));
+                    }
+                }
+            }
+            crate::wave_source::LoadIntent::AddSource => {
+                self.record_file_history(&filename);
+                if self.user.waves.is_none() {
+                    self.on_transaction_streams_loaded(
+                        filename,
+                        format,
+                        new_ftr,
+                        LoadOptions::Clear,
+                    );
+                    return;
+                }
+
+                let source_label = filename.to_string();
+                let Some(waves) = self.user.waves.as_mut() else {
+                    return;
+                };
+                let candidate_container = DataContainer::Transactions(new_ftr);
+                let candidate_domain =
+                    crate::source::TimeDomain::from_container(&candidate_container);
+                waves.refresh_session_time_domain();
+                let existing_domain = waves.sources.session_time_domain.clone();
+
+                match waves.add_loaded_source(filename.clone(), format, candidate_container) {
+                    Ok(id) => {
+                        info!("Added transaction source {source_label} as {id}");
+                        self.user.config.theme.alt_frequency = 0;
+                        self.invalidate_draw_commands();
+                    }
+                    Err(err) => {
+                        let details = match (existing_domain, candidate_domain) {
+                            (Some(existing), Some(candidate)) => format!(
+                                "\nExisting session: {}\nCandidate source: {}",
+                                format_time_domain(&existing),
+                                format_time_domain(&candidate)
+                            ),
+                            _ => String::new(),
+                        };
+                        self.update(Message::Error(eyre::eyre!(
+                            "Cannot add {source_label}. {err}{details}"
+                        )));
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn record_file_history(&mut self, source: &WaveSource) {
         if let Some(path) = source.path() {
             self.file_history.add(path);
         }
@@ -643,63 +816,156 @@ impl SystemState {
     }
 
     pub(crate) fn load_state(&mut self, mut loaded_state: Box<UserState>, path: Option<PathBuf>) {
+        if self.user.waves.is_none() && loaded_state.waves.is_some() {
+            if let Err(err) = self.start_pending_state_restore(loaded_state, path) {
+                self.update(Message::Error(err));
+            }
+            return;
+        }
+
         // first swap everything, fix special cases afterwards
         mem::swap(&mut self.user, &mut loaded_state);
 
         // swap back waves for inner, source, format since we want to keep the file
         // fix up all wave references from paths if a wave is loaded
         mem::swap(&mut loaded_state.waves, &mut self.user.waves);
-        let load_commands = if let (Some(waves), Some(new_waves)) =
-            (&mut self.user.waves, &mut loaded_state.waves)
-        {
-            mem::swap(&mut waves.active_scope, &mut new_waves.active_scope);
-            let items = std::mem::take(&mut new_waves.displayed_items);
-            let items_tree = std::mem::take(&mut new_waves.items_tree);
-            let load_commands = waves.update_with_items(&items, items_tree, &self.translators);
-
-            mem::swap(&mut waves.viewports, &mut new_waves.viewports);
-            mem::swap(&mut waves.cursor, &mut new_waves.cursor);
-            mem::swap(&mut waves.markers, &mut new_waves.markers);
-            mem::swap(&mut waves.focused_item, &mut new_waves.focused_item);
-
-            mem::swap(&mut waves.annotations, &mut new_waves.annotations);
-            //load annotations
-            mem::swap(
-                &mut waves.annotation_groups,
-                &mut new_waves.annotation_groups,
-            );
-            mem::swap(
-                &mut waves.annotation_list_visible,
-                &mut new_waves.annotation_list_visible,
-            );
-            mem::swap(
-                &mut waves.annotation_counter,
-                &mut new_waves.annotation_counter,
-            );
-            mem::swap(
-                &mut waves.selected_annotation,
-                &mut new_waves.selected_annotation,
-            );
-            waves.default_variable_name_type = new_waves.default_variable_name_type;
-            waves.scroll_offset = new_waves.scroll_offset;
-            load_commands
-        } else {
-            None
-        };
-        if let Some(load_commands) = load_commands {
-            self.load_variables(load_commands);
+        if let Some(new_waves) = loaded_state.waves.take() {
+            let source_map = self
+                .user
+                .waves
+                .as_ref()
+                .map(|waves| Self::source_id_map_for_loaded_state(waves, &new_waves))
+                .unwrap_or_default();
+            self.apply_loaded_wave_state(new_waves, &source_map);
         }
 
-        // reset drag to avoid confusion
+        self.finish_state_load(path);
+    }
+
+    fn start_pending_state_restore(
+        &mut self,
+        mut loaded_state: Box<UserState>,
+        path: Option<PathBuf>,
+    ) -> Result<()> {
+        let Some(saved_waves) = loaded_state.waves.take() else {
+            return Ok(());
+        };
+        let sources = Self::state_source_entries(&saved_waves);
+        let load_messages = Self::state_restore_load_messages(&sources)?;
+
+        mem::swap(&mut self.user, &mut loaded_state);
+        self.user.waves = None;
+        self.user.pending_state_restore = Some(PendingStateRestore {
+            waves: saved_waves,
+            sources,
+        });
+        self.finish_state_load(path);
+        self.add_batch_messages(load_messages);
+        Ok(())
+    }
+
+    pub(crate) fn try_apply_pending_state_restore(&mut self) {
+        let Some(restore) = self.user.pending_state_restore.as_ref() else {
+            return;
+        };
+        if !self.waves_fully_loaded() {
+            return;
+        }
+        let Some(waves) = self.user.waves.as_ref() else {
+            return;
+        };
+        if waves.source_count() != restore.sources.len() {
+            return;
+        }
+
+        let source_map = restore
+            .sources
+            .iter()
+            .map(|(saved_source, _)| *saved_source)
+            .zip(
+                Self::state_source_entries(waves)
+                    .into_iter()
+                    .map(|(source, _)| source),
+            )
+            .collect::<HashMap<_, _>>();
+        let restore = self
+            .user
+            .pending_state_restore
+            .take()
+            .expect("checked above");
+        self.apply_loaded_wave_state(restore.waves, &source_map);
+    }
+
+    fn apply_loaded_wave_state(
+        &mut self,
+        mut new_waves: WaveData,
+        source_map: &HashMap<SourceId, SourceId>,
+    ) {
+        new_waves.remap_source_ids(source_map);
+        self.remap_table_sources(source_map);
+
+        let Some(mut waves) = self.user.waves.take() else {
+            return;
+        };
+
+        mem::swap(
+            &mut waves.active_scope_source,
+            &mut new_waves.active_scope_source,
+        );
+        mem::swap(&mut waves.active_scope, &mut new_waves.active_scope);
+        let items = std::mem::take(&mut new_waves.displayed_items);
+        let items_tree = std::mem::take(&mut new_waves.items_tree);
+        let load_commands = waves.restore_items_from_state(items, items_tree, &self.translators);
+
+        mem::swap(&mut waves.viewports, &mut new_waves.viewports);
+        mem::swap(&mut waves.cursor, &mut new_waves.cursor);
+        mem::swap(&mut waves.markers, &mut new_waves.markers);
+        mem::swap(&mut waves.focused_item, &mut new_waves.focused_item);
+        mem::swap(
+            &mut waves.focused_transaction,
+            &mut new_waves.focused_transaction,
+        );
+
+        mem::swap(&mut waves.annotations, &mut new_waves.annotations);
+        mem::swap(
+            &mut waves.annotation_groups,
+            &mut new_waves.annotation_groups,
+        );
+        mem::swap(
+            &mut waves.annotation_list_visible,
+            &mut new_waves.annotation_list_visible,
+        );
+        mem::swap(
+            &mut waves.annotation_counter,
+            &mut new_waves.annotation_counter,
+        );
+        mem::swap(
+            &mut waves.selected_annotation,
+            &mut new_waves.selected_annotation,
+        );
+        waves.default_variable_name_type = new_waves.default_variable_name_type;
+        waves.display_variable_indices = new_waves.display_variable_indices;
+        waves.scroll_offset = new_waves.scroll_offset;
+        waves.last_active_viewport_idx = new_waves.last_active_viewport_idx;
+
+        self.user.waves = Some(waves);
+        for (source, cmd) in load_commands {
+            if source == WaveData::primary_source_id() {
+                self.load_variables(cmd);
+            } else {
+                self.load_variables_for_source(source, cmd);
+            }
+        }
+    }
+
+    fn finish_state_load(&mut self, path: Option<PathBuf>) {
         self.user.drag_started = false;
         self.user.drag_source_idx = None;
         self.user.drag_target_idx = None;
 
-        // reset previous_waves & count to prevent unintuitive state here
         self.user.previous_waves = None;
         self.user.count = None;
 
-        // use just loaded path since path is not part of the export as it might have changed anyways
         self.user.state_file = path;
 
         self.invalidate_draw_commands();
@@ -708,22 +974,95 @@ impl SystemState {
         }
     }
 
+    fn state_source_entries(waves: &WaveData) -> Vec<(SourceId, WaveSource)> {
+        std::iter::once((WaveData::primary_source_id(), waves.source.clone()))
+            .chain(
+                waves
+                    .sources
+                    .sources
+                    .iter()
+                    .map(|source| (source.id, source.source.clone())),
+            )
+            .collect()
+    }
+
+    fn state_restore_load_messages(sources: &[(SourceId, WaveSource)]) -> Result<Vec<Message>> {
+        sources
+            .iter()
+            .enumerate()
+            .map(|(idx, (_, source))| {
+                let intent = if idx == 0 {
+                    LoadIntent::ReplaceSession
+                } else {
+                    LoadIntent::AddSource
+                };
+                source
+                    .path()
+                    .cloned()
+                    .map(|path| Message::LoadFileWithIntent(path, intent))
+                    .ok_or_else(|| {
+                        eyre::eyre!(
+                            "Cannot restore state source {source}. Only file-backed sources are supported"
+                        )
+                    })
+            })
+            .try_collect()
+    }
+
+    fn source_id_map_for_loaded_state(
+        current_waves: &WaveData,
+        saved_waves: &WaveData,
+    ) -> HashMap<SourceId, SourceId> {
+        let current_sources = Self::state_source_entries(current_waves);
+        let mut used_current = HashSet::new();
+
+        Self::state_source_entries(saved_waves)
+            .into_iter()
+            .map(|(saved_id, saved_source)| {
+                let current_id = current_sources
+                    .iter()
+                    .enumerate()
+                    .find_map(|(idx, (current_id, current_source))| {
+                        (!used_current.contains(&idx) && *current_source == saved_source)
+                            .then_some((idx, *current_id))
+                    })
+                    .map_or(saved_id, |(idx, current_id)| {
+                        used_current.insert(idx);
+                        current_id
+                    });
+                (saved_id, current_id)
+            })
+            .collect()
+    }
+
+    fn remap_table_sources(&mut self, source_map: &HashMap<SourceId, SourceId>) {
+        for tile in self.user.table_tiles.values_mut() {
+            tile.spec.remap_sources(source_map);
+        }
+    }
+
     /// Returns true if the waveform and all requested signals have been loaded.
     /// Used for testing to make sure the GUI is at its final state before taking a
     /// snapshot.
     pub fn waves_fully_loaded(&self) -> bool {
-        self.user
-            .waves
-            .as_ref()
-            .is_some_and(|w| w.inner.is_fully_loaded())
+        self.user.waves.as_ref().is_some_and(|w| {
+            w.inner.is_fully_loaded()
+                && w.sources.sources.iter().all(|source| {
+                    source.inner.is_fully_loaded()
+                        && matches!(source.load_state, crate::source::SourceLoadState::Loaded)
+                })
+        })
     }
 
     /// Returns true if no analog caches are currently being built
     pub fn analog_caches_ready(&self) -> bool {
-        self.user
-            .waves
-            .as_ref()
-            .is_none_or(|w| w.inflight_caches.is_empty())
+        self.user.waves.as_ref().is_none_or(|w| {
+            w.inflight_caches.is_empty()
+                && w.sources
+                    .sources
+                    .iter()
+                    .all(|source| source.inflight_caches.is_empty())
+        })
     }
 
     /// Returns the current canvas state

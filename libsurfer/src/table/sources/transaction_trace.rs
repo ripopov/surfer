@@ -3,6 +3,7 @@
 //! Displays transactions from a specific generator with columns for
 //! Start, End, Duration, Type, and dynamic attribute columns.
 
+use crate::source::SourceId;
 use crate::table::{
     TableAction, TableCacheError, TableCell, TableColumn, TableColumnKey, TableModel,
     TableModelContext, TableRowId, TableSchema, TableSortKey,
@@ -31,6 +32,7 @@ const MAX_SEARCH_TEXT_LEN: usize = 1024;
 /// Shows transactions with fixed columns (Start, End, Duration, Type) followed by
 /// dynamic attribute columns discovered from the transaction data.
 pub struct TransactionTraceModel {
+    source: SourceId,
     generator: TransactionStreamRef,
     time_formatter: TimeFormatter,
     data: OnceLock<TransactionData>,
@@ -86,13 +88,13 @@ impl TransactionTraceModel {
     /// Returns `TableCacheError::DataUnavailable` if transaction data is not loaded.
     /// Returns `TableCacheError::ModelNotFound` if the specified generator doesn't exist.
     pub fn new(
+        source: SourceId,
         generator: TransactionStreamRef,
         ctx: &TableModelContext<'_>,
     ) -> Result<Self, TableCacheError> {
         let waves = ctx.waves.ok_or(TableCacheError::DataUnavailable)?;
         let transactions = waves
-            .inner
-            .as_transactions()
+            .transactions_for_source(source)
             .ok_or(TableCacheError::DataUnavailable)?;
 
         // Validate generator exists
@@ -113,6 +115,7 @@ impl TransactionTraceModel {
         let time_formatter = TimeFormatter::new(&timescale, &ctx.wanted_timeunit, &ctx.time_format);
 
         Ok(Self {
+            source,
             generator,
             time_formatter,
             data: OnceLock::new(),
@@ -136,7 +139,7 @@ impl TransactionTraceModel {
             return TransactionData::empty();
         };
 
-        let Some(transactions) = waves.inner.as_transactions() else {
+        let Some(transactions) = waves.transactions_for_source(self.source) else {
             return TransactionData::empty();
         };
 
@@ -417,7 +420,7 @@ impl TableModel for TransactionTraceModel {
 
     fn on_activate(&self, row: TableRowId) -> TableAction {
         self.row_by_id(row)
-            .map(|row| TableAction::FocusTransaction(row.tx_ref.clone()))
+            .map(|row| TableAction::FocusTransaction(self.source, row.tx_ref.clone()))
             .unwrap_or(TableAction::None)
     }
 }
@@ -432,10 +435,11 @@ pub struct TransactionTraceModelWithData {
 impl TransactionTraceModelWithData {
     /// Create a new TransactionTraceModel and immediately build its data.
     pub fn new(
+        source: SourceId,
         generator: TransactionStreamRef,
         ctx: &TableModelContext<'_>,
     ) -> Result<Self, TableCacheError> {
-        let inner = TransactionTraceModel::new(generator, ctx)?;
+        let inner = TransactionTraceModel::new(source, generator, ctx)?;
         let data = inner.build_data(ctx);
         let _ = inner.data.set(data);
         Ok(Self { inner })

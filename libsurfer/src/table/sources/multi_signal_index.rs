@@ -141,7 +141,7 @@ impl MergedIndex {
     }
 }
 
-/// Deduplicate selected signal entries by `(VariableRef, field)` preserving first occurrence.
+/// Deduplicate selected signal entries by `(SourceId, VariableRef, field)` preserving first occurrence.
 pub fn dedup_multi_signal_entries<I>(entries: I) -> Vec<MultiSignalEntry>
 where
     I: IntoIterator<Item = MultiSignalEntry>,
@@ -150,7 +150,7 @@ where
     let mut deduped = Vec::new();
 
     for entry in entries {
-        let key = (entry.variable.clone(), entry.field.clone());
+        let key = (entry.source, entry.variable.clone(), entry.field.clone());
         if seen.insert(key) {
             deduped.push(entry);
         }
@@ -294,22 +294,27 @@ mod tests {
 
         let deduped = dedup_multi_signal_entries(vec![
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: clk.clone(),
                 field: vec![],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: counter.clone(),
                 field: vec!["value".to_string()],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: clk.clone(),
                 field: vec![],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: counter.clone(),
                 field: vec!["value".to_string()],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: counter.clone(),
                 field: vec!["next".to_string()],
             },

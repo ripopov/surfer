@@ -11,7 +11,6 @@ use regex::{Regex, RegexBuilder, escape};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 
-use crate::data_container::DataContainer::Transactions;
 use crate::transaction_container::{StreamScopeRef, TransactionStreamRef};
 use crate::variable_direction::VariableDirectionExt;
 use crate::wave_container::{VariableRefExt, WaveContainer};
@@ -344,23 +343,26 @@ impl SystemState {
                 // waves in the same order as the variable
                 // list
                 if let Some(active_scope) = waves.active_scope.as_ref() {
+                    let source = waves.active_scope_source;
                     match active_scope {
                         ScopeType::WaveScope(active_scope) => {
-                            let variables = waves
-                                .inner
-                                .as_waves()
-                                .unwrap()
-                                .variables_in_scope(active_scope);
-                            msgs.push(Message::AddVariables(
-                                self.filtered_variables(&variables, false),
-                            ));
+                            if let Some(wave_container) = waves.waves_for_source(source) {
+                                let variables = wave_container.variables_in_scope(active_scope);
+                                let variables = self.filtered_variables(&variables, false);
+                                if source == crate::wave_data::WaveData::primary_source_id() {
+                                    msgs.push(Message::AddVariables(variables));
+                                } else {
+                                    msgs.push(Message::AddVariablesFromSource(source, variables));
+                                }
+                            }
                         }
                         ScopeType::StreamScope(active_scope) => {
-                            if let Transactions(inner) = &waves.inner {
+                            if let Some(inner) = waves.transactions_for_source(source) {
                                 match active_scope {
                                     StreamScopeRef::Root => {
                                         for stream in inner.get_streams() {
-                                            msgs.push(Message::AddStreamOrGenerator(
+                                            msgs.push(Message::AddStreamOrGeneratorFromSource(
+                                                source,
                                                 TransactionStreamRef::new_stream(
                                                     stream.id,
                                                     stream.name.clone(),
@@ -374,7 +376,8 @@ impl SystemState {
                                         {
                                             let generator = inner.get_generator(*gen_id).unwrap();
 
-                                            msgs.push(Message::AddStreamOrGenerator(
+                                            msgs.push(Message::AddStreamOrGeneratorFromSource(
+                                                source,
                                                 TransactionStreamRef::new_gen(
                                                     generator.stream_id,
                                                     generator.id,

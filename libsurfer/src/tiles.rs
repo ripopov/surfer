@@ -169,6 +169,21 @@ impl SurferTileTree {
         }
         self.tree.remove_recursively(tile_id);
     }
+
+    pub fn remove_table_tile(&mut self, table_tile_id: TableTileId) {
+        let tile_id = self
+            .tree
+            .tiles
+            .iter()
+            .find_map(|(tile_id, tile)| match tile {
+                Tile::Pane(SurferPane::Table(id)) if *id == table_tile_id => Some(tile_id),
+                _ => None,
+            });
+
+        if let Some(tile_id) = tile_id {
+            self.remove_tile(*tile_id);
+        }
+    }
 }
 
 pub struct SurferTileBehavior<'a> {

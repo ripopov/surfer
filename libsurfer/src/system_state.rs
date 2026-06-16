@@ -20,6 +20,7 @@ use crate::{
     memory_viewer::{ChangeModes, MemoryViewerCache, MemoryViewerFormat},
     message::Message,
     mousegestures::AnnotationKind,
+    source::LoadRequestId,
     state::UserState,
     table::{TableCacheEntry, TableCacheKey, TableRuntimeState, TableTileId},
     time::TimeInputState,
@@ -146,6 +147,7 @@ pub struct SystemState {
 
     pub(crate) table_runtime: HashMap<TableTileId, TableRuntimeState>,
     pub(crate) table_inflight: HashMap<TableCacheKey, Arc<TableCacheEntry>>,
+    pub(crate) next_load_request_id: u64,
 
     // Only used for testing
     pub(crate) expand_parameter_section: bool,
@@ -218,6 +220,7 @@ impl SystemState {
             continuous_redraw: false,
             table_runtime: HashMap::new(),
             table_inflight: HashMap::new(),
+            next_load_request_id: 1,
             #[cfg(feature = "performance_plot")]
             rendering_cpu_times: VecDeque::new(),
             #[cfg(feature = "performance_plot")]
@@ -239,6 +242,12 @@ impl SystemState {
     /// Returns true if no table caches are currently being built
     pub fn table_caches_ready(&self) -> bool {
         self.table_inflight.is_empty()
+    }
+
+    pub(crate) fn next_load_request_id(&mut self) -> LoadRequestId {
+        let id = LoadRequestId(self.next_load_request_id);
+        self.next_load_request_id = self.next_load_request_id.saturating_add(1);
+        id
     }
 }
 

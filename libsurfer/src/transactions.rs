@@ -9,6 +9,7 @@ use tracing::{info, warn};
 use crate::SystemState;
 use crate::displayed_item::DisplayedItem;
 use crate::message::Message;
+use crate::source::{SourceId, SourceTransactionRef};
 use crate::transaction_container::{StreamScopeRef, TransactionContainer};
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
 use crate::wave_data::ScopeType;
@@ -76,12 +77,12 @@ impl SystemState {
         let (Some(transaction_ref), focused_transaction) = &waves.focused_transaction else {
             return;
         };
-        let Some(transactions) = waves.inner.as_transactions() else {
+        let Some(transactions) = waves.transactions_for_source(transaction_ref.source) else {
             return;
         };
         let Some(focused_transaction) = focused_transaction
             .as_ref()
-            .or_else(|| transactions.get_transaction(transaction_ref))
+            .or_else(|| transactions.get_transaction(&transaction_ref.inner))
         else {
             return;
         };
@@ -97,6 +98,7 @@ impl SystemState {
                 draw_focused_transaction_details(
                     ui,
                     transactions,
+                    transaction_ref.source,
                     focused_transaction,
                     events_enabled,
                     viewport_idx,
@@ -197,7 +199,6 @@ impl WaveData {
     }
 
     pub fn move_to_transaction(&mut self, next: bool) -> Option<()> {
-        let inner = self.inner.as_transactions()?;
         let mut transactions = self
             .items_tree
             .iter_visible()
@@ -205,24 +206,31 @@ impl WaveData {
                 let item = &self.displayed_items[&node.item_ref];
                 match item {
                     DisplayedItem::Stream(s) => {
+                        let Some(inner) = self.transactions_for_source(s.source) else {
+                            return vec![];
+                        };
                         let stream_ref = &s.transaction_stream_ref;
                         let stream_id = stream_ref.stream_id;
-                        if let Some(gen_id) = stream_ref.gen_id {
+                        let transaction_refs = if let Some(gen_id) = stream_ref.gen_id {
                             inner.get_transactions_from_generator(gen_id)
                         } else {
                             inner.get_transactions_from_stream(stream_id)
-                        }
+                        };
+                        transaction_refs
+                            .into_iter()
+                            .map(|id| SourceTransactionRef::new(s.source, TransactionRef { id }))
+                            .collect()
                     }
                     _ => vec![],
                 }
             })
             .collect_vec();
-        transactions.sort_unstable_by_key(|a| a.0);
+        transactions.sort_unstable_by_key(|tx| (tx.inner.id.0, tx.source.0));
         let tx = if let Some(focused_tx) = &self.focused_transaction.0 {
             let next_id = transactions
                 .iter()
                 .enumerate()
-                .find(|(_, tx)| **tx == focused_tx.id)
+                .find(|(_, tx)| *tx == focused_tx)
                 .map_or(
                     if next { transactions.len() - 1 } else { 0 },
                     |(vec_idx, _)| {
@@ -237,13 +245,9 @@ impl WaveData {
                         }
                     },
                 );
-            Some(TransactionRef {
-                id: *transactions.get(next_id)?,
-            })
+            Some(transactions.get(next_id)?.clone())
         } else {
-            transactions
-                .first()
-                .map(|first| TransactionRef { id: *first })
+            transactions.first().cloned()
         };
         self.focused_transaction = (tx, self.focused_transaction.1.clone());
         Some(())
@@ -254,8 +258,9 @@ impl WaveData {
     /// moves to the neighboring event of the same parent, wrapping into the
     /// neighboring parents' events at the ends.
     pub fn move_to_event(&mut self, next: bool) -> Option<()> {
-        let inner = self.inner.as_transactions()?;
-        let focused_id = self.focused_transaction.0.as_ref()?.id;
+        let focused_ref = self.focused_transaction.0.clone()?;
+        let inner = self.transactions_for_source(focused_ref.source)?;
+        let focused_id = focused_ref.inner.id;
         let index = inner.event_index();
 
         let target = if let Some(info) = index.event_info(focused_id) {
@@ -281,7 +286,13 @@ impl WaveData {
             own.or_else(|| neighbor_parent_event(inner, focused_id, next))
         }?;
 
-        self.focused_transaction = (Some(TransactionRef { id: target }), None);
+        self.focused_transaction = (
+            Some(SourceTransactionRef::new(
+                focused_ref.source,
+                TransactionRef { id: target },
+            )),
+            None,
+        );
         Some(())
     }
 }
@@ -317,6 +328,7 @@ fn neighbor_parent_event(
 fn draw_focused_transaction_details(
     ui: &mut Ui,
     transactions: &TransactionContainer,
+    source: SourceId,
     focused_transaction: &Transaction,
     events_enabled: bool,
     viewport_idx: usize,
@@ -327,9 +339,23 @@ fn draw_focused_transaction_details(
             .event_index()
             .is_events_generator(focused_transaction.get_gen_id());
     if is_event {
-        draw_focused_event_details(ui, transactions, focused_transaction, viewport_idx, msgs);
+        draw_focused_event_details(
+            ui,
+            transactions,
+            source,
+            focused_transaction,
+            viewport_idx,
+            msgs,
+        );
     } else {
-        draw_focused_parent_details(ui, transactions, focused_transaction, events_enabled, msgs);
+        draw_focused_parent_details(
+            ui,
+            transactions,
+            source,
+            focused_transaction,
+            events_enabled,
+            msgs,
+        );
     }
 }
 
@@ -338,6 +364,7 @@ fn draw_focused_transaction_details(
 fn draw_focused_event_details(
     ui: &mut Ui,
     transactions: &TransactionContainer,
+    source: SourceId,
     focused_transaction: &Transaction,
     viewport_idx: usize,
     msgs: &mut Vec<Message>,
@@ -413,7 +440,10 @@ fn draw_focused_event_details(
                     ui.label(format!("{parent_gen_name} tx#{}", info.parent_tx));
                     if ui.button(GO_TO_PARENT_LABEL).clicked() {
                         let parent_ref = TransactionRef { id: info.parent_tx };
-                        msgs.push(Message::FocusTransaction(Some(parent_ref), None));
+                        msgs.push(Message::FocusTransactionFromSource(
+                            Some(SourceTransactionRef::new(source, parent_ref)),
+                            None,
+                        ));
                         // Bring the parent into view
                         let mid = (parent.get_start_time() + parent.get_end_time()) / 2u8;
                         msgs.push(Message::GoToTime(
@@ -442,6 +472,7 @@ fn draw_focused_event_details(
 fn draw_focused_parent_details(
     ui: &mut Ui,
     transactions: &TransactionContainer,
+    source: SourceId,
     focused_transaction: &Transaction,
     events_enabled: bool,
     msgs: &mut Vec<Message>,
@@ -540,6 +571,7 @@ fn draw_focused_parent_details(
                         let gen_id = focused_transaction.get_gen_id();
                         if let Some(generator) = transactions.get_generator(gen_id) {
                             msgs.push(Message::OpenEventTable {
+                                source,
                                 generator: TransactionStreamRef::new_gen(
                                     generator.stream_id,
                                     gen_id,
@@ -580,13 +612,19 @@ fn draw_focused_parent_details(
                         msgs.push(Message::CursorSet(num::BigInt::from(
                             event.get_start_time(),
                         )));
-                        msgs.push(Message::FocusTransaction(
-                            Some(TransactionRef { id: *event_id }),
+                        msgs.push(Message::FocusTransactionFromSource(
+                            Some(SourceTransactionRef::new(
+                                source,
+                                TransactionRef { id: *event_id },
+                            )),
                             None,
                         ));
                     } else if response.clicked() {
-                        msgs.push(Message::FocusTransaction(
-                            Some(TransactionRef { id: *event_id }),
+                        msgs.push(Message::FocusTransactionFromSource(
+                            Some(SourceTransactionRef::new(
+                                source,
+                                TransactionRef { id: *event_id },
+                            )),
                             None,
                         ));
                     }
@@ -645,24 +683,51 @@ pub fn draw_transaction_variable_list(
     active_stream: &StreamScopeRef,
     options: &TransactionListOptions,
 ) {
-    let Some(inner) = streams.inner.as_transactions() else {
+    draw_transaction_variable_list_for_source(
+        msgs,
+        streams,
+        ui,
+        WaveData::primary_source_id(),
+        active_stream,
+        options,
+    );
+}
+
+pub fn draw_transaction_variable_list_for_source(
+    msgs: &mut Vec<Message>,
+    streams: &WaveData,
+    ui: &mut Ui,
+    source: SourceId,
+    active_stream: &StreamScopeRef,
+    options: &TransactionListOptions,
+) {
+    let Some(inner) = streams.transactions_for_source(source) else {
         return;
     };
     match active_stream {
         StreamScopeRef::Root => {
-            draw_transaction_root_variables(msgs, ui, inner);
+            draw_transaction_root_variables(msgs, ui, inner, source);
         }
         StreamScopeRef::Stream(stream_ref) => {
-            draw_transaction_stream_variables(msgs, ui, inner, stream_ref, options);
+            draw_transaction_stream_variables(msgs, ui, inner, source, stream_ref, options);
         }
         StreamScopeRef::Empty(_) => {}
     }
 }
 
 pub fn draw_transaction_root(msgs: &mut Vec<Message>, streams: &WaveData, ui: &mut Ui) {
+    draw_transaction_root_for_source(msgs, streams, WaveData::primary_source_id(), ui);
+}
+
+pub fn draw_transaction_root_for_source(
+    msgs: &mut Vec<Message>,
+    streams: &WaveData,
+    source: SourceId,
+    ui: &mut Ui,
+) {
     egui::collapsing_header::CollapsingState::load_with_default_open(
         ui.ctx(),
-        egui::Id::from("Streams"),
+        egui::Id::new(("Streams", source)),
         false,
     )
     .show_header(ui, |ui| {
@@ -670,35 +735,39 @@ pub fn draw_transaction_root(msgs: &mut Vec<Message>, streams: &WaveData, ui: &m
             Layout::top_down(Align::LEFT).with_cross_justify(true),
             |ui| {
                 let response = ui.selectable_label(
-                    streams.active_scope == Some(ScopeType::StreamScope(StreamScopeRef::Root)),
+                    streams.active_scope_source == source
+                        && streams.active_scope
+                            == Some(ScopeType::StreamScope(StreamScopeRef::Root)),
                     TRANSACTION_ROOT_NAME,
                 );
                 if response.clicked() {
-                    msgs.push(Message::SetActiveScope(Some(ScopeType::StreamScope(
-                        StreamScopeRef::Root,
-                    ))));
+                    msgs.push(Message::SetActiveScopeFromSource(
+                        source,
+                        Some(ScopeType::StreamScope(StreamScopeRef::Root)),
+                    ));
                 }
             },
         );
     })
     .body(|ui| {
-        if let Some(tx_container) = streams.inner.as_transactions() {
+        if let Some(tx_container) = streams.transactions_for_source(source) {
             for (id, stream) in &tx_container.inner.tx_streams {
-                let selected = streams.active_scope.as_ref().is_some_and(|s| {
-                    if let ScopeType::StreamScope(StreamScopeRef::Stream(scope_stream)) = s {
-                        scope_stream.stream_id == *id
-                    } else {
-                        false
-                    }
-                });
+                let selected = streams.active_scope_source == source
+                    && streams.active_scope.as_ref().is_some_and(|s| {
+                        if let ScopeType::StreamScope(StreamScopeRef::Stream(scope_stream)) = s {
+                            scope_stream.stream_id == *id
+                        } else {
+                            false
+                        }
+                    });
                 let response = ui.selectable_label(selected, &stream.name);
                 if response.clicked() {
-                    msgs.push(Message::SetActiveScope(Some(ScopeType::StreamScope(
-                        StreamScopeRef::Stream(TransactionStreamRef::new_stream(
-                            *id,
-                            stream.name.clone(),
-                        )),
-                    ))));
+                    msgs.push(Message::SetActiveScopeFromSource(
+                        source,
+                        Some(ScopeType::StreamScope(StreamScopeRef::Stream(
+                            TransactionStreamRef::new_stream(*id, stream.name.clone()),
+                        ))),
+                    ));
                 }
             }
         }
@@ -709,6 +778,7 @@ fn draw_transaction_stream_variables(
     msgs: &mut Vec<Message>,
     ui: &mut Ui,
     inner: &TransactionContainer,
+    source: SourceId,
     stream_ref: &TransactionStreamRef,
     options: &TransactionListOptions,
 ) {
@@ -777,7 +847,8 @@ fn draw_transaction_stream_variables(
                     };
                     let response = ui.selectable_label(false, label);
                     if response.clicked() {
-                        msgs.push(Message::AddStreamOrGenerator(
+                        msgs.push(Message::AddStreamOrGeneratorFromSource(
+                            source,
                             TransactionStreamRef::new_gen(
                                 stream_ref.stream_id,
                                 gen_id,
@@ -794,6 +865,7 @@ fn draw_transaction_stream_variables(
                         );
                         if ui.button("Show transactions in table").clicked() {
                             msgs.push(Message::OpenTransactionTable {
+                                source,
                                 generator: gen_ref.clone(),
                             });
                             ui.close();
@@ -801,13 +873,15 @@ fn draw_transaction_stream_variables(
                         if let Some(events_gen) = events_generator {
                             if ui.button("Show events in table").clicked() {
                                 msgs.push(Message::OpenEventTable {
+                                    source,
                                     generator: gen_ref.clone(),
                                 });
                                 ui.close();
                             }
                             if ui.button("Add events as separate row").clicked() {
                                 if let Some(events_generator) = inner.get_generator(events_gen) {
-                                    msgs.push(Message::AddStreamOrGenerator(
+                                    msgs.push(Message::AddStreamOrGeneratorFromSource(
+                                        source,
                                         TransactionStreamRef::new_gen(
                                             stream_ref.stream_id,
                                             events_gen,
@@ -819,7 +893,7 @@ fn draw_transaction_stream_variables(
                             }
                         }
                         if ui.button("Add to waveform view").clicked() {
-                            msgs.push(Message::AddStreamOrGenerator(gen_ref));
+                            msgs.push(Message::AddStreamOrGeneratorFromSource(source, gen_ref));
                             ui.close();
                         }
                     });
@@ -873,6 +947,7 @@ fn draw_transaction_root_variables(
     msgs: &mut Vec<Message>,
     ui: &mut Ui,
     inner: &TransactionContainer,
+    source: SourceId,
 ) {
     let streams = inner.get_streams();
     let sorted_streams = streams
@@ -884,13 +959,15 @@ fn draw_transaction_root_variables(
             |ui| {
                 let response = ui.selectable_label(false, &stream.name);
                 if response.clicked() {
-                    msgs.push(Message::AddStreamOrGenerator(
+                    msgs.push(Message::AddStreamOrGeneratorFromSource(
+                        source,
                         TransactionStreamRef::new_stream(stream.id, stream.name.clone()),
                     ));
                 }
                 response.context_menu(|ui| {
                     if ui.button("Add to waveform view").clicked() {
-                        msgs.push(Message::AddStreamOrGenerator(
+                        msgs.push(Message::AddStreamOrGeneratorFromSource(
+                            source,
                             TransactionStreamRef::new_stream(stream.id, stream.name.clone()),
                         ));
                         ui.close();
@@ -901,7 +978,10 @@ fn draw_transaction_root_variables(
                         inner.generators_in_stream(&StreamScopeRef::Stream(stream_ref));
                     if !generators.is_empty() && ui.button("Show transactions in table").clicked() {
                         for gen_ref in generators {
-                            msgs.push(Message::OpenTransactionTable { generator: gen_ref });
+                            msgs.push(Message::OpenTransactionTable {
+                                source,
+                                generator: gen_ref,
+                            });
                         }
                         ui.close();
                     }

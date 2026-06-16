@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use egui::{Id, Pos2};
 use eyre::{Result, WrapErr as _};
 use num::bigint::ToBigInt as _;
 use num::{BigInt, BigUint, One, ToPrimitive, Zero};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use surfer_translation_types::{TranslationPreference, Translator, VariableValue};
 use tracing::{error, info, warn};
 
@@ -18,6 +18,7 @@ use crate::displayed_item::{
 use crate::displayed_item_tree::{DisplayedItemTree, ItemIndex, TargetPosition, VisibleItemIndex};
 use crate::graphics::{Graphic, GraphicId};
 use crate::item_drawing_info::ItemDrawingInfo;
+use crate::source::{LoadRequestId, SourceId, SourceStore, SourceTransactionRef, TimeDomain};
 use crate::transaction_container::{
     StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
 };
@@ -62,6 +63,10 @@ pub struct WaveData {
     pub inner: DataContainer,
     pub source: WaveSource,
     pub format: WaveFormat,
+    #[serde(default)]
+    pub sources: SourceStore,
+    #[serde(default)]
+    pub active_scope_source: SourceId,
     pub active_scope: Option<ScopeType>,
     /// Root items (variables, dividers, ...) to display
     pub items_tree: DisplayedItemTree,
@@ -87,7 +92,8 @@ pub struct WaveData {
     pub annotation_menu_time: Option<BigInt>,
 
     pub focused_item: Option<VisibleItemIndex>,
-    pub focused_transaction: (Option<TransactionRef>, Option<Transaction>),
+    #[serde(default, deserialize_with = "deserialize_focused_transaction")]
+    pub focused_transaction: (Option<SourceTransactionRef>, Option<Transaction>),
     pub default_variable_name_type: VariableNameType,
     pub scroll_offset: f32,
     pub display_variable_indices: bool,
@@ -188,7 +194,550 @@ where
     (translators.get_translator(&translator_name)) as _
 }
 
+fn deserialize_focused_transaction<'de, D>(
+    deserializer: D,
+) -> std::result::Result<(Option<SourceTransactionRef>, Option<Transaction>), D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let (tx_ref, tx) = <(Option<ron::Value>, Option<Transaction>)>::deserialize(deserializer)?;
+    let tx_ref = tx_ref
+        .map(|tx_ref| {
+            normalize_ron_newtypes(tx_ref)
+                .into_rust::<SourceTransactionRef>()
+                .map_err(serde::de::Error::custom)
+        })
+        .transpose()?;
+    Ok((tx_ref, tx))
+}
+
+fn normalize_ron_newtypes(value: ron::Value) -> ron::Value {
+    match value {
+        ron::Value::Seq(mut values) if values.len() == 1 => {
+            normalize_ron_newtypes(values.remove(0))
+        }
+        ron::Value::Seq(values) => {
+            ron::Value::Seq(values.into_iter().map(normalize_ron_newtypes).collect())
+        }
+        ron::Value::Map(map) => ron::Value::Map(
+            map.into_iter()
+                .map(|(key, value)| (key, normalize_ron_newtypes(value)))
+                .collect(),
+        ),
+        ron::Value::Option(Some(value)) => {
+            ron::Value::Option(Some(Box::new(normalize_ron_newtypes(*value))))
+        }
+        ron::Value::Option(None) => ron::Value::Option(None),
+        value => value,
+    }
+}
+
 impl WaveData {
+    #[must_use]
+    pub const fn primary_source_id() -> SourceId {
+        SourceId(0)
+    }
+
+    #[must_use]
+    pub fn source_count(&self) -> usize {
+        1 + self.sources.sources.len()
+    }
+
+    #[must_use]
+    pub fn source_ids(&self) -> Vec<SourceId> {
+        std::iter::once(Self::primary_source_id())
+            .chain(self.sources.sources.iter().map(|source| source.id))
+            .collect()
+    }
+
+    #[must_use]
+    pub fn source_label_for(&self, source: SourceId) -> Option<String> {
+        if source == Self::primary_source_id() {
+            Some(crate::source::source_label(&self.source))
+        } else {
+            self.sources
+                .source(source)
+                .map(|source| source.label.clone())
+        }
+    }
+
+    #[must_use]
+    pub fn data_container_for_source(&self, source: SourceId) -> Option<&DataContainer> {
+        if source == Self::primary_source_id() {
+            Some(&self.inner)
+        } else {
+            self.sources.source(source).map(|source| &source.inner)
+        }
+    }
+
+    #[must_use]
+    pub fn time_domain_for_source(&self, source: SourceId) -> Option<TimeDomain> {
+        if source == Self::primary_source_id() {
+            TimeDomain::from_container(&self.inner)
+        } else {
+            self.sources.source(source).and_then(|source| {
+                source
+                    .time_domain
+                    .clone()
+                    .or_else(|| TimeDomain::from_container(&source.inner))
+            })
+        }
+    }
+
+    pub fn data_container_for_source_mut(
+        &mut self,
+        source: SourceId,
+    ) -> Option<&mut DataContainer> {
+        if source == Self::primary_source_id() {
+            Some(&mut self.inner)
+        } else {
+            self.sources
+                .source_mut(source)
+                .map(|source| &mut source.inner)
+        }
+    }
+
+    #[must_use]
+    pub fn waves_for_source(&self, source: SourceId) -> Option<&WaveContainer> {
+        self.data_container_for_source(source)?.as_waves()
+    }
+
+    pub fn waves_for_source_mut(&mut self, source: SourceId) -> Option<&mut WaveContainer> {
+        self.data_container_for_source_mut(source)?.as_waves_mut()
+    }
+
+    #[must_use]
+    pub fn transactions_for_source(&self, source: SourceId) -> Option<&TransactionContainer> {
+        self.data_container_for_source(source)?.as_transactions()
+    }
+
+    pub fn transactions_for_source_mut(
+        &mut self,
+        source: SourceId,
+    ) -> Option<&mut TransactionContainer> {
+        self.data_container_for_source_mut(source)?
+            .as_transactions_mut()
+    }
+
+    pub fn analog_cache_generation_for_source(&self, source: SourceId) -> Option<u64> {
+        self.cache_generation_for_source(source)
+    }
+
+    pub fn cache_generation_for_source(&self, source: SourceId) -> Option<u64> {
+        if source == Self::primary_source_id() {
+            Some(self.cache_generation)
+        } else {
+            self.sources
+                .source(source)
+                .map(|source| source.cache_generation)
+        }
+    }
+
+    pub fn analog_inflight_caches_for_source(
+        &self,
+        source: SourceId,
+    ) -> Option<
+        &HashMap<AnalogCacheKey, std::sync::Arc<crate::analog_signal_cache::AnalogCacheEntry>>,
+    > {
+        if source == Self::primary_source_id() {
+            Some(&self.inflight_caches)
+        } else {
+            self.sources
+                .source(source)
+                .map(|source| &source.inflight_caches)
+        }
+    }
+
+    pub fn analog_inflight_caches_for_source_mut(
+        &mut self,
+        source: SourceId,
+    ) -> Option<
+        &mut HashMap<AnalogCacheKey, std::sync::Arc<crate::analog_signal_cache::AnalogCacheEntry>>,
+    > {
+        if source == Self::primary_source_id() {
+            Some(&mut self.inflight_caches)
+        } else {
+            self.sources
+                .source_mut(source)
+                .map(|source| &mut source.inflight_caches)
+        }
+    }
+
+    pub fn refresh_session_time_domain(&mut self) {
+        if let Err(err) = self
+            .sources
+            .recompute_session_time_domain(TimeDomain::from_container(&self.inner))
+        {
+            warn!("Failed to refresh session time domain: {err:?}");
+        }
+    }
+
+    pub fn add_loaded_source(
+        &mut self,
+        source: WaveSource,
+        format: WaveFormat,
+        inner: DataContainer,
+    ) -> Result<SourceId> {
+        self.refresh_session_time_domain();
+        self.sources.add_source(source, format, inner)
+    }
+
+    pub fn add_pending_source(
+        &mut self,
+        source: WaveSource,
+        format: WaveFormat,
+        inner: DataContainer,
+        request: LoadRequestId,
+    ) -> SourceId {
+        self.sources
+            .add_pending_source(source, format, inner, request)
+    }
+
+    pub fn mark_source_load_request(&mut self, source: SourceId, request: LoadRequestId) {
+        if let Some(loaded_source) = self.sources.source_mut(source) {
+            loaded_source.active_load_request = Some(request);
+            loaded_source.load_state = crate::source::SourceLoadState::Pending;
+        }
+    }
+
+    #[must_use]
+    pub fn source_load_request_matches(&self, source: SourceId, request: LoadRequestId) -> bool {
+        self.sources
+            .source(source)
+            .is_some_and(|loaded_source| loaded_source.active_load_request == Some(request))
+    }
+
+    pub fn validate_loaded_source(&mut self, source: SourceId) -> Result<()> {
+        let time_domain = self
+            .data_container_for_source(source)
+            .and_then(TimeDomain::from_container)
+            .ok_or_else(|| eyre::eyre!("source {source} has no loaded time domain"))?;
+        self.sources.validate_time_domain(&time_domain)?;
+        if let Some(loaded_source) = self.sources.source_mut(source) {
+            loaded_source.time_domain = Some(time_domain);
+            loaded_source.load_state = crate::source::SourceLoadState::Loaded;
+            loaded_source.active_load_request = None;
+        }
+        self.refresh_session_time_domain();
+        Ok(())
+    }
+
+    fn validate_reloaded_source_domain(&self, inner: &DataContainer) -> Result<TimeDomain> {
+        let time_domain = TimeDomain::from_container(inner)
+            .ok_or_else(|| eyre::eyre!("reloaded source has no loaded time domain"))?;
+        if self.source_count() > 1 {
+            self.sources.validate_time_domain(&time_domain)?;
+        }
+        Ok(time_domain)
+    }
+
+    pub fn replace_source(
+        &mut self,
+        source_id: SourceId,
+        source: WaveSource,
+        format: WaveFormat,
+        inner: DataContainer,
+        keep_unavailable: bool,
+        translators: &TranslatorList,
+    ) -> Result<Option<LoadSignalsCmd>> {
+        let time_domain = self.validate_reloaded_source_domain(&inner)?;
+        let old_num_timestamps = self.num_timestamps();
+
+        if source_id == Self::primary_source_id() {
+            self.inner = inner;
+            self.source = source;
+            self.format = format;
+            self.cache_generation = self.cache_generation.saturating_add(1);
+            self.inflight_caches.clear();
+        } else {
+            let Some(loaded_source) = self.sources.source_mut(source_id) else {
+                return Err(eyre::eyre!("cannot reload unknown source {source_id}"));
+            };
+            loaded_source.source = source.clone();
+            loaded_source.label = crate::source::source_label(&source);
+            loaded_source.format = format;
+            loaded_source.inner = inner;
+            loaded_source.time_domain = Some(time_domain.clone());
+            loaded_source.cache_generation = loaded_source.cache_generation.saturating_add(1);
+            loaded_source.inflight_caches.clear();
+            loaded_source.load_state = crate::source::SourceLoadState::Loaded;
+            loaded_source.active_load_request = None;
+        }
+
+        self.refresh_session_time_domain();
+
+        self.old_num_timestamps = old_num_timestamps;
+        self.reconcile_displayed_items_for_reloaded_source(
+            source_id,
+            keep_unavailable,
+            translators,
+        );
+        self.update_metadata(translators);
+        self.load_streams_for_displayed_items_for_source(source_id);
+        let load_cmd = self.load_displayed_variables_for_source(source_id)?;
+        self.update_viewports();
+        Ok(load_cmd)
+    }
+
+    fn reconcile_displayed_items_for_reloaded_source(
+        &mut self,
+        source: SourceId,
+        keep_unavailable: bool,
+        translators: &TranslatorList,
+    ) {
+        let replacements = match self.data_container_for_source(source) {
+            Some(DataContainer::Waves(waves)) => self
+                .displayed_items
+                .iter()
+                .filter_map(|(id, item)| match item {
+                    DisplayedItem::Variable(variable) if variable.source == source => variable
+                        .update(waves, keep_unavailable)
+                        .map_or(Some((*id, None)), |item| Some((*id, Some(item)))),
+                    DisplayedItem::Placeholder(placeholder) if placeholder.source == source => {
+                        match waves.update_variable_ref(&placeholder.variable_ref) {
+                            None if keep_unavailable => {
+                                Some((*id, Some(DisplayedItem::Placeholder(placeholder.clone()))))
+                            }
+                            None => Some((*id, None)),
+                            Some(new_variable_ref) => {
+                                let item =
+                                    waves
+                                        .variable_meta(&new_variable_ref)
+                                        .ok()
+                                        .and_then(|meta| {
+                                            let translator = variable_translator(
+                                                placeholder.format.as_ref(),
+                                                &[],
+                                                translators,
+                                                || Ok(meta.clone()),
+                                            );
+                                            translator.variable_info(&meta).ok().map(|info| {
+                                                DisplayedItem::Variable(
+                                                    placeholder
+                                                        .clone()
+                                                        .into_variable(info, new_variable_ref),
+                                                )
+                                            })
+                                        });
+                                Some((*id, item))
+                            }
+                        }
+                    }
+                    DisplayedItem::Stream(stream) if stream.source == source => Some((*id, None)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            Some(DataContainer::Transactions(_)) => self
+                .displayed_items
+                .iter()
+                .filter_map(|(id, item)| match item {
+                    DisplayedItem::Stream(stream) if stream.source == source => {
+                        Some((*id, Some(item.clone())))
+                    }
+                    DisplayedItem::Variable(variable) if variable.source == source => {
+                        Some((*id, None))
+                    }
+                    DisplayedItem::Placeholder(placeholder) if placeholder.source == source => {
+                        Some((*id, None))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            Some(DataContainer::Empty) | None => self
+                .displayed_items
+                .iter()
+                .filter_map(|(id, item)| match item {
+                    DisplayedItem::Variable(variable) if variable.source == source => {
+                        Some((*id, None))
+                    }
+                    DisplayedItem::Placeholder(placeholder) if placeholder.source == source => {
+                        Some((*id, None))
+                    }
+                    DisplayedItem::Stream(stream) if stream.source == source => Some((*id, None)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+        };
+
+        for (id, item) in replacements {
+            match item {
+                Some(item) => {
+                    self.displayed_items.insert(id, item);
+                }
+                None => {
+                    self.remove_displayed_item(id);
+                }
+            }
+        }
+    }
+
+    fn load_displayed_variables_for_source(
+        &mut self,
+        source: SourceId,
+    ) -> Result<Option<LoadSignalsCmd>> {
+        let variables = self
+            .displayed_items
+            .values()
+            .filter_map(|item| match item {
+                DisplayedItem::Variable(variable) if variable.source == source => {
+                    Some(variable.variable_ref.clone())
+                }
+                _ => None,
+            })
+            .collect_vec();
+
+        if variables.is_empty() {
+            return Ok(None);
+        }
+
+        let Some(waves) = self.waves_for_source_mut(source) else {
+            return Ok(None);
+        };
+        waves
+            .load_variables(variables.iter())
+            .wrap_err_with(|| format!("failed to reload displayed variables for {source}"))
+    }
+
+    fn load_streams_for_displayed_items_for_source(&mut self, source: SourceId) {
+        let stream_ids = self
+            .displayed_items
+            .values()
+            .filter_map(|item| match item {
+                DisplayedItem::Stream(stream) if stream.source == source => {
+                    Some(stream.transaction_stream_ref.stream_id)
+                }
+                _ => None,
+            })
+            .collect_vec();
+
+        let Some(transactions) = self.transactions_for_source_mut(source) else {
+            return;
+        };
+        for stream_id in stream_ids {
+            let needs_load = transactions
+                .get_stream(stream_id)
+                .is_some_and(|stream| !stream.transactions_loaded);
+            if needs_load {
+                info!("(Stream) Loading transactions into memory!");
+                match transactions.load_stream(stream_id) {
+                    Ok(()) => info!("(Stream {stream_id}) Finished loading transactions!"),
+                    Err(e) => {
+                        warn!("Failed to load transactions for stream {stream_id}: {e:?}")
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn remap_source_ids(&mut self, source_map: &HashMap<SourceId, SourceId>) {
+        let remap = |source: &mut SourceId| {
+            if let Some(mapped) = source_map.get(source) {
+                *source = *mapped;
+            }
+        };
+
+        remap(&mut self.active_scope_source);
+        if let Some(focused_transaction) = &mut self.focused_transaction.0 {
+            remap(&mut focused_transaction.source);
+        }
+
+        for item in self.displayed_items.values_mut() {
+            match item {
+                DisplayedItem::Variable(variable) => remap(&mut variable.source),
+                DisplayedItem::Placeholder(placeholder) => remap(&mut placeholder.source),
+                DisplayedItem::Stream(stream) => remap(&mut stream.source),
+                DisplayedItem::Divider(_)
+                | DisplayedItem::Marker(_)
+                | DisplayedItem::TimeLine(_)
+                | DisplayedItem::Group(_) => {}
+            }
+        }
+    }
+
+    pub(crate) fn restore_items_from_state(
+        &mut self,
+        new_items: HashMap<DisplayedItemRef, DisplayedItem>,
+        items_tree: DisplayedItemTree,
+        translators: &TranslatorList,
+    ) -> Vec<(SourceId, LoadSignalsCmd)> {
+        self.items_tree = items_tree;
+        self.displayed_items = new_items;
+
+        let source_ids = self.source_ids();
+        let loaded_sources = source_ids.iter().copied().collect::<HashSet<_>>();
+        let stale_items = self
+            .displayed_items
+            .iter()
+            .filter_map(|(item_ref, item)| match item {
+                DisplayedItem::Variable(variable) if !loaded_sources.contains(&variable.source) => {
+                    Some(*item_ref)
+                }
+                DisplayedItem::Placeholder(placeholder)
+                    if !loaded_sources.contains(&placeholder.source) =>
+                {
+                    Some(*item_ref)
+                }
+                DisplayedItem::Stream(stream) if !loaded_sources.contains(&stream.source) => {
+                    Some(*item_ref)
+                }
+                _ => None,
+            })
+            .collect_vec();
+        for item_ref in stale_items {
+            self.remove_displayed_item(item_ref);
+        }
+
+        for source in &source_ids {
+            self.reconcile_displayed_items_for_reloaded_source(*source, true, translators);
+            self.load_streams_for_displayed_items_for_source(*source);
+        }
+
+        self.display_item_ref_counter = self
+            .displayed_items
+            .keys()
+            .map(|dir| dir.0)
+            .max()
+            .unwrap_or(0);
+        self.update_metadata(translators);
+
+        source_ids
+            .into_iter()
+            .filter_map(
+                |source| match self.load_displayed_variables_for_source(source) {
+                    Ok(Some(cmd)) => Some((source, cmd)),
+                    Ok(None) => None,
+                    Err(err) => {
+                        warn!("Failed to restore displayed variables for {source}: {err:?}");
+                        None
+                    }
+                },
+            )
+            .collect()
+    }
+
+    pub fn remove_source(&mut self, source: SourceId) {
+        if source == Self::primary_source_id() {
+            return;
+        }
+        self.sources.remove_source(source);
+        let stale_items = self
+            .displayed_items
+            .iter()
+            .filter_map(|(item_ref, item)| match item {
+                DisplayedItem::Variable(variable) if variable.source == source => Some(*item_ref),
+                DisplayedItem::Stream(stream) if stream.source == source => Some(*item_ref),
+                DisplayedItem::Placeholder(placeholder) if placeholder.source == source => {
+                    Some(*item_ref)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for item_ref in stale_items {
+            self.remove_displayed_item(item_ref);
+        }
+        self.refresh_session_time_domain();
+    }
+
     #[must_use]
     pub fn update_with_waves(
         mut self,
@@ -214,10 +763,14 @@ impl WaveData {
         );
 
         let old_num_timestamps = self.num_timestamps();
+        let inner = DataContainer::Waves(*new_waves);
+        let sources = SourceStore::with_primary_domain(&inner);
         let mut new_wavedata = WaveData {
-            inner: DataContainer::Waves(*new_waves),
+            inner,
             source,
             format,
+            sources,
+            active_scope_source: Self::primary_source_id(),
             active_scope,
             items_tree: self.items_tree,
             displayed_items: display_items,
@@ -261,10 +814,14 @@ impl WaveData {
         format: WaveFormat,
         translators: &TranslatorList,
     ) -> WaveData {
+        let inner = DataContainer::Transactions(new_ftr);
+        let sources = SourceStore::with_primary_domain(&inner);
         let mut new_wavedata = WaveData {
-            inner: DataContainer::Transactions(new_ftr),
+            inner,
             source,
             format,
+            sources,
+            active_scope_source: Self::primary_source_id(),
             active_scope: self.active_scope.take(),
             items_tree: self.items_tree,
             displayed_items: self.displayed_items.clone(),
@@ -364,17 +921,24 @@ impl WaveData {
     ///
     /// Used after loading new waves, signals or switching a bunch of translators
     fn update_metadata(&mut self, translators: &TranslatorList) {
-        let Some(waves) = self.inner.as_waves() else {
-            return;
-        };
         for di in self.displayed_items.values_mut() {
             let DisplayedItem::Variable(displayed_variable) = di else {
                 continue;
             };
 
-            let meta = waves
-                .variable_meta(&displayed_variable.variable_ref.clone())
-                .unwrap();
+            let meta = self
+                .sources
+                .waves(displayed_variable.source)
+                .or_else(|| {
+                    (displayed_variable.source == Self::primary_source_id())
+                        .then(|| self.inner.as_waves())
+                        .flatten()
+                })
+                .and_then(|waves| waves.variable_meta(&displayed_variable.variable_ref).ok());
+            let Some(meta) = meta else {
+                displayed_variable.field_formats.clear();
+                continue;
+            };
             let translator =
                 variable_translator(displayed_variable.get_format(&[]), &[], translators, || {
                     Ok(meta.clone())
@@ -409,12 +973,16 @@ impl WaveData {
     /// Needs to be called after `update_with`, once the new number of timestamps is available in
     /// the inner `WaveContainer`.
     pub fn update_viewports(&mut self) {
+        self.refresh_session_time_domain();
         if let Some(old_num_timestamps) = std::mem::take(&mut self.old_num_timestamps) {
             // FIXME: I'm not sure if Defaulting to 1 time step is the right thing to do if we
             // have none, but it does avoid some potentially nasty division by zero problems
             let new_num_timestamps = self
-                .inner
-                .max_timestamp()
+                .sources
+                .session_time_domain
+                .as_ref()
+                .and_then(|domain| domain.normalized_for_viewport())
+                .or_else(|| self.inner.max_timestamp())
                 .unwrap_or_else(BigUint::one)
                 .to_bigint()
                 .unwrap();
@@ -441,16 +1009,29 @@ impl WaveData {
                     DisplayedItem::Divider(_)
                     | DisplayedItem::Marker(_)
                     | DisplayedItem::TimeLine(_)
-                    | DisplayedItem::Stream(_)
                     | DisplayedItem::Group(_) => Some((*id, i.clone())),
+                    DisplayedItem::Stream(_) => None,
                     DisplayedItem::Variable(s) => {
-                        s.update(waves, keep_unavailable).map(|r| (*id, r))
+                        s.update(waves, keep_unavailable).map(|mut item| {
+                            match &mut item {
+                                DisplayedItem::Variable(variable) => {
+                                    variable.source = Self::primary_source_id();
+                                }
+                                DisplayedItem::Placeholder(placeholder) => {
+                                    placeholder.source = Self::primary_source_id();
+                                }
+                                _ => {}
+                            }
+                            (*id, item)
+                        })
                     }
                     DisplayedItem::Placeholder(p) => {
                         match waves.update_variable_ref(&p.variable_ref) {
                             None => {
                                 if keep_unavailable {
-                                    Some((*id, DisplayedItem::Placeholder(p.clone())))
+                                    let mut placeholder = p.clone();
+                                    placeholder.source = Self::primary_source_id();
+                                    Some((*id, DisplayedItem::Placeholder(placeholder)))
                                 } else {
                                     None
                                 }
@@ -470,10 +1051,12 @@ impl WaveData {
                                     || Ok(meta.clone()),
                                 );
                                 let info = translator.variable_info(&meta).unwrap();
+                                let mut placeholder = p.clone();
+                                placeholder.source = Self::primary_source_id();
                                 Some((
                                     *id,
                                     DisplayedItem::Variable(
-                                        p.clone().into_variable(info, new_variable_ref),
+                                        placeholder.into_variable(info, new_variable_ref),
                                     ),
                                 ))
                             }
@@ -522,9 +1105,10 @@ impl WaveData {
             &field.field,
             translators,
             || {
-                self.inner
-                    .as_waves()
-                    .unwrap()
+                self.waves_for_source(displayed_variable.source)
+                    .ok_or_else(|| {
+                        eyre::eyre!("wave source {} is not loaded", displayed_variable.source)
+                    })?
                     .variable_meta(&displayed_variable.variable_ref)
             },
         )
@@ -560,14 +1144,34 @@ impl WaveData {
         ignore_failures: bool,
         variable_name_type: Option<VariableNameType>,
     ) -> (Option<LoadSignalsCmd>, Vec<DisplayedItemRef>) {
+        self.add_variables_from_source(
+            Self::primary_source_id(),
+            translators,
+            variables,
+            target_position,
+            update_display_names,
+            ignore_failures,
+            variable_name_type,
+        )
+    }
+
+    pub fn add_variables_from_source(
+        &mut self,
+        source: SourceId,
+        translators: &TranslatorList,
+        variables: Vec<VariableRef>,
+        target_position: Option<TargetPosition>,
+        update_display_names: bool,
+        ignore_failures: bool,
+        variable_name_type: Option<VariableNameType>,
+    ) -> (Option<LoadSignalsCmd>, Vec<DisplayedItemRef>) {
         let mut indices = vec![];
         // load variables from waveform
-        let res = match self
-            .inner
-            .as_waves_mut()
-            .unwrap()
-            .load_variables(variables.iter())
-        {
+        let Some(waves) = self.waves_for_source_mut(source) else {
+            error!("No waveform source {source} for add_variables");
+            return (None, indices);
+        };
+        let res = match waves.load_variables(variables.iter()) {
             Err(e) => {
                 error!("{e:#?}");
                 return (None, indices);
@@ -581,9 +1185,8 @@ impl WaveData {
             .unwrap_or(self.end_insert_position());
         for variable in variables {
             let Ok(meta) = self
-                .inner
-                .as_waves()
-                .unwrap()
+                .waves_for_source(source)
+                .expect("waveform source disappeared while adding variables")
                 .variable_meta(&variable)
                 .context("When adding variable")
                 .map_err(|e| error!("{e:#?}"))
@@ -598,6 +1201,7 @@ impl WaveData {
             let info = translator.variable_info(&meta).unwrap();
 
             let new_variable = DisplayedItem::Variable(DisplayedVariable {
+                source,
                 variable_ref: variable.clone(),
                 info,
                 color: None,
@@ -722,8 +1326,12 @@ impl WaveData {
     }
 
     pub fn add_generator(&mut self, gen_ref: TransactionStreamRef) {
+        self.add_generator_from_source(Self::primary_source_id(), gen_ref);
+    }
+
+    pub fn add_generator_from_source(&mut self, source: SourceId, gen_ref: TransactionStreamRef) {
         let Some(gen_id) = gen_ref.gen_id else { return };
-        let Some(transactions) = self.inner.as_transactions_mut() else {
+        let Some(transactions) = self.transactions_for_source_mut(source) else {
             return;
         };
         let is_empty = {
@@ -747,6 +1355,7 @@ impl WaveData {
         calculate_rows_of_stream(&generator.transactions, &mut last_times_on_row);
 
         let new_gen = DisplayedItem::Stream(DisplayedStream {
+            source,
             display_name: gen_ref.name.clone(),
             transaction_stream_ref: gen_ref,
             color: None,
@@ -763,9 +1372,17 @@ impl WaveData {
     /// conforming `.events` generators do not get lanes of their own: their
     /// events render overlaid on the parent generator's lanes instead.
     pub fn add_stream(&mut self, stream_ref: TransactionStreamRef, fold_events: bool) {
+        self.add_stream_from_source(Self::primary_source_id(), stream_ref, fold_events);
+    }
+
+    pub fn add_stream_from_source(
+        &mut self,
+        source: SourceId,
+        stream_ref: TransactionStreamRef,
+        fold_events: bool,
+    ) {
         if self
-            .inner
-            .as_transactions_mut()
+            .transactions_for_source_mut(source)
             .unwrap()
             .get_stream(stream_ref.stream_id)
             .unwrap()
@@ -774,8 +1391,7 @@ impl WaveData {
         {
             info!("(Stream) Loading transactions into memory!");
             match self
-                .inner
-                .as_transactions_mut()
+                .transactions_for_source_mut(source)
                 .unwrap()
                 .load_stream(stream_ref.stream_id)
             {
@@ -787,7 +1403,7 @@ impl WaveData {
             }
         }
 
-        let transactions = self.inner.as_transactions().unwrap();
+        let transactions = self.transactions_for_source(source).unwrap();
         let stream = transactions.get_stream(stream_ref.stream_id).unwrap();
         let mut last_times_on_row = vec![(BigUint::ZERO, BigUint::ZERO)];
 
@@ -804,6 +1420,7 @@ impl WaveData {
         }
 
         let new_stream = DisplayedItem::Stream(DisplayedStream {
+            source,
             display_name: stream_ref.name.clone(),
             transaction_stream_ref: stream_ref,
             color: None,
@@ -839,13 +1456,15 @@ impl WaveData {
         mode: EventDisplayMode,
     ) -> Option<()> {
         let item_ref = self.items_tree.get_visible(vidx)?.item_ref;
-        let stream_ref = match self.displayed_items.get(&item_ref)? {
-            DisplayedItem::Stream(stream) => stream.transaction_stream_ref.clone(),
+        let (source, stream_ref) = match self.displayed_items.get(&item_ref)? {
+            DisplayedItem::Stream(stream) => (stream.source, stream.transaction_stream_ref.clone()),
             _ => return None,
         };
 
         let new_rows = stream_ref.gen_id.map(|gen_id| {
-            let index = self.inner.as_transactions().map(|t| t.event_index());
+            let index = self
+                .transactions_for_source(source)
+                .map(|t| t.event_index());
             let parent_lanes = index.map_or(1, |index| index.lane_count(gen_id));
             match (
                 mode,
@@ -1179,9 +1798,15 @@ impl WaveData {
     /// done to avoid having to consider what happens with the viewport.
     #[must_use]
     pub fn num_timestamps(&self) -> Option<BigInt> {
-        self.inner
-            .max_timestamp()
-            .and_then(|r| if r.is_zero() { None } else { Some(r) })
+        self.sources
+            .session_time_domain
+            .as_ref()
+            .and_then(|domain| domain.normalized_for_viewport())
+            .or_else(|| {
+                self.inner
+                    .max_timestamp()
+                    .and_then(|r| if r.is_zero() { None } else { Some(r) })
+            })
             .and_then(|r| r.to_bigint())
     }
 
@@ -1213,12 +1838,13 @@ impl WaveData {
     /// Spawn async worker to build analog cache. Worker holds Arc clone.
     pub fn build_analog_cache_async(
         &self,
+        source: SourceId,
         entry: std::sync::Arc<crate::analog_signal_cache::AnalogCacheEntry>,
         variable_ref: &VariableRef,
         translator: crate::translation::AnyTranslator,
         sender: &std::sync::mpsc::Sender<crate::message::Message>,
     ) -> Option<()> {
-        let wave_container = self.inner.as_waves()?;
+        let wave_container = self.waves_for_source(source)?;
         let meta = wave_container.variable_meta(variable_ref).ok()?.clone();
 
         let num_timestamps = self.num_timestamps()?.to_u64()?;
@@ -1237,10 +1863,12 @@ impl WaveData {
 
             let msg = match result {
                 Some(cache) => crate::message::Message::AnalogCacheBuilt {
+                    source,
                     entry: entry.clone(),
                     result: Ok(cache),
                 },
                 None => crate::message::Message::AnalogCacheBuilt {
+                    source,
                     entry: entry.clone(),
                     result: Err("Failed to build analog cache".into()),
                 },
@@ -1258,21 +1886,34 @@ impl WaveData {
     }
 
     pub fn set_active_scope(&mut self, scope: Option<ScopeType>) -> Option<()> {
+        self.set_active_scope_from_source(Self::primary_source_id(), scope)
+    }
+
+    pub fn set_active_scope_from_source(
+        &mut self,
+        source: SourceId,
+        scope: Option<ScopeType>,
+    ) -> Option<()> {
         if let Some(scope) = scope {
             let scope = if let ScopeType::StreamScope(StreamScopeRef::Empty(name)) = scope {
-                let inner = self.inner.as_transactions()?;
+                let inner = self.transactions_for_source(source)?;
                 ScopeType::StreamScope(StreamScopeRef::new_stream_from_name(inner, name))
             } else {
                 scope
             };
 
-            if self.inner.scope_exists(&scope) {
+            if self
+                .data_container_for_source(source)
+                .is_some_and(|inner| inner.scope_exists(&scope))
+            {
+                self.active_scope_source = source;
                 self.active_scope = Some(scope);
             } else {
-                warn!("Setting active scope to {scope} which does not exist");
+                warn!("Setting active scope to {scope} in {source} which does not exist");
             }
         } else {
             // Set to top-level scope
+            self.active_scope_source = source;
             self.active_scope = None;
         }
         Some(())
@@ -1285,14 +1926,18 @@ mod tests {
     use crate::data_container::DataContainer;
     use crate::displayed_item_tree::DisplayedItemTree;
     use crate::item_drawing_info::{DividerDrawingInfo, ItemDrawingInfo};
+    use crate::transaction_container::TransactionRef;
     use crate::viewport::Viewport;
     use crate::wave_source::{WaveFormat, WaveSource};
+    use ftr_parser::types::TransactionId;
 
     fn wave_data_with_rows(top_item_draw_offset: f32) -> WaveData {
         WaveData {
             inner: DataContainer::Empty,
             source: WaveSource::Data,
             format: WaveFormat::Vcd,
+            sources: SourceStore::default(),
+            active_scope_source: SourceId::default(),
             active_scope: None,
             items_tree: DisplayedItemTree::new(),
             displayed_items: HashMap::new(),
@@ -1349,5 +1994,27 @@ mod tests {
 
         assert_eq!(waves.get_item_at_y(-25.0), Some(VisibleItemIndex(0)));
         assert_eq!(waves.get_item_at_y(5.0), Some(VisibleItemIndex(1)));
+    }
+
+    #[test]
+    fn focused_transaction_legacy_ref_deserializes_as_primary_source() {
+        #[derive(Deserialize)]
+        struct FocusedFixture {
+            #[serde(default, deserialize_with = "deserialize_focused_transaction")]
+            focused_transaction: (Option<SourceTransactionRef>, Option<Transaction>),
+        }
+
+        let legacy_ref = TransactionRef {
+            id: TransactionId(7),
+        };
+        let legacy_tuple =
+            ron::to_string(&(Some(legacy_ref), Option::<Transaction>::None)).unwrap();
+        let fixture: FocusedFixture =
+            ron::from_str(&format!("(focused_transaction: {legacy_tuple})")).unwrap();
+        let focused = fixture.focused_transaction.0.expect("focused transaction");
+
+        assert_eq!(focused.source, SourceId::default());
+        assert_eq!(focused.inner.id, TransactionId(7));
+        assert!(fixture.focused_transaction.1.is_none());
     }
 }

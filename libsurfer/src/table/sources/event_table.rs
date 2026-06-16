@@ -4,6 +4,7 @@
 //! matching `.events` generator) with the promoted `name` attribute and the
 //! resolved parent transaction as first-class columns.
 
+use crate::source::SourceId;
 use crate::table::{
     TableAction, TableCacheError, TableCell, TableColumn, TableColumnKey, TableModel,
     TableModelContext, TableRowId, TableSchema, TableSortKey,
@@ -31,6 +32,7 @@ const ORPHAN_PARENT_LABEL: &str = "—";
 
 /// Table model over the events of one parent generator.
 pub struct EventTableModel {
+    source: SourceId,
     rows: Vec<EventRow>,
     index_by_id: HashMap<TableRowId, usize>,
     /// Attribute column names discovered from the events, in discovery
@@ -61,6 +63,7 @@ impl EventTableModel {
     /// loaded and `TableCacheError::ModelNotFound` when the generator or its
     /// events generator cannot be resolved.
     pub fn new(
+        source: SourceId,
         generator: TransactionStreamRef,
         ctx: &TableModelContext<'_>,
     ) -> Result<Self, TableCacheError> {
@@ -71,8 +74,7 @@ impl EventTableModel {
         }
         let waves = ctx.waves.ok_or(TableCacheError::DataUnavailable)?;
         let transactions = waves
-            .inner
-            .as_transactions()
+            .transactions_for_source(source)
             .ok_or(TableCacheError::DataUnavailable)?;
 
         let parent_gen_id = generator
@@ -178,6 +180,7 @@ impl EventTableModel {
             .collect();
 
         Ok(Self {
+            source,
             rows,
             index_by_id,
             attribute_columns,
@@ -301,7 +304,7 @@ impl TableModel for EventTableModel {
 
     fn on_activate(&self, row: TableRowId) -> TableAction {
         self.row_by_id(row)
-            .map(|row| TableAction::FocusTransaction(row.tx_ref.clone()))
+            .map(|row| TableAction::FocusTransaction(self.source, row.tx_ref.clone()))
             .unwrap_or(TableAction::None)
     }
 }

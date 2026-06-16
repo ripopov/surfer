@@ -214,11 +214,13 @@ pub fn draw_table_tile(
         }
     );
 
+    let current_generation = {
+        let model_ctx = state.table_model_context();
+        tile_state.spec.cache_generation(&model_ctx)
+    };
+
     // Get or create runtime state
     let runtime = state.table_runtime.entry(tile_id).or_default();
-
-    // Get current generation from wave data (0 if no wave data loaded)
-    let current_generation = state.user.waves.as_ref().map_or(0, |w| w.cache_generation);
 
     // Check if generation changed and clear selection/model if so
     let last_generation = runtime.scroll_state.last_generation;
@@ -844,7 +846,7 @@ fn render_table(
                                 response.context_menu(|ui| {
                                     // Drill-down: open single-signal change list for signal columns
                                     if let TableColumnKey::Str(key_str) = &col.key
-                                        && let Some((full_path, field)) =
+                                        && let Some((source, full_path, field)) =
                                             crate::table::sources::decode_signal_column_key(key_str)
                                     {
                                         if ui.button("Signal change list").clicked() {
@@ -853,7 +855,11 @@ fn render_table(
                                                     &full_path,
                                                 );
                                             msgs.push(Message::AddTableTile {
-                                                spec: TableModelSpec::SignalChangeList { variable, field },
+                                                spec: TableModelSpec::SignalChangeList {
+                                                    source,
+                                                    variable,
+                                                    field,
+                                                },
                                             });
                                             ui.close();
                                         }

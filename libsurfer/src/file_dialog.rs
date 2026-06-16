@@ -39,10 +39,12 @@ extern "C" {
     fn vscode_show_open_dialog(kind: &str, filters_json: &str);
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub enum OpenMode {
     Open,
     Switch,
+    AddSource,
+    OpenMultipleSources,
 }
 
 impl SystemState {
@@ -60,6 +62,32 @@ impl SystemState {
         perform_async_work(async move {
             if let Some(file) = create_file_dialog(filter, title).pick_file().await {
                 checked_send_many(&sender, messages(file.path().to_path_buf()));
+            }
+        });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn file_dialog_open_many<F>(
+        &mut self,
+        title: &'static str,
+        filter: (String, Vec<String>),
+        messages: F,
+    ) where
+        F: FnOnce(Vec<PathBuf>) -> Vec<Message> + Send + 'static,
+    {
+        let sender = self.channels.msg_sender.clone();
+
+        perform_async_work(async move {
+            if let Some(files) = create_file_dialog(filter, title).pick_files().await {
+                checked_send_many(
+                    &sender,
+                    messages(
+                        files
+                            .into_iter()
+                            .map(|file| file.path().to_path_buf())
+                            .collect(),
+                    ),
+                );
             }
         });
     }
@@ -131,8 +159,6 @@ impl SystemState {
     }
 
     pub(crate) fn open_file_dialog(&mut self, mode: OpenMode) {
-        let load_options: LoadOptions = (mode, self.user.config.behavior.keep_during_reload).into();
-
         let filter = (
             "Waveform/Transaction-files (*.vcd, *.fst, *.ghw, *.ftr)".to_string(),
             vec![
@@ -143,32 +169,100 @@ impl SystemState {
             ],
         );
 
-        #[cfg(all(target_arch = "wasm32", feature = "vscode"))]
-        {
-            let kind = match load_options {
-                LoadOptions::Clear => "waveform_clear",
-                LoadOptions::KeepAvailable => "waveform_keep_available",
-                LoadOptions::KeepAll => "waveform_keep_all",
-            };
-            vscode_open_dialog_with_filter(kind, &filter);
-        }
+        match mode {
+            OpenMode::Open | OpenMode::Switch => {
+                let load_options: LoadOptions =
+                    (mode, self.user.config.behavior.keep_during_reload).into();
 
-        #[cfg(not(target_arch = "wasm32"))]
-        let message = move |file: PathBuf| match Utf8PathBuf::from_path_buf(file.clone()) {
-            Ok(utf8_path) => vec![Message::LoadFile(utf8_path, load_options)],
-            Err(_) => {
-                vec![Message::Error(eyre::eyre!(
-                    "File path '{}' contains invalid UTF-8",
-                    file.display()
-                ))]
+                #[cfg(all(target_arch = "wasm32", feature = "vscode"))]
+                {
+                    let kind = match load_options {
+                        LoadOptions::Clear => "waveform_clear",
+                        LoadOptions::KeepAvailable => "waveform_keep_available",
+                        LoadOptions::KeepAll => "waveform_keep_all",
+                    };
+                    vscode_open_dialog_with_filter(kind, &filter);
+                }
+
+                #[cfg(not(target_arch = "wasm32"))]
+                let message = move |file: PathBuf| match Utf8PathBuf::from_path_buf(file.clone()) {
+                    Ok(utf8_path) => vec![Message::LoadFile(utf8_path, load_options)],
+                    Err(_) => {
+                        vec![Message::Error(eyre::eyre!(
+                            "File path '{}' contains invalid UTF-8",
+                            file.display()
+                        ))]
+                    }
+                };
+
+                #[cfg(all(target_arch = "wasm32", not(feature = "vscode")))]
+                let message = move |file: Vec<u8>| vec![Message::LoadFromData(file, load_options)];
+
+                #[cfg(not(all(target_arch = "wasm32", feature = "vscode")))]
+                self.file_dialog_open("Open waveform file", filter, message);
             }
-        };
+            OpenMode::AddSource => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let message =
+                        move |file: PathBuf| match Utf8PathBuf::from_path_buf(file.clone()) {
+                            Ok(utf8_path) => {
+                                vec![Message::LoadFileWithIntent(
+                                    utf8_path,
+                                    crate::wave_source::LoadIntent::AddSource,
+                                )]
+                            }
+                            Err(_) => {
+                                vec![Message::Error(eyre::eyre!(
+                                    "File path '{}' contains invalid UTF-8",
+                                    file.display()
+                                ))]
+                            }
+                        };
+                    self.file_dialog_open("Add source", filter, message);
+                }
 
-        #[cfg(all(target_arch = "wasm32", not(feature = "vscode")))]
-        let message = move |file: Vec<u8>| vec![Message::LoadFromData(file, load_options)];
+                #[cfg(target_arch = "wasm32")]
+                self.update(Message::Error(eyre::eyre!(
+                    "Add Source file dialog is not supported on this platform yet"
+                )));
+            }
+            OpenMode::OpenMultipleSources => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let message = move |files: Vec<PathBuf>| {
+                        let mut messages = Vec::new();
+                        let mut load_requests = Vec::new();
+                        for file in files {
+                            match Utf8PathBuf::from_path_buf(file.clone()) {
+                                Ok(utf8_path) => {
+                                    let intent = if load_requests.is_empty() {
+                                        crate::wave_source::LoadIntent::ReplaceSession
+                                    } else {
+                                        crate::wave_source::LoadIntent::AddSource
+                                    };
+                                    load_requests.push((utf8_path, intent));
+                                }
+                                Err(_) => messages.push(Message::Error(eyre::eyre!(
+                                    "File path '{}' contains invalid UTF-8",
+                                    file.display()
+                                ))),
+                            }
+                        }
+                        if !load_requests.is_empty() {
+                            messages.push(Message::LoadFilesWithIntents(load_requests));
+                        }
+                        messages
+                    };
+                    self.file_dialog_open_many("Open waveform + transactions", filter, message);
+                }
 
-        #[cfg(not(all(target_arch = "wasm32", feature = "vscode")))]
-        self.file_dialog_open("Open waveform file", filter, message);
+                #[cfg(target_arch = "wasm32")]
+                self.update(Message::Error(eyre::eyre!(
+                    "Multi-source file dialog is not supported on this platform yet"
+                )));
+            }
+        }
     }
 
     pub(crate) fn open_command_file_dialog(&mut self) {
