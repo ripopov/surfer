@@ -41,7 +41,7 @@ impl SystemState {
             theme: &self.user.config.theme,
         };
 
-        let num_timestamps = waves.safe_num_timestamps();
+        let num_timestamps = waves.safe_canvas_num_timestamps();
         let viewport_all = waves.viewport_all();
         let base_fill_color = self.user.config.theme.canvas_colors.foreground;
 

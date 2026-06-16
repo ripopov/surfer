@@ -184,6 +184,67 @@ fn matching_timescale_sources_can_have_different_spans() {
 }
 
 #[test]
+fn canvas_zoom_fit_ignores_loaded_sources_without_displayed_rows() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+
+    let mut state = SystemState::new_default_config().unwrap();
+    state.update(Message::LoadFilesWithIntents(vec![
+        (
+            fixture("examples/fused_ftr_wave.vcd"),
+            LoadIntent::ReplaceSession,
+        ),
+        (fixture("examples/my_db.ftr"), LoadIntent::AddSource),
+        (
+            fixture("examples/fused_ftr_wave_long.vcd"),
+            LoadIntent::AddSource,
+        ),
+    ]));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+    state.update(Message::AddStreamOrGeneratorFromSource(
+        SourceId(1),
+        TransactionStreamRef::new_gen(
+            StreamId(1),
+            GeneratorId(4),
+            "pipelined_stream.read".to_string(),
+        ),
+    ));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    {
+        let waves = state.user.waves.as_ref().expect("waves loaded");
+        assert_eq!(waves.safe_num_timestamps(), BigInt::from(6_000_000));
+        assert_eq!(waves.safe_canvas_num_timestamps(), BigInt::from(3_400_000));
+    }
+
+    state.update(Message::ZoomToFit { viewport_idx: 0 });
+    {
+        let waves = state.user.waves.as_ref().expect("waves loaded");
+        assert_eq!(
+            waves.viewports[0].right_edge_time(&waves.safe_canvas_num_timestamps()),
+            BigInt::from(3_400_000)
+        );
+    }
+
+    state.update(Message::AddVariablesFromSource(
+        SourceId(2),
+        vec![VariableRef::from_hierarchy_string("tb.counter")],
+    ));
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert_eq!(waves.safe_canvas_num_timestamps(), BigInt::from(6_000_000));
+}
+
+#[test]
 fn source_load_request_tokens_reject_stale_additive_source_responses() {
     let mut state = SystemState::new_default_config()
         .unwrap()

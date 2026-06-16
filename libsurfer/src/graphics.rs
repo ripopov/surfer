@@ -102,7 +102,7 @@ impl WaveData {
         theme: &SurferTheme,
     ) {
         let color = theme.variable_dontcare;
-        let num_timestamps = self.safe_num_timestamps();
+        let num_timestamps = self.safe_canvas_num_timestamps();
         for g in self.graphics.values() {
             match g {
                 Graphic::TextArrow {

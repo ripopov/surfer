@@ -495,7 +495,7 @@ impl WaveData {
                 menu_position.x = viewport.pixel_from_time(
                     &menu_time,
                     ctx.cfg.canvas_size.x,
-                    &self.safe_num_timestamps(),
+                    &self.safe_canvas_num_timestamps(),
                 );
                 let temp_y = menu_position.y;
                 menu_position = (ctx.to_screen)(menu_position.x, menu_position.y);
@@ -525,7 +525,7 @@ impl WaveData {
 impl SystemState {
     pub(crate) fn go_to_annotation_position(&mut self, anno_id: Id, viewport_idx: usize) {
         if let Some(waves) = self.user.waves.as_mut() {
-            if let Some(num_timestamps) = waves.num_timestamps() {
+            if let Some(num_timestamps) = waves.canvas_num_timestamps() {
                 if let Some(target) = waves.get_annotation_by_id(&anno_id) {
                     let mut left = target.get_start_time();
                     let mut right = target.get_end_time();

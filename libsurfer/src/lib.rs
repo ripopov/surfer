@@ -944,7 +944,7 @@ impl SystemState {
                 viewport_idx,
             } => {
                 let waves = self.user.waves.as_mut()?;
-                if let Some(num_timestamps) = waves.num_timestamps() {
+                if let Some(num_timestamps) = waves.canvas_num_timestamps() {
                     waves.viewports[viewport_idx].handle_canvas_zoom(
                         mouse_ptr,
                         f64::from(delta),
@@ -994,7 +994,7 @@ impl SystemState {
             Message::GoToTime(time, viewport_idx) => {
                 let waves = self.user.waves.as_mut()?;
                 // If there are no timestamps, the file is not fully loaded
-                if let Some(num_timestamps) = waves.num_timestamps() {
+                if let Some(num_timestamps) = waves.canvas_num_timestamps() {
                     let time = time?;
                     waves.viewports[viewport_idx].go_to_time(&time.clone(), &num_timestamps);
                     self.invalidate_draw_commands();
@@ -1019,7 +1019,7 @@ impl SystemState {
             } => {
                 let waves = self.user.waves.as_mut()?;
                 // If there are no timestamps, the file is not fully loaded
-                if let Some(num_timestamps) = waves.num_timestamps() {
+                if let Some(num_timestamps) = waves.canvas_num_timestamps() {
                     waves.viewports[viewport_idx].zoom_to_range(&start, &end, &num_timestamps);
                     self.invalidate_draw_commands();
                 } else {
@@ -1305,7 +1305,7 @@ impl SystemState {
             } => {
                 let waves = self.user.waves.as_mut()?;
                 // If there are no timestamps, the file is not fully loaded
-                if let Some(num_timestamps) = waves.num_timestamps() {
+                if let Some(num_timestamps) = waves.canvas_num_timestamps() {
                     // if no cursor is set, move it to
                     // start of visible area transition for next transition
                     // end of visible area for previous transition
@@ -2293,7 +2293,7 @@ impl SystemState {
             Message::GoToMarkerPosition(idx, viewport_idx) => {
                 let waves = self.user.waves.as_mut()?;
                 // If there are no timestamps, the file is not fully loaded
-                if let Some(num_timestamps) = waves.num_timestamps() {
+                if let Some(num_timestamps) = waves.canvas_num_timestamps() {
                     let cursor = waves.markers.get(&idx)?;
                     waves.viewports[viewport_idx].go_to_time(cursor, &num_timestamps);
                     self.invalidate_draw_commands();
@@ -3189,7 +3189,7 @@ impl SystemState {
                 if let Some(waves) = self.user.waves.as_mut() {
                     waves.select_annotation(id);
 
-                    let num_timestamps: BigInt = waves.safe_num_timestamps();
+                    let num_timestamps: BigInt = waves.safe_canvas_num_timestamps();
 
                     let menu_pos_local = to_screen?.inverse().transform_pos(menu_pos?);
 

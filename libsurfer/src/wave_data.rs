@@ -441,7 +441,7 @@ impl WaveData {
         translators: &TranslatorList,
     ) -> Result<Option<LoadSignalsCmd>> {
         let time_domain = self.validate_reloaded_source_domain(&inner)?;
-        let old_num_timestamps = self.num_timestamps();
+        let old_num_timestamps = self.canvas_num_timestamps();
 
         if source_id == Self::primary_source_id() {
             self.inner = inner;
@@ -762,7 +762,7 @@ impl WaveData {
             translators,
         );
 
-        let old_num_timestamps = self.num_timestamps();
+        let old_num_timestamps = self.canvas_num_timestamps();
         let inner = DataContainer::Waves(*new_waves);
         let sources = SourceStore::with_primary_domain(&inner);
         let mut new_wavedata = WaveData {
@@ -977,15 +977,7 @@ impl WaveData {
         if let Some(old_num_timestamps) = std::mem::take(&mut self.old_num_timestamps) {
             // FIXME: I'm not sure if Defaulting to 1 time step is the right thing to do if we
             // have none, but it does avoid some potentially nasty division by zero problems
-            let new_num_timestamps = self
-                .sources
-                .session_time_domain
-                .as_ref()
-                .and_then(|domain| domain.normalized_for_viewport())
-                .or_else(|| self.inner.max_timestamp())
-                .unwrap_or_else(BigUint::one)
-                .to_bigint()
-                .unwrap();
+            let new_num_timestamps = self.canvas_num_timestamps().unwrap_or_else(BigInt::one);
             if new_num_timestamps != old_num_timestamps {
                 for viewport in &mut self.viewports {
                     *viewport = viewport.clip_to(&old_num_timestamps, &new_num_timestamps);
@@ -1576,7 +1568,7 @@ impl WaveData {
 
     pub fn go_to_cursor_if_not_in_view(&mut self) -> bool {
         if let Some(cursor) = &self.cursor {
-            let num_timestamps = self.num_timestamps().unwrap_or_else(BigInt::one);
+            let num_timestamps = self.safe_canvas_num_timestamps();
             self.viewports[0].go_to_cursor_if_not_in_view(cursor, &num_timestamps)
         } else {
             false
@@ -1589,7 +1581,7 @@ impl WaveData {
         viewport.pixel_from_time(
             self.numbered_marker_time(idx),
             view_width,
-            &self.num_timestamps().unwrap_or_else(BigInt::one),
+            &self.safe_canvas_num_timestamps(),
         )
     }
 
@@ -1810,11 +1802,64 @@ impl WaveData {
             .and_then(|r| r.to_bigint())
     }
 
+    fn displayed_item_source(item: &DisplayedItem) -> Option<SourceId> {
+        match item {
+            DisplayedItem::Variable(variable) => Some(variable.source),
+            DisplayedItem::Placeholder(placeholder) => Some(placeholder.source),
+            DisplayedItem::Stream(stream) => Some(stream.source),
+            DisplayedItem::Divider(_)
+            | DisplayedItem::Marker(_)
+            | DisplayedItem::TimeLine(_)
+            | DisplayedItem::Group(_) => None,
+        }
+    }
+
+    /// Returns the time span currently relevant to the waveform canvas.
+    ///
+    /// Loaded-but-undisplayed sources should not affect zooming or canvas
+    /// coordinate conversion. If the canvas has no source-backed rows yet, fall
+    /// back to the session span so an empty canvas still has usable timing.
+    #[must_use]
+    pub fn canvas_num_timestamps(&self) -> Option<BigInt> {
+        let displayed_max = self
+            .displayed_items
+            .values()
+            .filter_map(Self::displayed_item_source)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .filter_map(|source| {
+                self.time_domain_for_source(source)
+                    .and_then(|domain| domain.normalized_for_viewport())
+            })
+            .max();
+
+        displayed_max
+            .or_else(|| {
+                self.sources
+                    .session_time_domain
+                    .as_ref()
+                    .and_then(TimeDomain::normalized_for_viewport)
+            })
+            .or_else(|| {
+                self.inner
+                    .max_timestamp()
+                    .and_then(|r| if r.is_zero() { None } else { Some(r) })
+            })
+            .and_then(|r| r.to_bigint())
+    }
+
     /// Returns the number of timestamps in the current waves. This is like `num_timestamps` but
     /// will always return at least 1.
     #[must_use]
     pub fn safe_num_timestamps(&self) -> BigInt {
         self.num_timestamps().unwrap_or_else(BigInt::one)
+    }
+
+    /// Returns the canvas time span, falling back to 1 for zero-length or
+    /// not-yet-loaded data.
+    #[must_use]
+    pub fn safe_canvas_num_timestamps(&self) -> BigInt {
+        self.canvas_num_timestamps().unwrap_or_else(BigInt::one)
     }
 
     #[must_use]

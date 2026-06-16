@@ -957,7 +957,7 @@ impl SystemState {
             &self.user.wanted_timeunit,
             &self.get_time_format(),
             self.user.config.theme.ticks.density,
-            &waves.safe_num_timestamps(),
+            &waves.safe_canvas_num_timestamps(),
         )
     }
 }
