@@ -808,7 +808,7 @@ fn canvas_zoom_fit_ignores_loaded_sources_without_displayed_rows() {
 }
 
 #[test]
-fn source_load_request_tokens_reject_stale_additive_source_responses() {
+fn source_load_request_tokens_reject_stale_source_responses() {
     let mut state = SystemState::new_default_config()
         .unwrap()
         .with_params(StartupParams {
@@ -821,6 +821,24 @@ fn source_load_request_tokens_reject_stale_additive_source_responses() {
 
     let old_request = LoadRequestId(10);
     let new_request = LoadRequestId(11);
+    let primary_source = SourceId::default();
+    assert!(!state.source_load_request_is_current(primary_source, old_request));
+    state
+        .user
+        .waves
+        .as_mut()
+        .expect("waves loaded")
+        .mark_source_load_request(primary_source, old_request);
+    assert!(state.source_load_request_is_current(primary_source, old_request));
+    state
+        .user
+        .waves
+        .as_mut()
+        .expect("waves loaded")
+        .mark_source_load_request(primary_source, new_request);
+    assert!(!state.source_load_request_is_current(primary_source, old_request));
+    assert!(state.source_load_request_is_current(primary_source, new_request));
+
     let source_id = state
         .user
         .waves
@@ -1557,6 +1575,7 @@ fn reload_primary_wave_source_preserves_additive_sources_and_rows() {
     });
 
     let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert_eq!(waves.primary_active_load_request, None);
     assert!(
         primary_signal_spec.cache_generation(&state.table_model_context())
             > primary_generation_before,
@@ -1634,6 +1653,7 @@ fn reload_primary_wave_source_rejects_mismatched_time_domain_without_replacing_o
     });
 
     let waves = state.user.waves.as_ref().expect("waves loaded");
+    assert_eq!(waves.primary_active_load_request, None);
     assert_eq!(waves.cache_generation, old_generation);
     assert_eq!(
         waves.time_domain_for_source(SourceId::default()),

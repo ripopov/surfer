@@ -114,6 +114,8 @@ pub struct WaveData {
     #[serde(skip)]
     pub inflight_caches:
         HashMap<AnalogCacheKey, std::sync::Arc<crate::analog_signal_cache::AnalogCacheEntry>>,
+    #[serde(skip, default)]
+    pub primary_active_load_request: Option<LoadRequestId>,
 }
 
 fn select_preferred_translator(var: &VariableMeta, translators: &TranslatorList) -> String {
@@ -424,6 +426,7 @@ impl WaveData {
         self.primary_source_label = Some(promoted.label);
         self.cache_generation = promoted.cache_generation;
         self.inflight_caches = promoted.inflight_caches;
+        self.primary_active_load_request = promoted.active_load_request;
 
         let source_map = HashMap::from([(promoted_id, Self::primary_source_id())]);
         self.remap_source_ids(&source_map);
@@ -453,17 +456,32 @@ impl WaveData {
     }
 
     pub fn mark_source_load_request(&mut self, source: SourceId, request: LoadRequestId) {
-        if let Some(loaded_source) = self.sources.source_mut(source) {
+        if source == Self::primary_source_id() {
+            self.primary_active_load_request = Some(request);
+        } else if let Some(loaded_source) = self.sources.source_mut(source) {
             loaded_source.active_load_request = Some(request);
             loaded_source.load_state = crate::source::SourceLoadState::Pending;
         }
     }
 
+    pub fn mark_source_load_error(&mut self, source: SourceId, err: String) {
+        if source == Self::primary_source_id() {
+            self.primary_active_load_request = None;
+        } else if let Some(loaded_source) = self.sources.source_mut(source) {
+            loaded_source.load_state = crate::source::SourceLoadState::Error(err);
+            loaded_source.active_load_request = None;
+        }
+    }
+
     #[must_use]
     pub fn source_load_request_matches(&self, source: SourceId, request: LoadRequestId) -> bool {
-        self.sources
-            .source(source)
-            .is_some_and(|loaded_source| loaded_source.active_load_request == Some(request))
+        if source == Self::primary_source_id() {
+            self.primary_active_load_request == Some(request)
+        } else {
+            self.sources
+                .source(source)
+                .is_some_and(|loaded_source| loaded_source.active_load_request == Some(request))
+        }
     }
 
     pub fn validate_loaded_source(&mut self, source: SourceId) -> Result<()> {
@@ -508,6 +526,7 @@ impl WaveData {
             self.format = format;
             self.cache_generation = self.cache_generation.saturating_add(1);
             self.inflight_caches.clear();
+            self.primary_active_load_request = None;
         } else {
             let Some(loaded_source) = self.sources.source_mut(source_id) else {
                 return Err(eyre::eyre!("cannot reload unknown source {source_id}"));
@@ -862,6 +881,7 @@ impl WaveData {
             old_num_timestamps,
             cache_generation: self.cache_generation + 1, // Invalidate all existing caches
             inflight_caches: HashMap::new(),
+            primary_active_load_request: None,
         };
 
         new_wavedata.update_metadata(translators);
@@ -912,6 +932,7 @@ impl WaveData {
             old_num_timestamps: None,
             cache_generation: 0,
             inflight_caches: HashMap::new(),
+            primary_active_load_request: None,
             annotation_groups: self.annotation_groups.clone(),
             annotation_list_visible: self.annotation_list_visible,
         };
@@ -2103,6 +2124,7 @@ mod tests {
             old_num_timestamps: None,
             cache_generation: 0,
             inflight_caches: HashMap::new(),
+            primary_active_load_request: None,
         }
     }
 
