@@ -1,5 +1,6 @@
 use super::cache::TableCacheError;
 use crate::config::SurferTheme;
+use crate::source::SourceId;
 use crate::table::sources::{
     EventTableModel, MultiSignalChangeListModel, SignalAnalysisResultsModel, SignalChangeListModel,
     TransactionTraceModelWithData, VirtualTableModel, infer_sampling_mode,
@@ -27,6 +28,8 @@ pub struct TableRowId(pub u64);
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TableModelSpec {
     SignalChangeList {
+        #[serde(default)]
+        source: SourceId,
         variable: VariableRef,
         field: Vec<String>,
     },
@@ -36,12 +39,16 @@ pub enum TableModelSpec {
     /// Transaction trace table for a specific generator.
     /// Each generator has its own attribute schema, so tables are per-generator.
     TransactionTrace {
+        #[serde(default)]
+        source: SourceId,
         generator: TransactionStreamRef,
     },
     /// FTR event table for a parent generator with a matching `.events`
     /// generator. Rows are the events; the parent transaction and the
     /// promoted `name` attribute are first-class columns.
     EventTable {
+        #[serde(default)]
+        source: SourceId,
         generator: TransactionStreamRef,
     },
     /// Source-level search that produces a derived table model from waveform data.
@@ -67,6 +74,8 @@ pub enum TableModelSpec {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MultiSignalEntry {
+    #[serde(default)]
+    pub source: SourceId,
     pub variable: VariableRef,
     pub field: Vec<String>,
 }
@@ -91,6 +100,82 @@ impl TableModelSpec {
         }
     }
 
+    #[must_use]
+    pub fn references_source(&self, source: SourceId) -> bool {
+        match self {
+            Self::SignalChangeList {
+                source: spec_source,
+                ..
+            }
+            | Self::TransactionTrace {
+                source: spec_source,
+                ..
+            }
+            | Self::EventTable {
+                source: spec_source,
+                ..
+            } => *spec_source == source,
+            Self::MultiSignalChangeList { variables } => {
+                variables.iter().any(|entry| entry.source == source)
+            }
+            Self::AnalysisResults {
+                kind: AnalysisKind::SignalAnalysisV1,
+                params: AnalysisParams::SignalAnalysisV1 { config },
+            } => config.references_source(source),
+            Self::Virtual { .. }
+            | Self::SearchResults { .. }
+            | Self::AnalysisResults { .. }
+            | Self::Custom { .. } => false,
+        }
+    }
+
+    #[must_use]
+    pub fn cache_generation(&self, ctx: &TableModelContext<'_>) -> u64 {
+        match self {
+            Self::SignalChangeList { source, .. }
+            | Self::TransactionTrace { source, .. }
+            | Self::EventTable { source, .. } => ctx.source_generation(*source),
+            Self::MultiSignalChangeList { variables } => {
+                combined_source_generation(ctx, variables.iter().map(|entry| entry.source))
+            }
+            Self::AnalysisResults {
+                kind: AnalysisKind::SignalAnalysisV1,
+                params: AnalysisParams::SignalAnalysisV1 { config },
+            } => config.cache_generation(ctx),
+            Self::Virtual { .. }
+            | Self::SearchResults { .. }
+            | Self::AnalysisResults { .. }
+            | Self::Custom { .. } => ctx.cache_generation,
+        }
+    }
+
+    pub(crate) fn remap_sources(&mut self, source_map: &HashMap<SourceId, SourceId>) {
+        let remap = |source: &mut SourceId| {
+            if let Some(mapped) = source_map.get(source) {
+                *source = *mapped;
+            }
+        };
+
+        match self {
+            Self::SignalChangeList { source, .. }
+            | Self::TransactionTrace { source, .. }
+            | Self::EventTable { source, .. } => remap(source),
+            Self::MultiSignalChangeList { variables } => {
+                for variable in variables {
+                    remap(&mut variable.source);
+                }
+            }
+            Self::AnalysisResults {
+                kind: AnalysisKind::SignalAnalysisV1,
+                params: AnalysisParams::SignalAnalysisV1 { config },
+            } => config.remap_sources(source_map),
+            Self::Virtual { .. }
+            | Self::SearchResults { .. }
+            | Self::AnalysisResults { .. }
+            | Self::Custom { .. } => {}
+        }
+    }
+
     /// Create a table model instance from this specification.
     pub fn create_model(
         &self,
@@ -102,16 +187,20 @@ impl TableModelSpec {
                 columns,
                 seed,
             } => Ok(Arc::new(VirtualTableModel::new(*rows, *columns, *seed))),
-            Self::SignalChangeList { variable, field } => {
-                SignalChangeListModel::new(variable.clone(), field.clone(), ctx)
-                    .map(|model| Arc::new(model) as Arc<dyn TableModel>)
-            }
-            Self::TransactionTrace { generator } => {
-                TransactionTraceModelWithData::new(generator.clone(), ctx)
-                    .map(|model| Arc::new(model) as Arc<dyn TableModel>)
-            }
-            Self::EventTable { generator } => EventTableModel::new(generator.clone(), ctx)
+            Self::SignalChangeList {
+                source,
+                variable,
+                field,
+            } => SignalChangeListModel::new(*source, variable.clone(), field.clone(), ctx)
                 .map(|model| Arc::new(model) as Arc<dyn TableModel>),
+            Self::TransactionTrace { source, generator } => {
+                TransactionTraceModelWithData::new(*source, generator.clone(), ctx)
+                    .map(|model| Arc::new(model) as Arc<dyn TableModel>)
+            }
+            Self::EventTable { source, generator } => {
+                EventTableModel::new(*source, generator.clone(), ctx)
+                    .map(|model| Arc::new(model) as Arc<dyn TableModel>)
+            }
             Self::MultiSignalChangeList { variables } => {
                 MultiSignalChangeListModel::new(variables.clone(), ctx)
                     .map(|model| Arc::new(model) as Arc<dyn TableModel>)
@@ -134,14 +223,18 @@ impl TableModelSpec {
     #[must_use]
     pub fn default_view_config(&self, ctx: &TableModelContext<'_>) -> TableViewConfig {
         match self {
-            Self::SignalChangeList { variable, field } => {
+            Self::SignalChangeList {
+                source,
+                variable,
+                field,
+            } => {
                 let mut config = TableViewConfig::default();
                 let mut title = variable.full_path_string();
                 if !field.is_empty() {
                     title.push('.');
                     title.push_str(&field.join("."));
                 }
-                config.title = format!("Signal change list: {title}");
+                config.title = source_table_title(ctx, *source, "Signal change list", &title);
                 config.sort = vec![TableSortSpec {
                     key: TableColumnKey::Str("time".to_string()),
                     direction: TableSortDirection::Ascending,
@@ -150,8 +243,8 @@ impl TableModelSpec {
                 config.activate_on_select = true;
                 config
             }
-            Self::TransactionTrace { generator } => TableViewConfig {
-                title: format!("Transactions: {}", generator.name),
+            Self::TransactionTrace { source, generator } => TableViewConfig {
+                title: source_table_title(ctx, *source, "Transactions", &generator.name),
                 // Default sort: ascending by start time
                 sort: vec![TableSortSpec {
                     key: TableColumnKey::Str("start".to_string()),
@@ -161,8 +254,8 @@ impl TableModelSpec {
                 activate_on_select: true,
                 ..Default::default()
             },
-            Self::EventTable { generator } => TableViewConfig {
-                title: format!("Events: {}", generator.name),
+            Self::EventTable { source, generator } => TableViewConfig {
+                title: source_table_title(ctx, *source, "Events", &generator.name),
                 sort: vec![TableSortSpec {
                     key: TableColumnKey::Str("time".to_string()),
                     direction: TableSortDirection::Ascending,
@@ -202,6 +295,37 @@ impl TableModelSpec {
     }
 }
 
+fn combined_source_generation(
+    ctx: &TableModelContext<'_>,
+    sources: impl IntoIterator<Item = SourceId>,
+) -> u64 {
+    sources
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|source| ctx.source_generation(source))
+        .fold(0, u64::wrapping_add)
+}
+
+fn source_table_title(
+    ctx: &TableModelContext<'_>,
+    source: SourceId,
+    kind: &str,
+    name: &str,
+) -> String {
+    let Some(waves) = ctx.waves else {
+        return format!("{kind}: {name}");
+    };
+    if waves.source_count() <= 1 {
+        format!("{kind}: {name}")
+    } else {
+        waves.source_label_for(source).map_or_else(
+            || format!("{kind}: {name}"),
+            |label| format!("{kind}: {label}: {name}"),
+        )
+    }
+}
+
 #[must_use]
 pub fn signal_analysis_title(
     config: &SignalAnalysisConfig,
@@ -231,7 +355,7 @@ fn signal_analysis_sampling_mode_from_context(
     ctx: &TableModelContext<'_>,
 ) -> Option<SignalAnalysisSamplingMode> {
     let waves = ctx.waves?;
-    let wave_container = waves.inner.as_waves()?;
+    let wave_container = waves.waves_for_source(config.sampling.source)?;
     let resolved_sampling_signal = wave_container
         .update_variable_ref(&config.sampling.signal)
         .unwrap_or_else(|| config.sampling.signal.clone());
@@ -249,8 +373,19 @@ pub struct TableModelContext<'a> {
     pub time_format: TimeFormat,
     pub theme: &'a SurferTheme,
     pub cache_generation: u64,
+    pub source_generations: HashMap<SourceId, u64>,
     /// FTR transaction event convention support is enabled
     pub ftr_events_enabled: bool,
+}
+
+impl TableModelContext<'_> {
+    #[must_use]
+    pub fn source_generation(&self, source: SourceId) -> u64 {
+        self.source_generations
+            .get(&source)
+            .copied()
+            .unwrap_or(self.cache_generation)
+    }
 }
 
 /// Serializable view configuration.
@@ -625,7 +760,7 @@ pub enum TableSortKey {
 pub enum TableAction {
     None,
     CursorSet(BigInt),
-    FocusTransaction(TransactionRef),
+    FocusTransaction(SourceId, TransactionRef),
     SelectSignal(VariableRef),
 }
 
@@ -698,15 +833,46 @@ pub struct SignalAnalysisConfig {
     pub run_revision: u64,
 }
 
+impl SignalAnalysisConfig {
+    #[must_use]
+    pub fn references_source(&self, source: SourceId) -> bool {
+        self.sampling.source == source || self.signals.iter().any(|signal| signal.source == source)
+    }
+
+    #[must_use]
+    pub fn cache_generation(&self, ctx: &TableModelContext<'_>) -> u64 {
+        combined_source_generation(
+            ctx,
+            std::iter::once(self.sampling.source)
+                .chain(self.signals.iter().map(|signal| signal.source)),
+        )
+    }
+
+    pub(crate) fn remap_sources(&mut self, source_map: &HashMap<SourceId, SourceId>) {
+        if let Some(mapped) = source_map.get(&self.sampling.source) {
+            self.sampling.source = *mapped;
+        }
+        for signal in &mut self.signals {
+            if let Some(mapped) = source_map.get(&signal.source) {
+                signal.source = *mapped;
+            }
+        }
+    }
+}
+
 /// Sampling signal selection for signal analysis.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SignalAnalysisSamplingConfig {
+    #[serde(default)]
+    pub source: SourceId,
     pub signal: VariableRef,
 }
 
 /// Per-signal analysis configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SignalAnalysisSignal {
+    #[serde(default)]
+    pub source: SourceId,
     pub variable: VariableRef,
     #[serde(default)]
     pub field: Vec<String>,

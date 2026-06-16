@@ -1,4 +1,5 @@
 use crate::displayed_item::DisplayedItem;
+use crate::source::SourceId;
 use crate::table::sources::signal_formatting::{
     SignalValueFormatter, format_signal_value, resolve_signal_value_formatter,
 };
@@ -43,14 +44,14 @@ struct TransitionRow {
 
 impl SignalChangeListModel {
     pub fn new(
+        source: SourceId,
         variable: VariableRef,
         field: Vec<String>,
         ctx: &TableModelContext<'_>,
     ) -> Result<Self, TableCacheError> {
         let waves = ctx.waves.ok_or(TableCacheError::DataUnavailable)?;
         let wave_container = waves
-            .inner
-            .as_waves()
+            .waves_for_source(source)
             .ok_or(TableCacheError::DataUnavailable)?;
 
         let updated_variable = wave_container
@@ -80,7 +81,11 @@ impl SignalChangeListModel {
             })?;
 
         let displayed_variable = waves.displayed_items.values().find_map(|item| match item {
-            DisplayedItem::Variable(var) if var.variable_ref == updated_variable => Some(var),
+            DisplayedItem::Variable(var)
+                if var.source == source && var.variable_ref == updated_variable =>
+            {
+                Some(var)
+            }
             _ => None,
         });
 

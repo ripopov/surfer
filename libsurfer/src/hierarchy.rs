@@ -1,11 +1,14 @@
 //! Functions for drawing the left hand panel showing scopes and variables.
 use crate::SystemState;
-use crate::data_container::{DataContainer, VariableType as VarType};
+use crate::data_container::DataContainer;
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::message::Message;
-use crate::tooltips::{scope_tooltip_text, variable_tooltip_text};
+use crate::tooltips::{scope_tooltip_text_for_container, variable_tooltip_text};
 use crate::transaction_container::StreamScopeRef;
-use crate::transactions::{draw_transaction_root, draw_transaction_variable_list};
+use crate::transactions::{
+    draw_transaction_root, draw_transaction_root_for_source,
+    draw_transaction_variable_list_for_source,
+};
 use crate::variable_direction::get_direction_string;
 use crate::view::draw_true_name;
 use crate::wave_container::{
@@ -53,6 +56,7 @@ pub enum ScopeExpandType {
     CollapseAll,
 }
 
+use crate::source::{SourceId, TimeDomain, format_time_domain, source_label};
 use crate::variable_filter::VariableNameFilterType;
 use crate::wave_source::WaveSource;
 
@@ -182,7 +186,11 @@ impl SystemState {
 
     fn draw_variables(&mut self, msgs: &mut Vec<Message>, ui: &mut Ui) {
         if let Some(waves) = &self.user.waves {
-            let empty_scope = if waves.inner.is_waves() {
+            let source = waves.active_scope_source;
+            let Some(active_container) = waves.data_container_for_source(source) else {
+                return;
+            };
+            let empty_scope = if active_container.is_waves() {
                 ScopeType::WaveScope(ScopeRef::empty())
             } else {
                 ScopeType::StreamScope(StreamScopeRef::Empty(String::default()))
@@ -190,7 +198,7 @@ impl SystemState {
             let active_scope = waves.active_scope.as_ref().unwrap_or(&empty_scope);
             match active_scope {
                 ScopeType::WaveScope(scope) => {
-                    let Some(wave_container) = waves.inner.as_waves() else {
+                    let Some(wave_container) = waves.waves_for_source(source) else {
                         return;
                     };
                     let variables = self.filtered_variables_unsorted(
@@ -209,9 +217,16 @@ impl SystemState {
                                 .id_salt("variables")
                                 .show(ui, |ui| {
                                     ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-                                    self.draw_parameters(msgs, wave_container, &parameters, ui);
+                                    self.draw_parameters(
+                                        msgs,
+                                        source,
+                                        wave_container,
+                                        &parameters,
+                                        ui,
+                                    );
                                     self.draw_variable_rows(
                                         msgs,
+                                        source,
                                         wave_container,
                                         ui,
                                         &variable_rows,
@@ -234,6 +249,7 @@ impl SystemState {
 
                             self.draw_variable_rows(
                                 msgs,
+                                source,
                                 wave_container,
                                 ui,
                                 &variable_rows,
@@ -253,7 +269,9 @@ impl SystemState {
                                 events_enabled: self.user.config.behavior.ftr_events_enabled(),
                                 show_raw_event_generators: self.user.show_raw_event_generators,
                             };
-                            draw_transaction_variable_list(msgs, waves, ui, s, &options);
+                            draw_transaction_variable_list_for_source(
+                                msgs, waves, ui, source, s, &options,
+                            );
                         });
                 }
             }
@@ -263,6 +281,7 @@ impl SystemState {
     fn draw_parameters(
         &self,
         msgs: &mut Vec<Message>,
+        source: SourceId,
         wave_container: &WaveContainer,
         parameters: &[VariableRef],
         ui: &mut Ui,
@@ -281,7 +300,7 @@ impl SystemState {
             );
         })
         .body(|ui| {
-            self.filter_and_draw_variable_list(msgs, wave_container, ui, parameters, None);
+            self.filter_and_draw_variable_list(msgs, source, wave_container, ui, parameters, None);
         });
     }
 
@@ -358,6 +377,16 @@ impl SystemState {
     }
 
     fn draw_all_variables(&mut self, msgs: &mut Vec<Message>, ui: &mut Ui) {
+        if self
+            .user
+            .waves
+            .as_ref()
+            .is_some_and(|waves| waves.source_count() > 1)
+        {
+            self.draw_all_variables_grouped_by_source(msgs, ui);
+            return;
+        }
+
         // Phase 1: Rebuild the row cache only when the key changes.
         // wave_container borrows self.user.waves; all_variable_rows_cache is a disjoint field.
         if let Some(waves) = &self.user.waves
@@ -396,6 +425,7 @@ impl SystemState {
                             ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                             self.draw_variable_rows(
                                 msgs,
+                                WaveData::primary_source_id(),
                                 wave_container,
                                 ui,
                                 &variable_rows,
@@ -405,18 +435,136 @@ impl SystemState {
                         });
                 }
                 DataContainer::Transactions(_) => {
-                    // No support for Streams yet
-                    ui.with_layout(
-                        Layout::top_down(Align::LEFT).with_cross_justify(true),
-                        |ui| {
-                            ui.label("Streams are not yet supported.");
-                            ui.label("Select another view.");
-                        },
-                    );
+                    let options = crate::transactions::TransactionListOptions {
+                        events_enabled: self.user.config.behavior.ftr_events_enabled(),
+                        show_raw_event_generators: self.user.show_raw_event_generators,
+                    };
+                    ScrollArea::both()
+                        .auto_shrink([false; 2])
+                        .id_salt("variables")
+                        .show(ui, |ui| {
+                            ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+                            draw_transaction_variable_list_for_source(
+                                msgs,
+                                waves,
+                                ui,
+                                WaveData::primary_source_id(),
+                                &StreamScopeRef::Root,
+                                &options,
+                            );
+                        });
                 }
                 DataContainer::Empty => {}
             }
         }
+    }
+
+    fn draw_all_variables_grouped_by_source(&self, msgs: &mut Vec<Message>, ui: &mut Ui) {
+        let Some(waves) = &self.user.waves else {
+            return;
+        };
+        let options = crate::transactions::TransactionListOptions {
+            events_enabled: self.user.config.behavior.ftr_events_enabled(),
+            show_raw_event_generators: self.user.show_raw_event_generators,
+        };
+
+        self.draw_variable_list_header(ui);
+        ScrollArea::both()
+            .auto_shrink([false; 2])
+            .id_salt("variables_grouped_by_source")
+            .show(ui, |ui| {
+                ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+                self.draw_all_variables_for_source(
+                    msgs,
+                    waves,
+                    WaveData::primary_source_id(),
+                    &source_label(&waves.source),
+                    waves.format,
+                    &waves.inner,
+                    &options,
+                    ui,
+                );
+                for source in &waves.sources.sources {
+                    ui.separator();
+                    self.draw_all_variables_for_source(
+                        msgs,
+                        waves,
+                        source.id,
+                        &source.label,
+                        source.format,
+                        &source.inner,
+                        &options,
+                        ui,
+                    );
+                }
+            });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_all_variables_for_source(
+        &self,
+        msgs: &mut Vec<Message>,
+        waves: &WaveData,
+        source: SourceId,
+        label: &str,
+        format: crate::WaveFormat,
+        inner: &DataContainer,
+        options: &crate::transactions::TransactionListOptions,
+        ui: &mut Ui,
+    ) {
+        self.draw_source_header(
+            msgs,
+            source,
+            label,
+            format,
+            TimeDomain::from_container(inner).as_ref(),
+            ui,
+        );
+        match inner {
+            DataContainer::Waves(wave_container) => {
+                let variables = self.filtered_variables_unsorted(&wave_container.variables(), true);
+                self.draw_variable_list(msgs, source, wave_container, ui, &variables, None, true);
+            }
+            DataContainer::Transactions(_) => {
+                draw_transaction_variable_list_for_source(
+                    msgs,
+                    waves,
+                    ui,
+                    source,
+                    &StreamScopeRef::Root,
+                    options,
+                );
+            }
+            DataContainer::Empty => {}
+        }
+    }
+
+    fn draw_source_header(
+        &self,
+        msgs: &mut Vec<Message>,
+        source: SourceId,
+        label: &str,
+        format: crate::WaveFormat,
+        time_domain: Option<&TimeDomain>,
+        ui: &mut Ui,
+    ) {
+        let mut text = format!("{label}  {format}");
+        if let Some(time_domain) = time_domain {
+            text.push_str("  ");
+            text.push_str(&format_time_domain(time_domain));
+        }
+
+        let response = ui.label(text);
+        response.context_menu(|ui| {
+            if ui.button("Reload Source").clicked() {
+                msgs.push(Message::ReloadSource(source, true));
+                ui.close();
+            }
+            if source != WaveData::primary_source_id() && ui.button("Close Source").clicked() {
+                msgs.push(Message::CloseSource(source));
+                ui.close();
+            }
+        });
     }
 
     fn draw_all_scopes(
@@ -426,26 +574,91 @@ impl SystemState {
         draw_variables: bool,
         ui: &mut Ui,
     ) {
-        for scope in wave.inner.root_scopes() {
-            match scope {
-                ScopeType::WaveScope(scope) => {
+        let show_source_headers = wave.source_count() > 1;
+        if show_source_headers {
+            self.draw_source_header(
+                msgs,
+                WaveData::primary_source_id(),
+                &source_label(&wave.source),
+                wave.format,
+                TimeDomain::from_container(&wave.inner).as_ref(),
+                ui,
+            );
+        }
+        match &wave.inner {
+            DataContainer::Waves(wave_container) => {
+                for scope in wave_container.root_scopes() {
                     self.draw_selectable_child_or_orphan_scope(
                         msgs,
                         wave,
+                        WaveData::primary_source_id(),
+                        wave_container,
                         &scope,
                         draw_variables,
                         ui,
                     );
                 }
-                ScopeType::StreamScope(_) => {
-                    draw_transaction_root(msgs, wave, ui);
-                }
             }
+            DataContainer::Transactions(_) => {
+                draw_transaction_root(msgs, wave, ui);
+            }
+            DataContainer::Empty => {}
         }
         if draw_variables && let Some(wave_container) = wave.inner.as_waves() {
             let scope = ScopeRef::empty();
             let variables = wave_container.variables_in_scope(&scope);
-            self.filter_and_draw_variable_list(msgs, wave_container, ui, &variables, None);
+            self.filter_and_draw_variable_list(
+                msgs,
+                WaveData::primary_source_id(),
+                wave_container,
+                ui,
+                &variables,
+                None,
+            );
+        }
+        for source in &wave.sources.sources {
+            if show_source_headers {
+                ui.separator();
+                self.draw_source_header(
+                    msgs,
+                    source.id,
+                    &source.label,
+                    source.format,
+                    source.time_domain.as_ref(),
+                    ui,
+                );
+            }
+            match &source.inner {
+                DataContainer::Transactions(_) => {
+                    draw_transaction_root_for_source(msgs, wave, source.id, ui);
+                }
+                DataContainer::Waves(wave_container) => {
+                    for scope in wave_container.root_scopes() {
+                        self.draw_selectable_child_or_orphan_scope(
+                            msgs,
+                            wave,
+                            source.id,
+                            wave_container,
+                            &scope,
+                            draw_variables,
+                            ui,
+                        );
+                    }
+                    if draw_variables {
+                        let scope = ScopeRef::empty();
+                        let variables = wave_container.variables_in_scope(&scope);
+                        self.filter_and_draw_variable_list(
+                            msgs,
+                            source.id,
+                            wave_container,
+                            ui,
+                            &variables,
+                            None,
+                        );
+                    }
+                }
+                DataContainer::Empty => {}
+            }
         }
     }
 
@@ -453,17 +666,18 @@ impl SystemState {
         &self,
         msgs: &mut Vec<Message>,
         wave: &WaveData,
+        source: SourceId,
+        wave_container: &WaveContainer,
         scope: &ScopeRef,
         ui: &mut Ui,
         scroll_to_label: bool,
     ) {
         let name = scope.name();
-        let is_selected = wave.active_scope == Some(ScopeType::WaveScope(scope.clone()));
+        let is_primary = source == WaveData::primary_source_id();
+        let is_selected = wave.active_scope_source == source
+            && wave.active_scope == Some(ScopeType::WaveScope(scope.clone()));
         let mut response = if self.show_hierarchy_icons() {
-            let scope_type = wave
-                .inner
-                .as_waves()
-                .and_then(|wc| wc.get_scope_type(scope));
+            let scope_type = wave_container.get_scope_type(scope);
             let (icon, icon_color) = self.user.config.theme.scope_icons.get_icon(scope_type);
 
             let body_font = ui
@@ -506,27 +720,25 @@ impl SystemState {
             if ui.input(|i| i.pointer.hover_pos().unwrap_or_default().x)
                 > self.user.sidepanel_width.unwrap_or_default()
             {
-                let scope_t = ScopeType::WaveScope(scope.clone());
-                let variables = wave
-                    .inner
-                    .variables_in_scope(&scope_t)
+                let variables = wave_container
+                    .variables_in_scope(scope)
                     .iter()
-                    .filter_map(|var| match var {
-                        VarType::Variable(var) => Some(var.clone()),
-                        VarType::Generator(_) => None,
-                    })
+                    .cloned()
                     .collect_vec();
 
-                msgs.push(Message::AddDraggedVariables(
-                    self.filtered_variables(variables.as_slice(), false),
-                ));
+                let variables = self.filtered_variables(variables.as_slice(), false);
+                if is_primary {
+                    msgs.push(Message::AddDraggedVariables(variables));
+                } else {
+                    msgs.push(Message::AddDraggedVariablesFromSource(source, variables));
+                }
             }
         });
         if self.show_scope_tooltip() {
             response = response.on_hover_ui(|ui| {
                 ui.set_max_width(ui.spacing().tooltip_width);
-                ui.add(egui::Label::new(scope_tooltip_text(
-                    wave,
+                ui.add(egui::Label::new(scope_tooltip_text_for_container(
+                    wave_container,
                     scope,
                     self.parameter_display_location() == ParameterDisplayLocation::Tooltips,
                 )));
@@ -534,25 +746,33 @@ impl SystemState {
         }
         response.context_menu(|ui| {
             if ui.button("Add scope").clicked() {
-                msgs.push(Message::AddScope(scope.clone(), false));
+                msgs.push(Message::AddScopeFromSource(source, scope.clone(), false));
             }
             if ui.button("Add scope recursively").clicked() {
-                msgs.push(Message::AddScope(scope.clone(), true));
+                msgs.push(Message::AddScopeFromSource(source, scope.clone(), true));
             }
             if ui.button("Add events recursively").clicked() {
-                msgs.push(Message::AddScopeEventsRecursive(scope.clone()));
+                msgs.push(Message::AddScopeEventsRecursiveFromSource(
+                    source,
+                    scope.clone(),
+                ));
             }
             if ui.button("Add scope as group").clicked() {
-                msgs.push(Message::AddScopeAsGroup(scope.clone(), false));
+                msgs.push(Message::AddScopeAsGroupFromSource(
+                    source,
+                    scope.clone(),
+                    false,
+                ));
             }
             if ui.button("Add scope as group recursively").clicked() {
-                msgs.push(Message::AddScopeAsGroup(scope.clone(), true));
+                msgs.push(Message::AddScopeAsGroupFromSource(
+                    source,
+                    scope.clone(),
+                    true,
+                ));
             }
 
-            let is_array_scope = wave
-                .inner
-                .as_waves()
-                .is_some_and(|wc| wc.scope_is_array(scope));
+            let is_array_scope = is_primary && wave_container.scope_is_array(scope);
 
             if is_array_scope && ui.button("Show frame buffer").clicked() {
                 msgs.push(Message::SetFrameBufferArray(scope.clone()));
@@ -566,11 +786,14 @@ impl SystemState {
             }
         });
         response.clicked().then(|| {
-            msgs.push(Message::SetActiveScope(if is_selected {
-                None
-            } else {
-                Some(ScopeType::WaveScope(scope.clone()))
-            }));
+            msgs.push(Message::SetActiveScopeFromSource(
+                source,
+                if is_selected {
+                    None
+                } else {
+                    Some(ScopeType::WaveScope(scope.clone()))
+                },
+            ));
         });
     }
 
@@ -578,15 +801,12 @@ impl SystemState {
         &self,
         msgs: &mut Vec<Message>,
         wave: &WaveData,
+        source: SourceId,
+        wave_container: &WaveContainer,
         scope: &ScopeRef,
         draw_variables: bool,
         ui: &mut Ui,
     ) {
-        // Extract wave container once to avoid repeated as_waves().unwrap() calls
-        let Some(wave_container) = wave.inner.as_waves() else {
-            return;
-        };
-
         let Some(child_scopes) = wave_container
             .child_scopes(scope)
             .context("Failed to get child scopes")
@@ -606,14 +826,22 @@ impl SystemState {
             // match the other headers that actually have an icon.
             ui.horizontal(|ui| {
                 ui.add_space(ui.spacing().icon_width + ui.spacing().icon_spacing);
-                self.add_scope_selectable_label(msgs, wave, scope, ui, false);
+                self.add_scope_selectable_label(
+                    msgs,
+                    wave,
+                    source,
+                    wave_container,
+                    scope,
+                    ui,
+                    false,
+                );
             });
         } else {
             let should_open_header = self.should_open_header_and_scroll_to(scope);
             let mut collapsing_header =
                 egui::collapsing_header::CollapsingState::load_with_default_open(
                     ui.ctx(),
-                    egui::Id::new(scope),
+                    egui::Id::new(format!("hierarchy-scope-{source}-{}", scope)),
                     false,
                 );
             if let Some((header_state, _)) = should_open_header {
@@ -627,6 +855,8 @@ impl SystemState {
                             self.add_scope_selectable_label(
                                 msgs,
                                 wave,
+                                source,
+                                wave_container,
                                 scope,
                                 ui,
                                 should_open_header.is_some_and(|(_, scroll)| scroll),
@@ -644,14 +874,23 @@ impl SystemState {
                     {
                         let parameters = wave_container.parameters_in_scope(scope);
                         if !parameters.is_empty() {
-                            self.draw_parameters(msgs, wave_container, &parameters, ui);
+                            self.draw_parameters(msgs, source, wave_container, &parameters, ui);
                         }
                     }
-                    self.draw_root_scope_view(msgs, wave, scope, draw_variables, ui);
+                    self.draw_root_scope_view(
+                        msgs,
+                        wave,
+                        source,
+                        wave_container,
+                        scope,
+                        draw_variables,
+                        ui,
+                    );
                     if draw_variables {
                         let variables = wave_container.variables_in_scope(scope);
                         self.filter_and_draw_variable_list(
                             msgs,
+                            source,
                             wave_container,
                             ui,
                             &variables,
@@ -666,15 +905,12 @@ impl SystemState {
         &self,
         msgs: &mut Vec<Message>,
         wave: &WaveData,
+        source: SourceId,
+        wave_container: &WaveContainer,
         root_scope: &ScopeRef,
         draw_variables: bool,
         ui: &mut Ui,
     ) {
-        // Extract wave container once to avoid unwrap
-        let Some(wave_container) = wave.inner.as_waves() else {
-            return;
-        };
-
         wave_container
             .child_scopes(root_scope)
             .context("Failed to get child scopes")
@@ -687,6 +923,8 @@ impl SystemState {
                 self.draw_selectable_child_or_orphan_scope(
                     msgs,
                     wave,
+                    source,
+                    wave_container,
                     &child_scope,
                     draw_variables,
                     ui,
@@ -697,6 +935,7 @@ impl SystemState {
     fn filter_and_draw_variable_list(
         &self,
         msgs: &mut Vec<Message>,
+        source: SourceId,
         wave_container: &WaveContainer,
         ui: &mut Ui,
         variables: &[VariableRef],
@@ -705,6 +944,7 @@ impl SystemState {
         let filtered_variables = self.filtered_variables_unsorted(variables, false);
         self.draw_variable_list(
             msgs,
+            source,
             wave_container,
             ui,
             &filtered_variables,
@@ -716,6 +956,7 @@ impl SystemState {
     fn draw_variable_list(
         &self,
         msgs: &mut Vec<Message>,
+        source: SourceId,
         wave_container: &WaveContainer,
         ui: &mut Ui,
         variables: &[VariableRef],
@@ -725,6 +966,7 @@ impl SystemState {
         let variable_rows = self.build_variable_rows(wave_container, variables);
         self.draw_variable_rows(
             msgs,
+            source,
             wave_container,
             ui,
             &variable_rows,
@@ -772,6 +1014,7 @@ impl SystemState {
     fn draw_variable_rows(
         &self,
         msgs: &mut Vec<Message>,
+        source: SourceId,
         wave_container: &WaveContainer,
         ui: &mut Ui,
         variable_rows: &[VariableListRow],
@@ -937,12 +1180,26 @@ impl SystemState {
                         if ui.input(|i| i.pointer.hover_pos().unwrap_or_default().x)
                             > self.user.sidepanel_width.unwrap_or_default()
                         {
-                            msgs.push(Message::AddDraggedVariables(vec![variable.clone()]));
+                            if source == WaveData::primary_source_id() {
+                                msgs.push(Message::AddDraggedVariables(vec![variable.clone()]));
+                            } else {
+                                msgs.push(Message::AddDraggedVariablesFromSource(
+                                    source,
+                                    vec![variable.clone()],
+                                ));
+                            }
                         }
                     });
-                    response
-                        .clicked()
-                        .then(|| msgs.push(Message::AddVariables(vec![variable.clone()])));
+                    if response.clicked() {
+                        if source == WaveData::primary_source_id() {
+                            msgs.push(Message::AddVariables(vec![variable.clone()]));
+                        } else {
+                            msgs.push(Message::AddVariablesFromSource(
+                                source,
+                                vec![variable.clone()],
+                            ));
+                        }
+                    }
                 },
             );
         }

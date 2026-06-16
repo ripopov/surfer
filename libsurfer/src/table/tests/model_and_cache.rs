@@ -39,10 +39,12 @@ fn table_model_spec_multi_signal_change_list_ron_round_trip() {
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.clk"),
                 field: vec![],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                 field: vec!["value".to_string(), "lsb".to_string()],
             },
@@ -65,10 +67,12 @@ fn multi_signal_change_list_default_view_config_deterministic() {
     let spec_a = TableModelSpec::MultiSignalChangeList {
         variables: vec![
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.clk"),
                 field: vec![],
             },
             MultiSignalEntry {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                 field: vec!["value".to_string()],
             },
@@ -76,6 +80,7 @@ fn multi_signal_change_list_default_view_config_deterministic() {
     };
     let spec_b = TableModelSpec::MultiSignalChangeList {
         variables: vec![MultiSignalEntry {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
             field: vec!["value".to_string()],
         }],
@@ -104,6 +109,7 @@ fn multi_signal_change_list_model_creation_no_waves_returns_data_unavailable() {
     let ctx = state.table_model_context();
     let spec = TableModelSpec::MultiSignalChangeList {
         variables: vec![MultiSignalEntry {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.clk"),
             field: vec![],
         }],
@@ -259,15 +265,18 @@ fn table_view_config_round_trip_with_pinned_filters() {
 fn signal_analysis_config_ron_round_trip() {
     let config = SignalAnalysisConfig {
         sampling: SignalAnalysisSamplingConfig {
+            source: crate::source::SourceId::default(),
             signal: VariableRef::from_hierarchy_string("tb.clk"),
         },
         signals: vec![
             SignalAnalysisSignal {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.data_out"),
                 field: vec![],
                 translator: "Unsigned".to_string(),
             },
             SignalAnalysisSignal {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.counter"),
                 field: vec!["value".to_string()],
                 translator: "Signed".to_string(),
@@ -290,9 +299,11 @@ fn table_model_spec_analysis_results_signal_analysis_v1_ron_round_trip() {
         params: AnalysisParams::SignalAnalysisV1 {
             config: SignalAnalysisConfig {
                 sampling: SignalAnalysisSamplingConfig {
+                    source: crate::source::SourceId::default(),
                     signal: VariableRef::from_hierarchy_string("tb.clk"),
                 },
                 signals: vec![SignalAnalysisSignal {
+                    source: crate::source::SourceId::default(),
                     variable: VariableRef::from_hierarchy_string("tb.data_out"),
                     field: vec![],
                     translator: "Unsigned".to_string(),
@@ -350,6 +361,7 @@ fn table_model_spec_create_unimplemented_returns_error() {
     let state = SystemState::new_default_config().expect("state");
     let ctx = state.table_model_context();
     let signal_spec = TableModelSpec::SignalChangeList {
+        source: crate::source::SourceId::default(),
         variable: crate::wave_container::VariableRef::from_hierarchy_string(""),
         field: vec![],
     };

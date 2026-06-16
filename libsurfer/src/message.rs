@@ -20,6 +20,8 @@ use crate::frame_buffer::FrameBufferColorMode;
 use crate::graphics::{Graphic, GraphicId, GraphicsY};
 use crate::hierarchy::{ParameterDisplayLocation, ScopeExpandType};
 use crate::mousegestures::AnnotationKind;
+use crate::source::LoadRequestId;
+use crate::source::{SourceId, SourceTransactionRef};
 use crate::state::UserState;
 use crate::table::{
     SignalAnalysisConfig, TableCache, TableCacheEntry, TableCacheError, TableCacheKey,
@@ -46,7 +48,7 @@ use crate::{
     variable_filter::VariableIOFilterType,
     variable_name_type::VariableNameType,
     wave_container::{AnalogCacheKey, ScopeRef, VariableRef, WaveContainer},
-    wave_source::{CxxrtlKind, LoadOptions, WaveFormat},
+    wave_source::{CxxrtlKind, LoadIntent, LoadOptions, WaveFormat},
     wellen::{BodyResult, HeaderResult, LoadSignalsResult},
 };
 
@@ -84,18 +86,24 @@ impl<T: Copy> Copy for MessageTarget<T> {}
 pub enum Message {
     /// Set active scope, None corresponds to the top-level scope.
     SetActiveScope(Option<ScopeType>),
+    SetActiveScopeFromSource(SourceId, Option<ScopeType>),
     ExpandScope(ScopeExpandType),
     /// Add one or more variables to wave view.
     AddVariables(Vec<VariableRef>),
+    AddVariablesFromSource(SourceId, Vec<VariableRef>),
     /// Add scope to wave view. If second argument is true, add subscopes recursively.
     AddScope(ScopeRef, bool),
+    AddScopeFromSource(SourceId, ScopeRef, bool),
     /// Add VCD event variables from scope subtree to wave view.
     AddScopeEventsRecursive(ScopeRef),
+    AddScopeEventsRecursiveFromSource(SourceId, ScopeRef),
     /// Add scope to wave view as a group. If second argument is true, add subscopes recursively.
     AddScopeAsGroup(ScopeRef, bool),
+    AddScopeAsGroupFromSource(SourceId, ScopeRef, bool),
     /// Add a character to the repeat command counter.
     AddCount(char),
     AddStreamOrGenerator(TransactionStreamRef),
+    AddStreamOrGeneratorFromSource(SourceId, TransactionStreamRef),
     AddStreamOrGeneratorFromName(Option<StreamScopeRef>, String),
     AddAllFromStreamScope(String),
     /// Reset the repeat command counter.
@@ -113,6 +121,7 @@ pub enum Message {
     MoveFocus(MoveDir, CommandCount, bool),
     MoveFocusedItem(MoveDir, CommandCount),
     FocusTransaction(Option<TransactionRef>, Option<Transaction>),
+    FocusTransactionFromSource(Option<SourceTransactionRef>, Option<Transaction>),
     VerticalScroll(MoveDir, CommandCount),
     /// Scroll in vertical direction so that the item at a given location in the list is at the top (or visible).
     ScrollToItem(usize),
@@ -159,6 +168,14 @@ pub enum Message {
     SetSurverStatus(web_time::Instant, String, SurverStatus),
     /// Load file from file path.
     LoadFile(Utf8PathBuf, LoadOptions),
+    /// Load file with explicit session/source intent.
+    LoadFileWithIntent(Utf8PathBuf, LoadIntent),
+    /// Queue a set of file loads with explicit intents, preserving order.
+    LoadFilesWithIntents(Vec<(Utf8PathBuf, LoadIntent)>),
+    /// Close an additive source and remove source-owned rows/tables.
+    CloseSource(SourceId),
+    /// Reload one source from its locator without replacing the whole session.
+    ReloadSource(SourceId, bool),
     /// Load file from URL.
     LoadWaveformFileFromUrl(String, LoadOptions),
     /// Load file from data.
@@ -186,8 +203,44 @@ pub enum Message {
         #[debug(skip)] HeaderResult,
     ),
     #[serde(skip)]
+    WaveHeaderLoadedWithIntent(
+        web_time::Instant,
+        LoadRequestId,
+        Option<SourceId>,
+        WaveSource,
+        LoadIntent,
+        #[debug(skip)] HeaderResult,
+    ),
+    #[serde(skip)]
+    WaveHeaderLoadFailedWithIntent(
+        LoadRequestId,
+        Option<SourceId>,
+        WaveSource,
+        LoadIntent,
+        eyre::Error,
+    ),
+    #[serde(skip)]
     /// Message sent when waveform file body is loaded.
     WaveBodyLoaded(web_time::Instant, WaveSource, #[debug(skip)] BodyResult),
+    #[serde(skip)]
+    WaveBodyLoadedForSource(
+        web_time::Instant,
+        LoadRequestId,
+        SourceId,
+        WaveSource,
+        #[debug(skip)] BodyResult,
+    ),
+    #[serde(skip)]
+    WaveBodyLoadedForReloadedSource(
+        web_time::Instant,
+        LoadRequestId,
+        SourceId,
+        WaveSource,
+        WaveFormat,
+        #[debug(skip)] Box<WaveContainer>,
+        #[debug(skip)] BodyResult,
+        bool,
+    ),
     #[serde(skip)]
     WavesLoaded(
         WaveSource,
@@ -198,11 +251,24 @@ pub enum Message {
     #[serde(skip)]
     SignalsLoaded(web_time::Instant, #[debug(skip)] LoadSignalsResult),
     #[serde(skip)]
+    SignalsLoadedForSource(
+        SourceId,
+        web_time::Instant,
+        #[debug(skip)] LoadSignalsResult,
+    ),
+    #[serde(skip)]
     TransactionStreamsLoaded(
         WaveSource,
         WaveFormat,
         #[debug(skip)] TransactionContainer,
         LoadOptions,
+    ),
+    #[serde(skip)]
+    TransactionStreamsLoadedWithIntent(
+        WaveSource,
+        WaveFormat,
+        #[debug(skip)] TransactionContainer,
+        LoadIntent,
     ),
     #[serde(skip)]
     Error(eyre::Error),
@@ -215,6 +281,8 @@ pub enum Message {
     ShowCommandPrompt(String, Option<String>),
     /// Message sent when file is loadedropped onto Surfer.
     FileDropped(DroppedFile),
+    /// Message sent when one or more files are dropped onto Surfer.
+    FilesDropped(Vec<DroppedFile>),
     #[serde(skip)]
     /// Message sent when download of a waveform file is complete.
     FileDownloaded(String, Bytes, LoadOptions),
@@ -407,6 +475,7 @@ pub enum Message {
     VariableDragTargetChanged(crate::displayed_item_tree::TargetPosition),
     VariableDragFinished,
     AddDraggedVariables(Vec<VariableRef>),
+    AddDraggedVariablesFromSource(SourceId, Vec<VariableRef>),
     /// Unpauses the simulation if the wave source supports this kind of interactivity. Otherwise
     /// does nothing
     UnpauseSimulation,
@@ -434,6 +503,7 @@ pub enum Message {
     },
     #[serde(skip)]
     AnalogCacheBuilt {
+        source: SourceId,
         #[debug(skip)]
         entry: Arc<crate::analog_signal_cache::AnalogCacheEntry>,
         #[debug(skip)]
@@ -485,11 +555,15 @@ pub enum Message {
     },
     /// Open a transaction trace table for a specific generator
     OpenTransactionTable {
+        #[serde(default)]
+        source: SourceId,
         generator: TransactionStreamRef,
     },
     /// Open an FTR event table for a parent generator that has a matching
     /// `.events` generator
     OpenEventTable {
+        #[serde(default)]
+        source: SourceId,
         generator: TransactionStreamRef,
     },
     /// Remove a table tile from the tile tree

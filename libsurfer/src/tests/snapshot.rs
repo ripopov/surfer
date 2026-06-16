@@ -28,6 +28,7 @@ use crate::{
     hierarchy::{HierarchyStyle, ParameterDisplayLocation, ScopeExpandType},
     message::MessageTarget,
     setup_custom_font,
+    source::SourceId,
     state::UserState,
     trace_style::TraceStyle,
     transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef},
@@ -35,7 +36,7 @@ use crate::{
     variable_name_type::VariableNameType,
     wave_container::{ScopeRef, ScopeRefExt, VariableRef, VariableRefExt},
     wave_data::ScopeType,
-    wave_source::{LoadOptions, STATE_FILE_EXTENSION},
+    wave_source::{LoadIntent, LoadOptions, STATE_FILE_EXTENSION},
 };
 
 /// Default snapshot size
@@ -294,6 +295,52 @@ macro_rules! snapshot_ui_with_file_and_msgs {
                 }
             }
 
+            state
+        });
+    };
+}
+
+macro_rules! snapshot_ui_with_files_and_msgs {
+    ($name:ident, $files:expr, $msgs:expr) => {
+        snapshot_ui!($name, || {
+            let files: Vec<&str> = Vec::from($files);
+            let mut iter = files.into_iter();
+            let first_file = iter.next().expect("at least one snapshot input file");
+            let mut state = SystemState::new_default_config()
+                .unwrap()
+                .with_params(StartupParams {
+                    waves: Some(WaveSource::File(
+                        get_project_root()
+                            .unwrap()
+                            .join(first_file)
+                            .try_into()
+                            .unwrap(),
+                    )),
+                    startup_commands: vec![],
+                    ..Default::default()
+                });
+
+            wait_for_waves_fully_loaded(&mut state, 10);
+
+            for file in iter {
+                state.update(Message::LoadFileWithIntent(
+                    get_project_root().unwrap().join(file).try_into().unwrap(),
+                    LoadIntent::AddSource,
+                ));
+                state.handle_async_messages();
+                wait_for_waves_fully_loaded(&mut state, 10);
+            }
+
+            state.add_batch_message(Message::SetMenuVisible(false));
+            state.add_batch_message(Message::SetSidePanelVisible(false));
+            state.add_batch_message(Message::SetToolbarVisible(false));
+            state.add_batch_message(Message::SetOverviewVisible(false));
+            state.add_batch_message(Message::CloseOpenSiblingStateFileDialog {
+                load_state: false,
+                do_not_show_again: true,
+            });
+            state.add_batch_messages($msgs);
+            wait_for_waves_fully_loaded(&mut state, 10);
             state
         });
     };
@@ -2014,6 +2061,31 @@ snapshot_ui_with_file_and_msgs! {transaction_hierarchy_variables, "examples/my_d
     Message::SetHierarchyStyle(HierarchyStyle::Variables),
 ]}
 
+snapshot_ui_with_files_and_msgs! {fused_wave_ftr_hierarchy_tree, ["examples/fused_ftr_wave.vcd", "examples/my_db.ftr"], [
+    Message::SetSidePanelVisible(true),
+    Message::SetHierarchyStyle(HierarchyStyle::Tree),
+]}
+
+snapshot_ui_with_files_and_msgs! {fused_wave_ftr_hierarchy_variables, ["examples/fused_ftr_wave.vcd", "examples/my_db.ftr"], [
+    Message::SetSidePanelVisible(true),
+    Message::SetHierarchyStyle(HierarchyStyle::Variables),
+]}
+
+snapshot_ui_with_files_and_msgs! {fused_wave_wave_hierarchy_tree, ["examples/fused_ftr_wave.vcd", "examples/fused_ftr_wave.vcd"], [
+    Message::SetSidePanelVisible(true),
+    Message::SetHierarchyStyle(HierarchyStyle::Tree),
+    Message::ExpandScope(ScopeExpandType::ExpandAll),
+]}
+
+snapshot_ui_with_files_and_msgs! {fused_wave_wave_hierarchy_separate_source, ["examples/fused_ftr_wave.vcd", "examples/fused_ftr_wave.vcd"], [
+    Message::SetSidePanelVisible(true),
+    Message::SetHierarchyStyle(HierarchyStyle::Separate),
+    Message::SetActiveScopeFromSource(
+        SourceId(1),
+        Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"]))),
+    ),
+]}
+
 // makes sure that variables that are not part of a scope are properly displayed in the hierarchy tree view
 snapshot_ui_with_file_and_msgs! {hierarchy_tree_with_root_vars, "examples/atxmega256a3u-bmda-jtag_short.vcd", [
     Message::SetSidePanelVisible(true),
@@ -2693,6 +2765,38 @@ snapshot_ui_with_file_and_msgs! {simple_ftr_loads, "examples/my_db.ftr", [
 
 ]}
 
+snapshot_ui_with_files_and_msgs! {fused_wave_ftr_mixed_canvas, ["examples/fused_ftr_wave.vcd", "examples/my_db.ftr"], [
+    Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.clk")]),
+    Message::AddDivider(Some("Transactions".to_string()), None),
+    Message::AddStreamOrGeneratorFromSource(
+        SourceId(1),
+        TransactionStreamRef::new_gen(
+            StreamId(1),
+            GeneratorId(4),
+            "pipelined_stream.read".to_string()
+        )
+    ),
+    Message::CursorSet(BigInt::from(1_500_000)),
+]}
+
+snapshot_ui_with_files_and_msgs! {fused_wave_ftr_unequal_span_mixed_canvas, ["examples/fused_ftr_wave.vcd", "examples/my_db.ftr", "examples/fused_ftr_wave_long.vcd"], [
+    Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.clk")]),
+    Message::AddVariablesFromSource(
+        SourceId(2),
+        vec![VariableRef::from_hierarchy_string("tb.counter")]
+    ),
+    Message::AddDivider(Some("Transactions".to_string()), None),
+    Message::AddStreamOrGeneratorFromSource(
+        SourceId(1),
+        TransactionStreamRef::new_gen(
+            StreamId(1),
+            GeneratorId(4),
+            "pipelined_stream.read".to_string()
+        )
+    ),
+    Message::ZoomToFit { viewport_idx: 0 },
+]}
+
 snapshot_ui_with_file_and_msgs! {add_stream_from_name, "examples/my_db.ftr", [
     Message::AddStreamOrGeneratorFromName(None, "read".to_string()),
     Message::AddDivider(Some("Add all for root".to_string()), None),
@@ -2782,6 +2886,7 @@ snapshot_ui_with_file_and_msgs! {ftr_events_focus_parent_events_section, "exampl
 snapshot_ui_with_file_and_msgs! {ftr_events_event_table, "examples/ftr_events.ftr", [
     Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(StreamId(1), GeneratorId(3), "instruction".to_string())),
     Message::OpenEventTable {
+        source: SourceId::default(),
         generator: TransactionStreamRef::new_gen(StreamId(1), GeneratorId(3), "instruction".to_string()),
     },
 ]}
@@ -2893,7 +2998,7 @@ fn ftr_event_navigation_moves_between_events() {
             .waves
             .as_ref()
             .and_then(|waves| waves.focused_transaction.0.clone())
-            .map(|tx_ref| tx_ref.id)
+            .map(|tx_ref| tx_ref.inner.id)
     };
 
     // Parent tx#1 focused: event_next focuses its first event (tx#2)
@@ -3941,6 +4046,7 @@ snapshot_ui_with_file_and_msgs! {table_signal_change_list_counter, "examples/cou
     Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.clk")]),
     Message::AddTableTile {
         spec: crate::table::TableModelSpec::SignalChangeList {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.clk"),
             field: vec![],
         },
@@ -4008,12 +4114,14 @@ snapshot_ui_with_file_and_msgs! {table_light_theme_waveform_two_tiles, "examples
     ]),
     Message::AddTableTile {
         spec: crate::table::TableModelSpec::SignalChangeList {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.clk"),
             field: vec![],
         },
     },
     Message::AddTableTile {
         spec: crate::table::TableModelSpec::SignalChangeList {
+            source: crate::source::SourceId::default(),
             variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
             field: vec![],
         },
@@ -4508,6 +4616,7 @@ snapshot_ui_with_file_and_msgs! {table_transaction_trace_renders_columns, "examp
     // Open transaction table for 'read' generator - shows Start/End/Duration/Type columns plus attributes
     Message::AddTableTile {
         spec: crate::table::TableModelSpec::TransactionTrace {
+            source: SourceId::default(),
             generator: TransactionStreamRef::new_gen(StreamId(1), GeneratorId(4), "read".to_string()),
         },
     },
@@ -4519,6 +4628,7 @@ snapshot_ui_with_file_and_msgs! {table_transaction_trace_for_write_generator, "e
     // Open transaction table for the 'write' generator to show different attributes
     Message::AddTableTile {
         spec: crate::table::TableModelSpec::TransactionTrace {
+            source: SourceId::default(),
             generator: TransactionStreamRef::new_gen(StreamId(1), GeneratorId(5), "write".to_string()),
         },
     },
@@ -4530,9 +4640,11 @@ snapshot_ui_with_file_and_msgs! {table_transaction_trace_stream_opens_all_genera
     Message::AddStreamOrGenerator(TransactionStreamRef::new_stream(StreamId(1), "pipelined_stream".to_string())),
     // Open transaction tables for both generators in stream 1 (read + write)
     Message::OpenTransactionTable {
+        source: SourceId::default(),
         generator: TransactionStreamRef::new_gen(StreamId(1), GeneratorId(4), "read".to_string()),
     },
     Message::OpenTransactionTable {
+        source: SourceId::default(),
         generator: TransactionStreamRef::new_gen(StreamId(1), GeneratorId(5), "write".to_string()),
     },
 ]}
@@ -4575,9 +4687,11 @@ snapshot_ui!(table_transaction_tables_restored_from_state_file, || {
     wait_for_waves_fully_loaded(&mut state, 10);
 
     state.update(Message::OpenTransactionTable {
+        source: SourceId::default(),
         generator: TransactionStreamRef::new_gen(StreamId(1), GeneratorId(4), "read".to_string()),
     });
     state.update(Message::OpenTransactionTable {
+        source: SourceId::default(),
         generator: TransactionStreamRef::new_gen(StreamId(1), GeneratorId(5), "write".to_string()),
     });
 
@@ -4640,10 +4754,12 @@ snapshot_ui_with_file_and_msgs! {table_multi_signal_change_list_basic, "examples
         spec: crate::table::TableModelSpec::MultiSignalChangeList {
             variables: vec![
                 crate::table::MultiSignalEntry {
+                    source: crate::source::SourceId::default(),
                     variable: VariableRef::from_hierarchy_string("tb.clk"),
                     field: vec![],
                 },
                 crate::table::MultiSignalEntry {
+                    source: crate::source::SourceId::default(),
                     variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                     field: vec![],
                 },
@@ -4664,14 +4780,17 @@ snapshot_ui_with_file_and_msgs! {table_multi_signal_change_list_three_signals, "
         spec: crate::table::TableModelSpec::MultiSignalChangeList {
             variables: vec![
                 crate::table::MultiSignalEntry {
+                    source: crate::source::SourceId::default(),
                     variable: VariableRef::from_hierarchy_string("tb.clk"),
                     field: vec![],
                 },
                 crate::table::MultiSignalEntry {
+                    source: crate::source::SourceId::default(),
                     variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                     field: vec![],
                 },
                 crate::table::MultiSignalEntry {
+                    source: crate::source::SourceId::default(),
                     variable: VariableRef::from_hierarchy_string("tb.reset"),
                     field: vec![],
                 },
@@ -4720,10 +4839,12 @@ snapshot_ui!(table_multi_signal_change_list_dense, || {
         spec: crate::table::TableModelSpec::MultiSignalChangeList {
             variables: vec![
                 crate::table::MultiSignalEntry {
+                    source: crate::source::SourceId::default(),
                     variable: VariableRef::from_hierarchy_string("tb.clk"),
                     field: vec![],
                 },
                 crate::table::MultiSignalEntry {
+                    source: crate::source::SourceId::default(),
                     variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                     field: vec![],
                 },
@@ -4764,9 +4885,11 @@ snapshot_ui_with_file_and_msgs! {signal_analysis_results_table, "examples/counte
     Message::RunSignalAnalysis {
         config: crate::table::SignalAnalysisConfig {
             sampling: crate::table::SignalAnalysisSamplingConfig {
+                source: crate::source::SourceId::default(),
                 signal: VariableRef::from_hierarchy_string("tb.clk"),
             },
             signals: vec![crate::table::SignalAnalysisSignal {
+                source: crate::source::SourceId::default(),
                 variable: VariableRef::from_hierarchy_string("tb.dut.counter"),
                 field: vec![],
                 translator: "Unsigned".to_string(),

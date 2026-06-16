@@ -42,6 +42,7 @@ pub mod overview;
 pub mod rectangle;
 pub mod remote;
 pub mod server_file_window;
+pub mod source;
 pub mod state;
 pub mod state_file_io;
 pub mod state_util;
@@ -95,7 +96,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, LazyLock, RwLock};
 
-use crate::channels::checked_send;
 use batch_commands::read_command_bytes;
 use batch_commands::read_command_file;
 #[cfg(target_arch = "wasm32")]
@@ -126,6 +126,7 @@ use wave_container::ScopeRef;
 #[cfg(all(not(target_arch = "wasm32"), feature = "wasm_plugins"))]
 use crate::async_util::perform_work;
 use crate::config::{SurferConfig, SurferTheme};
+use crate::data_container::DataContainer;
 use crate::dialog::{
     OpenSiblingStateFileDialog, ReloadWaveformDialog, SignalAnalysisWizardDialog,
     SignalAnalysisWizardSamplingOption, SignalAnalysisWizardSignal,
@@ -137,13 +138,14 @@ use crate::displayed_item_tree::VisibleItemIndex;
 use crate::drawing_canvas::TxDrawingCommands;
 use crate::frame_buffer::{FrameBufferColorMode, FrameBufferContent, build_frame_buffer_content};
 use crate::message::Message;
+use crate::source::{LoadRequestId, SourceId, SourceTransactionRef};
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
 use crate::translation::{AnyTranslator, all_translators};
 use crate::variable_filter::{VariableIOFilterType, VariableNameFilterType};
 use crate::viewport::Viewport;
 use crate::wave_container::{ScopeRefExt, VariableRefExt, WaveContainer};
 use crate::wave_data::WaveData;
-use crate::wave_source::{LoadOptions, WaveFormat, WaveSource};
+use crate::wave_source::{LoadIntent, LoadOptions, WaveFormat, WaveSource};
 use crate::wellen::{HeaderResult, convert_format};
 
 /// A number that is non-zero if there are asynchronously triggered operations that
@@ -169,6 +171,7 @@ pub(crate) static WCP_SC_HANDLER: LazyLock<GlobalChannelTx<WcpSCMessage>> =
 #[derive(Default)]
 pub struct StartupParams {
     pub waves: Option<WaveSource>,
+    pub additional_waves: Vec<WaveSource>,
     pub wcp_initiate: Option<u16>,
     pub startup_commands: Vec<String>,
 }
@@ -239,6 +242,7 @@ pub enum ColorSpecifier {
 enum CachedDrawData {
     WaveDrawData(CachedWaveDrawData),
     TransactionDrawData(CachedTransactionDrawData),
+    MixedDrawData(CachedMixedDrawData),
 }
 
 struct CachedWaveDrawData {
@@ -257,6 +261,11 @@ struct CachedTransactionDrawData {
     pub out_relation_tx_ids: Vec<TransactionRef>,
     /// Parent transaction to co-highlight while one of its events is focused
     pub parent_highlight_tx: Option<TransactionRef>,
+}
+
+struct CachedMixedDrawData {
+    pub wave: Option<CachedWaveDrawData>,
+    pub transactions: HashMap<SourceId, CachedTransactionDrawData>,
 }
 
 pub struct Channels {
@@ -301,7 +310,7 @@ impl WcpClientCapabilities {
 struct CanvasState {
     message: String,
     focused_item: Option<VisibleItemIndex>,
-    focused_transaction: (Option<TransactionRef>, Option<Transaction>),
+    focused_transaction: (Option<SourceTransactionRef>, Option<Transaction>),
     items_tree: DisplayedItemTree,
     displayed_items: HashMap<DisplayedItemRef, DisplayedItem>,
     markers: HashMap<u8, BigInt>,
@@ -324,6 +333,10 @@ impl SystemState {
                 let waves = self.user.waves.as_mut()?;
                 waves.set_active_scope(scope)?;
             }
+            Message::SetActiveScopeFromSource(source, scope) => {
+                let waves = self.user.waves.as_mut()?;
+                waves.set_active_scope_from_source(source, scope)?;
+            }
 
             Message::ExpandScope(scope_ref) => {
                 *self.scope_ref_to_expand.borrow_mut() = Some(scope_ref);
@@ -341,6 +354,32 @@ impl SystemState {
                             waves.add_variables(&self.translators, vars, None, true, false, None)
                         {
                             self.load_variables(cmd);
+                        }
+                        self.invalidate_draw_commands();
+                    } else {
+                        error!("Could not load signals, no waveform loaded");
+                    }
+                }
+            }
+            Message::AddVariablesFromSource(source, vars) => {
+                if !vars.is_empty() {
+                    let undo_msg = if vars.len() == 1 {
+                        format!("Add variable {} from {source}", vars[0].name)
+                    } else {
+                        format!("Add {} variables from {source}", vars.len())
+                    };
+                    self.save_current_canvas(undo_msg);
+                    if let Some(waves) = self.user.waves.as_mut() {
+                        if let (Some(cmd), _) = waves.add_variables_from_source(
+                            source,
+                            &self.translators,
+                            vars,
+                            None,
+                            true,
+                            false,
+                            None,
+                        ) {
+                            self.load_variables_for_source(source, cmd);
                         }
                         self.invalidate_draw_commands();
                     } else {
@@ -387,6 +426,26 @@ impl SystemState {
 
                 self.invalidate_draw_commands();
             }
+            Message::AddScopeFromSource(source, scope, recursive) => {
+                self.save_current_canvas(format!("Add scope {} from {source}", scope.name()));
+
+                let vars = self.get_scope_from_source(source, scope, recursive);
+                let waves = self.user.waves.as_mut()?;
+
+                if let (Some(cmd), _) = waves.add_variables_from_source(
+                    source,
+                    &self.translators,
+                    vars,
+                    None,
+                    true,
+                    false,
+                    None,
+                ) {
+                    self.load_variables_for_source(source, cmd);
+                }
+
+                self.invalidate_draw_commands();
+            }
             Message::AddScopeEventsRecursive(scope) => {
                 let vars = self.get_scope_vcd_events(scope.clone(), true);
                 if vars.is_empty() {
@@ -405,6 +464,32 @@ impl SystemState {
                     self.invalidate_draw_commands();
                 }
             }
+            Message::AddScopeEventsRecursiveFromSource(source, scope) => {
+                let vars = self.get_scope_vcd_events_from_source(source, scope.clone(), true);
+                if vars.is_empty() {
+                    warn!("No event variables found in scope {scope} from {source}");
+                } else {
+                    self.save_current_canvas(format!(
+                        "Add events from scope {} from {source}",
+                        scope.name()
+                    ));
+                    let waves = self.user.waves.as_mut()?;
+
+                    if let (Some(cmd), _) = waves.add_variables_from_source(
+                        source,
+                        &self.translators,
+                        vars,
+                        None,
+                        true,
+                        false,
+                        None,
+                    ) {
+                        self.load_variables_for_source(source, cmd);
+                    }
+
+                    self.invalidate_draw_commands();
+                }
+            }
             Message::AddScopeAsGroup(scope, recursive) => {
                 self.save_current_canvas(format!("Add scope {} as group", scope.name()));
                 let waves = self.user.waves.as_mut()?;
@@ -412,6 +497,20 @@ impl SystemState {
                 let target = passed_or_focused.unwrap_or_else(|| waves.end_insert_position());
 
                 self.add_scope_as_group(&scope, target, recursive, None);
+                self.invalidate_draw_commands();
+
+                self.user.waves.as_mut()?.compute_variable_display_names();
+            }
+            Message::AddScopeAsGroupFromSource(source, scope, recursive) => {
+                self.save_current_canvas(format!(
+                    "Add scope {} from {source} as group",
+                    scope.name()
+                ));
+                let waves = self.user.waves.as_mut()?;
+                let passed_or_focused = waves.insert_position(waves.focused_item);
+                let target = passed_or_focused.unwrap_or_else(|| waves.end_insert_position());
+
+                self.add_scope_as_group_from_source(source, &scope, target, recursive, None);
                 self.invalidate_draw_commands();
 
                 self.user.waves.as_mut()?.compute_variable_display_names();
@@ -437,6 +536,23 @@ impl SystemState {
                     waves.add_generator(s);
                 } else {
                     waves.add_stream(s, fold_events);
+                }
+                self.invalidate_draw_commands();
+            }
+            Message::AddStreamOrGeneratorFromSource(source, s) => {
+                let undo_msg = if let Some(gen_id) = s.gen_id {
+                    format!("Add generator(id: {gen_id}) from {source}")
+                } else {
+                    format!("Add stream(id: {}) from {source}", s.stream_id)
+                };
+                self.save_current_canvas(undo_msg);
+
+                let fold_events = self.user.config.behavior.ftr_events_enabled();
+                let waves = self.user.waves.as_mut()?;
+                if s.gen_id.is_some() {
+                    waves.add_generator_from_source(source, s);
+                } else {
+                    waves.add_stream_from_source(source, s, fold_events);
                 }
                 self.invalidate_draw_commands();
             }
@@ -533,6 +649,24 @@ impl SystemState {
                     && tx.is_none()
                 {
                     self.save_current_canvas(format!("Focus Transaction id: {}", tx_ref.id));
+                }
+                let tx_ref = tx_ref.map(SourceTransactionRef::primary);
+                let waves = self.user.waves.as_mut()?;
+                let invalidate = tx.is_none();
+                waves.focused_transaction =
+                    (tx_ref, tx.or_else(|| waves.focused_transaction.1.clone()));
+                if invalidate {
+                    self.invalidate_draw_commands();
+                }
+            }
+            Message::FocusTransactionFromSource(tx_ref, tx) => {
+                if let Some(tx_ref) = tx_ref.as_ref()
+                    && tx.is_none()
+                {
+                    self.save_current_canvas(format!(
+                        "Focus Transaction id: {} from {}",
+                        tx_ref.inner.id, tx_ref.source
+                    ));
                 }
                 let waves = self.user.waves.as_mut()?;
                 let invalidate = tx.is_none();
@@ -1280,6 +1414,24 @@ impl SystemState {
                 self.add_batch_commands(read_command_bytes(bytes));
             }
             Message::SetupCxxrtl(kind) => self.connect_to_cxxrtl(kind, false),
+            Message::LoadFileWithIntent(path, intent) => {
+                self.load_from_file_with_intent(path, intent)
+                    .map_err(|e| error!("{e:#?}"))
+                    .ok();
+            }
+            Message::LoadFilesWithIntents(files) => {
+                self.add_batch_messages(
+                    files
+                        .into_iter()
+                        .map(|(path, intent)| Message::LoadFileWithIntent(path, intent)),
+                );
+            }
+            Message::CloseSource(source) => {
+                self.close_source(source);
+            }
+            Message::ReloadSource(source, keep_unavailable) => {
+                self.reload_source(source, keep_unavailable);
+            }
             Message::SetSurverStatus(_start, server, status) => {
                 self.user.surver_file_infos = Some(status.file_infos.clone());
                 info!(
@@ -1319,6 +1471,11 @@ impl SystemState {
             }
             Message::FileDropped(dropped_file) => {
                 self.load_from_dropped(dropped_file)
+                    .map_err(|e| error!("{e:#?}"))
+                    .ok();
+            }
+            Message::FilesDropped(dropped_files) => {
+                self.load_from_dropped_files(dropped_files)
                     .map_err(|e| error!("{e:#?}"))
                     .ok();
             }
@@ -1382,6 +1539,210 @@ impl SystemState {
                     }
                 }
             }
+            Message::WaveHeaderLoadFailedWithIntent(
+                request,
+                pending_source,
+                source,
+                intent,
+                err,
+            ) => {
+                self.progress_tracker = None;
+                match intent {
+                    LoadIntent::AddSource => {
+                        if let Some(source_id) = pending_source
+                            && self.source_load_request_is_current(source_id, request)
+                            && let Some(waves) = self.user.waves.as_mut()
+                        {
+                            waves.remove_source(source_id);
+                            self.invalidate_draw_commands();
+                        }
+                    }
+                    LoadIntent::ReloadSource {
+                        source: source_id, ..
+                    } => {
+                        if self.source_load_request_is_current(source_id, request)
+                            && let Some(waves) = self.user.waves.as_mut()
+                            && let Some(loaded_source) = waves.sources.source_mut(source_id)
+                        {
+                            loaded_source.load_state =
+                                crate::source::SourceLoadState::Error(err.to_string());
+                            loaded_source.active_load_request = None;
+                        }
+                    }
+                    LoadIntent::ReplaceSession => {}
+                }
+                self.update(Message::Error(
+                    err.wrap_err(format!("Failed to load waveform header for {source}")),
+                ));
+            }
+            Message::WaveHeaderLoadedWithIntent(
+                start,
+                request,
+                pending_source,
+                source,
+                intent,
+                header,
+            ) => {
+                info!(
+                    "Loaded the hierarchy and meta-data of {source} with intent {intent:?} in {:?}",
+                    start.elapsed()
+                );
+                match intent {
+                    LoadIntent::ReplaceSession => {
+                        self.update(Message::WaveHeaderLoaded(
+                            start,
+                            source,
+                            LoadOptions::Clear,
+                            header,
+                        ));
+                    }
+                    LoadIntent::ReloadSource {
+                        source: source_id,
+                        keep_unavailable,
+                    } => {
+                        if !self.source_load_request_is_current(source_id, request) {
+                            info!("Dropping stale header for reload of {source_id} from {source}");
+                            return None;
+                        }
+                        match header {
+                            HeaderResult::LocalFile(header) => {
+                                let shared_hierarchy = Arc::new(header.hierarchy);
+                                let format = convert_format(header.file_format);
+                                let new_waves =
+                                    Box::new(WaveContainer::new_waveform(shared_hierarchy.clone()));
+                                self.load_wave_body_for_reloaded_source(
+                                    request,
+                                    source_id,
+                                    source,
+                                    format,
+                                    new_waves,
+                                    header.body,
+                                    header.body_len,
+                                    shared_hierarchy,
+                                    keep_unavailable,
+                                );
+                            }
+                            HeaderResult::LocalBytes(header) => {
+                                let shared_hierarchy = Arc::new(header.hierarchy);
+                                let format = convert_format(header.file_format);
+                                let new_waves =
+                                    Box::new(WaveContainer::new_waveform(shared_hierarchy.clone()));
+                                self.load_wave_body_for_reloaded_source(
+                                    request,
+                                    source_id,
+                                    source,
+                                    format,
+                                    new_waves,
+                                    header.body,
+                                    header.body_len,
+                                    shared_hierarchy,
+                                    keep_unavailable,
+                                );
+                            }
+                            HeaderResult::Remote(..) => {
+                                self.progress_tracker = None;
+                                self.update(Message::Error(eyre::eyre!(
+                                    "Reload Source for remote waveform sources is not implemented yet: {source}"
+                                )));
+                            }
+                        }
+                    }
+                    LoadIntent::AddSource => match header {
+                        HeaderResult::LocalFile(header) => {
+                            let shared_hierarchy = Arc::new(header.hierarchy);
+                            let format = convert_format(header.file_format);
+                            let new_waves =
+                                Box::new(WaveContainer::new_waveform(shared_hierarchy.clone()));
+                            if self.user.waves.is_none() {
+                                self.on_waves_loaded(
+                                    source.clone(),
+                                    format,
+                                    new_waves,
+                                    LoadOptions::Clear,
+                                );
+                                self.load_wave_body(
+                                    source,
+                                    header.body,
+                                    header.body_len,
+                                    shared_hierarchy,
+                                );
+                            } else if let Some(source_id) = pending_source {
+                                if !self.source_load_request_is_current(source_id, request) {
+                                    info!(
+                                        "Dropping stale header for additive {source_id} from {source}"
+                                    );
+                                    return None;
+                                }
+                                if let Some(loaded_source) =
+                                    self.user.waves.as_mut()?.sources.source_mut(source_id)
+                                {
+                                    loaded_source.source = source.clone();
+                                    loaded_source.label = crate::source::source_label(&source);
+                                    loaded_source.format = format;
+                                    loaded_source.inner = DataContainer::Waves(*new_waves);
+                                }
+                                self.load_wave_body_for_source(
+                                    request,
+                                    source_id,
+                                    source,
+                                    header.body,
+                                    header.body_len,
+                                    shared_hierarchy,
+                                );
+                            }
+                        }
+                        HeaderResult::LocalBytes(header) => {
+                            let shared_hierarchy = Arc::new(header.hierarchy);
+                            let format = convert_format(header.file_format);
+                            let new_waves =
+                                Box::new(WaveContainer::new_waveform(shared_hierarchy.clone()));
+                            if self.user.waves.is_none() {
+                                self.on_waves_loaded(
+                                    source.clone(),
+                                    format,
+                                    new_waves,
+                                    LoadOptions::Clear,
+                                );
+                                self.load_wave_body(
+                                    source,
+                                    header.body,
+                                    header.body_len,
+                                    shared_hierarchy,
+                                );
+                            } else if let Some(source_id) = pending_source {
+                                if !self.source_load_request_is_current(source_id, request) {
+                                    info!(
+                                        "Dropping stale header for additive {source_id} from {source}"
+                                    );
+                                    return None;
+                                }
+                                if let Some(loaded_source) =
+                                    self.user.waves.as_mut()?.sources.source_mut(source_id)
+                                {
+                                    loaded_source.source = source.clone();
+                                    loaded_source.label = crate::source::source_label(&source);
+                                    loaded_source.format = format;
+                                    loaded_source.inner = DataContainer::Waves(*new_waves);
+                                }
+                                self.load_wave_body_for_source(
+                                    request,
+                                    source_id,
+                                    source,
+                                    header.body,
+                                    header.body_len,
+                                    shared_hierarchy,
+                                );
+                            }
+                        }
+                        HeaderResult::Remote(..) => {
+                            self.progress_tracker = None;
+                            self.update(Message::Error(eyre::eyre!(
+                                "Add Source for remote waveform sources is not implemented yet: {source}"
+                            )));
+                        }
+                    },
+                }
+            }
             Message::WaveBodyLoaded(start, source, body) => {
                 // for files using the `wellen` backend, parse the body in a second step
                 info!("Loaded the body of {source} in {:?}", start.elapsed());
@@ -1440,6 +1801,156 @@ impl SystemState {
                     self.load_variables(cmd);
                 }
             }
+            Message::WaveBodyLoadedForSource(start, request, source_id, source, body) => {
+                // for files using the `wellen` backend, parse the body in a second step
+                info!(
+                    "Loaded the body of {source} for {source_id} in {:?}",
+                    start.elapsed()
+                );
+                self.progress_tracker = None;
+
+                if !self.source_load_request_is_current(source_id, request) {
+                    info!("Dropping stale body for additive {source_id} from {source}");
+                    return None;
+                }
+
+                let Some(waves) = self.user.waves.as_mut() else {
+                    error!("Could not finish loading {source_id}, no waveform loaded");
+                    return None;
+                };
+
+                let (maybe_cmd, param_cmd, validation_result) = {
+                    let Some(source_waves) = waves.waves_for_source_mut(source_id) else {
+                        warn!("Dropping body for unknown {source_id} from {source}");
+                        return None;
+                    };
+                    let maybe_cmd = source_waves
+                        .wellen_add_body(body)
+                        .map_err(|err| {
+                            error!(
+                                "While getting commands to lazy-load signals for {source_id}: {err:?}"
+                            );
+                        })
+                        .ok()
+                        .flatten();
+                    let param_cmd = source_waves
+                        .load_parameters()
+                        .map_err(|err| {
+                            error!(
+                                "While getting commands to lazy-load parameters for {source_id}: {err:?}"
+                            );
+                        })
+                        .ok()
+                        .flatten();
+                    (
+                        maybe_cmd,
+                        param_cmd,
+                        waves.validate_loaded_source(source_id),
+                    )
+                };
+
+                if let Err(err) = validation_result {
+                    waves.remove_source(source_id);
+                    self.invalidate_draw_commands();
+                    self.update(Message::Error(eyre::eyre!("Cannot add {source}. {err}")));
+                    return None;
+                }
+
+                waves.update_viewports();
+                self.invalidate_draw_commands();
+                if let Some(cmd) = param_cmd {
+                    self.load_variables_for_source(source_id, cmd);
+                }
+                if let Some(cmd) = maybe_cmd {
+                    self.load_variables_for_source(source_id, cmd);
+                }
+            }
+            Message::WaveBodyLoadedForReloadedSource(
+                start,
+                request,
+                source_id,
+                source,
+                format,
+                mut new_waves,
+                body,
+                keep_unavailable,
+            ) => {
+                info!(
+                    "Loaded the body of {source} for reload of {source_id} in {:?}",
+                    start.elapsed()
+                );
+                self.progress_tracker = None;
+
+                if !self.source_load_request_is_current(source_id, request) {
+                    info!("Dropping stale body for reload of {source_id} from {source}");
+                    return None;
+                }
+
+                let maybe_cmd = new_waves
+                    .wellen_add_body(body)
+                    .map_err(|err| {
+                        error!(
+                            "While getting commands to lazy-load signals for reloaded {source_id}: {err:?}"
+                        );
+                    })
+                    .ok()
+                    .flatten();
+                let param_cmd = new_waves
+                    .load_parameters()
+                    .map_err(|err| {
+                        error!(
+                            "While getting commands to lazy-load parameters for reloaded {source_id}: {err:?}"
+                        );
+                    })
+                    .ok()
+                    .flatten();
+
+                let candidate_container = DataContainer::Waves(*new_waves);
+                let candidate_domain =
+                    crate::source::TimeDomain::from_container(&candidate_container);
+                let Some(waves) = self.user.waves.as_mut() else {
+                    self.update(Message::Error(eyre::eyre!(
+                        "Cannot reload {source}. No session is loaded"
+                    )));
+                    return None;
+                };
+                let existing_domain = waves.sources.session_time_domain.clone();
+                match waves.replace_source(
+                    source_id,
+                    source.clone(),
+                    format,
+                    candidate_container,
+                    keep_unavailable,
+                    &self.translators,
+                ) {
+                    Ok(display_cmd) => {
+                        self.record_file_history(&source);
+                        self.invalidate_draw_commands();
+                        if let Some(cmd) = param_cmd {
+                            self.load_variables_for_source(source_id, cmd);
+                        }
+                        if let Some(cmd) = maybe_cmd {
+                            self.load_variables_for_source(source_id, cmd);
+                        }
+                        if let Some(cmd) = display_cmd {
+                            self.load_variables_for_source(source_id, cmd);
+                        }
+                    }
+                    Err(err) => {
+                        let details = match (existing_domain, candidate_domain) {
+                            (Some(existing), Some(candidate)) => format!(
+                                "\nExisting session: {}\nCandidate source: {}",
+                                crate::source::format_time_domain(&existing),
+                                crate::source::format_time_domain(&candidate)
+                            ),
+                            _ => String::new(),
+                        };
+                        self.update(Message::Error(eyre::eyre!(
+                            "Cannot reload {source}. {err}{details}"
+                        )));
+                    }
+                }
+            }
             Message::SignalsLoaded(start, res) => {
                 info!("Loaded {} variables in {:?}", res.len(), start.elapsed());
                 self.progress_tracker = None;
@@ -1451,6 +1962,28 @@ impl SystemState {
                 match waves.inner.as_waves_mut()?.on_signals_loaded(res) {
                     Err(err) => error!("{err:?}"),
                     Ok(Some(cmd)) => self.load_variables(cmd),
+                    _ => {}
+                }
+                // make sure we redraw since now more variable data is available
+                self.invalidate_draw_commands();
+            }
+            Message::SignalsLoadedForSource(source_id, start, res) => {
+                info!(
+                    "Loaded {} variables for {source_id} in {:?}",
+                    res.len(),
+                    start.elapsed()
+                );
+                self.progress_tracker = None;
+                let Some(waves) = self.user.waves.as_mut() else {
+                    error!("Could not apply loaded signals for {source_id}, no waveform loaded");
+                    return None;
+                };
+                match waves
+                    .waves_for_source_mut(source_id)?
+                    .on_signals_loaded(res)
+                {
+                    Err(err) => error!("{err:?}"),
+                    Ok(Some(cmd)) => self.load_variables_for_source(source_id, cmd),
                     _ => {}
                 }
                 // make sure we redraw since now more variable data is available
@@ -1473,6 +2006,12 @@ impl SystemState {
                     .as_mut()
                     .expect("Waves should be loaded at this point!")
                     .update_viewports();
+            }
+            Message::TransactionStreamsLoadedWithIntent(filename, format, new_ftr, intent) => {
+                self.on_transaction_streams_loaded_with_intent(filename, format, new_ftr, intent);
+                if let Some(waves) = self.user.waves.as_mut() {
+                    waves.update_viewports();
+                }
             }
             Message::BlacklistTranslator(idx, translator) => {
                 self.user.blacklisted_translators.insert((idx, translator));
@@ -1569,6 +2108,10 @@ impl SystemState {
             }
             Message::ReloadWaveform(keep_unavailable) => {
                 let waves = self.user.waves.as_ref()?;
+                if waves.source_count() > 1 {
+                    self.reload_source(WaveData::primary_source_id(), keep_unavailable);
+                    return None;
+                }
                 let options = if keep_unavailable {
                     LoadOptions::KeepAll
                 } else {
@@ -1898,6 +2441,26 @@ impl SystemState {
                     waves.add_variables(&self.translators, variables, target, true, false, None)
                 {
                     self.load_variables(cmd);
+                }
+                self.invalidate_draw_commands();
+            }
+            Message::AddDraggedVariablesFromSource(source, variables) => {
+                let waves = self.user.waves.as_mut()?;
+
+                waves.focused_item = None;
+                self.user.drag_source_idx = None;
+                let target = self.user.drag_target_idx.take();
+
+                if let (Some(cmd), _) = waves.add_variables_from_source(
+                    source,
+                    &self.translators,
+                    variables,
+                    target,
+                    true,
+                    false,
+                    None,
+                ) {
+                    self.load_variables_for_source(source, cmd);
                 }
                 self.invalidate_draw_commands();
             }
@@ -2249,11 +2812,14 @@ impl SystemState {
                 cache_key,
             } => {
                 let waves = self.user.waves.as_mut()?;
-                let generation = waves.cache_generation;
+                let (source, variable_ref) = match waves.displayed_items.get(&display_id)? {
+                    DisplayedItem::Variable(var) => (var.source, var.variable_ref.clone()),
+                    _ => return None,
+                };
+                let generation = waves.analog_cache_generation_for_source(source)?;
 
                 // Check if already have valid entry (building or ready)
-                let item = waves.displayed_items.get(&display_id)?;
-                let DisplayedItem::Variable(var) = item else {
+                let DisplayedItem::Variable(var) = waves.displayed_items.get(&display_id)? else {
                     return None;
                 };
                 if var
@@ -2267,13 +2833,16 @@ impl SystemState {
                 }
 
                 // Try to share from in-flight builds first (handles removed-but-still-building case)
-                if let Some(entry) = waves.inflight_caches.get(&cache_key)
-                    && entry.generation == generation
+                if let Some(entry) = waves
+                    .analog_inflight_caches_for_source(source)
+                    .and_then(|caches| caches.get(&cache_key))
+                    .filter(|entry| entry.generation == generation)
+                    .cloned()
                 {
                     if let DisplayedItem::Variable(var) =
                         waves.displayed_items.get_mut(&display_id)?
                     {
-                        var.analog.as_mut()?.cache = Some(entry.clone());
+                        var.analog.as_mut()?.cache = Some(entry);
                     }
                     return None; // Shared from in-flight build
                 }
@@ -2283,7 +2852,9 @@ impl SystemState {
                     .displayed_items
                     .values()
                     .filter_map(|item| match item {
-                        DisplayedItem::Variable(v) => v.analog.as_ref()?.cache.as_ref(),
+                        DisplayedItem::Variable(v) if v.source == source => {
+                            v.analog.as_ref()?.cache.as_ref()
+                        }
                         _ => None,
                     })
                     .find(|e| e.cache_key == cache_key && e.generation == generation)
@@ -2297,12 +2868,6 @@ impl SystemState {
                     }
                     return None; // Shared existing entry (may still be building)
                 }
-
-                // Clone variable_ref only when we need to spawn builder
-                let variable_ref = match waves.displayed_items.get(&display_id)? {
-                    DisplayedItem::Variable(v) => v.variable_ref.clone(),
-                    _ => return None,
-                };
 
                 // Create new entry and spawn builder
                 let entry = std::sync::Arc::new(crate::analog_signal_cache::AnalogCacheEntry::new(
@@ -2318,10 +2883,11 @@ impl SystemState {
 
                 // Track in-flight build for sharing with other variables
                 waves
-                    .inflight_caches
+                    .analog_inflight_caches_for_source_mut(source)?
                     .insert(cache_key.clone(), entry.clone());
 
                 waves.build_analog_cache_async(
+                    source,
                     entry,
                     &variable_ref,
                     translator,
@@ -2352,11 +2918,17 @@ impl SystemState {
             | Message::SetTableColumnVisibility { .. }) => {
                 self.handle_table_message(message)?;
             }
-            Message::AnalogCacheBuilt { entry, result } => {
+            Message::AnalogCacheBuilt {
+                source,
+                entry,
+                result,
+            } => {
                 OUTSTANDING_TRANSACTIONS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 // Remove from in-flight registry (may already be gone if generation changed)
-                if let Some(waves) = self.user.waves.as_mut() {
-                    waves.inflight_caches.remove(&entry.cache_key);
+                if let Some(waves) = self.user.waves.as_mut()
+                    && let Some(caches) = waves.analog_inflight_caches_for_source_mut(source)
+                {
+                    caches.remove(&entry.cache_key);
                 }
                 match result {
                     Ok(cache) => {
@@ -2708,6 +3280,8 @@ impl SystemState {
             }
         }
 
+        self.try_apply_pending_state_restore();
+
         Some(())
     }
 
@@ -2724,10 +3298,27 @@ impl SystemState {
         recursive: bool,
         variable_name_type: Option<VariableNameType>,
     ) -> TargetPosition {
+        self.add_scope_as_group_from_source(
+            WaveData::primary_source_id(),
+            scope,
+            pos,
+            recursive,
+            variable_name_type,
+        )
+    }
+
+    pub fn add_scope_as_group_from_source(
+        &mut self,
+        source: SourceId,
+        scope: &ScopeRef,
+        pos: TargetPosition,
+        recursive: bool,
+        variable_name_type: Option<VariableNameType>,
+    ) -> TargetPosition {
         let Some(waves) = self.user.waves.as_mut() else {
             return pos;
         };
-        let Some(container) = waves.inner.as_waves() else {
+        let Some(container) = waves.waves_for_source(source) else {
             return pos;
         };
 
@@ -2750,7 +3341,8 @@ impl SystemState {
             level: pos.level + 1,
         };
 
-        let (cmd, variable_refs) = waves.add_variables(
+        let (cmd, variable_refs) = waves.add_variables_from_source(
+            source,
             &self.translators,
             variables,
             Some(into_group_pos),
@@ -2764,13 +3356,18 @@ impl SystemState {
         };
 
         if let Some(cmd) = cmd {
-            self.load_variables(cmd);
+            self.load_variables_for_source(source, cmd);
         }
 
         if recursive {
             for child in child_scopes.unwrap_or(vec![]) {
-                into_group_pos =
-                    self.add_scope_as_group(&child, into_group_pos, recursive, variable_name_type);
+                into_group_pos = self.add_scope_as_group_from_source(
+                    source,
+                    &child,
+                    into_group_pos,
+                    recursive,
+                    variable_name_type,
+                );
                 into_group_pos.level = pos.level + 1;
             }
         }
@@ -2823,7 +3420,10 @@ impl SystemState {
                         return None;
                     };
 
-                if !seen.insert(displayed_variable.variable_ref.clone()) {
+                if !seen.insert((
+                    displayed_variable.source,
+                    displayed_variable.variable_ref.clone(),
+                )) {
                     return None;
                 }
 
@@ -2833,6 +3433,7 @@ impl SystemState {
                 );
 
                 Some(SignalAnalysisWizardSignal {
+                    source: displayed_variable.source,
                     variable: displayed_variable.variable_ref.clone(),
                     display_name: item.name(),
                     include: true,
@@ -2864,11 +3465,15 @@ impl SystemState {
                         return None;
                     };
 
-                if !seen.insert(displayed_variable.variable_ref.clone()) {
+                if !seen.insert((
+                    displayed_variable.source,
+                    displayed_variable.variable_ref.clone(),
+                )) {
                     return None;
                 }
 
                 Some(SignalAnalysisWizardSamplingOption {
+                    source: displayed_variable.source,
                     variable: displayed_variable.variable_ref.clone(),
                     display_name: item.name(),
                 })
@@ -2879,11 +3484,11 @@ impl SystemState {
     fn default_signal_analysis_sampling_signal(
         &self,
         options: &[SignalAnalysisWizardSamplingOption],
-    ) -> Option<wave_container::VariableRef> {
+    ) -> Option<(SourceId, wave_container::VariableRef)> {
         let waves = self.user.waves.as_ref()?;
-        let wave_container = waves.inner.as_waves()?;
 
         let one_bit = options.iter().find_map(|option| {
+            let wave_container = waves.waves_for_source(option.source)?;
             let resolved = wave_container
                 .update_variable_ref(&option.variable)
                 .unwrap_or_else(|| option.variable.clone());
@@ -2891,10 +3496,14 @@ impl SystemState {
                 .variable_meta(&resolved)
                 .ok()
                 .filter(|meta| meta.num_bits == Some(1))
-                .map(|_| option.variable.clone())
+                .map(|_| (option.source, option.variable.clone()))
         });
 
-        one_bit.or_else(|| options.first().map(|option| option.variable.clone()))
+        one_bit.or_else(|| {
+            options
+                .first()
+                .map(|option| (option.source, option.variable.clone()))
+        })
     }
 
     fn build_signal_analysis_wizard_dialog(&self) -> Option<SignalAnalysisWizardDialog> {
@@ -2904,12 +3513,14 @@ impl SystemState {
         }
 
         let sampling_options = self.signal_analysis_sampling_options();
-        let sampling_signal = self.default_signal_analysis_sampling_signal(&sampling_options)?;
+        let (sampling_source, sampling_signal) =
+            self.default_signal_analysis_sampling_signal(&sampling_options)?;
         let marker_count = self.user.waves.as_ref()?.markers.len();
         let translators = self.signal_analysis_wizard_translators();
 
         Some(SignalAnalysisWizardDialog {
             sampling_options,
+            sampling_source,
             sampling_signal,
             signals,
             translators,
@@ -2924,17 +3535,19 @@ impl SystemState {
         let mut sampling_options = self.signal_analysis_sampling_options();
         let mut seen = sampling_options
             .iter()
-            .map(|option| option.variable.clone())
+            .map(|option| (option.source, option.variable.clone()))
             .collect::<HashSet<_>>();
-        if seen.insert(config.sampling.signal.clone()) {
+        if seen.insert((config.sampling.source, config.sampling.signal.clone())) {
             sampling_options.push(SignalAnalysisWizardSamplingOption {
+                source: config.sampling.source,
                 variable: config.sampling.signal.clone(),
                 display_name: config.sampling.signal.full_path_string(),
             });
         }
         for signal in &config.signals {
-            if seen.insert(signal.variable.clone()) {
+            if seen.insert((signal.source, signal.variable.clone())) {
                 sampling_options.push(SignalAnalysisWizardSamplingOption {
+                    source: signal.source,
                     variable: signal.variable.clone(),
                     display_name: signal.variable.full_path_string(),
                 });
@@ -2948,6 +3561,7 @@ impl SystemState {
             .signals
             .iter()
             .map(|signal| SignalAnalysisWizardSignal {
+                source: signal.source,
                 variable: signal.variable.clone(),
                 display_name: signal.variable.full_path_string(),
                 include: true,
@@ -2960,6 +3574,7 @@ impl SystemState {
 
         Some(SignalAnalysisWizardDialog {
             sampling_options,
+            sampling_source: config.sampling.source,
             sampling_signal: config.sampling.signal.clone(),
             signals,
             translators: self.signal_analysis_wizard_translators(),
@@ -2980,21 +3595,43 @@ impl SystemState {
     }
 
     fn preload_signal_analysis_variables(&mut self, config: &table::SignalAnalysisConfig) {
-        if let Some(waves) = self.user.waves.as_mut()
-            && let Some(wave_container) = waves.inner.as_waves_mut()
-        {
-            let preload_variables = std::iter::once(config.sampling.signal.clone())
-                .chain(config.signals.iter().map(|signal| signal.variable.clone()))
-                .collect_vec();
+        let Some(waves) = self.user.waves.as_mut() else {
+            return;
+        };
 
-            if !preload_variables.is_empty() {
+        let mut variables_by_source: HashMap<SourceId, Vec<wave_container::VariableRef>> =
+            HashMap::new();
+        variables_by_source
+            .entry(config.sampling.source)
+            .or_default()
+            .push(config.sampling.signal.clone());
+        for signal in &config.signals {
+            variables_by_source
+                .entry(signal.source)
+                .or_default()
+                .push(signal.variable.clone());
+        }
+
+        let mut load_commands = Vec::new();
+        for (source, preload_variables) in variables_by_source {
+            if let Some(wave_container) = waves.waves_for_source_mut(source) {
                 match wave_container.load_variables(preload_variables.iter()) {
-                    Ok(Some(cmd)) => self.load_variables(cmd),
+                    Ok(Some(cmd)) => load_commands.push((source, cmd)),
                     Ok(None) => {}
                     Err(err) => {
-                        warn!("Failed to preflight signal-analysis variable loading: {err:?}");
+                        warn!(
+                            "Failed to preflight signal-analysis variable loading for {source}: {err:?}"
+                        );
                     }
                 }
+            }
+        }
+
+        for (source, cmd) in load_commands {
+            if source == WaveData::primary_source_id() {
+                self.load_variables(cmd);
+            } else {
+                self.load_variables_for_source(source, cmd);
             }
         }
     }
@@ -3006,6 +3643,115 @@ impl SystemState {
         };
         let table_tile_id = self.open_table_tile(spec);
         self.trigger_table_cache_build(table_tile_id);
+    }
+
+    pub(crate) fn source_load_request_is_current(
+        &self,
+        source: SourceId,
+        request: LoadRequestId,
+    ) -> bool {
+        source == WaveData::primary_source_id()
+            || self
+                .user
+                .waves
+                .as_ref()
+                .is_some_and(|waves| waves.source_load_request_matches(source, request))
+    }
+
+    fn reload_source(&mut self, source: SourceId, keep_unavailable: bool) {
+        let Some(waves) = self.user.waves.as_ref() else {
+            return;
+        };
+        let Some(source_locator) = waves.data_container_for_source(source).map(|_| {
+            if source == WaveData::primary_source_id() {
+                waves.source.clone()
+            } else {
+                waves
+                    .sources
+                    .source(source)
+                    .map(|loaded_source| loaded_source.source.clone())
+                    .unwrap_or(WaveSource::Data)
+            }
+        }) else {
+            self.update(Message::Error(eyre::eyre!(
+                "Cannot reload unknown source {source}"
+            )));
+            return;
+        };
+
+        let intent = LoadIntent::ReloadSource {
+            source,
+            keep_unavailable,
+        };
+        match source_locator {
+            WaveSource::File(path) => {
+                self.load_from_file_with_intent(path, intent)
+                    .map_err(|err| error!("{err:#?}"))
+                    .ok();
+            }
+            WaveSource::DragAndDrop(Some(path)) => {
+                self.load_from_file_with_intent(path, intent)
+                    .map_err(|err| error!("{err:#?}"))
+                    .ok();
+            }
+            WaveSource::Url(url) => {
+                self.update(Message::Error(eyre::eyre!(
+                    "Reload Source for remote sources is not implemented yet: {url}"
+                )));
+            }
+            WaveSource::Data | WaveSource::DragAndDrop(None) | WaveSource::Cxxrtl(_) => {
+                self.update(Message::Error(eyre::eyre!(
+                    "Source {source} does not have a reloadable file locator"
+                )));
+            }
+        }
+
+        for translator in self.translators.all_translators() {
+            translator.reload(self.channels.msg_sender.clone());
+        }
+        self.variable_name_info_cache.borrow_mut().clear();
+        self.translator_generation += 1;
+
+        if let Some(waves) = self.user.waves.as_mut() {
+            waves.compute_variable_display_names();
+        }
+    }
+
+    fn close_source(&mut self, source: SourceId) {
+        if source == WaveData::primary_source_id() {
+            warn!("Ignoring CloseSource for the primary source; open a new file to replace it");
+            return;
+        }
+
+        let table_tiles_to_remove = self
+            .user
+            .table_tiles
+            .iter()
+            .filter_map(|(tile_id, tile)| tile.spec.references_source(source).then_some(*tile_id))
+            .collect_vec();
+        for tile_id in table_tiles_to_remove {
+            self.update(Message::RemoveTableTile { tile_id });
+        }
+
+        let Some(waves) = self.user.waves.as_mut() else {
+            return;
+        };
+
+        if waves.active_scope_source == source {
+            waves.set_active_scope_from_source(WaveData::primary_source_id(), None);
+        }
+        if waves
+            .focused_transaction
+            .0
+            .as_ref()
+            .is_some_and(|focused| focused.source == source)
+        {
+            waves.focused_transaction = (None, None);
+        }
+
+        waves.remove_source(source);
+        self.all_variable_rows_cache = None;
+        self.invalidate_draw_commands();
     }
 
     fn open_table_tile(&mut self, spec: crate::table::TableModelSpec) -> crate::table::TableTileId {
@@ -3029,7 +3775,7 @@ impl SystemState {
             display_filter: tile_state.config.display_filter.clone(),
             pinned_filters: tile_state.config.pinned_filters.clone(),
             view_sort: tile_state.config.sort.clone(),
-            generation: model_ctx.cache_generation,
+            generation: tile_state.spec.cache_generation(&model_ctx),
         };
         self.update(Message::BuildTableCache { tile_id, cache_key });
     }
@@ -3059,12 +3805,15 @@ impl SystemState {
                 self.update(Message::CursorSet(time));
                 self.update(Message::GoToCursorIfNotInView);
             }
-            table::TableAction::FocusTransaction(tx_ref) => {
+            table::TableAction::FocusTransaction(source, tx_ref) => {
                 // Focus the transaction and set cursor to its start time.
-                self.update(Message::FocusTransaction(Some(tx_ref.clone()), None));
+                self.update(Message::FocusTransactionFromSource(
+                    Some(SourceTransactionRef::new(source, tx_ref.clone())),
+                    None,
+                ));
                 // Keep cursor in sync with the focused transaction start.
                 if let Some(waves) = &self.user.waves
-                    && let Some(transactions) = waves.inner.as_transactions()
+                    && let Some(transactions) = waves.transactions_for_source(source)
                     && let Some(tx) = transactions.get_transaction(&tx_ref)
                 {
                     let start_time = BigInt::from(tx.get_start_time());
@@ -3080,10 +3829,11 @@ impl SystemState {
 
     pub(crate) fn signal_analysis_sampling_mode(
         &self,
+        source: SourceId,
         signal: &wave_container::VariableRef,
     ) -> Option<table::SignalAnalysisSamplingMode> {
         let waves = self.user.waves.as_ref()?;
-        let wave_container = waves.inner.as_waves()?;
+        let wave_container = waves.waves_for_source(source)?;
         let resolved = wave_container
             .update_variable_ref(signal)
             .unwrap_or_else(|| signal.clone());
@@ -3093,12 +3843,23 @@ impl SystemState {
 }
 
 impl SystemState {
-    fn table_model_context(&self) -> crate::table::TableModelContext<'_> {
-        let cache_generation = self
-            .user
-            .waves
-            .as_ref()
-            .map_or(0, |waves| waves.cache_generation);
+    pub(crate) fn table_model_context(&self) -> crate::table::TableModelContext<'_> {
+        let (cache_generation, source_generations) =
+            self.user
+                .waves
+                .as_ref()
+                .map_or((0, HashMap::new()), |waves| {
+                    let source_generations = waves
+                        .source_ids()
+                        .into_iter()
+                        .filter_map(|source| {
+                            waves
+                                .cache_generation_for_source(source)
+                                .map(|generation| (source, generation))
+                        })
+                        .collect();
+                    (waves.cache_generation, source_generations)
+                });
         crate::table::TableModelContext {
             waves: self.user.waves.as_ref(),
             translators: &self.translators,
@@ -3106,6 +3867,7 @@ impl SystemState {
             time_format: self.get_time_format(),
             theme: &self.user.config.theme,
             cache_generation,
+            source_generations,
             ftr_events_enabled: self.user.config.behavior.ftr_events_enabled(),
         }
     }

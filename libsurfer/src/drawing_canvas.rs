@@ -23,8 +23,9 @@ use crate::data_container::DataContainer;
 use crate::displayed_item::{
     AnalogSettings, DisplayedFieldRef, DisplayedItemRef, DisplayedVariable,
 };
+use crate::source::{SourceId, SourceTransactionRef};
 use crate::time::TimeFormatter;
-use crate::tooltips::handle_transaction_tooltip;
+use crate::tooltips::handle_transaction_tooltip_for_source;
 use crate::trace_style::{TraceStyle, TraceValue};
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
 use crate::transaction_events::EventDisplayMode;
@@ -33,8 +34,8 @@ use crate::view::{DrawConfig, DrawingContext, ItemDrawingInfo};
 use crate::wave_container::{QueryResult, VariableRefExt};
 use crate::wave_data::WaveData;
 use crate::{
-    CachedDrawData, CachedTransactionDrawData, CachedWaveDrawData, Message, SystemState,
-    displayed_item::DisplayedItem,
+    CachedDrawData, CachedMixedDrawData, CachedTransactionDrawData, CachedWaveDrawData, Message,
+    SystemState, displayed_item::DisplayedItem,
 };
 
 pub struct DrawnRegion {
@@ -286,7 +287,7 @@ fn variable_draw_commands(
     viewport_idx: usize,
     trace_style: TraceStyle,
 ) -> Option<VariableDrawCommands> {
-    let wave_container = waves.inner.as_waves()?;
+    let wave_container = waves.waves_for_source(displayed_variable.source)?;
 
     let signal_id = wave_container
         .signal_id(&displayed_variable.variable_ref)
@@ -522,6 +523,76 @@ impl SystemState {
         sorted
     }
 
+    fn source_tail_start_pixel(
+        waves: &WaveData,
+        source: SourceId,
+        viewport_idx: usize,
+        cfg: &DrawConfig,
+    ) -> Option<f32> {
+        let session_domain = waves.sources.common_time_domain()?;
+        let source_domain = waves.time_domain_for_source(source)?;
+        if source_domain.max_timestamp >= session_domain.max_timestamp {
+            return None;
+        }
+
+        let source_end = source_domain.max_timestamp.to_bigint()?;
+        Some(waves.viewports[viewport_idx].pixel_from_time(
+            &source_end,
+            cfg.canvas_size.x - 1.0,
+            &waves.safe_num_timestamps(),
+        ))
+    }
+
+    fn draw_source_tail_overlay(
+        &self,
+        tail_start_pixel: f32,
+        drawing_info: &ItemDrawingInfo,
+        ctx: &mut DrawingContext,
+    ) {
+        if tail_start_pixel >= ctx.cfg.canvas_size.x {
+            return;
+        }
+
+        let tail_start_pixel = tail_start_pixel.clamp(0.0, ctx.cfg.canvas_size.x);
+        let left = (ctx.to_screen)(tail_start_pixel, 0.0).x;
+        let right = (ctx.to_screen)(ctx.cfg.canvas_size.x, 0.0).x;
+        if right <= left {
+            return;
+        }
+
+        let top = drawing_info.top();
+        let bottom = drawing_info.bottom();
+        let fill_source = ctx.theme.accent_warn.background;
+        let fill =
+            Color32::from_rgba_unmultiplied(fill_source.r(), fill_source.g(), fill_source.b(), 72);
+        ctx.painter.rect_filled(
+            Rect {
+                min: Pos2::new(left, top),
+                max: Pos2::new(right, bottom),
+            },
+            CornerRadius::ZERO,
+            fill,
+        );
+
+        let marker_color = ctx.theme.accent_warn.foreground;
+        ctx.painter
+            .vline(left, top..=bottom, Stroke::new(2.0, marker_color));
+
+        let hatch_stroke = Stroke::new(1.0, marker_color.gamma_multiply(0.45));
+        let row_height = bottom - top;
+        let mut hatch_x = left + 8.0;
+        while hatch_x < right + row_height {
+            ctx.painter.line_segment(
+                [
+                    Pos2::new(hatch_x, bottom),
+                    Pos2::new(hatch_x + row_height, top),
+                ],
+                hatch_stroke,
+            );
+            hatch_x += 8.0;
+        }
+    }
+
     pub fn invalidate_draw_commands(&mut self) {
         if let Some(waves) = &self.user.waves {
             for viewport in 0..waves.viewports.len() {
@@ -539,19 +610,79 @@ impl SystemState {
         #[cfg(feature = "performance_plot")]
         self.timing.borrow_mut().start("Generate draw commands");
         if let Some(waves) = &self.user.waves {
-            let draw_data = match waves.inner {
-                DataContainer::Waves(_) => {
-                    self.generate_wave_draw_commands(waves, cfg, msgs, viewport_idx)
+            let has_wave_rows = waves
+                .displayed_items
+                .values()
+                .any(|item| matches!(item, DisplayedItem::Variable(_)));
+            let has_stream_rows = waves
+                .displayed_items
+                .values()
+                .any(|item| matches!(item, DisplayedItem::Stream(_)));
+            let draw_data = if has_stream_rows && (has_wave_rows || waves.source_count() > 1) {
+                self.generate_mixed_draw_commands(waves, cfg, msgs, viewport_idx)
+            } else {
+                match waves.inner {
+                    DataContainer::Waves(_) => {
+                        self.generate_wave_draw_commands(waves, cfg, msgs, viewport_idx)
+                    }
+                    DataContainer::Transactions(_) => {
+                        self.generate_transaction_draw_commands(waves, cfg, msgs, viewport_idx)
+                    }
+                    DataContainer::Empty => None,
                 }
-                DataContainer::Transactions(_) => {
-                    self.generate_transaction_draw_commands(waves, cfg, msgs, viewport_idx)
-                }
-                DataContainer::Empty => None,
             };
             self.draw_data.borrow_mut()[viewport_idx] = draw_data;
         }
         #[cfg(feature = "performance_plot")]
         self.timing.borrow_mut().end("Generate draw commands");
+    }
+
+    fn generate_mixed_draw_commands(
+        &self,
+        waves: &WaveData,
+        cfg: &DrawConfig,
+        msgs: &mut Vec<Message>,
+        viewport_idx: usize,
+    ) -> Option<CachedDrawData> {
+        let wave = match self.generate_wave_draw_commands(waves, cfg, msgs, viewport_idx) {
+            Some(CachedDrawData::WaveDrawData(data)) => Some(data),
+            _ => None,
+        };
+
+        let tx_cfg = DrawConfig::new(
+            cfg.canvas_size,
+            self.user.config.layout.transactions_line_height,
+            cfg.text_size,
+        );
+        let transaction_sources = waves
+            .items_tree
+            .iter_visible()
+            .filter_map(|node| waves.displayed_items.get(&node.item_ref))
+            .filter_map(|item| match item {
+                DisplayedItem::Stream(stream) => Some(stream.source),
+                _ => None,
+            })
+            .unique()
+            .collect::<Vec<_>>();
+
+        let transactions = transaction_sources
+            .into_iter()
+            .filter_map(|source| {
+                self.generate_transaction_draw_commands_for_source(
+                    waves,
+                    &tx_cfg,
+                    msgs,
+                    viewport_idx,
+                    source,
+                )
+                .map(|data| (source, data))
+            })
+            .collect::<HashMap<_, _>>();
+
+        Some(CachedDrawData::MixedDrawData(CachedMixedDrawData {
+            wave,
+            transactions,
+        }))
     }
 
     fn generate_wave_draw_commands(
@@ -660,6 +791,24 @@ impl SystemState {
         msgs: &mut Vec<Message>,
         viewport_idx: usize,
     ) -> Option<CachedDrawData> {
+        self.generate_transaction_draw_commands_for_source(
+            waves,
+            cfg,
+            msgs,
+            viewport_idx,
+            WaveData::primary_source_id(),
+        )
+        .map(TransactionDrawData)
+    }
+
+    fn generate_transaction_draw_commands_for_source(
+        &self,
+        waves: &WaveData,
+        cfg: &DrawConfig,
+        msgs: &mut Vec<Message>,
+        viewport_idx: usize,
+        source: SourceId,
+    ) -> Option<CachedTransactionDrawData> {
         let mut draw_commands: HashMap<
             TransactionStreamRef,
             HashMap<TransactionRef, TxDrawingCommands>,
@@ -668,14 +817,18 @@ impl SystemState {
         let mut inc_relation_tx_ids = vec![];
         let mut out_relation_tx_ids = vec![];
 
-        let (focused_tx_ref, old_focused_tx) = &waves.focused_transaction;
+        let (session_focused_tx_ref, old_focused_tx) = &waves.focused_transaction;
+        let focused_tx_ref = session_focused_tx_ref
+            .as_ref()
+            .filter(|focused| focused.source == source)
+            .map(|focused| &focused.inner);
         let mut new_focused_tx: Option<&Transaction> = None;
         // The focused event was drawn on its parent's lane in some row, so
         // the parent_of relation arrow would be noise
         let mut focused_event_overlaid = false;
 
         let events_enabled = self.user.config.behavior.ftr_events_enabled();
-        let container = waves.inner.as_transactions()?;
+        let container = waves.transactions_for_source(source)?;
         let event_index = container.event_index();
 
         let viewport = waves.viewports[viewport_idx];
@@ -689,7 +842,9 @@ impl SystemState {
             .par_iter()
             .map(|id| waves.displayed_items.get(id))
             .filter_map(|item| match item {
-                Some(DisplayedItem::Stream(stream_ref)) => Some(stream_ref),
+                Some(DisplayedItem::Stream(stream_ref)) if stream_ref.source == source => {
+                    Some(stream_ref)
+                }
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -913,11 +1068,7 @@ impl SystemState {
         }
 
         let focused_event_info = events_enabled
-            .then(|| {
-                focused_tx_ref
-                    .as_ref()
-                    .and_then(|focused| container.event_info(focused.id))
-            })
+            .then(|| focused_tx_ref.and_then(|focused| container.event_info(focused.id)))
             .flatten();
         let parent_highlight_tx =
             focused_event_info.map(|info| TransactionRef { id: info.parent_tx });
@@ -941,20 +1092,20 @@ impl SystemState {
                 out_relation_tx_ids.push(TransactionRef { id: rel.sink_tx_id });
             }
             if old_focused_tx.is_none() || Some(focused_tx) != old_focused_tx.as_ref() {
-                msgs.push(Message::FocusTransaction(
-                    focused_tx_ref.clone(),
+                msgs.push(Message::FocusTransactionFromSource(
+                    session_focused_tx_ref.clone(),
                     Some(focused_tx.clone()),
                 ));
             }
         }
 
-        Some(TransactionDrawData(CachedTransactionDrawData {
+        Some(CachedTransactionDrawData {
             draw_commands,
             stream_to_displayed_txs,
             inc_relation_tx_ids,
             out_relation_tx_ids,
             parent_highlight_tx,
-        }))
+        })
     }
 
     // Transform from screen coordinates taking timeline into account if `consider_timeline` is true.
@@ -1195,18 +1346,42 @@ impl SystemState {
 
         match &self.draw_data.borrow()[viewport_idx] {
             Some(CachedDrawData::WaveDrawData(draw_data)) => {
-                self.draw_wave_data(waves, draw_data, &sorted_drawing_infos, &mut ctx);
+                self.draw_wave_data(
+                    waves,
+                    draw_data,
+                    viewport_idx,
+                    &sorted_drawing_infos,
+                    &mut ctx,
+                );
             }
             Some(CachedDrawData::TransactionDrawData(draw_data)) => {
                 self.draw_transaction_data(
                     waves,
                     draw_data,
+                    None,
                     viewport_idx,
                     ui,
                     msgs,
                     &sorted_drawing_infos,
                     &mut ctx,
                 );
+            }
+            Some(CachedDrawData::MixedDrawData(draw_data)) => {
+                if let Some(wave) = &draw_data.wave {
+                    self.draw_wave_data(waves, wave, viewport_idx, &sorted_drawing_infos, &mut ctx);
+                }
+                for (source, tx_data) in &draw_data.transactions {
+                    self.draw_transaction_data(
+                        waves,
+                        tx_data,
+                        Some(*source),
+                        viewport_idx,
+                        ui,
+                        msgs,
+                        &sorted_drawing_infos,
+                        &mut ctx,
+                    );
+                }
             }
             None => {}
         }
@@ -1289,6 +1464,7 @@ impl SystemState {
         &self,
         waves: &WaveData,
         draw_data: &CachedWaveDrawData,
+        viewport_idx: usize,
         sorted_drawing_infos: &[&ItemDrawingInfo],
         ctx: &mut DrawingContext,
     ) {
@@ -1326,6 +1502,10 @@ impl SystemState {
 
             match drawing_info {
                 ItemDrawingInfo::Variable(variable_info) => {
+                    let variable_source = match displayed_item {
+                        Some(DisplayedItem::Variable(variable)) => Some(variable.source),
+                        _ => None,
+                    };
                     if let Some(commands) = draw_commands.get(&variable_info.displayed_field_ref) {
                         let height_scaling_factor = displayed_item.map_or(
                             1.0,
@@ -1336,8 +1516,7 @@ impl SystemState {
                         let color = color.unwrap_or_else(|| {
                             if let Some(DisplayedItem::Variable(variable)) = displayed_item {
                                 waves
-                                    .inner
-                                    .as_waves()
+                                    .waves_for_source(variable.source)
                                     .and_then(|w| w.variable_meta(&variable.variable_ref).ok())
                                     .and_then(|meta| {
                                         if meta.is_event() {
@@ -1431,6 +1610,12 @@ impl SystemState {
                             }
                         }
                     }
+                    if let Some(source) = variable_source
+                        && let Some(tail_start) =
+                            Self::source_tail_start_pixel(waves, source, viewport_idx, ctx.cfg)
+                    {
+                        self.draw_source_tail_overlay(tail_start, drawing_info, ctx);
+                    }
                 }
                 ItemDrawingInfo::Divider(_) | ItemDrawingInfo::Group(_) => {
                     if !self.show_divider_text() {
@@ -1488,6 +1673,7 @@ impl SystemState {
         &self,
         waves: &WaveData,
         draw_data: &CachedTransactionDrawData,
+        source_filter: Option<SourceId>,
         viewport_idx: usize,
         ui: &mut Ui,
         msgs: &mut Vec<Message>,
@@ -1535,6 +1721,14 @@ impl SystemState {
 
             match drawing_info {
                 ItemDrawingInfo::Stream(stream) => {
+                    let Some(DisplayedItem::Stream(displayed_stream)) = displayed_item else {
+                        continue;
+                    };
+                    if let Some(source_filter) = source_filter
+                        && displayed_stream.source != source_filter
+                    {
+                        continue;
+                    }
                     if let Some(tx_refs) =
                         stream_to_displayed_txs.get(&stream.transaction_stream_ref)
                     {
@@ -1554,12 +1748,11 @@ impl SystemState {
 
                                 let start = Pos2::new(min.x, f32::midpoint(min.y, max.y));
 
-                                let is_transaction_focused = waves
-                                    .focused_transaction
-                                    .0
-                                    .as_ref()
-                                    .is_some_and(|t| t == tx_ref)
-                                    || matches!(
+                                let is_transaction_focused =
+                                    waves.focused_transaction.0.as_ref().is_some_and(|focused| {
+                                        focused.source == displayed_stream.source
+                                            && &focused.inner == tx_ref
+                                    }) || matches!(
                                         &tx_draw_command.kind,
                                         TxDrawKind::EventCluster {
                                             contains_focused: true,
@@ -1621,15 +1814,19 @@ impl SystemState {
 
                                 match &tx_draw_command.kind {
                                     TxDrawKind::Rect => {
-                                        let response = handle_transaction_tooltip(
+                                        let response = handle_transaction_tooltip_for_source(
                                             response,
                                             waves,
+                                            displayed_stream.source,
                                             &tx_draw_command.gen_ref,
                                             tx_ref,
                                         );
                                         if response.clicked() {
-                                            msgs.push(Message::FocusTransaction(
-                                                Some(tx_ref.clone()),
+                                            msgs.push(Message::FocusTransactionFromSource(
+                                                Some(SourceTransactionRef::new(
+                                                    displayed_stream.source,
+                                                    tx_ref.clone(),
+                                                )),
                                                 None,
                                             ));
                                         }
@@ -1675,15 +1872,19 @@ impl SystemState {
                                         }
                                     }
                                     TxDrawKind::EventMarker { out_of_range } => {
-                                        let response = handle_transaction_tooltip(
+                                        let response = handle_transaction_tooltip_for_source(
                                             response,
                                             waves,
+                                            displayed_stream.source,
                                             &tx_draw_command.gen_ref,
                                             tx_ref,
                                         );
                                         if response.clicked() {
-                                            msgs.push(Message::FocusTransaction(
-                                                Some(tx_ref.clone()),
+                                            msgs.push(Message::FocusTransactionFromSource(
+                                                Some(SourceTransactionRef::new(
+                                                    displayed_stream.source,
+                                                    tx_ref.clone(),
+                                                )),
                                                 None,
                                             ));
                                         }
@@ -1771,12 +1972,20 @@ impl SystemState {
                                 }
                             }
                         }
-                        ctx.painter.hline(
-                            0.0..=((ctx.to_screen)(ctx.cfg.canvas_size.x, 0.0).x),
-                            drawing_info.bottom(),
-                            border_stroke,
-                        );
                     }
+                    if let Some(tail_start) = Self::source_tail_start_pixel(
+                        waves,
+                        displayed_stream.source,
+                        viewport_idx,
+                        ctx.cfg,
+                    ) {
+                        self.draw_source_tail_overlay(tail_start, drawing_info, ctx);
+                    }
+                    ctx.painter.hline(
+                        0.0..=((ctx.to_screen)(ctx.cfg.canvas_size.x, 0.0).x),
+                        drawing_info.bottom(),
+                        border_stroke,
+                    );
                 }
                 ItemDrawingInfo::TimeLine(_) => {
                     let text_color = color.unwrap_or(

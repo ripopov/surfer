@@ -5,18 +5,20 @@ use itertools::Itertools;
 use num::BigUint;
 
 use crate::{
+    source::SourceId,
     transaction_container::{TransactionRef, TransactionStreamRef},
-    wave_container::{ScopeRef, VariableMeta, VariableRef, VariableRefExt},
+    wave_container::{ScopeRef, VariableMeta, VariableRef, VariableRefExt, WaveContainer},
     wave_data::WaveData,
 };
 
 // Try to locate a transaction for the tooltip without panicking
 fn find_transaction<'a>(
     waves: &'a WaveData,
+    source: SourceId,
     gen_ref: &TransactionStreamRef,
     tx_ref: &TransactionRef,
 ) -> Option<&'a Transaction> {
-    let txs = waves.inner.as_transactions()?;
+    let txs = waves.transactions_for_source(source)?;
     let gen_id = gen_ref.gen_id?;
     let generator = txs.get_generator(gen_id)?;
     generator
@@ -46,41 +48,40 @@ pub(crate) fn variable_tooltip_text(meta: Option<&VariableMeta>, variable: &Vari
 }
 
 #[must_use]
-pub(crate) fn scope_tooltip_text(
-    wave: &WaveData,
+pub(crate) fn scope_tooltip_text_for_container(
+    wave_container: &WaveContainer,
     scope: &ScopeRef,
     include_parameters: bool,
 ) -> String {
     let mut parts = vec![format!("{scope}")];
-    if let Some(wave_container) = &wave.inner.as_waves() {
-        if include_parameters && let Some(waves) = &wave.inner.as_waves() {
-            for param in &waves.parameters_in_scope(scope) {
-                let value = wave_container
-                    .query_variable(param, &BigUint::ZERO)
-                    .ok()
-                    .and_then(|o| o.and_then(|q| q.current.map(|v| format!("{}", v.1))))
-                    .unwrap_or_else(|| "Undefined".to_string());
-                parts.push(format!("{}: {}", param.name, value));
-            }
+    if include_parameters {
+        for param in &wave_container.parameters_in_scope(scope) {
+            let value = wave_container
+                .query_variable(param, &BigUint::ZERO)
+                .ok()
+                .and_then(|o| o.and_then(|q| q.current.map(|v| format!("{}", v.1))))
+                .unwrap_or_else(|| "Undefined".to_string());
+            parts.push(format!("{}: {}", param.name, value));
         }
-        let other = wave_container.get_scope_tooltip_data(scope);
-        if !other.is_empty() {
-            parts.push(other);
-        }
+    }
+    let other = wave_container.get_scope_tooltip_data(scope);
+    if !other.is_empty() {
+        parts.push(other);
     }
     parts.join("\n")
 }
 
 #[must_use]
-pub(crate) fn handle_transaction_tooltip(
+pub(crate) fn handle_transaction_tooltip_for_source(
     response: Response,
     waves: &WaveData,
+    source: SourceId,
     gen_ref: &TransactionStreamRef,
     tx_ref: &TransactionRef,
 ) -> Response {
     response
         .on_hover_ui(|ui| {
-            if let Some(tx) = find_transaction(waves, gen_ref, tx_ref) {
+            if let Some(tx) = find_transaction(waves, source, gen_ref, tx_ref) {
                 ui.set_max_width(ui.spacing().tooltip_width);
                 ui.add(egui::Label::new(transaction_tooltip_text(waves, tx)));
             } else {
@@ -92,7 +93,7 @@ pub(crate) fn handle_transaction_tooltip(
             // alternative is to do it every frame for every transaction, this
             // is most likely still a better approach.
             // Feel free to use some Rust magic to only do it once though...
-            if let Some(tx) = find_transaction(waves, gen_ref, tx_ref) {
+            if let Some(tx) = find_transaction(waves, source, gen_ref, tx_ref) {
                 transaction_tooltip_table(ui, tx);
             } else {
                 ui.label("Transaction details unavailable");

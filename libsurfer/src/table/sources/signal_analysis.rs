@@ -215,9 +215,8 @@ pub(crate) fn prepare_signal_analysis_model_input(
     ctx: &TableModelContext<'_>,
 ) -> Result<PreparedSignalAnalysisModelInput, TableCacheError> {
     let waves = ctx.waves.ok_or(TableCacheError::DataUnavailable)?;
-    let wave_container = waves
-        .inner
-        .as_waves()
+    let sampling_wave_container = waves
+        .waves_for_source(config.sampling.source)
         .ok_or(TableCacheError::DataUnavailable)?;
 
     if config.signals.is_empty() {
@@ -227,13 +226,16 @@ pub(crate) fn prepare_signal_analysis_model_input(
     }
 
     let (_sampling_variable, sampling_meta, sampling_accessor) =
-        resolve_loaded_signal(wave_container, &config.sampling.signal)?;
+        resolve_loaded_signal(sampling_wave_container, &config.sampling.signal)?;
     let sampling_mode = infer_sampling_mode(&sampling_meta);
 
     let analyzed_signals = config
         .signals
         .iter()
         .map(|signal| {
+            let wave_container = waves
+                .waves_for_source(signal.source)
+                .ok_or(TableCacheError::DataUnavailable)?;
             let (variable, meta, accessor) =
                 resolve_loaded_signal(wave_container, &signal.variable)?;
             Ok(ResolvedSignalAnalysisSignal {
@@ -263,7 +265,10 @@ pub(crate) fn prepare_signal_analysis_model_input(
         analyzed_signals,
         range,
         markers,
-        timescale: wave_container.metadata().timescale,
+        timescale: waves.sources.common_time_domain().map_or_else(
+            || sampling_wave_container.metadata().timescale,
+            |domain| domain.timescale.clone(),
+        ),
         wanted_timeunit: ctx.wanted_timeunit,
         time_format: ctx.time_format.clone(),
     })

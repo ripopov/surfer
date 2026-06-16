@@ -1,4 +1,5 @@
 use crate::displayed_item::DisplayedItem;
+use crate::source::SourceId;
 use crate::table::sources::multi_signal_index::MergedIndex;
 use crate::table::sources::signal_formatting::{
     SignalValueFormatter, format_signal_value as format_resolved_signal_value,
@@ -10,6 +11,7 @@ use crate::table::{
     TableRowId, TableSchema, TableSortKey,
 };
 use crate::time::TimeFormatter;
+use crate::time::TimeScale;
 use crate::wave_container::{SignalAccessor, VariableMeta, VariableRefExt};
 use egui::RichText;
 use num::BigInt;
@@ -19,6 +21,7 @@ use tracing::warn;
 
 const TIME_COLUMN_KEY: &str = "time";
 const SIGNAL_COLUMN_KEY_PREFIX: &str = "sig:v1:";
+const SIGNAL_COLUMN_KEY_V2_PREFIX: &str = "sig:v2:";
 
 /// Resolved per-signal entry metadata for the multi-signal model.
 struct ResolvedSignalEntry {
@@ -68,16 +71,22 @@ impl MultiSignalChangeListModel {
         ctx: &TableModelContext<'_>,
     ) -> Result<Self, TableCacheError> {
         let waves = ctx.waves.ok_or(TableCacheError::DataUnavailable)?;
-        let wave_container = waves
-            .inner
-            .as_waves()
-            .ok_or(TableCacheError::DataUnavailable)?;
 
         let deduped =
             crate::table::sources::multi_signal_index::dedup_multi_signal_entries(variables);
 
         let mut entries = Vec::new();
+        let mut fallback_time_scale = None::<TimeScale>;
         for entry in &deduped {
+            let Some(wave_container) = waves.waves_for_source(entry.source) else {
+                warn!(
+                    "Multi-signal change list: waveform source unavailable, skipping {} from {}",
+                    entry.variable.full_path_string(),
+                    entry.source
+                );
+                continue;
+            };
+            fallback_time_scale.get_or_insert_with(|| wave_container.metadata().timescale);
             let Some(updated_variable) = wave_container.update_variable_ref(&entry.variable) else {
                 warn!(
                     "Multi-signal change list: signal not found, skipping: {}",
@@ -128,7 +137,11 @@ impl MultiSignalChangeListModel {
             };
 
             let displayed_variable = waves.displayed_items.values().find_map(|item| match item {
-                DisplayedItem::Variable(var) if var.variable_ref == updated_variable => Some(var),
+                DisplayedItem::Variable(var)
+                    if var.source == entry.source && var.variable_ref == updated_variable =>
+                {
+                    Some(var)
+                }
                 _ => None,
             });
 
@@ -139,8 +152,11 @@ impl MultiSignalChangeListModel {
                 || waves.select_preferred_translator(&meta, ctx.translators),
             );
 
-            let column_key =
-                encode_signal_column_key(&updated_variable.full_path_string(), &entry.field);
+            let column_key = encode_signal_column_key(
+                entry.source,
+                &updated_variable.full_path_string(),
+                &entry.field,
+            );
 
             let display_label =
                 build_display_label(&updated_variable.full_path_string(), &entry.field);
@@ -161,11 +177,14 @@ impl MultiSignalChangeListModel {
             });
         }
 
-        let time_formatter = TimeFormatter::new(
-            &wave_container.metadata().timescale,
-            &ctx.wanted_timeunit,
-            &ctx.time_format,
-        );
+        let time_scale = waves
+            .sources
+            .common_time_domain()
+            .map(|domain| domain.timescale.clone())
+            .or(fallback_time_scale)
+            .ok_or(TableCacheError::DataUnavailable)?;
+        let time_formatter =
+            TimeFormatter::new(&time_scale, &ctx.wanted_timeunit, &ctx.time_format);
 
         Ok(Self {
             entries,
@@ -437,25 +456,39 @@ impl TableModel for MultiSignalChangeListModel {
 
 /// Encode a signal column key using percent-encoding for path separators.
 ///
-/// Format: `sig:v1:<escaped-path>#<escaped-field>`
+/// Format: `sig:v2:<source-id>:<escaped-path>#<escaped-field>`
 ///
 /// The encoding uses percent-encoding for `.`, `#`, `%`, and `/` characters
 /// to ensure the key is reversible and unambiguous.
-pub fn encode_signal_column_key(full_path: &str, field: &[String]) -> String {
+pub fn encode_signal_column_key(source: SourceId, full_path: &str, field: &[String]) -> String {
     let escaped_path = percent_encode_component(full_path);
     let escaped_field = field
         .iter()
         .map(|f| percent_encode_component(f))
         .collect::<Vec<_>>()
         .join(".");
-    format!("{SIGNAL_COLUMN_KEY_PREFIX}{escaped_path}#{escaped_field}")
+    format!(
+        "{SIGNAL_COLUMN_KEY_V2_PREFIX}{}:{escaped_path}#{escaped_field}",
+        source.0
+    )
 }
 
-/// Decode a signal column key back into `(full_path, field)`.
+/// Decode a signal column key back into `(source, full_path, field)`.
 ///
 /// Returns `None` if the key does not match the expected format.
-pub fn decode_signal_column_key(key: &str) -> Option<(String, Vec<String>)> {
+pub fn decode_signal_column_key(key: &str) -> Option<(SourceId, String, Vec<String>)> {
+    if let Some(rest) = key.strip_prefix(SIGNAL_COLUMN_KEY_V2_PREFIX) {
+        let (source, rest) = rest.split_once(':')?;
+        let source = SourceId(source.parse().ok()?);
+        let (full_path, field) = decode_signal_column_key_payload(rest)?;
+        return Some((source, full_path, field));
+    }
     let rest = key.strip_prefix(SIGNAL_COLUMN_KEY_PREFIX)?;
+    let (full_path, field) = decode_signal_column_key_payload(rest)?;
+    Some((SourceId::default(), full_path, field))
+}
+
+fn decode_signal_column_key_payload(rest: &str) -> Option<(String, Vec<String>)> {
     let (escaped_path, escaped_field) = rest.split_once('#')?;
     let full_path = percent_decode_component(escaped_path);
     let field = if escaped_field.is_empty() {
@@ -525,10 +558,11 @@ mod tests {
     fn column_key_encode_decode_round_trip_simple() {
         let path = "tb.dut.counter";
         let field: Vec<String> = vec![];
-        let key = encode_signal_column_key(path, &field);
-        assert_eq!(key, "sig:v1:tb%2Edut%2Ecounter#");
+        let key = encode_signal_column_key(SourceId(2), path, &field);
+        assert_eq!(key, "sig:v2:2:tb%2Edut%2Ecounter#");
 
-        let (decoded_path, decoded_field) = decode_signal_column_key(&key).unwrap();
+        let (decoded_source, decoded_path, decoded_field) = decode_signal_column_key(&key).unwrap();
+        assert_eq!(decoded_source, SourceId(2));
         assert_eq!(decoded_path, path);
         assert_eq!(decoded_field, field);
     }
@@ -537,10 +571,11 @@ mod tests {
     fn column_key_encode_decode_round_trip_with_field() {
         let path = "tb.dut.counter";
         let field = vec!["value".to_string(), "lsb".to_string()];
-        let key = encode_signal_column_key(path, &field);
-        assert_eq!(key, "sig:v1:tb%2Edut%2Ecounter#value.lsb");
+        let key = encode_signal_column_key(SourceId(1), path, &field);
+        assert_eq!(key, "sig:v2:1:tb%2Edut%2Ecounter#value.lsb");
 
-        let (decoded_path, decoded_field) = decode_signal_column_key(&key).unwrap();
+        let (decoded_source, decoded_path, decoded_field) = decode_signal_column_key(&key).unwrap();
+        assert_eq!(decoded_source, SourceId(1));
         assert_eq!(decoded_path, path);
         assert_eq!(decoded_field, field);
     }
@@ -549,9 +584,10 @@ mod tests {
     fn column_key_encode_special_chars() {
         let path = "a%b#c/d.e";
         let field = vec!["f.g".to_string()];
-        let key = encode_signal_column_key(path, &field);
+        let key = encode_signal_column_key(SourceId::default(), path, &field);
 
-        let (decoded_path, decoded_field) = decode_signal_column_key(&key).unwrap();
+        let (decoded_source, decoded_path, decoded_field) = decode_signal_column_key(&key).unwrap();
+        assert_eq!(decoded_source, SourceId::default());
         assert_eq!(decoded_path, path);
         assert_eq!(decoded_field, field);
     }
@@ -559,12 +595,21 @@ mod tests {
     #[test]
     fn column_key_decode_invalid_prefix_returns_none() {
         assert!(decode_signal_column_key("invalid:key").is_none());
-        assert!(decode_signal_column_key("sig:v2:path#field").is_none());
+        assert!(decode_signal_column_key("sig:v2:not-a-source:path#field").is_none());
     }
 
     #[test]
     fn column_key_decode_missing_hash_returns_none() {
         assert!(decode_signal_column_key("sig:v1:nohash").is_none());
+    }
+
+    #[test]
+    fn column_key_decode_v1_defaults_to_primary_source() {
+        let (decoded_source, decoded_path, decoded_field) =
+            decode_signal_column_key("sig:v1:tb%2Edut%2Ecounter#value").unwrap();
+        assert_eq!(decoded_source, SourceId::default());
+        assert_eq!(decoded_path, "tb.dut.counter");
+        assert_eq!(decoded_field, vec!["value".to_string()]);
     }
 
     #[test]

@@ -112,6 +112,17 @@ impl SystemState {
                         .format_shortcut(ShortcutAction::SwitchFile),
                 )
                 .add_closing_menu(msgs, ui);
+            b(
+                "Add source...",
+                Message::OpenFileDialog(OpenMode::AddSource),
+            )
+            .add_closing_menu(msgs, ui);
+            #[cfg(not(target_arch = "wasm32"))]
+            b(
+                "Open waveform + transactions...",
+                Message::OpenFileDialog(OpenMode::OpenMultipleSources),
+            )
+            .add_closing_menu(msgs, ui);
 
             #[cfg(not(target_arch = "wasm32"))]
             ui.menu_button("Recent files", |ui| {
@@ -657,6 +668,7 @@ impl SystemState {
                     let item = waves.displayed_items.get(&node.item_ref)?;
                     if let DisplayedItem::Variable(var) = item {
                         Some(MultiSignalEntry {
+                            source: var.source,
                             variable: var.variable_ref.clone(),
                             field: vec![],
                         })
@@ -682,6 +694,7 @@ impl SystemState {
 
                 msgs.push(Message::AddTableTile {
                     spec: TableModelSpec::SignalChangeList {
+                        source: variable.source,
                         variable: variable_ref,
                         field,
                     },
@@ -728,33 +741,40 @@ impl SystemState {
                 // Single generator — open one table
                 if ui.button("Show transactions in table").clicked() {
                     msgs.push(Message::OpenTransactionTable {
+                        source: stream.source,
                         generator: stream.transaction_stream_ref.clone(),
                     });
                     ui.close();
                 }
                 let has_events = events_enabled
-                    && waves.inner.as_transactions().is_some_and(|tc| {
-                        stream
-                            .transaction_stream_ref
-                            .gen_id
-                            .and_then(|gen_id| {
-                                tc.event_index().conforming_events_generator_of(gen_id)
-                            })
-                            .is_some()
-                    });
+                    && waves
+                        .transactions_for_source(stream.source)
+                        .is_some_and(|tc| {
+                            stream
+                                .transaction_stream_ref
+                                .gen_id
+                                .and_then(|gen_id| {
+                                    tc.event_index().conforming_events_generator_of(gen_id)
+                                })
+                                .is_some()
+                        });
                 if has_events && ui.button("Show events in table").clicked() {
                     msgs.push(Message::OpenEventTable {
+                        source: stream.source,
                         generator: stream.transaction_stream_ref.clone(),
                     });
                     ui.close();
                 }
-            } else if let Some(tc) = waves.inner.as_transactions() {
+            } else if let Some(tc) = waves.transactions_for_source(stream.source) {
                 // Stream — open one table per generator
                 let scope = StreamScopeRef::Stream(stream.transaction_stream_ref.clone());
                 let generators = tc.generators_in_stream(&scope);
                 if !generators.is_empty() && ui.button("Show transactions in table").clicked() {
                     for gen_ref in generators {
-                        msgs.push(Message::OpenTransactionTable { generator: gen_ref });
+                        msgs.push(Message::OpenTransactionTable {
+                            source: stream.source,
+                            generator: gen_ref,
+                        });
                     }
                     ui.close();
                 }
@@ -763,19 +783,21 @@ impl SystemState {
             // Three-way event display control for rows whose generators
             // carry FTR events
             let row_has_events = events_enabled
-                && waves.inner.as_transactions().is_some_and(|tc| {
-                    let index = tc.event_index();
-                    match stream.transaction_stream_ref.gen_id {
-                        Some(gen_id) => index.conforming_events_generator_of(gen_id).is_some(),
-                        None => tc
-                            .get_stream(stream.transaction_stream_ref.stream_id)
-                            .is_some_and(|s| {
-                                s.generators
-                                    .iter()
-                                    .any(|gen_id| index.is_conforming_events_generator(*gen_id))
-                            }),
-                    }
-                });
+                && waves
+                    .transactions_for_source(stream.source)
+                    .is_some_and(|tc| {
+                        let index = tc.event_index();
+                        match stream.transaction_stream_ref.gen_id {
+                            Some(gen_id) => index.conforming_events_generator_of(gen_id).is_some(),
+                            None => tc
+                                .get_stream(stream.transaction_stream_ref.stream_id)
+                                .is_some_and(|s| {
+                                    s.generators
+                                        .iter()
+                                        .any(|gen_id| index.is_conforming_events_generator(*gen_id))
+                                }),
+                        }
+                    });
             if row_has_events {
                 ui.menu_button("Events", |ui| {
                     for (mode, label) in [
@@ -793,8 +815,10 @@ impl SystemState {
             }
         }
 
-        if let Some(path) = path {
-            let wave_container = waves.inner.as_waves().unwrap();
+        if let Some(path) = path
+            && let DisplayedItem::Variable(variable) = clicked_item
+            && let Some(wave_container) = waves.waves_for_source(variable.source)
+        {
             let meta = wave_container.variable_meta(&path.root).ok();
             let is_parameter = meta
                 .as_ref()
@@ -802,15 +826,16 @@ impl SystemState {
             if !is_parameter && ui.button("Expand scope").clicked() {
                 let scope_path = path.root.path.clone();
                 let scope_type = ScopeType::WaveScope(scope_path.clone());
-                msgs.push(Message::SetActiveScope(Some(scope_type)));
+                msgs.push(Message::SetActiveScopeFromSource(
+                    variable.source,
+                    Some(scope_type),
+                ));
                 msgs.push(Message::ExpandScope(ScopeExpandType::ExpandSpecific(
                     scope_path,
                 )));
             }
 
-            if let DisplayedItem::Variable(variable) = clicked_item
-                && wave_container.supports_analog()
-            {
+            if wave_container.supports_analog() {
                 let displayed_field_ref: DisplayedFieldRef = clicked_item_ref.into();
                 let translator = waves.variable_translator(&displayed_field_ref, &self.translators);
                 let type_limits_available = meta

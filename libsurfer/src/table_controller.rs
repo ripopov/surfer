@@ -39,7 +39,8 @@ impl SystemState {
                 self.user.show_signal_analysis_wizard = None;
                 let edit_target = self.user.signal_analysis_wizard_edit_target.take();
                 self.preload_signal_analysis_variables(&config);
-                let sampling_mode = self.signal_analysis_sampling_mode(&config.sampling.signal);
+                let sampling_mode = self
+                    .signal_analysis_sampling_mode(config.sampling.source, &config.sampling.signal);
 
                 if let Some(tile_id) = edit_target
                     && let Some(tile_state) = self.user.table_tiles.get_mut(&tile_id)
@@ -129,23 +130,25 @@ impl SystemState {
                 let item = waves.displayed_items.get(&item_ref)?;
                 if let DisplayedItem::Variable(variable) = item {
                     let spec = table::TableModelSpec::SignalChangeList {
+                        source: variable.source,
                         variable: variable.variable_ref.clone(),
                         field: Vec::new(),
                     };
                     self.open_table_tile(spec);
                 }
             }
-            Message::OpenTransactionTable { generator } => {
-                self.ensure_transaction_stream_loaded(&generator);
-                let spec = table::TableModelSpec::TransactionTrace { generator };
+            Message::OpenTransactionTable { source, generator } => {
+                self.ensure_transaction_stream_loaded(source, &generator);
+                let spec = table::TableModelSpec::TransactionTrace { source, generator };
                 self.open_table_tile(spec);
             }
-            Message::OpenEventTable { generator } => {
-                self.ensure_transaction_stream_loaded(&generator);
-                let spec = table::TableModelSpec::EventTable { generator };
+            Message::OpenEventTable { source, generator } => {
+                self.ensure_transaction_stream_loaded(source, &generator);
+                let spec = table::TableModelSpec::EventTable { source, generator };
                 self.open_table_tile(spec);
             }
             Message::RemoveTableTile { tile_id } => {
+                self.user.tile_tree.remove_table_tile(tile_id);
                 self.user.table_tiles.remove(&tile_id);
                 self.table_runtime.remove(&tile_id);
                 self.invalidate_draw_commands();
@@ -347,10 +350,11 @@ impl SystemState {
     /// in memory even when it was never added to the waveform view.
     fn ensure_transaction_stream_loaded(
         &mut self,
+        source: crate::source::SourceId,
         generator: &crate::transaction_container::TransactionStreamRef,
     ) {
         if let Some(waves) = self.user.waves.as_mut()
-            && let Some(transactions) = waves.inner.as_transactions_mut()
+            && let Some(transactions) = waves.transactions_for_source_mut(source)
         {
             let needs_load = transactions
                 .get_stream(generator.stream_id)

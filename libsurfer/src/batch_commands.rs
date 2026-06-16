@@ -25,6 +25,11 @@ impl SystemState {
                 }
                 info!("Applying batch command: {cmd:?}");
                 self.update(cmd);
+                let mut msgs = Vec::new();
+                self.push_async_messages(&mut msgs);
+                while let Some(msg) = msgs.pop() {
+                    self.update(msg);
+                }
             } else {
                 break; // no more messages
             }
