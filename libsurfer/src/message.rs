@@ -172,7 +172,7 @@ pub enum Message {
     LoadFileWithIntent(Utf8PathBuf, LoadIntent),
     /// Queue a set of file loads with explicit intents, preserving order.
     LoadFilesWithIntents(Vec<(Utf8PathBuf, LoadIntent)>),
-    /// Close an additive source and remove source-owned rows/tables.
+    /// Close a source and remove or remap source-owned rows/tables.
     CloseSource(SourceId),
     /// Reload one source from its locator without replacing the whole session.
     ReloadSource(SourceId, bool),
@@ -182,6 +182,8 @@ pub enum Message {
     LoadWaveformFileFromUrl(String, LoadOptions),
     /// Load file from data.
     LoadFromData(Vec<u8>, LoadOptions),
+    /// Load byte data with explicit session/source intent.
+    LoadDataWithIntent(Vec<u8>, LoadIntent),
     #[cfg(feature = "python")]
     /// Load translator from Python file path.
     LoadPythonTranslator(Utf8PathBuf),
@@ -283,6 +285,8 @@ pub enum Message {
     ShowCommandPrompt(String, Option<String>),
     /// Message sent when file is loadedropped onto Surfer.
     FileDropped(DroppedFile),
+    /// Message sent when a dropped file should use a specific load intent.
+    FileDroppedWithIntent(DroppedFile, LoadIntent),
     /// Message sent when one or more files are dropped onto Surfer.
     FilesDropped(Vec<DroppedFile>),
     #[serde(skip)]

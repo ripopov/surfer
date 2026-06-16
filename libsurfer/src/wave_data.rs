@@ -240,7 +240,7 @@ impl WaveData {
     }
 
     #[must_use]
-    pub fn source_label_for(&self, source: SourceId) -> Option<String> {
+    pub fn source_base_label_for(&self, source: SourceId) -> Option<String> {
         if source == Self::primary_source_id() {
             Some(
                 self.primary_source_label
@@ -251,6 +251,28 @@ impl WaveData {
             self.sources
                 .source(source)
                 .map(|source| source.label.clone())
+        }
+    }
+
+    #[must_use]
+    pub fn source_label_for(&self, source: SourceId) -> Option<String> {
+        let label = self.source_base_label_for(source)?;
+        if self.source_count() <= 1 {
+            return Some(label);
+        }
+
+        let duplicate_count = self
+            .source_ids()
+            .into_iter()
+            .filter(|candidate| {
+                self.source_base_label_for(*candidate).as_deref() == Some(label.as_str())
+            })
+            .count();
+
+        if duplicate_count > 1 {
+            Some(format!("{label} ({source})"))
+        } else {
+            Some(label)
         }
     }
 
@@ -376,6 +398,37 @@ impl WaveData {
         {
             warn!("Failed to refresh session time domain: {err:?}");
         }
+    }
+
+    pub fn promote_first_additive_source_to_primary(
+        &mut self,
+    ) -> Option<HashMap<SourceId, SourceId>> {
+        let promoted_id = self.sources.sources.first()?.id;
+        self.remove_displayed_items_for_source(Self::primary_source_id());
+        if self.active_scope_source == Self::primary_source_id() {
+            self.active_scope = None;
+        }
+        if self
+            .focused_transaction
+            .0
+            .as_ref()
+            .is_some_and(|focused| focused.source == Self::primary_source_id())
+        {
+            self.focused_transaction = (None, None);
+        }
+
+        let promoted = self.sources.remove_source(promoted_id)?;
+        self.inner = promoted.inner;
+        self.source = promoted.source;
+        self.format = promoted.format;
+        self.primary_source_label = Some(promoted.label);
+        self.cache_generation = promoted.cache_generation;
+        self.inflight_caches = promoted.inflight_caches;
+
+        let source_map = HashMap::from([(promoted_id, Self::primary_source_id())]);
+        self.remap_source_ids(&source_map);
+        self.refresh_session_time_domain();
+        Some(source_map)
     }
 
     pub fn add_loaded_source(
@@ -726,6 +779,11 @@ impl WaveData {
             return;
         }
         self.sources.remove_source(source);
+        self.remove_displayed_items_for_source(source);
+        self.refresh_session_time_domain();
+    }
+
+    fn remove_displayed_items_for_source(&mut self, source: SourceId) {
         let stale_items = self
             .displayed_items
             .iter()
@@ -741,7 +799,6 @@ impl WaveData {
         for item_ref in stale_items {
             self.remove_displayed_item(item_ref);
         }
-        self.refresh_session_time_domain();
     }
 
     #[must_use]

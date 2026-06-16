@@ -2071,6 +2071,15 @@ snapshot_ui_with_files_and_msgs! {fused_wave_ftr_hierarchy_variables, ["examples
     Message::SetHierarchyStyle(HierarchyStyle::Variables),
 ]}
 
+snapshot_ui_with_files_and_msgs! {fused_wave_ftr_hierarchy_separate_ftr_scope, ["examples/fused_ftr_wave.vcd", "examples/my_db.ftr"], [
+    Message::SetActiveScopeFromSource(
+        SourceId(1),
+        Some(ScopeType::StreamScope(StreamScopeRef::Root)),
+    ),
+    Message::SetSidePanelVisible(true),
+    Message::SetHierarchyStyle(HierarchyStyle::Separate),
+]}
+
 snapshot_ui_with_files_and_msgs! {fused_wave_ftr_renamed_hierarchy_tree, ["examples/fused_ftr_wave.vcd", "examples/my_db.ftr"], [
     Message::RenameSource(SourceId::default(), "waves".to_string()),
     Message::RenameSource(SourceId(1), "transactions".to_string()),
@@ -2784,6 +2793,26 @@ snapshot_ui_with_files_and_msgs! {fused_wave_ftr_mixed_canvas, ["examples/fused_
         )
     ),
     Message::CursorSet(BigInt::from(1_500_000)),
+]}
+
+snapshot_ui_with_files_and_msgs! {fused_wave_ftr_mixed_canvas_marker_timeline, ["examples/fused_ftr_wave.vcd", "examples/my_db.ftr"], [
+    Message::SetDefaultTimeline(true),
+    Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.clk")]),
+    Message::AddDivider(Some("Transactions".to_string()), None),
+    Message::AddStreamOrGeneratorFromSource(
+        SourceId(1),
+        TransactionStreamRef::new_gen(
+            StreamId(1),
+            GeneratorId(4),
+            "pipelined_stream.read".to_string()
+        )
+    ),
+    Message::CursorSet(BigInt::from(1_500_000)),
+    Message::AddMarker {
+        time: BigInt::from(2_500_000),
+        name: Some("M".to_string()),
+        move_focus: false,
+    },
 ]}
 
 snapshot_ui_with_files_and_msgs! {fused_wave_ftr_unequal_span_mixed_canvas, ["examples/fused_ftr_wave.vcd", "examples/my_db.ftr", "examples/fused_ftr_wave_long.vcd"], [
