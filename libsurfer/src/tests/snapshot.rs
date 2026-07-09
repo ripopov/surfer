@@ -3057,6 +3057,16 @@ snapshot_ui_with_file_and_msgs! {ftr_events_event_table, "examples/ftr_events.ft
     },
 ]}
 
+// A real pipeline trace: Konata's kanata-sample-2.log (Dhrystone on RSD)
+// converted with LWTR4SC's konata2ftr, one transaction per instruction and
+// one event per pipeline stage (4041 instructions, 51961 stage events).
+// Zoomed to a window where the pipeline diagonal is visible.
+snapshot_ui_with_file_and_msgs! {kanata_pipeline_trace_renders, "examples/kanata-sample-2.ftr", [
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(StreamId(1), GeneratorId(10), "instruction".to_string())),
+    Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(StreamId(1), GeneratorId(11), "instruction.events".to_string())),
+    Message::ZoomToRange { start: BigInt::from(3300), end: BigInt::from(3380), viewport_idx: 0 },
+]}
+
 // When many events map to the same pixel columns, markers aggregate into
 // cluster glyphs with count badges instead of a smear of overdrawn diamonds
 #[test]
