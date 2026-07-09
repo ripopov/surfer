@@ -13,7 +13,7 @@ use crate::time::TimeFormatter;
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
 use crate::transaction_events::{EVENT_NAME_ATTRIBUTE, event_name};
 use ftr_parser::types::AttributeType;
-use num::{BigInt, BigUint};
+use num::BigInt;
 use std::collections::HashMap;
 
 // Fixed column keys
@@ -43,8 +43,8 @@ pub struct EventTableModel {
 struct EventRow {
     row_id: TableRowId,
     tx_ref: TransactionRef,
-    time: BigUint,
-    duration: BigUint,
+    time: u64,
+    duration: u64,
     name: String,
     parent: String,
     /// Values in the same order as `attribute_columns`.
@@ -104,10 +104,10 @@ impl EventTableModel {
         let mut attribute_columns: Vec<String> = vec![];
         for tx in &events_generator.transactions {
             for attr in &tx.attributes {
-                let is_promoted_name =
-                    matches!(attr.kind, AttributeType::BEGIN) && attr.name == EVENT_NAME_ATTRIBUTE;
-                if !is_promoted_name && !attribute_columns.contains(&attr.name) {
-                    attribute_columns.push(attr.name.clone());
+                let is_promoted_name = matches!(attr.kind, AttributeType::BEGIN)
+                    && attr.name.as_ref() == EVENT_NAME_ATTRIBUTE;
+                if !is_promoted_name && !attribute_columns.iter().any(|c| c == attr.name.as_ref()) {
+                    attribute_columns.push(attr.name.to_string());
                 }
             }
         }
@@ -120,11 +120,7 @@ impl EventTableModel {
                 let tx_id = tx.get_tx_id();
                 let time = tx.get_start_time();
                 let end_time = tx.get_end_time();
-                let duration = if end_time >= time {
-                    &end_time - &time
-                } else {
-                    BigUint::ZERO
-                };
+                let duration = end_time.saturating_sub(time);
 
                 let name = event_name(tx).unwrap_or_default();
                 let parent = index
@@ -140,14 +136,14 @@ impl EventTableModel {
                     .map(|column| {
                         tx.attributes
                             .iter()
-                            .find(|attr| &attr.name == column)
+                            .find(|attr| attr.name.as_ref() == column)
                             .map(ftr_parser::types::Attribute::value)
                             .unwrap_or_default()
                     })
                     .collect::<Vec<_>>();
 
-                let time_text = time_formatter.format(&BigInt::from(time.clone()));
-                let duration_text = time_formatter.format(&BigInt::from(duration.clone()));
+                let time_text = time_formatter.format(&BigInt::from(time));
+                let duration_text = time_formatter.format(&BigInt::from(duration));
 
                 let mut search_text = format!("{time_text} {duration_text} {name} {parent}");
                 for value in attribute_values.iter().filter(|value| !value.is_empty()) {
@@ -171,7 +167,7 @@ impl EventTableModel {
             })
             .collect();
 
-        rows.sort_by(|a, b| a.time.cmp(&b.time));
+        rows.sort_by_key(|row| row.time);
 
         let index_by_id = rows
             .iter()

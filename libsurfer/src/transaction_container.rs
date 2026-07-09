@@ -2,7 +2,7 @@ use crate::time::{TimeScale, TimeUnit};
 use crate::transaction_events::{EventIndex, EventInfo};
 use crate::wave_container::MetaData;
 use ftr_parser::types::{
-    FTR, GeneratorId, StreamId, Transaction, TransactionId, TxGenerator, TxStream,
+    FTR, GeneratorId, StreamId, Transaction, TransactionId, TxGenerator, TxRelation, TxStream,
 };
 use itertools::Itertools;
 use num::BigUint;
@@ -51,6 +51,13 @@ impl TransactionContainer {
     #[must_use]
     pub fn events_of_parent(&self, tx_id: TransactionId) -> &[TransactionId] {
         self.event_index.events_of_parent(tx_id)
+    }
+
+    /// Resolves a relation index (as stored in a transaction's
+    /// `inc_relations`/`out_relations`) to the relation itself.
+    #[must_use]
+    pub fn get_relation(&self, index: usize) -> Option<&TxRelation> {
+        self.inner.get_relation(index)
     }
     #[must_use]
     pub fn get_streams(&self) -> Vec<&TxStream> {
@@ -212,7 +219,7 @@ impl TransactionContainer {
 
     #[must_use]
     pub fn max_timestamp(&self) -> Option<BigUint> {
-        Some(BigUint::try_from(&self.inner.max_timestamp).unwrap())
+        Some(BigUint::from(self.inner.max_timestamp))
     }
 
     #[must_use]

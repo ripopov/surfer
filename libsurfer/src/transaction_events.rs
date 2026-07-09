@@ -187,7 +187,8 @@ impl EventIndex {
         let parent_relations = tx
             .inc_relations
             .iter()
-            .filter(|rel| rel.name == EVENT_PARENT_RELATION)
+            .filter_map(|idx| ftr.get_relation(*idx))
+            .filter(|rel| rel.name.as_ref() == EVENT_PARENT_RELATION)
             .collect::<Vec<_>>();
 
         let parent_relation = parent_relations.first()?;
@@ -301,11 +302,13 @@ pub fn is_orphan_event(index: &EventIndex, generator: GeneratorId, tx_id: Transa
 pub fn event_name(tx: &Transaction) -> Option<String> {
     tx.attributes
         .iter()
-        .find(|attr| matches!(attr.kind, AttributeType::BEGIN) && attr.name == EVENT_NAME_ATTRIBUTE)
+        .find(|attr| {
+            matches!(attr.kind, AttributeType::BEGIN) && attr.name.as_ref() == EVENT_NAME_ATTRIBUTE
+        })
         .or_else(|| {
             tx.attributes
                 .iter()
-                .find(|attr| attr.name == EVENT_NAME_ATTRIBUTE)
+                .find(|attr| attr.name.as_ref() == EVENT_NAME_ATTRIBUTE)
         })
         .map(ftr_parser::types::Attribute::value)
 }
@@ -330,13 +333,40 @@ pub(crate) mod test_util {
     use serde_json::json;
 
     pub fn ftr_from_json(streams: serde_json::Value, generators: serde_json::Value) -> FTR {
+        // Transactions are written with their incoming relations inline (see
+        // `tx`), but the parser stores relations once in `FTR::tx_relations`
+        // and only indices on the transactions. Hoist the inline objects into
+        // the shared list and replace them with their indices.
+        let mut generators = generators;
+        let mut relations: Vec<serde_json::Value> = vec![];
+        if let Some(generators) = generators.as_object_mut() {
+            for transaction in generators
+                .values_mut()
+                .filter_map(|g| g.get_mut("transactions")?.as_array_mut())
+                .flatten()
+            {
+                if let Some(inline) = transaction
+                    .get_mut("inc_relations")
+                    .and_then(|r| r.as_array_mut())
+                {
+                    let indices: Vec<serde_json::Value> = inline
+                        .drain(..)
+                        .map(|rel| {
+                            relations.push(rel);
+                            json!(relations.len() - 1)
+                        })
+                        .collect();
+                    inline.extend(indices);
+                }
+            }
+        }
         serde_json::from_value(json!({
             "time_scale": "Ns",
-            "max_timestamp": [1, [1000]],
+            "max_timestamp": 1000,
             "str_dict": {},
             "tx_streams": streams,
             "tx_generators": generators,
-            "tx_relations": [],
+            "tx_relations": relations,
             "path": null,
         }))
         .expect("constructing test FTR")
@@ -417,9 +447,8 @@ pub(crate) mod test_util {
             "event": {
                 "tx_id": id,
                 "gen_id": gen_id,
-                // BigUint serializes as its u32 digit sequence
-                "start_time": [start],
-                "end_time": [end],
+                "start_time": start,
+                "end_time": end,
             },
             "attributes": attributes,
             "inc_relations": inc_relations,

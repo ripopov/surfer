@@ -202,8 +202,8 @@ fn event_tooltip_text(
         crate::transaction_events::event_name(tx).unwrap_or_else(|| format!("event tx#{tx_id}"));
     let mut lines = vec![name];
 
-    let duration = &tx.event.end_time - &tx.event.start_time;
-    if duration == BigUint::ZERO {
+    let duration = tx.event.end_time - tx.event.start_time;
+    if duration == 0 {
         lines.push(format!("Time: {}{time_scale}", tx.event.start_time));
     } else {
         lines.push(format!(
@@ -253,7 +253,7 @@ fn transaction_tooltip_table(ui: &mut Ui, tx: &Transaction) {
             body.rows(15., total_rows, |mut row| {
                 if let Some(attribute) = attributes.get(row.index()) {
                     row.col(|ui| {
-                        ui.label(attribute.name.clone());
+                        ui.label(attribute.name.to_string());
                     });
                     row.col(|ui| {
                         ui.label(attribute.value());

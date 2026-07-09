@@ -1,0 +1,26 @@
+[package]
+name = "ftr_parser"
+description = "FTR Transaction Stream Parser"
+authors = ["Christian Dattinger", "Lucas Klemmer"]
+homepage = "https://git.sr.ht/~lucasklemmer/ftr_parser"
+version = "0.3.0"
+edition = "2021"
+license-file = "LICENSE.txt"
+readme = "README.md"
+repository = "https://git.sr.ht/~lucasklemmer/ftr_parser"
+keywords = ["transactions", "debugging", "TLM", "SystemC"]
+categories = ["parser-implementations"]
+
+[dependencies]
+lz4_flex = "0.11.5"
+serde = { version = "1.0.197", features = ["derive", "rc"] }
+
+[lints.clippy]
+all = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+undocumented_unsafe_blocks = "deny"
+unwrap_in_result = "deny"
+ok_expect = "deny"
