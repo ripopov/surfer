@@ -3,7 +3,6 @@ use egui_extras::{Column, TableBody, TableBuilder};
 use emath::Align;
 use ftr_parser::types::Transaction;
 use itertools::Itertools;
-use num::BigUint;
 use tracing::{info, warn};
 
 use crate::SystemState;
@@ -448,7 +447,7 @@ fn draw_focused_event_details(
                         table_row(
                             &mut body,
                             EVENT_DURATION_LABEL,
-                            &(&end_time - &start_time).to_string(),
+                            &(end_time - start_time).to_string(),
                         );
                     }
 
@@ -456,7 +455,9 @@ fn draw_focused_event_details(
                     let attributes = focused_transaction
                         .attributes
                         .iter()
-                        .filter(|attr| attr.name != crate::transaction_events::EVENT_NAME_ATTRIBUTE)
+                        .filter(|attr| {
+                            attr.name.as_ref() != crate::transaction_events::EVENT_NAME_ATTRIBUTE
+                        })
                         .collect_vec();
                     if !attributes.is_empty() {
                         section_header(&mut body, ATTRIBUTES_SECTION_TITLE);
@@ -485,7 +486,7 @@ fn draw_focused_event_details(
                             None,
                         ));
                         // Bring the parent into view
-                        let mid = (parent.get_start_time() + parent.get_end_time()) / 2u8;
+                        let mid = (parent.get_start_time() + parent.get_end_time()) / 2;
                         msgs.push(Message::GoToTime(
                             Some(num::BigInt::from(mid)),
                             viewport_idx,
@@ -569,6 +570,7 @@ fn draw_focused_parent_details(
                     let inc_relations = focused_transaction
                         .inc_relations
                         .iter()
+                        .filter_map(|idx| transactions.get_relation(*idx))
                         .filter(|rel| !is_event_link(transactions, events_enabled, rel))
                         .collect_vec();
                     if !inc_relations.is_empty() {
@@ -587,6 +589,7 @@ fn draw_focused_parent_details(
                     let out_relations = focused_transaction
                         .out_relations
                         .iter()
+                        .filter_map(|idx| transactions.get_relation(*idx))
                         .filter(|rel| !is_event_link(transactions, events_enabled, rel))
                         .collect_vec();
                     if !out_relations.is_empty() {
@@ -635,7 +638,9 @@ fn draw_focused_parent_details(
                     let summary = event
                         .attributes
                         .iter()
-                        .filter(|attr| attr.name != crate::transaction_events::EVENT_NAME_ATTRIBUTE)
+                        .filter(|attr| {
+                            attr.name.as_ref() != crate::transaction_events::EVENT_NAME_ATTRIBUTE
+                        })
                         .map(|attr| format!("{}={}", attr.name, attr.value()))
                         .join(", ");
                     let mut label = format!("{}  {name}", event.get_start_time());
@@ -682,7 +687,7 @@ fn is_event_link(
     rel: &ftr_parser::types::TxRelation,
 ) -> bool {
     events_enabled
-        && rel.name == crate::transaction_events::EVENT_PARENT_RELATION
+        && rel.name.as_ref() == crate::transaction_events::EVENT_PARENT_RELATION
         && transactions
             .event_info(rel.sink_tx_id)
             .is_some_and(|info| info.parent_tx == rel.source_tx_id)
@@ -690,7 +695,7 @@ fn is_event_link(
 
 pub fn calculate_rows_of_stream(
     transactions: &[Transaction],
-    last_times_on_row: &mut Vec<(BigUint, BigUint)>,
+    last_times_on_row: &mut Vec<(u64, u64)>,
 ) {
     for transaction in transactions {
         let mut curr_row = 0;
@@ -700,7 +705,7 @@ pub fn calculate_rows_of_stream(
         while last_times_on_row[curr_row].1 > start_time {
             curr_row += 1;
             if last_times_on_row.len() <= curr_row {
-                last_times_on_row.push((BigUint::ZERO, BigUint::ZERO));
+                last_times_on_row.push((0, 0));
             }
         }
         last_times_on_row[curr_row] = (start_time, end_time);

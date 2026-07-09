@@ -6,7 +6,7 @@ use eyre::WrapErr as _;
 use ftr_parser::types::{Transaction, TxGenerator};
 use itertools::Itertools;
 use num::bigint::{ToBigInt, ToBigUint};
-use num::{BigInt, BigUint, ToPrimitive};
+use num::{BigInt, ToPrimitive};
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::collections::HashMap;
 use std::f32::consts::PI;
@@ -867,12 +867,8 @@ impl SystemState {
             })
             .collect::<Vec<_>>();
 
-        let first_visible_timestamp = viewport
-            .curr_left
-            .absolute(&num_timestamps)
-            .0
-            .to_biguint()
-            .unwrap_or(BigUint::ZERO);
+        let first_visible_timestamp =
+            viewport.curr_left.absolute(&num_timestamps).0.max(0.0) as u64;
 
         for displayed_stream in displayed_streams {
             let tx_stream_ref = &displayed_stream.transaction_stream_ref;
@@ -1092,12 +1088,16 @@ impl SystemState {
             focused_event_info.map(|info| TransactionRef { id: info.parent_tx });
 
         if let Some(focused_tx) = new_focused_tx {
-            for rel in &focused_tx.inc_relations {
+            for rel in focused_tx
+                .inc_relations
+                .iter()
+                .filter_map(|idx| container.get_relation(*idx))
+            {
                 // The parent_of link of an overlaid event reads as one unit
                 // with its parent: the parent gets a co-highlight instead of
                 // a relation arrow
                 let is_overlaid_parent_link = focused_event_overlaid
-                    && rel.name == crate::transaction_events::EVENT_PARENT_RELATION
+                    && rel.name.as_ref() == crate::transaction_events::EVENT_PARENT_RELATION
                     && focused_event_info.is_some_and(|info| info.parent_tx == rel.source_tx_id);
                 if is_overlaid_parent_link {
                     continue;
@@ -1106,7 +1106,11 @@ impl SystemState {
                     id: rel.source_tx_id,
                 });
             }
-            for rel in &focused_tx.out_relations {
+            for rel in focused_tx
+                .out_relations
+                .iter()
+                .filter_map(|idx| container.get_relation(*idx))
+            {
                 out_relation_tx_ids.push(TransactionRef { id: rel.sink_tx_id });
             }
             if old_focused_tx.is_none() || Some(focused_tx) != old_focused_tx.as_ref() {

@@ -11,7 +11,6 @@ use crate::table::{
 use crate::time::TimeFormatter;
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
 use num::BigInt;
-use num::BigUint;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
@@ -62,9 +61,9 @@ impl TransactionData {
 struct TransactionRow {
     row_id: TableRowId,
     tx_ref: TransactionRef,
-    start_time: BigUint,
-    end_time: BigUint,
-    duration: BigUint,
+    start_time: u64,
+    end_time: u64,
+    duration: u64,
     tx_type: String,
     /// Number of FTR events recorded for this transaction
     events_count: usize,
@@ -164,7 +163,7 @@ impl TransactionTraceModel {
             for attr in tx.attributes.iter() {
                 if !attribute_names_set.contains(&attr.name) {
                     attribute_names_set.insert(attr.name.clone());
-                    attribute_names_order.push(attr.name.clone());
+                    attribute_names_order.push(attr.name.to_string());
                 }
             }
         }
@@ -176,21 +175,15 @@ impl TransactionTraceModel {
             let end_time = tx.get_end_time();
 
             // Compute duration
-            let duration = if end_time >= start_time {
-                &end_time - &start_time
-            } else {
-                BigUint::from(0u32)
-            };
+            let duration = end_time.saturating_sub(start_time);
 
             // Row ID is just the transaction ID (unique within generator)
             let row_id = TableRowId(tx_id.0 as u64);
 
             // Format times
-            let start_time_text = self
-                .time_formatter
-                .format(&BigInt::from(start_time.clone()));
-            let end_time_text = self.time_formatter.format(&BigInt::from(end_time.clone()));
-            let duration_text = self.time_formatter.format(&BigInt::from(duration.clone()));
+            let start_time_text = self.time_formatter.format(&BigInt::from(start_time));
+            let end_time_text = self.time_formatter.format(&BigInt::from(end_time));
+            let duration_text = self.time_formatter.format(&BigInt::from(duration));
 
             // Get transaction type - format as "tx#ID"
             let tx_type = format!("tx#{tx_id}");
@@ -204,7 +197,10 @@ impl TransactionTraceModel {
             // Build attribute values in order
             let mut attribute_values = vec![String::new(); attribute_names_order.len()];
             for attr in tx.attributes.iter() {
-                if let Some(idx) = attribute_names_order.iter().position(|n| n == &attr.name) {
+                if let Some(idx) = attribute_names_order
+                    .iter()
+                    .position(|n| n.as_str() == attr.name.as_ref())
+                {
                     attribute_values[idx] = attr.value();
                 }
             }
@@ -241,7 +237,7 @@ impl TransactionTraceModel {
         }
 
         // Sort rows by start time (base order for row_id_at)
-        rows.sort_by(|a, b| a.start_time.cmp(&b.start_time));
+        rows.sort_by_key(|row| row.start_time);
 
         // Build index
         let index_by_id: HashMap<TableRowId, usize> = rows

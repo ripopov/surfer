@@ -2,6 +2,7 @@
 resolver = "2"
 
 members = [
+    "ftr-parser",
     "surfer",
     "surfer-translation-types",
     "surfer-wcp",
@@ -63,7 +64,7 @@ f128 = { git = "https://github.com/jkarns275/f128.git", rev = "7f971c34568dd6ae4
 fastrand = "2.3.0"
 fern = { version = "0.7.1", features = ["colored"] }
 filetime = "0.2"
-ftr_parser = "0.3.0"
+ftr_parser = { path = "ftr-parser" }
 futures = "0.3.32"
 futures-core = "0.3.32"
 futures-util = "0.3.32"

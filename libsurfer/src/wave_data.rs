@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use egui::{Id, Pos2};
 use eyre::{Result, WrapErr as _};
 use num::bigint::ToBigInt as _;
-use num::{BigInt, BigUint, One, ToPrimitive, Zero};
+use num::{BigInt, One, ToPrimitive, Zero};
 use serde::{Deserialize, Deserializer, Serialize};
 use surfer_translation_types::{TranslationPreference, Translator, VariableValue};
 use tracing::{error, info, warn};
@@ -1439,7 +1439,7 @@ impl WaveData {
             }
         }
 
-        let mut last_times_on_row = vec![(BigUint::ZERO, BigUint::ZERO)];
+        let mut last_times_on_row = vec![(0u64, 0u64)];
         let Some(generator) = transactions.get_generator(gen_id) else {
             return;
         };
@@ -1500,7 +1500,7 @@ impl WaveData {
         let Some(stream) = transactions.get_stream(stream_ref.stream_id) else {
             return;
         };
-        let mut last_times_on_row = vec![(BigUint::ZERO, BigUint::ZERO)];
+        let mut last_times_on_row = vec![(0u64, 0u64)];
 
         for gen_id in &stream.generators {
             if fold_events
