@@ -1246,13 +1246,9 @@ fn interact(
             .round() as u64;
         runtime.range_selection = Some((start.min(tick), start.max(tick)));
     } else if response.dragged_by(PointerButton::Primary) {
-        let total = response.drag_delta();
-        let delta = total - runtime.last_drag_delta;
-        runtime.last_drag_delta = total;
-        tile.viewport.pan_pixels(f64::from(delta.x), 0.0);
-        tile.viewport.top_visible_row -= f64::from(delta.y) / row_pitch(tile, model);
+        let pitch = row_pitch(tile, model);
+        pan_viewport_by_drag_delta(&mut tile.viewport, response.drag_delta(), pitch);
     } else if response.drag_stopped_by(PointerButton::Primary) {
-        runtime.last_drag_delta = Vec2::ZERO;
         runtime.range_drag_start = None;
     }
 
@@ -1498,6 +1494,11 @@ fn interact(
             }
         }
     }
+}
+
+fn pan_viewport_by_drag_delta(viewport: &mut super::KonataViewport, delta: Vec2, row_pitch: f64) {
+    viewport.pan_pixels(f64::from(delta.x), 0.0);
+    viewport.top_visible_row -= f64::from(delta.y) / row_pitch;
 }
 
 fn scroll_rows_with_diagonal(
@@ -3821,6 +3822,28 @@ mod tests {
 
         tile.config.clock_period_ticks = Some(8);
         assert_eq!(effective_detail(&tile), 4.0);
+    }
+
+    #[test]
+    fn consecutive_drag_frame_deltas_pan_freely_in_both_axes() {
+        let mut viewport = super::super::KonataViewport {
+            left_tick: 100,
+            px_per_tick: 2.0,
+            top_visible_row: 20.0,
+            row_height_px: 24.0,
+            ..Default::default()
+        };
+
+        pan_viewport_by_drag_delta(&mut viewport, Vec2::new(8.0, 12.0), 24.0);
+        pan_viewport_by_drag_delta(&mut viewport, Vec2::new(8.0, 12.0), 24.0);
+
+        assert_eq!(viewport.left_value(), 92.0);
+        assert_eq!(viewport.top_visible_row, 19.0);
+
+        pan_viewport_by_drag_delta(&mut viewport, Vec2::new(-24.0, -48.0), 24.0);
+
+        assert_eq!(viewport.left_value(), 104.0);
+        assert_eq!(viewport.top_visible_row, 21.0);
     }
 
     #[test]
