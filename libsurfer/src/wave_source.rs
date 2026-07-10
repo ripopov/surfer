@@ -10,7 +10,9 @@ use crate::channels::checked_send;
 use crate::cxxrtl_container::CxxrtlContainer;
 use crate::data_container::DataContainer;
 use crate::file_dialog::OpenMode;
-use crate::remote::{get_hierarchy_from_server, get_server_status, server_reload};
+use crate::remote::{
+    get_hierarchy_from_server, get_server_status, get_transactions_from_server, server_reload,
+};
 use crate::transactions::TRANSACTIONS_FILE_EXTENSION;
 use crate::util::get_multi_extension;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -31,7 +33,8 @@ use crate::wellen::{
 };
 use crate::{SystemState, message::Message};
 use surver::{
-    HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, SurverFileInfo, WELLEN_SURFER_DEFAULT_OPTIONS,
+    HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, SurverFileInfo, SurverFileKind,
+    WELLEN_SURFER_DEFAULT_OPTIONS,
 };
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -245,6 +248,54 @@ pub enum LoadProgressStatus {
 }
 
 impl SystemState {
+    pub fn load_surver_file(
+        &mut self,
+        server: String,
+        file_index: usize,
+        load_options: LoadOptions,
+    ) {
+        self.user.selected_server_file_index = Some(file_index);
+        *self.surver_selected_file.borrow_mut() = Some(file_index);
+        let kind = self
+            .user
+            .surver_file_infos
+            .as_ref()
+            .and_then(|files| files.get(file_index))
+            .map_or(SurverFileKind::Waveform, |file| file.kind);
+        match kind {
+            SurverFileKind::Waveform => {
+                self.load_wave_from_url(server, load_options, true, Some(file_index));
+            }
+            SurverFileKind::Transaction => {
+                let supported = self
+                    .user
+                    .surver_capabilities
+                    .transaction_pages
+                    .as_ref()
+                    .is_some_and(|capability| {
+                        capability.protocol_version == surver::TRANSACTION_PAGE_PROTOCOL_VERSION
+                            && capability.formats.iter().any(|format| format == "ftr")
+                            && capability.revisioned
+                    });
+                if supported {
+                    self.progress_tracker = Some(LoadProgress::new(
+                        LoadProgressStatus::Connecting(format!("remote FTR pages from {server}")),
+                    ));
+                    get_transactions_from_server(
+                        self.channels.msg_sender.clone(),
+                        server,
+                        load_options,
+                        file_index,
+                    );
+                } else {
+                    self.update(Message::Error(anyhow!(
+                        "Remote Konata view unavailable: Surver does not advertise compatible revisioned FTR transaction pages"
+                    )));
+                }
+            }
+        }
+    }
+
     pub fn load_from_file_with_intent(
         &mut self,
         filename: Utf8PathBuf,

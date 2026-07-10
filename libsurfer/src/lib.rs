@@ -32,6 +32,8 @@ pub mod help;
 pub mod hierarchy;
 pub mod keyboard_shortcuts;
 pub mod keys;
+pub mod konata;
+mod konata_controller;
 pub mod logs;
 pub mod marker;
 pub mod memory_viewer;
@@ -886,9 +888,8 @@ impl SystemState {
             Message::LoadSurverFileByIndex(file_index, load_options) => {
                 // Disable file window in case executing from command/test
                 self.user.show_server_file_window = false;
-                let force_switch = self.user.selected_server_file_index != file_index;
-                if let Some(url) = self.user.surver_url.as_ref() {
-                    self.load_wave_from_url(url.clone(), load_options, force_switch, file_index);
+                if let (Some(url), Some(file_index)) = (self.user.surver_url.clone(), file_index) {
+                    self.load_surver_file(url, file_index, load_options);
                 }
             }
             Message::LoadSurverFileByName(file_name, load_options) => {
@@ -900,10 +901,8 @@ impl SystemState {
                     .as_ref()?
                     .iter()
                     .position(|fi| fi.filename == file_name);
-                let force_switch = self.user.selected_server_file_index != file_index;
-
-                if let Some(url) = self.user.surver_url.as_ref() {
-                    self.load_wave_from_url(url.clone(), load_options, force_switch, file_index);
+                if let (Some(url), Some(file_index)) = (self.user.surver_url.clone(), file_index) {
+                    self.load_surver_file(url, file_index, load_options);
                 }
             }
             Message::RemoveVisibleItems(target) => match target {
@@ -1521,6 +1520,7 @@ impl SystemState {
             }
             Message::SetSurverStatus(_start, server, status) => {
                 self.user.surver_file_infos = Some(status.file_infos.clone());
+                self.user.surver_capabilities = status.capabilities.clone();
                 info!(
                     "Received surfer server status from {server}. {} files available.",
                     status.file_infos.len()
@@ -1537,7 +1537,7 @@ impl SystemState {
                             "Only one file available on server {}, loading it automatically",
                             server
                         );
-                        self.load_wave_from_url(server.clone(), LoadOptions::Clear, false, Some(0));
+                        self.load_surver_file(server.clone(), 0, LoadOptions::Clear);
                     } else {
                         // if no file is selected, show the server file selection window
                         self.user.show_server_file_window = true;
@@ -1553,7 +1553,9 @@ impl SystemState {
                         );
                         return None;
                     }
-                    self.server_status_to_progress(&server, &status.file_infos[file_index]);
+                    if status.file_infos[file_index].kind == surver::SurverFileKind::Waveform {
+                        self.server_status_to_progress(&server, &status.file_infos[file_index]);
+                    }
                 }
             }
             Message::FileDropped(dropped_file) => {
@@ -2096,12 +2098,14 @@ impl SystemState {
                     .as_mut()
                     .expect("Waves should be loaded at this point!")
                     .update_viewports();
+                self.progress_tracker = None;
             }
             Message::TransactionStreamsLoadedWithIntent(filename, format, new_ftr, intent) => {
                 self.on_transaction_streams_loaded_with_intent(filename, format, new_ftr, intent);
                 if let Some(waves) = self.user.waves.as_mut() {
                     waves.update_viewports();
                 }
+                self.progress_tracker = None;
             }
             Message::BlacklistTranslator(idx, translator) => {
                 self.user.blacklisted_translators.insert((idx, translator));
@@ -3060,6 +3064,36 @@ impl SystemState {
             | Message::SetTableColumnVisibility { .. }) => {
                 self.handle_table_message(message)?;
             }
+            message @ (Message::OpenKonataView { .. }
+            | Message::BuildKonataModel { .. }
+            | Message::KonataModelBuilt { .. }
+            | Message::KonataModelProgress { .. }
+            | Message::RemoveKonataTile { .. }
+            | Message::KonataGotoRow(_)
+            | Message::KonataGotoRid(_)
+            | Message::KonataGotoThreadRid { .. }
+            | Message::KonataGotoSid(_)
+            | Message::KonataGotoCycle(_)
+            | Message::KonataZoomIn
+            | Message::KonataZoomOut
+            | Message::KonataBookmarkSet(_)
+            | Message::KonataBookmarkGoto(_)
+            | Message::StartKonataFind { .. }
+            | Message::KonataFindNext { .. }
+            | Message::OpenKonataFindTable { .. }
+            | Message::OpenKonataStatistics { .. }
+            | Message::OpenKonataRangeStatistics { .. }
+            | Message::OpenKonataEventTable { .. }
+            | Message::CancelKonataFind { .. }
+            | Message::ToggleKonataProducerChain { .. }
+            | Message::KonataProducerChainBuilt { .. }
+            | Message::KonataFindProgress { .. }
+            | Message::KonataFindFinished { .. }) => {
+                self.handle_konata_message(message)?;
+            }
+            Message::DismissKonataSuggestion => {
+                self.user.dismissed_konata_hint = true;
+            }
             Message::AnalogCacheBuilt {
                 source,
                 entry,
@@ -3868,6 +3902,9 @@ impl SystemState {
     }
 
     fn close_source(&mut self, source: SourceId) {
+        self.user
+            .konata_bookmarks
+            .retain(|spec, _| !spec.references_source(source));
         let table_tiles_to_remove = self
             .user
             .table_tiles
@@ -3876,6 +3913,15 @@ impl SystemState {
             .collect_vec();
         for tile_id in table_tiles_to_remove {
             self.update(Message::RemoveTableTile { tile_id });
+        }
+        let konata_tiles_to_remove = self
+            .user
+            .konata_tiles
+            .iter()
+            .filter_map(|(tile_id, tile)| tile.spec.references_source(source).then_some(*tile_id))
+            .collect_vec();
+        for tile_id in konata_tiles_to_remove {
+            self.update(Message::RemoveKonataTile { tile_id });
         }
 
         if source == WaveData::primary_source_id() {
@@ -3898,7 +3944,12 @@ impl SystemState {
                 for tile in self.user.table_tiles.values_mut() {
                     tile.spec.remap_sources(&source_map);
                 }
+                for tile in self.user.konata_tiles.values_mut() {
+                    tile.spec.remap_sources(&source_map);
+                }
                 self.table_runtime.clear();
+                self.konata_runtime.clear();
+                self.konata_models.clear();
                 self.all_variable_rows_cache = None;
                 self.invalidate_draw_commands();
                 return;
@@ -3932,7 +3983,10 @@ impl SystemState {
         self.invalidate_draw_commands();
     }
 
-    fn open_table_tile(&mut self, spec: crate::table::TableModelSpec) -> crate::table::TableTileId {
+    pub(crate) fn open_table_tile(
+        &mut self,
+        spec: crate::table::TableModelSpec,
+    ) -> crate::table::TableTileId {
         let table_tile_id = self.user.tile_tree.next_table_id();
         let model_ctx = self.table_model_context();
         let config = spec.default_view_config(&model_ctx);
@@ -3943,7 +3997,7 @@ impl SystemState {
         table_tile_id
     }
 
-    fn trigger_table_cache_build(&mut self, tile_id: crate::table::TableTileId) {
+    pub(crate) fn trigger_table_cache_build(&mut self, tile_id: crate::table::TableTileId) {
         let Some(tile_state) = self.user.table_tiles.get(&tile_id) else {
             return;
         };
@@ -4046,6 +4100,7 @@ impl SystemState {
             theme: &self.user.config.theme,
             cache_generation,
             source_generations,
+            konata_models: &self.konata_models,
             ftr_events_enabled: self.user.config.behavior.ftr_events_enabled(),
         }
     }

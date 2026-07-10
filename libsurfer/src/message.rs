@@ -19,6 +19,7 @@ use crate::displayed_item_tree::{ItemIndex, VisibleItemIndex};
 use crate::frame_buffer::FrameBufferColorMode;
 use crate::graphics::{Graphic, GraphicId, GraphicsY};
 use crate::hierarchy::{ParameterDisplayLocation, ScopeExpandType};
+use crate::konata::{KonataModel, KonataModelEntry, KonataRowSet, KonataSearchHits, KonataTileId};
 use crate::mousegestures::AnnotationKind;
 use crate::source::LoadRequestId;
 use crate::source::{SourceId, SourceTransactionRef};
@@ -586,6 +587,102 @@ pub enum Message {
         #[serde(default)]
         source: SourceId,
         generator: TransactionStreamRef,
+    },
+    /// Open an instruction-pipeline projection for a generator with a
+    /// matching `.events` companion.
+    OpenKonataView {
+        #[serde(default)]
+        source: SourceId,
+        generator: TransactionStreamRef,
+    },
+    /// Open a model-backed stage-event table, optionally filtered to one
+    /// parent instruction, without loading the generic transaction graph.
+    OpenKonataEventTable {
+        tile_id: KonataTileId,
+        parent_tx: Option<u64>,
+    },
+    #[serde(skip)]
+    BuildKonataModel {
+        tile_id: KonataTileId,
+    },
+    #[serde(skip)]
+    KonataModelBuilt {
+        #[debug(skip)]
+        entry: Arc<KonataModelEntry>,
+        #[debug(skip)]
+        result: Result<Arc<KonataModel>, Arc<str>>,
+    },
+    #[serde(skip)]
+    KonataModelProgress {
+        #[debug(skip)]
+        entry: Arc<KonataModelEntry>,
+        fraction: f32,
+        phase: String,
+    },
+    RemoveKonataTile {
+        tile_id: KonataTileId,
+    },
+    DismissKonataSuggestion,
+    KonataGotoRow(u64),
+    KonataGotoRid(u64),
+    KonataGotoThreadRid {
+        thread: String,
+        rid: u64,
+    },
+    KonataGotoSid(u64),
+    KonataGotoCycle(i64),
+    KonataZoomIn,
+    KonataZoomOut,
+    KonataBookmarkSet(u8),
+    KonataBookmarkGoto(u8),
+    #[serde(skip)]
+    StartKonataFind {
+        tile_id: KonataTileId,
+        pattern: String,
+    },
+    KonataFindNext {
+        tile_id: KonataTileId,
+        reverse: bool,
+    },
+    OpenKonataFindTable {
+        tile_id: KonataTileId,
+        pattern: String,
+    },
+    OpenKonataStatistics {
+        tile_id: KonataTileId,
+    },
+    OpenKonataRangeStatistics {
+        tile_id: KonataTileId,
+        range: (u64, u64),
+    },
+    CancelKonataFind {
+        tile_id: KonataTileId,
+    },
+    ToggleKonataProducerChain {
+        tile_id: KonataTileId,
+        row: usize,
+    },
+    #[serde(skip)]
+    KonataProducerChainBuilt {
+        tile_id: KonataTileId,
+        revision: u64,
+        row: usize,
+        #[debug(skip)]
+        result: Option<KonataRowSet>,
+    },
+    #[serde(skip)]
+    KonataFindFinished {
+        tile_id: KonataTileId,
+        revision: u64,
+        #[debug(skip)]
+        result: Result<KonataSearchHits, String>,
+    },
+    #[serde(skip)]
+    KonataFindProgress {
+        tile_id: KonataTileId,
+        revision: u64,
+        processed: usize,
+        matches: Vec<u64>,
     },
     /// Remove a table tile from the tile tree
     RemoveTableTile {

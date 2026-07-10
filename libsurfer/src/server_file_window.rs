@@ -30,6 +30,22 @@ impl SystemState {
                 ScrollArea::both().id_salt("file_list").show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+                        if let Some(reason) =
+                            self.user.surver_capabilities.konata_unavailable_reason()
+                        {
+                            ui.colored_label(
+                                ui.visuals().weak_text_color(),
+                                "Konata remote view unavailable",
+                            )
+                            .on_hover_text(reason);
+                        } else if let Some(capability) =
+                            &self.user.surver_capabilities.transaction_pages
+                        {
+                            ui.label(format!(
+                                "Waveforms + transaction pages v{}",
+                                capability.protocol_version
+                            ));
+                        }
                         if let Some(file_infos) = self.user.surver_file_infos.as_ref() {
                             let selected_idx = *self.surver_selected_file.borrow();
                             for (i, file_info) in file_infos.iter().enumerate() {

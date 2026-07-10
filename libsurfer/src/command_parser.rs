@@ -197,6 +197,39 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
             })
             .collect_vec()
     });
+    let konata_generators = state.user.waves.as_ref().map_or_else(Vec::new, |waves| {
+        waves
+            .source_ids()
+            .into_iter()
+            .flat_map(|source| {
+                let source_label = waves.source_label_for(source).unwrap_or_default();
+                waves
+                    .transactions_for_source(source)
+                    .into_iter()
+                    .flat_map(move |transactions| {
+                        transactions.get_generators().into_iter().filter_map({
+                            let source_label = source_label.clone();
+                            move |generator| {
+                                transactions
+                                    .event_index()
+                                    .events_generator_of(generator.id)
+                                    .map(|_| {
+                                        (
+                                            format!("{source_label}:{}", generator.name),
+                                            source,
+                                            TransactionStreamRef::new_gen(
+                                                generator.stream_id,
+                                                generator.id,
+                                                generator.name.clone(),
+                                            ),
+                                        )
+                                    })
+                            }
+                        })
+                    })
+            })
+            .collect_vec()
+    });
 
     fn files_with_ext(matches: fn(&str) -> bool) -> Vec<String> {
         if let Ok(res) = fs::read_dir(".") {
@@ -336,6 +369,20 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
             "item_focus",
             "table_view",
             "transaction_table",
+            "konata_view_new",
+            "konata_goto_row",
+            "j",
+            "konata_goto_rid",
+            "jr",
+            "konata_goto_sid",
+            "konata_goto_cycle",
+            "konata_find",
+            "f",
+            "konata_stats",
+            "konata_zoom_in",
+            "konata_zoom_out",
+            "konata_bookmark_set",
+            "konata_bookmark_goto",
             "item_set_color",
             "item_set_background_color",
             "item_set_format",
@@ -528,6 +575,10 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                 ),
             ))
         });
+    let active_konata_tile = state
+        .active_konata_tile
+        .filter(|tile| state.user.konata_tiles.contains_key(tile))
+        .or_else(|| state.user.konata_tiles.keys().next().copied());
 
     Command::NonTerminal(
         ParamGreed::Word,
@@ -541,6 +592,7 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
             let source_entries = source_entries.clone();
             let source_suggestions = source_suggestions.clone();
             let source_is_transaction = source_is_transaction.clone();
+            let konata_generators = konata_generators.clone();
             match query {
                 "load_file" => single_word_delayed_suggestions(
                     Box::new(all_wave_files),
@@ -1062,6 +1114,108 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                             Command::Terminal(Message::OpenTransactionTable { source, generator })
                         })
                 }
+                "konata_view_new" => single_word(
+                    konata_generators
+                        .iter()
+                        .map(|(name, _, _)| name.clone())
+                        .collect(),
+                    Box::new(move |word| {
+                        konata_generators
+                            .iter()
+                            .find(|(name, _, _)| name == word)
+                            .map(|(_, source, generator)| {
+                                Command::Terminal(Message::OpenKonataView {
+                                    source: *source,
+                                    generator: generator.clone(),
+                                })
+                            })
+                    }),
+                ),
+                "konata_goto_row" | "j" => single_word(
+                    vec![],
+                    Box::new(|word| {
+                        word.parse::<u64>()
+                            .ok()
+                            .map(Message::KonataGotoRow)
+                            .map(Command::Terminal)
+                    }),
+                ),
+                "konata_goto_rid" | "jr" => single_word(
+                    vec![],
+                    Box::new(|word| {
+                        word.split_once(':').map_or_else(
+                            || {
+                                word.parse::<u64>()
+                                    .ok()
+                                    .map(Message::KonataGotoRid)
+                                    .map(Command::Terminal)
+                            },
+                            |(thread, rid)| {
+                                rid.parse::<u64>().ok().map(|rid| {
+                                    Command::Terminal(Message::KonataGotoThreadRid {
+                                        thread: thread.to_string(),
+                                        rid,
+                                    })
+                                })
+                            },
+                        )
+                    }),
+                ),
+                "konata_goto_sid" => single_word(
+                    vec![],
+                    Box::new(|word| {
+                        word.parse::<u64>()
+                            .ok()
+                            .map(Message::KonataGotoSid)
+                            .map(Command::Terminal)
+                    }),
+                ),
+                "konata_goto_cycle" => single_word(
+                    vec![],
+                    Box::new(|word| {
+                        word.parse::<i64>()
+                            .ok()
+                            .map(Message::KonataGotoCycle)
+                            .map(Command::Terminal)
+                    }),
+                ),
+                "konata_find" | "f" => active_konata_tile.and_then(|tile_id| {
+                    single_word(
+                        vec![],
+                        Box::new(move |pattern| {
+                            (!pattern.is_empty()).then(|| {
+                                Command::Terminal(Message::StartKonataFind {
+                                    tile_id,
+                                    pattern: pattern.to_string(),
+                                })
+                            })
+                        }),
+                    )
+                }),
+                "konata_stats" => active_konata_tile
+                    .map(|tile_id| Command::Terminal(Message::OpenKonataStatistics { tile_id })),
+                "konata_zoom_in" => Some(Command::Terminal(Message::KonataZoomIn)),
+                "konata_zoom_out" => Some(Command::Terminal(Message::KonataZoomOut)),
+                "konata_bookmark_set" => single_word(
+                    (0..10).map(|slot| slot.to_string()).collect(),
+                    Box::new(|word| {
+                        word.parse::<u8>()
+                            .ok()
+                            .filter(|slot| *slot < 10)
+                            .map(Message::KonataBookmarkSet)
+                            .map(Command::Terminal)
+                    }),
+                ),
+                "konata_bookmark_goto" => single_word(
+                    (0..10).map(|slot| slot.to_string()).collect(),
+                    Box::new(|word| {
+                        word.parse::<u8>()
+                            .ok()
+                            .filter(|slot| *slot < 10)
+                            .map(Message::KonataBookmarkGoto)
+                            .map(Command::Terminal)
+                    }),
+                ),
                 "transition_next" => single_word(
                     displayed_items.clone(),
                     Box::new(|word| {

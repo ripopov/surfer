@@ -57,6 +57,23 @@ drag_hint_color = "#bfbfbf"
 drag_hint_width = 2.0
 highlight_background = "#37485E"
 
+[konata]
+stage_palette = [
+    "#4c95dc", "#4bb4a8", "#6ab15c", "#aeb747", "#daa641", "#e07e44",
+    "#d75d5e", "#be5c8f", "#9b68bd", "#7674cf", "#5089cf", "#46a4be",
+]
+color_blind_palette = [
+    "#0072b2", "#e69f00", "#009e73", "#d55e00",
+    "#56b4e9", "#cc79a7", "#f0e442", "#6e6e6e",
+]
+stall = "#6e747c"
+flat_orange = "#e07e2d"
+flat_royal_blue = "#4169e1"
+flush_overlay = "#08080c"
+warning = "#ffbe37"
+focus = "#ffffff"
+minimum_contrast = 3.0
+
 [colors]
 Green = "#6a9955"
 Red = "#f44747"

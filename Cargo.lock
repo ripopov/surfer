@@ -5230,6 +5230,7 @@ dependencies = [
  "eyre",
  "fastrand",
  "filetime",
+ "ftr_parser",
  "http-body-util",
  "hyper",
  "hyper-util",

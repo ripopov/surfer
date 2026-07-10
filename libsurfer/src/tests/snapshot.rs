@@ -7,7 +7,7 @@ use std::{
 
 use crate::{arrow::WavePoint, graphics::Anchor};
 use base64::{Engine, engine::general_purpose};
-use egui::{Pos2, Rect};
+use egui::{Color32, Pos2, Rect};
 use egui_skia_renderer::{EncodedImageFormat, create_surface, draw_onto_surface};
 use emath::Vec2;
 use ftr_parser::types::{GeneratorId, StreamId, TransactionId};
@@ -31,6 +31,7 @@ use crate::{
     setup_custom_font,
     source::{LoadRequestId, SourceId, SourceLoadState, SourceTransactionRef},
     state::UserState,
+    tiles::SurferPane,
     trace_style::TraceStyle,
     transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef},
     variable_filter::{VariableIOFilterType, VariableNameFilterType},
@@ -104,17 +105,22 @@ pub(crate) fn render_and_compare_inner(
             ctx.set_visuals(state.get_visuals());
             setup_custom_font(ctx);
             let msgs = state.draw(ctx, Some(size));
-            // Process cache build messages (analog and table)
+            // Process cache build messages (analog, table, and Konata)
             for msg in msgs {
                 if matches!(
                     msg,
-                    Message::BuildAnalogCache { .. } | Message::BuildTableCache { .. }
+                    Message::BuildAnalogCache { .. }
+                        | Message::BuildTableCache { .. }
+                        | Message::BuildKonataModel { .. }
                 ) {
                     state.update(msg);
                 }
             }
-            // Wait for analog and table cache builds to complete
-            while !state.analog_caches_ready() || !state.table_caches_ready() {
+            // Wait for asynchronous render models to complete.
+            while !state.analog_caches_ready()
+                || !state.table_caches_ready()
+                || !state.konata_caches_ready()
+            {
                 std::thread::sleep(std::time::Duration::from_millis(1));
                 state.handle_async_messages();
             }
@@ -3066,6 +3072,358 @@ snapshot_ui_with_file_and_msgs! {kanata_pipeline_trace_renders, "examples/kanata
     Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(StreamId(1), GeneratorId(11), "instruction.events".to_string())),
     Message::ZoomToRange { start: BigInt::from(3300), end: BigInt::from(3380), viewport_idx: 0 },
 ]}
+
+fn konata_snapshot_state() -> SystemState {
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/kanata-sample-2.ftr")
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+    wait_for_waves_fully_loaded(&mut state, 10);
+    for message in [
+        Message::SetMenuVisible(false),
+        Message::SetSidePanelVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
+        Message::CloseOpenSiblingStateFileDialog {
+            load_state: false,
+            do_not_show_again: true,
+        },
+        Message::OpenKonataView {
+            source: SourceId::default(),
+            generator: TransactionStreamRef::new_gen(
+                StreamId(1),
+                GeneratorId(10),
+                "instruction".to_string(),
+            ),
+        },
+    ] {
+        state.update(message);
+    }
+    state
+}
+
+pub(super) fn show_only_analysis_tiles(state: &mut SystemState) {
+    let mut panes = state
+        .user
+        .tile_tree
+        .tree
+        .tiles
+        .iter()
+        .filter_map(|(_, tile)| {
+            let egui_tiles::Tile::Pane(pane @ (SurferPane::Konata(_) | SurferPane::Table(_))) =
+                tile
+            else {
+                return None;
+            };
+            Some(pane.clone())
+        })
+        .collect::<Vec<_>>();
+    panes.sort_by_key(|pane| match pane {
+        SurferPane::Table(id) => (0, id.0),
+        SurferPane::Konata(id) => (1, id.0),
+        SurferPane::Waveform => (2, 0),
+        SurferPane::DebugTile(id) => (3, *id),
+    });
+    show_snapshot_panes(state, panes);
+}
+
+fn show_only_konata_tile(state: &mut SystemState, tile_id: crate::konata::KonataTileId) {
+    show_snapshot_panes(state, vec![SurferPane::Konata(tile_id)]);
+}
+
+fn show_snapshot_panes(state: &mut SystemState, panes: Vec<SurferPane>) {
+    if panes.is_empty() {
+        return;
+    }
+    let mut tiles = egui_tiles::Tiles::default();
+    let tabs = panes
+        .into_iter()
+        .map(|pane| {
+            let pane = tiles.insert_pane(pane);
+            tiles.insert_tab_tile(vec![pane])
+        })
+        .collect::<Vec<_>>();
+    let root = if let [tab] = tabs.as_slice() {
+        *tab
+    } else {
+        tiles.insert_horizontal_tile(tabs)
+    };
+    state.user.tile_tree.tree = egui_tiles::Tree::new("konata_snapshot", root, tiles);
+}
+
+snapshot_ui! {konata_pipeline_view, || {
+    let mut state = konata_snapshot_state();
+    let tile = state.user.konata_tiles.values_mut().next().unwrap();
+    tile.viewport.top_visible_row = 96.0;
+    tile.viewport.set_left_tick(640);
+    show_only_analysis_tiles(&mut state);
+    state
+}}
+
+snapshot_ui! {konata_pipeline_density_view, || {
+    let mut state = konata_snapshot_state();
+    let tile = state
+        .user
+        .konata_tiles
+        .values_mut()
+        .next()
+        .expect("Konata tile");
+    tile.viewport.px_per_tick = 0.25;
+    tile.viewport.row_height_px = 0.25;
+    tile.config.hide_flushed = true;
+    show_only_analysis_tiles(&mut state);
+    state
+}}
+
+snapshot_ui! {konata_pipeline_minimap_view, || {
+    let mut state = konata_snapshot_state();
+    let tile = state
+        .user
+        .konata_tiles
+        .values_mut()
+        .next()
+        .expect("Konata tile");
+    tile.viewport.top_visible_row = 96.0;
+    tile.viewport.set_left_tick(640);
+    tile.config.show_minimap = true;
+    show_only_analysis_tiles(&mut state);
+    state
+}}
+
+snapshot_ui! {konata_pipeline_overlay_view, || {
+    let mut state = konata_snapshot_state();
+    state.update(Message::OpenKonataView {
+        source: SourceId::default(),
+        generator: TransactionStreamRef::new_gen(
+            StreamId(1),
+            GeneratorId(10),
+            "instruction".to_string(),
+        ),
+    });
+    let mut ids = state.user.konata_tiles.keys().copied().collect::<Vec<_>>();
+    ids.sort_by_key(|id| id.0);
+    let overlay_spec = state.user.konata_tiles[&ids[1]].spec.clone();
+    let back = state.user.konata_tiles.get_mut(&ids[0]).unwrap();
+    back.config.color_scheme = crate::konata::KonataColorScheme::Orange;
+    back.config.overlay = Some(overlay_spec);
+    back.config.overlay_tile = Some(ids[1]);
+    back.viewport.top_visible_row = 96.0;
+    back.viewport.set_left_tick(640);
+    let front = state.user.konata_tiles.get_mut(&ids[1]).unwrap();
+    front.config.color_scheme = crate::konata::KonataColorScheme::RoyalBlue;
+    front.viewport.top_visible_row = 96.0;
+    front.viewport.set_left_tick(640);
+    show_only_konata_tile(&mut state, ids[0]);
+    state
+}}
+
+snapshot_ui! {konata_pipeline_cycle_view, || {
+    let mut state = konata_snapshot_state();
+    let tile = state
+        .user
+        .konata_tiles
+        .values_mut()
+        .next()
+        .expect("Konata tile");
+    tile.viewport.top_visible_row = 96.0;
+    tile.viewport.set_left_tick(640);
+    tile.config.clock_period_ticks = Some(4);
+    tile.config.ruler_cycles = true;
+    show_only_analysis_tiles(&mut state);
+    state
+}}
+
+snapshot_ui! {konata_pipeline_accessible_options_view, || {
+    let mut state = konata_snapshot_state();
+    state.user.config.theme.primary_ui_color.background = Color32::from_rgb(244, 246, 250);
+    state.user.config.theme.secondary_ui_color.background = Color32::from_rgb(226, 231, 239);
+    state.user.config.theme.foreground = Color32::from_rgb(24, 30, 40);
+    let tile = state
+        .user
+        .konata_tiles
+        .values_mut()
+        .next()
+        .expect("Konata tile");
+    tile.viewport.top_visible_row = 96.0;
+    tile.viewport.set_left_tick(700);
+    tile.viewport.row_height_px = 13.0;
+    tile.config.color_scheme = crate::konata::KonataColorScheme::ColorBlindSafe;
+    tile.config.lane_mode = crate::konata::KonataLaneMode::SplitFixed;
+    tile.config.hide_flushed = true;
+    tile.config.clock_period_ticks = Some(4);
+    show_only_analysis_tiles(&mut state);
+    state
+}}
+
+snapshot_ui! {konata_pipeline_find_view, || {
+    let mut state = konata_snapshot_state();
+    while !state.konata_caches_ready() {
+        state.handle_async_messages();
+        std::thread::yield_now();
+    }
+    let tile_id = *state.user.konata_tiles.keys().next().unwrap();
+    state.update(Message::StartKonataFind {
+        tile_id,
+        pattern: "bne".to_string(),
+    });
+    while state.konata_runtime[&tile_id].find_searching {
+        state.handle_async_messages();
+        std::thread::yield_now();
+    }
+    state.handle_async_messages();
+    show_only_analysis_tiles(&mut state);
+    state
+}}
+
+snapshot_ui! {konata_pipeline_statistics_view, || {
+    let mut state = konata_snapshot_state();
+    while !state.konata_caches_ready() {
+        state.handle_async_messages();
+        std::thread::yield_now();
+    }
+    let tile_id = *state.user.konata_tiles.keys().next().unwrap();
+    state.user.konata_tiles.get_mut(&tile_id).unwrap().config.clock_period_ticks = Some(1);
+    state.update(Message::OpenKonataStatistics { tile_id });
+    show_only_analysis_tiles(&mut state);
+    state
+}}
+
+snapshot_ui! {konata_pipeline_event_table_view, || {
+    let mut state = konata_snapshot_state();
+    while !state.konata_caches_ready() {
+        state.handle_async_messages();
+        std::thread::yield_now();
+    }
+    let tile_id = *state.user.konata_tiles.keys().next().unwrap();
+    let parent_tx = state.active_konata_model(tile_id).unwrap().rows.tx_id[96];
+    state.update(Message::OpenKonataEventTable {
+        tile_id,
+        parent_tx: Some(parent_tx),
+    });
+    show_only_analysis_tiles(&mut state);
+    state
+}}
+
+#[test]
+fn konata_dependency_arrows() {
+    use crate::transaction_events::test_util::{ftr_from_json, generator, stream, tx};
+    use serde_json::json;
+
+    render_and_compare(&PathBuf::from("konata_dependency_arrows"), || {
+        let parent = |id: usize,
+                      start: u64,
+                      end: u64,
+                      label: &str,
+                      rid: u64,
+                      producer: Option<usize>| {
+            let mut value = tx(id, 10, start, end, None, &[]);
+            let attributes = value["attributes"].as_array_mut().unwrap();
+            attributes.extend([
+                json!({"kind":"BEGIN", "name":"label", "data_type":{"String":label}}),
+                json!({"kind":"BEGIN", "name":"insn_id_in_sim", "data_type":{"Unsigned":id as u64 * 4}}),
+                json!({"kind":"BEGIN", "name":"thread_id", "data_type":{"Unsigned":0}}),
+                json!({"kind":"BEGIN", "name":"retire_id", "data_type":{"Unsigned":rid}}),
+                json!({"kind":"BEGIN", "name":"flushed", "data_type":{"Boolean":false}}),
+            ]);
+            if let Some(producer) = producer {
+                value["inc_relations"].as_array_mut().unwrap().push(json!({
+                    "name":"wakeup",
+                    "source_tx_id":producer,
+                    "sink_tx_id":id,
+                    "source_stream_id":1,
+                    "sink_stream_id":1,
+                }));
+            }
+            value
+        };
+        let ftr = ftr_from_json(
+            json!({"1": stream(1, "cpu", &[10, 11])}),
+            json!({
+                "10": generator(10, 1, "instruction", json!([
+                    parent(1, 0, 8, "0000: add r1, r2, r3", 0, None),
+                    parent(2, 1, 10, "0004: mul r4, r1, r5", 1, Some(1)),
+                    parent(3, 2, 12, "0008: sub r6, r4, r7", 2, Some(2)),
+                    parent(4, 3, 11, "000c: xor r8, r2, r9", 3, Some(1)),
+                ])),
+                "11": generator(11, 1, "instruction.events", json!([
+                    tx(101, 11, 0, 1, Some("F"), &[(1, 1)]),
+                    tx(102, 11, 1, 4, Some("X"), &[(1, 1)]),
+                    tx(103, 11, 1, 2, Some("F"), &[(2, 1)]),
+                    tx(104, 11, 5, 8, Some("X"), &[(2, 1)]),
+                    tx(105, 11, 2, 3, Some("F"), &[(3, 1)]),
+                    tx(106, 11, 9, 11, Some("X"), &[(3, 1)]),
+                    tx(107, 11, 3, 4, Some("F"), &[(4, 1)]),
+                    tx(108, 11, 6, 8, Some("X"), &[(4, 1)]),
+                ])),
+            }),
+        );
+        let container = crate::transaction_container::TransactionContainer::new(ftr);
+        let mut state = SystemState::new_default_config()
+            .unwrap()
+            .with_params(StartupParams::default());
+        state.update(Message::TransactionStreamsLoaded(
+            WaveSource::Data,
+            crate::wave_source::WaveFormat::Ftr,
+            container,
+            LoadOptions::Clear,
+        ));
+        for message in [
+            Message::SetMenuVisible(false),
+            Message::SetSidePanelVisible(false),
+            Message::SetToolbarVisible(false),
+            Message::SetOverviewVisible(false),
+            Message::OpenKonataView {
+                source: SourceId::default(),
+                generator: TransactionStreamRef::new_gen(
+                    StreamId(1),
+                    GeneratorId(10),
+                    "instruction".to_string(),
+                ),
+            },
+        ] {
+            state.update(message);
+        }
+        let tile = state.user.konata_tiles.values_mut().next().unwrap();
+        tile.config.clock_period_ticks = Some(1);
+        while !state.konata_caches_ready() {
+            state.handle_async_messages();
+            std::thread::yield_now();
+        }
+        let tile_id = *state.user.konata_tiles.keys().next().unwrap();
+        state.update(Message::FocusTransactionFromSource(
+            Some(SourceTransactionRef::new(
+                SourceId::default(),
+                TransactionRef {
+                    id: TransactionId(3),
+                },
+            )),
+            None,
+        ));
+        state.update(Message::ToggleKonataProducerChain { tile_id, row: 2 });
+        state
+            .konata_runtime
+            .get_mut(&tile_id)
+            .unwrap()
+            .suppress_focus_scroll = Some(3);
+        state
+            .user
+            .konata_tiles
+            .get_mut(&tile_id)
+            .unwrap()
+            .viewport
+            .top_visible_row = 0.0;
+        show_only_analysis_tiles(&mut state);
+        state
+    });
+}
 
 // When many events map to the same pixel columns, markers aggregate into
 // cluster glyphs with count badges instead of a smear of overdrawn diamonds

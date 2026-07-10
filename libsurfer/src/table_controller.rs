@@ -11,6 +11,7 @@ use crate::{
 enum TableBuildJob {
     Model(Arc<dyn table::TableModel>),
     SignalAnalysis(table::sources::signal_analysis::PreparedSignalAnalysisModelInput),
+    KonataStatistics(table::sources::KonataStatisticsInput),
 }
 
 impl SystemState {
@@ -151,6 +152,7 @@ impl SystemState {
                 self.user.tile_tree.remove_table_tile(tile_id);
                 self.user.table_tiles.remove(&tile_id);
                 self.table_runtime.remove(&tile_id);
+                self.retain_used_konata_models();
                 self.invalidate_draw_commands();
             }
             Message::SetTableSort { tile_id, sort } => {
@@ -405,11 +407,47 @@ impl SystemState {
 
         // Create model from table tile spec. Signal analysis uses a prepared input that
         // lets heavy model construction happen on the worker thread.
-        let build_job = if let Some(model) = reusable_model {
+        let mut build_job = if let Some(model) = reusable_model {
             TableBuildJob::Model(model)
         } else {
             match self.user.table_tiles.get(&tile_id) {
                 Some(tile_state) => match &tile_state.spec {
+                    table::TableModelSpec::KonataStatistics {
+                        spec,
+                        clock_period_ticks,
+                        clock_origin_tick,
+                        range,
+                        stall_stages,
+                        stall_case_sensitive,
+                        instruction_classifier,
+                        include_estimated_flush_rates,
+                    } => {
+                        let model_ctx = self.table_model_context();
+                        match table::sources::konata_instructions::resolve_konata_model(
+                            spec, &model_ctx,
+                        ) {
+                            Ok(model) => TableBuildJob::KonataStatistics(
+                                table::sources::KonataStatisticsInput {
+                                    spec: spec.clone(),
+                                    model,
+                                    clock_period_ticks: *clock_period_ticks,
+                                    clock_origin_tick: *clock_origin_tick,
+                                    range: *range,
+                                    stall_stages: stall_stages.clone(),
+                                    stall_case_sensitive: *stall_case_sensitive,
+                                    instruction_classifier: *instruction_classifier,
+                                    include_estimated_flush_rates: *include_estimated_flush_rates,
+                                    cancel: None,
+                                },
+                            ),
+                            Err(err) => {
+                                if let Some(runtime) = self.table_runtime.get_mut(&tile_id) {
+                                    runtime.last_error = Some(err);
+                                }
+                                return None;
+                            }
+                        }
+                    }
                     table::TableModelSpec::AnalysisResults {
                         kind: table::AnalysisKind::SignalAnalysisV1,
                         params: table::AnalysisParams::SignalAnalysisV1 { config },
@@ -460,6 +498,9 @@ impl SystemState {
 
         let cancel_token = Arc::new(AtomicBool::new(false));
         runtime.cancel_token = cancel_token.clone();
+        if let TableBuildJob::KonataStatistics(input) = &mut build_job {
+            input.cancel = Some(cancel_token.clone());
+        }
 
         let entry = Arc::new(table::TableCacheEntry::new(
             cache_key.clone(),
@@ -472,14 +513,14 @@ impl SystemState {
         runtime.last_error = None;
         runtime.model = match &build_job {
             TableBuildJob::Model(model) => Some(model.clone()),
-            TableBuildJob::SignalAnalysis(_) => None,
+            TableBuildJob::SignalAnalysis(_) | TableBuildJob::KonataStatistics(_) => None,
         };
 
         self.table_inflight.insert(cache_key.clone(), entry.clone());
 
         let sender = self.channels.msg_sender.clone();
         let cache_key_for_build = cache_key.clone();
-        crate::async_util::perform_work(move || {
+        crate::async_util::perform_async_work(async move {
             let (model, result) = match build_job {
                 TableBuildJob::Model(model) => {
                     let result = table::build_table_cache_with_pinned_filters(
@@ -493,6 +534,24 @@ impl SystemState {
                 }
                 TableBuildJob::SignalAnalysis(prepared) => {
                     match table::sources::SignalAnalysisResultsModel::from_prepared(prepared)
+                        .map(|model| Arc::new(model) as Arc<dyn table::TableModel>)
+                    {
+                        Ok(model) => {
+                            let result = table::build_table_cache_with_pinned_filters(
+                                model.clone(),
+                                cache_key_for_build.display_filter.clone(),
+                                cache_key_for_build.pinned_filters.clone(),
+                                cache_key_for_build.view_sort.clone(),
+                                Some(cancel_token),
+                            );
+                            (Some(model), result)
+                        }
+                        Err(err) => (None, Err(err)),
+                    }
+                }
+                TableBuildJob::KonataStatistics(input) => {
+                    match table::sources::KonataStatisticsTableModel::try_new_cooperative(input)
+                        .await
                         .map(|model| Arc::new(model) as Arc<dyn table::TableModel>)
                     {
                         Ok(model) => {

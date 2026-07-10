@@ -290,6 +290,57 @@ impl SystemState {
             b("Remove viewport", Message::RemoveViewport)
                 .enabled(waves_loaded)
                 .add_closing_menu(msgs, ui);
+            let konata_generators = self
+                .user
+                .waves
+                .as_ref()
+                .into_iter()
+                .flat_map(|waves| {
+                    waves.source_ids().into_iter().flat_map(move |source| {
+                        let source_label = waves.source_label_for(source).unwrap_or_default();
+                        waves.transactions_for_source(source).into_iter().flat_map(
+                            move |transactions| {
+                                transactions.get_generators().into_iter().filter_map({
+                                    let source_label = source_label.clone();
+                                    move |generator| {
+                                        transactions
+                                            .event_index()
+                                            .events_generator_of(generator.id)
+                                            .map(|_| {
+                                                (
+                                                    source,
+                                                    source_label.clone(),
+                                                    TransactionStreamRef::new_gen(
+                                                        generator.stream_id,
+                                                        generator.id,
+                                                        generator.name.clone(),
+                                                    ),
+                                                )
+                                            })
+                                    }
+                                })
+                            },
+                        )
+                    })
+                })
+                .collect_vec();
+            ui.menu_button("New Konata view…", |ui| {
+                if konata_generators.is_empty() {
+                    ui.add_enabled(false, Button::new("No pipeline generators"));
+                }
+                for (source, source_label, generator) in &konata_generators {
+                    if ui
+                        .button(format!("{source_label}: {}", generator.name))
+                        .clicked()
+                    {
+                        msgs.push(Message::OpenKonataView {
+                            source: *source,
+                            generator: generator.clone(),
+                        });
+                        ui.close();
+                    }
+                }
+            });
             ui.separator();
 
             b(
@@ -776,6 +827,25 @@ impl SystemState {
                         });
                 if has_events && ui.button("Show events in table").clicked() {
                     msgs.push(Message::OpenEventTable {
+                        source: stream.source,
+                        generator: stream.transaction_stream_ref.clone(),
+                    });
+                    ui.close();
+                }
+                let has_pipeline_pair =
+                    waves
+                        .transactions_for_source(stream.source)
+                        .is_some_and(|transactions| {
+                            stream
+                                .transaction_stream_ref
+                                .gen_id
+                                .and_then(|generator| {
+                                    transactions.event_index().events_generator_of(generator)
+                                })
+                                .is_some()
+                        });
+                if has_pipeline_pair && ui.button("Open in Konata view").clicked() {
+                    msgs.push(Message::OpenKonataView {
                         source: stream.source,
                         generator: stream.transaction_stream_ref.clone(),
                     });

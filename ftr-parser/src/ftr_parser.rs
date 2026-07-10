@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::path::Path;
 use std::sync::Arc;
 
 use lz4_flex::decompress_into;
 
 use crate::cbor_decoder::CborDecoder;
 use crate::types::{
-    Attribute, AttributeType, DataType, Event, FtrResult, GeneratorId, NameId, StreamId, Timescale,
-    Transaction, TransactionId, TxGenerator, TxRelation, TxStream, FTR,
+    Attribute, AttributeType, BlockMeta, BlockStatus, DataType, Event, FtrResult, GeneratorId,
+    NameId, RelationBlockMeta, StreamId, Timescale, Transaction, TransactionId, TxGenerator,
+    TxRelation, TxStream, FTR,
 };
 
 const INFO_CHUNK: u64 = 6;
@@ -44,16 +46,22 @@ const TIME: u8 = 11;
 
 pub struct FtrParser<'a> {
     ftr: &'a mut FTR,
+    current_ends: HashMap<GeneratorId, Vec<u64>>,
 }
 
 impl<'a> FtrParser<'a> {
     pub fn new(ftr: &'a mut FTR) -> FtrParser<'a> {
-        Self { ftr }
+        Self {
+            ftr,
+            current_ends: HashMap::new(),
+        }
     }
 
     pub(super) fn load<R: Read + Seek>(&mut self, file: R) -> FtrResult<()> {
         let cbor_decoder = CborDecoder::new(file);
-        self.parse_input(cbor_decoder)
+        self.parse_input(cbor_decoder)?;
+        self.ftr.rebuild_relation_indices();
+        Ok(())
     }
 
     //TODO change to work with buffered readers
@@ -135,38 +143,52 @@ impl<'a> FtrParser<'a> {
                         return Err(format!("Transaction block chunk has wrong size. Expected 4 but found {len}. Not a valid FTR file."));
                     }
 
-                    let stream_id = StreamId(cbor_decoder.read_int()? as usize);
-                    let _start_time = cbor_decoder.read_int()?; // start time of block
+                    let stream_id = StreamId(cbor_decoder.read_int()? as u64);
+                    let start_time = cbor_decoder.read_int()? as u64;
                     let end_time = cbor_decoder.read_int()? as u64; // end time of block
                     if end_time > self.ftr.max_timestamp {
                         self.ftr.max_timestamp = end_time;
                     }
 
-                    self.ftr
-                        .tx_streams
-                        .get_mut(&stream_id)
-                        .ok_or_else(|| format!("Cannot find stream with id {:?}", stream_id))?
-                        .tx_block_ids
-                        .push((
-                            cbor_decoder
-                                .input_stream
-                                .stream_position()
-                                .map_err(|e| e.to_string())?,
-                            false,
-                        ));
+                    let encoded_offset = cbor_decoder
+                        .input_stream
+                        .stream_position()
+                        .map_err(|e| e.to_string())?;
+                    let loaded_inline = self.ftr.path.is_none();
 
-                    if self.ftr.path.is_none() {
-                        let mut cbd =
-                            CborDecoder::new(Cursor::new(cbor_decoder.read_byte_string()?));
+                    let uncompressed_len = if loaded_inline {
+                        let bytes = cbor_decoder.read_byte_string()?;
+                        let len = bytes.len() as u64;
+                        let mut cbd = CborDecoder::new(Cursor::new(bytes));
                         self.parse_tx_block(&mut cbd)?;
                         self.ftr
                             .tx_streams
                             .get_mut(&stream_id)
                             .ok_or_else(|| format!("Cannot find stream with id {:?}", stream_id))?
                             .transactions_loaded = true;
+                        len
                     } else {
-                        cbor_decoder.skip_byte_string()?; // we don't want to load the transactions right now, so we just skip this whole block
-                    }
+                        cbor_decoder.skip_byte_string_len()?
+                    };
+                    let encoded_end = cbor_decoder
+                        .input_stream
+                        .stream_position()
+                        .map_err(|e| e.to_string())?;
+                    self.record_block(BlockMeta {
+                        stream_id,
+                        ordinal: 0,
+                        encoded_offset,
+                        encoded_len: encoded_end.saturating_sub(encoded_offset),
+                        compressed: false,
+                        uncompressed_len: Some(uncompressed_len),
+                        start_time,
+                        end_time,
+                        status: if loaded_inline {
+                            BlockStatus::Loaded
+                        } else {
+                            BlockStatus::Indexed
+                        },
+                    })?;
                 }
 
                 TX_BLOCK_CHUNK_COMP => {
@@ -175,32 +197,26 @@ impl<'a> FtrParser<'a> {
                         return Err(format!("Transaction block chunk has wrong size. Expected 5 but found {len}. Not a valid FTR file."));
                     }
 
-                    let stream_id = StreamId(cbor_decoder.read_int()? as usize);
-                    let _start_time = cbor_decoder.read_int()?; // start time of block
+                    let stream_id = StreamId(cbor_decoder.read_int()? as u64);
+                    let start_time = cbor_decoder.read_int()? as u64;
                     let end_time = cbor_decoder.read_int()? as u64; // end time of block
 
                     if end_time > self.ftr.max_timestamp {
                         self.ftr.max_timestamp = end_time;
                     }
 
-                    self.ftr
-                        .tx_streams
-                        .get_mut(&stream_id)
-                        .ok_or_else(|| format!("Cannot find stream with id {:?}", stream_id))?
-                        .tx_block_ids
-                        .push((
-                            cbor_decoder
-                                .input_stream
-                                .stream_position()
-                                .map_err(|e| e.to_string())?,
-                            true,
-                        ));
-                    let _uncomp_size = cbor_decoder.read_int();
+                    let encoded_offset = cbor_decoder
+                        .input_stream
+                        .stream_position()
+                        .map_err(|e| e.to_string())?;
+                    let uncomp_size = cbor_decoder.read_int()? as u64;
+                    let loaded_inline = self.ftr.path.is_none();
 
-                    if self.ftr.path.is_none() {
-                        let mut cbd =
-                            CborDecoder::new(Cursor::new(cbor_decoder.read_byte_string()?));
-                        self.parse_tx_block(&mut cbd)?;
+                    if loaded_inline {
+                        let compressed = cbor_decoder.read_byte_string()?;
+                        let mut buf = vec![0u8; uncomp_size as usize];
+                        decompress_into(&compressed, &mut buf).map_err(|e| e.to_string())?;
+                        self.parse_tx_block(&mut CborDecoder::new(Cursor::new(buf)))?;
                         self.ftr
                             .tx_streams
                             .get_mut(&stream_id)
@@ -209,11 +225,58 @@ impl<'a> FtrParser<'a> {
                     } else {
                         cbor_decoder.skip_byte_string()?;
                     }
+                    let encoded_end = cbor_decoder
+                        .input_stream
+                        .stream_position()
+                        .map_err(|e| e.to_string())?;
+                    self.record_block(BlockMeta {
+                        stream_id,
+                        ordinal: 0,
+                        encoded_offset,
+                        encoded_len: encoded_end.saturating_sub(encoded_offset),
+                        compressed: true,
+                        uncompressed_len: Some(uncomp_size),
+                        start_time,
+                        end_time,
+                        status: if loaded_inline {
+                            BlockStatus::Loaded
+                        } else {
+                            BlockStatus::Indexed
+                        },
+                    })?;
                 }
 
                 RELATIONSHIP_CHUNK_UNCOMP => {
-                    let mut cbd = CborDecoder::new(Cursor::new(cbor_decoder.read_byte_string()?));
-                    self.parse_rel(&mut cbd)?;
+                    let encoded_offset = cbor_decoder
+                        .input_stream
+                        .stream_position()
+                        .map_err(|error| error.to_string())?;
+                    let loaded_inline = self.ftr.path.is_none();
+                    let uncompressed_len = if loaded_inline {
+                        let bytes = cbor_decoder.read_byte_string()?;
+                        let len = bytes.len() as u64;
+                        self.parse_rel(&mut CborDecoder::new(Cursor::new(bytes)))?;
+                        len
+                    } else {
+                        cbor_decoder.skip_byte_string_len()?
+                    };
+                    let encoded_end = cbor_decoder
+                        .input_stream
+                        .stream_position()
+                        .map_err(|error| error.to_string())?;
+                    self.record_relation_block(RelationBlockMeta {
+                        ordinal: 0,
+                        encoded_offset,
+                        encoded_len: encoded_end.saturating_sub(encoded_offset),
+                        compressed: false,
+                        uncompressed_len: Some(uncompressed_len),
+                        record_count: None,
+                        status: if loaded_inline {
+                            BlockStatus::Loaded
+                        } else {
+                            BlockStatus::Indexed
+                        },
+                    });
                 }
 
                 RELATIONSHIP_CHUNK_COMP => {
@@ -221,12 +284,37 @@ impl<'a> FtrParser<'a> {
                     if len != 2 {
                         return Err(format!("Relationship Chunk has wrong size. Expected 2 but found {len}. Not a valid FTR file."));
                     }
-                    let uncomp_size = cbor_decoder.read_int()?;
-                    let mut buf = vec![0u8; uncomp_size as usize];
-                    let bytes = cbor_decoder.read_byte_string()?;
-                    decompress_into(bytes.as_slice(), &mut buf).map_err(|e| e.to_string())?;
-
-                    self.parse_rel(&mut CborDecoder::new(Cursor::new(buf)))?;
+                    let encoded_offset = cbor_decoder
+                        .input_stream
+                        .stream_position()
+                        .map_err(|error| error.to_string())?;
+                    let uncomp_size = cbor_decoder.read_int()? as u64;
+                    let loaded_inline = self.ftr.path.is_none();
+                    if loaded_inline {
+                        let mut buf = vec![0u8; uncomp_size as usize];
+                        let bytes = cbor_decoder.read_byte_string()?;
+                        decompress_into(bytes.as_slice(), &mut buf).map_err(|e| e.to_string())?;
+                        self.parse_rel(&mut CborDecoder::new(Cursor::new(buf)))?;
+                    } else {
+                        cbor_decoder.skip_byte_string()?;
+                    }
+                    let encoded_end = cbor_decoder
+                        .input_stream
+                        .stream_position()
+                        .map_err(|error| error.to_string())?;
+                    self.record_relation_block(RelationBlockMeta {
+                        ordinal: 0,
+                        encoded_offset,
+                        encoded_len: encoded_end.saturating_sub(encoded_offset),
+                        compressed: true,
+                        uncompressed_len: Some(uncomp_size),
+                        record_count: None,
+                        status: if loaded_inline {
+                            BlockStatus::Loaded
+                        } else {
+                            BlockStatus::Indexed
+                        },
+                    });
                 }
 
                 _ => return Err("Not a valid Tag!".into()),
@@ -237,11 +325,30 @@ impl<'a> FtrParser<'a> {
         Ok(())
     }
 
+    fn record_block(&mut self, mut block: BlockMeta) -> FtrResult<()> {
+        let stream = self
+            .ftr
+            .tx_streams
+            .get_mut(&block.stream_id)
+            .ok_or_else(|| format!("Cannot find stream with id {:?}", block.stream_id))?;
+        block.ordinal = stream.tx_blocks.len() as u64;
+        stream
+            .tx_block_ids
+            .push((block.encoded_offset, block.compressed));
+        stream.tx_blocks.push(block);
+        Ok(())
+    }
+
+    fn record_relation_block(&mut self, mut block: RelationBlockMeta) {
+        block.ordinal = self.ftr.relation_blocks.len() as u64;
+        self.ftr.relation_blocks.push(block);
+    }
+
     fn parse_dict<R: Read + Seek>(&mut self, cbd: &mut CborDecoder<R>) -> FtrResult<()> {
         let size = cbd.read_map_length()?;
 
         for _i in 0..size {
-            let idx = cbd.read_int()? as usize;
+            let idx = cbd.read_int()? as u64;
             self.ftr
                 .str_dict
                 .insert(NameId(idx), Arc::from(cbd.read_text_string()?));
@@ -274,9 +381,9 @@ impl<'a> FtrParser<'a> {
             if len != 3 {
                 return Err("Directory Entry(Stream) has wrong size!".into());
             }
-            let stream_id = StreamId(cbd.read_int()? as usize);
+            let stream_id = StreamId(cbd.read_int()? as u64);
 
-            let name_id = NameId(cbd.read_int()? as usize);
+            let name_id = NameId(cbd.read_int()? as u64);
             let name = match self.ftr.str_dict.get(&name_id) {
                 Some(n) => n,
                 None => {
@@ -287,7 +394,7 @@ impl<'a> FtrParser<'a> {
                 }
             };
 
-            let kind_id = NameId(cbd.read_int()? as usize);
+            let kind_id = NameId(cbd.read_int()? as u64);
             let Some(kind) = self.ftr.str_dict.get(&kind_id) else {
                 return Err(format!(
                     "There is no entry in the dictionary for id {:?}",
@@ -303,6 +410,7 @@ impl<'a> FtrParser<'a> {
                     kind: kind.to_string(),
                     generators: vec![],
                     transactions_loaded: false,
+                    tx_blocks: vec![],
                     tx_block_ids: vec![],
                 },
             );
@@ -312,8 +420,8 @@ impl<'a> FtrParser<'a> {
                 return Err("Directory entry(Generator) has wrong size!".into());
             }
 
-            let gen_id = GeneratorId(cbd.read_int()? as usize);
-            let name_id = NameId(cbd.read_int()? as usize);
+            let gen_id = GeneratorId(cbd.read_int()? as u64);
+            let name_id = NameId(cbd.read_int()? as u64);
             let Some(name) = self.ftr.str_dict.get(&name_id) else {
                 return Err(format!(
                     "There is no entry in the dictionary for id {:?}",
@@ -321,13 +429,13 @@ impl<'a> FtrParser<'a> {
                 ));
             };
 
-            let stream_id = StreamId(cbd.read_int()? as usize);
+            let stream_id = StreamId(cbd.read_int()? as u64);
 
             let generator = TxGenerator {
                 id: gen_id,
                 name: name.to_string(),
                 stream_id,
-                transactions: vec![],
+                transactions: Arc::new(vec![]),
             };
 
             self.ftr.tx_generators.insert(gen_id, generator);
@@ -342,12 +450,23 @@ impl<'a> FtrParser<'a> {
     }
 
     fn parse_tx_block<R: Read + Seek>(&mut self, cbd: &mut CborDecoder<R>) -> FtrResult<()> {
+        for transaction in self.decode_tx_block(cbd)? {
+            if let Some(generator) = self.ftr.tx_generators.get_mut(&transaction.event.gen_id) {
+                Arc::make_mut(&mut generator.transactions).push(transaction);
+            }
+        }
+        Ok(())
+    }
+
+    fn decode_tx_block<R: Read + Seek>(
+        &mut self,
+        cbd: &mut CborDecoder<R>,
+    ) -> FtrResult<Vec<Transaction>> {
         let size = cbd.read_array_length()?;
         if size != -1 {
             return Err("Transaction block does not have indefinite length!".into());
         }
-
-        let mut current_ends: HashMap<GeneratorId, Vec<u64>> = HashMap::new();
+        let mut transactions = Vec::new();
 
         while let Ok(next_tx) = cbd.peek() {
             if next_tx == 0xff {
@@ -367,8 +486,8 @@ impl<'a> FtrParser<'a> {
                         if len != 4 {
                             return Err(format!("Wrong size of event. Expected 4 but found {len}"));
                         }
-                        let tx_id = TransactionId(cbd.read_int()? as usize);
-                        let gen_id = GeneratorId(cbd.read_int()? as usize);
+                        let tx_id = TransactionId(cbd.read_int()? as u64);
+                        let gen_id = GeneratorId(cbd.read_int()? as u64);
                         let start_time = cbd.read_int()? as u64;
                         let end_time = cbd.read_int()? as u64;
                         let new_event = Event {
@@ -414,7 +533,8 @@ impl<'a> FtrParser<'a> {
             }
 
             let gen_id = event.gen_id;
-            let ends = current_ends
+            let ends = self
+                .current_ends
                 .entry(gen_id)
                 .or_insert_with(|| Vec::with_capacity(8));
 
@@ -431,18 +551,8 @@ impl<'a> FtrParser<'a> {
 
             // Attach relations by index lookup instead of scanning the whole
             // relation list per transaction (was O(transactions x relations)).
-            let out_relations = self
-                .ftr
-                .rel_by_source
-                .get(&event.tx_id)
-                .cloned()
-                .unwrap_or_default();
-            let inc_relations = self
-                .ftr
-                .rel_by_sink
-                .get(&event.tx_id)
-                .cloned()
-                .unwrap_or_default();
+            let out_relations = self.ftr.relations_from(event.tx_id).to_vec();
+            let inc_relations = self.ftr.relations_to(event.tx_id).to_vec();
 
             let tx = Transaction {
                 event,
@@ -452,19 +562,27 @@ impl<'a> FtrParser<'a> {
                 row,
             };
 
-            if let Some(generator) = self.ftr.tx_generators.get_mut(&tx.event.gen_id) {
-                generator.transactions.push(tx);
-            }
+            transactions.push(tx);
         }
-        Ok(())
+        Ok(transactions)
     }
 
     fn parse_rel<R: Read + Seek>(&mut self, cbd: &mut CborDecoder<R>) -> FtrResult<()> {
+        let relations = self.decode_relations(cbd)?;
+        Arc::make_mut(&mut self.ftr.tx_relations).extend(relations);
+        Ok(())
+    }
+
+    fn decode_relations<R: Read + Seek>(
+        &self,
+        cbd: &mut CborDecoder<R>,
+    ) -> FtrResult<Vec<TxRelation>> {
         let size = cbd.read_array_length()?;
         if size != -1 {
             return Err("Relation block does not have indefinite size!".into());
         }
 
+        let mut relations = Vec::new();
         while let Ok(next_rel) = cbd.peek() {
             if next_rel == 0xff {
                 break;
@@ -475,17 +593,17 @@ impl<'a> FtrParser<'a> {
                     "Relation has wrong size. Expected 3 or 5 but found {len}"
                 ));
             }
-            let type_id = NameId(cbd.read_int()? as usize);
-            let from_tx_id = TransactionId(cbd.read_int()? as usize);
-            let to_tx_id = TransactionId(cbd.read_int()? as usize);
+            let type_id = NameId(cbd.read_int()? as u64);
+            let from_tx_id = TransactionId(cbd.read_int()? as u64);
+            let to_tx_id = TransactionId(cbd.read_int()? as u64);
 
             // 5-element relations carry both stream ids explicitly (the form
             // the convention mandates). The 3-element fallback has to look each
             // stream up by its own transaction id -- previously both lookups
             // used the source id, so the sink stream was wrong.
             let (from_stream_id, to_stream_id) = if len > 3 {
-                let from = StreamId(cbd.read_int()? as usize);
-                let to = StreamId(cbd.read_int()? as usize);
+                let from = StreamId(cbd.read_int()? as u64);
+                let to = StreamId(cbd.read_int()? as u64);
                 (from, to)
             } else {
                 (
@@ -498,29 +616,137 @@ impl<'a> FtrParser<'a> {
                 return Err("Cannot find associated relation name".into());
             };
 
-            let tx_relation = TxRelation {
+            relations.push(TxRelation {
                 name: rel_name.clone(),
                 source_tx_id: from_tx_id,
                 sink_tx_id: to_tx_id,
                 source_stream_id: from_stream_id,
                 sink_stream_id: to_stream_id,
-            };
-
-            let index = self.ftr.tx_relations.len();
-            self.ftr
-                .rel_by_source
-                .entry(from_tx_id)
-                .or_default()
-                .push(index);
-            self.ftr
-                .rel_by_sink
-                .entry(to_tx_id)
-                .or_default()
-                .push(index);
-            self.ftr.tx_relations.push(tx_relation);
+            });
         }
 
+        Ok(relations)
+    }
+
+    pub(super) fn load_relations_from_file(&mut self, path: &Path) -> FtrResult<()> {
+        let reader = File::open(path).map_err(|error| error.to_string())?;
+        let blocks = self.ftr.relation_blocks.clone();
+        self.ftr.tx_relations = Arc::new(Vec::new());
+        self.ftr.rel_by_source.clear();
+        self.ftr.rel_by_sink.clear();
+
+        for block in blocks {
+            let before = self.ftr.tx_relations.len();
+            let result = self.decode_file_relation_block(&reader, &block);
+            let record_count = result
+                .as_ref()
+                .ok()
+                .map(|()| (self.ftr.tx_relations.len() - before) as u64);
+            if let Some(stored) = self.ftr.relation_blocks.get_mut(block.ordinal as usize) {
+                stored.status = match &result {
+                    Ok(()) => BlockStatus::Loaded,
+                    Err(error) => BlockStatus::Error(error.clone()),
+                };
+                if let Some(record_count) = record_count {
+                    stored.record_count = Some(record_count);
+                }
+            }
+            result?;
+        }
+        self.ftr.rebuild_relation_indices();
         Ok(())
+    }
+
+    fn decode_file_relation_block(
+        &mut self,
+        reader: &File,
+        block: &RelationBlockMeta,
+    ) -> FtrResult<()> {
+        let relations = self.read_file_relation_block(reader, block)?;
+        Arc::make_mut(&mut self.ftr.tx_relations).extend(relations);
+        Ok(())
+    }
+
+    fn read_file_relation_block(
+        &self,
+        reader: &File,
+        block: &RelationBlockMeta,
+    ) -> FtrResult<Vec<TxRelation>> {
+        let mut decoder = CborDecoder::new(reader);
+        decoder
+            .input_stream
+            .seek(SeekFrom::Start(block.encoded_offset))
+            .map_err(|error| error.to_string())?;
+        if block.compressed {
+            let uncompressed_len = decoder.read_int()?;
+            let uncompressed_len = usize::try_from(uncompressed_len)
+                .map_err(|_| "Invalid relationship block size".to_string())?;
+            let compressed = decoder.read_byte_string()?;
+            let mut bytes = vec![0; uncompressed_len];
+            decompress_into(&compressed, &mut bytes).map_err(|error| error.to_string())?;
+            self.decode_relations(&mut CborDecoder::new(Cursor::new(bytes)))
+        } else {
+            let bytes = decoder.read_byte_string()?;
+            self.decode_relations(&mut CborDecoder::new(Cursor::new(bytes)))
+        }
+    }
+
+    pub(super) fn visit_relation_blocks<F>(&mut self, mut visit: F) -> FtrResult<()>
+    where
+        F: FnMut(&RelationBlockMeta, &[TxRelation]) -> FtrResult<()>,
+    {
+        let path = self
+            .ftr
+            .path
+            .clone()
+            .ok_or_else(|| "Relationship blocks require a file-backed FTR".to_string())?;
+        let blocks = self.ftr.relation_blocks.clone();
+        let reader = File::open(path).map_err(|error| error.to_string())?;
+        for block in blocks {
+            let result = self
+                .read_file_relation_block(&reader, &block)
+                .and_then(|relations| {
+                    let count = relations.len() as u64;
+                    visit(&block, &relations).map(|()| count)
+                });
+            if let Some(stored) = self.ftr.relation_blocks.get_mut(block.ordinal as usize) {
+                stored.status = match &result {
+                    Ok(_) => BlockStatus::Indexed,
+                    Err(error) => BlockStatus::Error(error.clone()),
+                };
+                if let Ok(count) = &result {
+                    stored.record_count = Some(*count);
+                }
+            }
+            result?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn read_relation_block(&mut self, ordinal: u64) -> FtrResult<Vec<TxRelation>> {
+        let path = self
+            .ftr
+            .path
+            .clone()
+            .ok_or_else(|| "Relationship blocks require a file-backed FTR".to_string())?;
+        let block = self
+            .ftr
+            .relation_blocks
+            .get(ordinal as usize)
+            .cloned()
+            .ok_or_else(|| format!("Cannot find relationship block {ordinal}"))?;
+        let reader = File::open(path).map_err(|error| error.to_string())?;
+        let result = self.read_file_relation_block(&reader, &block);
+        if let Some(stored) = self.ftr.relation_blocks.get_mut(ordinal as usize) {
+            stored.status = match &result {
+                Ok(_) => BlockStatus::Indexed,
+                Err(error) => BlockStatus::Error(error.clone()),
+            };
+            if let Ok(relations) = &result {
+                stored.record_count = Some(relations.len() as u64);
+            }
+        }
+        result
     }
 
     //loads the transactions of all generators of stream 'stream_id'
@@ -538,32 +764,42 @@ impl<'a> FtrParser<'a> {
             .tx_block_ids
             .clone();
 
-        for tx_block_id in tx_block_ids {
+        for (ordinal, tx_block_id) in tx_block_ids.into_iter().enumerate() {
             let mut cbor_decoder = CborDecoder::new(&reader);
 
-            cbor_decoder
-                .input_stream
-                .seek(SeekFrom::Start(tx_block_id.0))
-                .map_err(|e| e.to_string())?;
+            let result: FtrResult<()> = (|| {
+                cbor_decoder
+                    .input_stream
+                    .seek(SeekFrom::Start(tx_block_id.0))
+                    .map_err(|e| e.to_string())?;
 
-            if tx_block_id.1 {
-                let uncomp_size = cbor_decoder.read_int()?;
+                if tx_block_id.1 {
+                    let uncomp_size = cbor_decoder.read_int()?;
 
-                let mut buf = vec![0u8; uncomp_size as usize];
-                let bytes = cbor_decoder.read_byte_string()?;
-                match decompress_into(bytes.as_slice(), &mut buf) {
-                    Ok(_) => {}
-                    Err(e) => {
-                        return Err(format!("Cannot decompress data correctly: {e}"));
-                    }
+                    let mut buf = vec![0u8; uncomp_size as usize];
+                    let bytes = cbor_decoder.read_byte_string()?;
+                    decompress_into(bytes.as_slice(), &mut buf)
+                        .map_err(|e| format!("Cannot decompress data correctly: {e}"))?;
+                    self.parse_tx_block(&mut CborDecoder::new(Cursor::new(buf)))?;
+                } else {
+                    self.parse_tx_block(&mut CborDecoder::new(Cursor::new(
+                        cbor_decoder.read_byte_string()?,
+                    )))?;
                 }
-
-                self.parse_tx_block(&mut CborDecoder::new(Cursor::new(buf)))?;
-            } else {
-                self.parse_tx_block(&mut CborDecoder::new(Cursor::new(
-                    cbor_decoder.read_byte_string()?,
-                )))?;
+                Ok(())
+            })();
+            if let Some(block) = self
+                .ftr
+                .tx_streams
+                .get_mut(&stream_id)
+                .and_then(|stream| stream.tx_blocks.get_mut(ordinal))
+            {
+                block.status = match &result {
+                    Ok(()) => BlockStatus::Loaded,
+                    Err(error) => BlockStatus::Error(error.clone()),
+                };
             }
+            result?;
         }
         self.ftr
             .tx_streams
@@ -573,19 +809,123 @@ impl<'a> FtrParser<'a> {
         Ok(())
     }
 
+    /// Decodes one transaction block at a time without retaining its
+    /// transactions in the generic FTR object graph. The callback completes
+    /// before the batch is dropped and may return an error to cancel the scan.
+    pub(super) fn visit_transaction_blocks<F>(
+        &mut self,
+        stream_id: StreamId,
+        mut visit: F,
+    ) -> FtrResult<()>
+    where
+        F: FnMut(&BlockMeta, &[Transaction]) -> FtrResult<()>,
+    {
+        let path = self
+            .ftr
+            .path
+            .clone()
+            .ok_or_else(|| "Transaction blocks require a file-backed FTR".to_string())?;
+        let blocks = self
+            .ftr
+            .tx_streams
+            .get(&stream_id)
+            .ok_or_else(|| format!("Cannot find stream with id {stream_id:?}"))?
+            .tx_blocks
+            .clone();
+        let reader = File::open(path).map_err(|error| error.to_string())?;
+        self.current_ends.clear();
+        for block in blocks {
+            let result = self
+                .decode_file_block(&reader, &block)
+                .and_then(|transactions| visit(&block, &transactions));
+            let status = match &result {
+                Ok(()) => BlockStatus::Loaded,
+                Err(error) => BlockStatus::Error(error.clone()),
+            };
+            if let Some(stored) = self
+                .ftr
+                .tx_streams
+                .get_mut(&stream_id)
+                .and_then(|stream| stream.tx_blocks.get_mut(block.ordinal as usize))
+            {
+                stored.status = status;
+            }
+            result?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn read_transaction_block(
+        &mut self,
+        stream_id: StreamId,
+        ordinal: u64,
+    ) -> FtrResult<Vec<Transaction>> {
+        let path = self
+            .ftr
+            .path
+            .clone()
+            .ok_or_else(|| "Transaction blocks require a file-backed FTR".to_string())?;
+        let block = self
+            .ftr
+            .tx_streams
+            .get(&stream_id)
+            .and_then(|stream| stream.tx_blocks.get(ordinal as usize))
+            .cloned()
+            .ok_or_else(|| format!("Cannot find block {ordinal} for stream {stream_id}"))?;
+        let reader = File::open(path).map_err(|error| error.to_string())?;
+        self.current_ends.clear();
+        let result = self.decode_file_block(&reader, &block);
+        if let Some(stored) = self
+            .ftr
+            .tx_streams
+            .get_mut(&stream_id)
+            .and_then(|stream| stream.tx_blocks.get_mut(ordinal as usize))
+        {
+            stored.status = match &result {
+                Ok(_) => BlockStatus::Loaded,
+                Err(error) => BlockStatus::Error(error.clone()),
+            };
+        }
+        result
+    }
+
+    fn decode_file_block(
+        &mut self,
+        reader: &File,
+        block: &BlockMeta,
+    ) -> FtrResult<Vec<Transaction>> {
+        let mut decoder = CborDecoder::new(reader);
+        decoder
+            .input_stream
+            .seek(SeekFrom::Start(block.encoded_offset))
+            .map_err(|error| error.to_string())?;
+        if block.compressed {
+            let uncompressed_len = decoder.read_int()?;
+            let uncompressed_len = usize::try_from(uncompressed_len)
+                .map_err(|_| "Invalid transaction block size".to_string())?;
+            let compressed = decoder.read_byte_string()?;
+            let mut bytes = vec![0; uncompressed_len];
+            decompress_into(&compressed, &mut bytes).map_err(|error| error.to_string())?;
+            self.decode_tx_block(&mut CborDecoder::new(Cursor::new(bytes)))
+        } else {
+            let bytes = decoder.read_byte_string()?;
+            self.decode_tx_block(&mut CborDecoder::new(Cursor::new(bytes)))
+        }
+    }
+
     fn parse_attribute<R: Read + Seek>(
         &self,
         cbd: &mut CborDecoder<R>,
         attribute_type: u64,
     ) -> FtrResult<Attribute> {
-        let name_id = NameId(cbd.read_int()? as usize);
+        let name_id = NameId(cbd.read_int()? as u64);
         let data_type = cbd.read_int()?;
         let data_type_with_value = match data_type as u8 {
             BOOLEAN => DataType::Boolean(cbd.read_boolean()?),
             ENUMERATION => DataType::Enumeration(
                 self.ftr
                     .str_dict
-                    .get(&NameId(cbd.read_int()? as usize))
+                    .get(&NameId(cbd.read_int()? as u64))
                     .ok_or("Cannot find enum entry in string dictionary")?
                     .clone(),
             ),
@@ -595,14 +935,14 @@ impl<'a> FtrParser<'a> {
             BIT_VECTOR => DataType::BitVector(
                 self.ftr
                     .str_dict
-                    .get(&NameId(cbd.read_int()? as usize))
+                    .get(&NameId(cbd.read_int()? as u64))
                     .ok_or("Cannot find bit vector entry in string dictionary")?
                     .clone(),
             ),
             LOGIC_VECTOR => DataType::LogicVector(
                 self.ftr
                     .str_dict
-                    .get(&NameId(cbd.read_int()? as usize))
+                    .get(&NameId(cbd.read_int()? as u64))
                     .ok_or("Cannot find logic vector entry in string dictionary")?
                     .clone(),
             ),
@@ -612,7 +952,7 @@ impl<'a> FtrParser<'a> {
             STRING => DataType::String(
                 self.ftr
                     .str_dict
-                    .get(&NameId(cbd.read_int()? as usize))
+                    .get(&NameId(cbd.read_int()? as u64))
                     .ok_or("Cannot find string entry in string dictionary")?
                     .clone(),
             ),
@@ -644,7 +984,7 @@ impl<'a> FtrParser<'a> {
 /// Only used for the rare 3-element relation fallback.
 fn find_stream_for_tx(ftr: &FTR, tx_id: TransactionId) -> StreamId {
     for (gen_id, gen) in &ftr.tx_generators {
-        for tx in &gen.transactions {
+        for tx in gen.transactions.iter() {
             if tx.event.tx_id == tx_id && tx.event.gen_id == *gen_id {
                 return gen.stream_id;
             }
@@ -653,26 +993,52 @@ fn find_stream_for_tx(ftr: &FTR, tx_id: TransactionId) -> StreamId {
     StreamId(0)
 }
 
-/// Attaches relations to the transactions they reference using the prebuilt
-/// source/sink index maps. This is O(transactions + relations) rather than the
-/// previous O(transactions x relations) scan.
+/// Attaches relations to the transactions they reference using sorted source
+/// and sink permutations. This is O(relations log relations + transactions
+/// log relations), without one hash-map allocation per transaction id.
 pub(super) fn connect_relations_and_transactions(ftr: &mut FTR) {
+    ftr.rebuild_relation_indices();
     let FTR {
         tx_generators,
+        tx_relations,
         rel_by_source,
         rel_by_sink,
         ..
     } = ftr;
     for gen in tx_generators.values_mut() {
-        for tx in gen.transactions.iter_mut() {
+        for tx in Arc::make_mut(&mut gen.transactions).iter_mut() {
             tx.out_relations.clear();
             tx.inc_relations.clear();
-            if let Some(idxs) = rel_by_source.get(&tx.event.tx_id) {
-                tx.out_relations.extend_from_slice(idxs);
-            }
-            if let Some(idxs) = rel_by_sink.get(&tx.event.tx_id) {
-                tx.inc_relations.extend_from_slice(idxs);
-            }
+            tx.out_relations.extend_from_slice(relation_range(
+                tx_relations,
+                rel_by_source,
+                tx.event.tx_id,
+                true,
+            ));
+            tx.inc_relations.extend_from_slice(relation_range(
+                tx_relations,
+                rel_by_sink,
+                tx.event.tx_id,
+                false,
+            ));
         }
     }
+}
+
+fn relation_range<'a>(
+    relations: &[TxRelation],
+    permutation: &'a [usize],
+    id: TransactionId,
+    by_source: bool,
+) -> &'a [usize] {
+    let key = |index: usize| {
+        if by_source {
+            relations[index].source_tx_id
+        } else {
+            relations[index].sink_tx_id
+        }
+    };
+    let start = permutation.partition_point(|index| key(*index) < id);
+    let end = permutation.partition_point(|index| key(*index) <= id);
+    &permutation[start..end]
 }

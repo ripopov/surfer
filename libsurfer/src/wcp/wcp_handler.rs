@@ -2,11 +2,14 @@ use crate::{
     SystemState, WcpClientCapabilities,
     displayed_item::{DisplayedItem, DisplayedItemRef},
     message::{Message, MessageTarget},
+    source::SourceTransactionRef,
+    transaction_container::{TransactionRef, TransactionStreamRef},
     wave_container::{ScopeRefExt, VariableRef, VariableRefExt},
     wave_data::WaveData,
     wave_source::{LoadOptions, WaveSource, string_to_wavesource},
 };
 
+use ftr_parser::types::TransactionId;
 use futures::executor::block_on;
 use itertools::Itertools;
 use std::sync::atomic::Ordering;
@@ -348,6 +351,175 @@ impl SystemState {
                         self.update(Message::CursorSet(timestamp.to_owned()));
                         self.send_response(WcpResponse::ack);
                     }
+                    WcpCommand::konata_open { generator, source } => {
+                        let candidates = self.user.waves.as_ref().map_or_else(Vec::new, |waves| {
+                            waves
+                                .source_ids()
+                                .into_iter()
+                                .filter(|source_id| {
+                                    source.as_ref().is_none_or(|wanted| {
+                                        wanted == &format!("s{}", source_id.0)
+                                            || waves.source_label_for(*source_id).as_ref()
+                                                == Some(wanted)
+                                    })
+                                })
+                                .flat_map(|source_id| {
+                                    waves
+                                        .transactions_for_source(source_id)
+                                        .into_iter()
+                                        .flat_map(move |transactions| {
+                                            transactions
+                                                .get_generators()
+                                                .into_iter()
+                                                .filter(move |candidate| {
+                                                    candidate.name == *generator
+                                                        && transactions
+                                                            .event_index()
+                                                            .events_generator_of(candidate.id)
+                                                            .is_some()
+                                                })
+                                                .map(move |candidate| {
+                                                    (
+                                                        source_id,
+                                                        TransactionStreamRef::new_gen(
+                                                            candidate.stream_id,
+                                                            candidate.id,
+                                                            candidate.name.clone(),
+                                                        ),
+                                                    )
+                                                })
+                                        })
+                                })
+                                .collect_vec()
+                        });
+                        if let [candidate] = candidates.as_slice() {
+                            self.update(Message::OpenKonataView {
+                                source: candidate.0,
+                                generator: candidate.1.clone(),
+                            });
+                            self.send_response(WcpResponse::ack);
+                        } else {
+                            self.send_error(
+                                "konata_open",
+                                vec![generator.clone()],
+                                if candidates.is_empty() {
+                                    "No matching pipeline generator"
+                                } else {
+                                    "Generator is ambiguous; specify source"
+                                },
+                            );
+                        }
+                    }
+                    WcpCommand::konata_goto_row { row } => {
+                        let valid = self
+                            .active_konata_tile()
+                            .and_then(|tile| self.active_konata_model(tile))
+                            .is_some_and(|model| {
+                                usize::try_from(*row).is_ok_and(|row| row < model.row_count())
+                            });
+                        if valid {
+                            self.update(Message::KonataGotoRow(*row));
+                            self.send_response(WcpResponse::ack);
+                        } else {
+                            self.send_error(
+                                "konata_goto_row",
+                                vec![row.to_string()],
+                                "No active ready Konata tile or row is out of range",
+                            );
+                        }
+                    }
+                    WcpCommand::konata_goto_rid { rid, thread } => {
+                        let row = self
+                            .active_konata_tile()
+                            .and_then(|tile| self.active_konata_model(tile))
+                            .and_then(|model| {
+                                thread.as_ref().map_or_else(
+                                    || model.row_for_rid(*rid),
+                                    |thread| model.row_for_thread_rid(Some(thread), *rid),
+                                )
+                            });
+                        if row.is_some() {
+                            self.update(thread.as_ref().map_or(
+                                Message::KonataGotoRid(*rid),
+                                |thread| Message::KonataGotoThreadRid {
+                                    thread: thread.clone(),
+                                    rid: *rid,
+                                },
+                            ));
+                            self.send_response(WcpResponse::ack);
+                        } else {
+                            self.send_error(
+                                "konata_goto_rid",
+                                vec![rid.to_string()],
+                                "Retire ID is missing or ambiguous for the requested thread",
+                            );
+                        }
+                    }
+                    WcpCommand::konata_goto_cycle { cycle } => {
+                        let has_clock = self
+                            .active_konata_tile()
+                            .and_then(|tile| self.user.konata_tiles.get(&tile))
+                            .is_some_and(|tile| {
+                                tile.config
+                                    .clock_period_ticks
+                                    .is_some_and(|period| period > 0)
+                            });
+                        if has_clock {
+                            self.update(Message::KonataGotoCycle(*cycle));
+                            self.send_response(WcpResponse::ack);
+                        } else {
+                            self.send_error(
+                                "konata_goto_cycle",
+                                vec![cycle.to_string()],
+                                "No active Konata tile with a configured pipeline clock",
+                            );
+                        }
+                    }
+                    WcpCommand::konata_set_bookmark { slot }
+                        if *slot < 10 && self.active_konata_tile().is_some() =>
+                    {
+                        self.update(Message::KonataBookmarkSet(*slot));
+                        self.send_response(WcpResponse::ack);
+                    }
+                    WcpCommand::konata_set_bookmark { slot } if *slot < 10 => {
+                        self.send_error(
+                            "konata_set_bookmark",
+                            vec![slot.to_string()],
+                            "No active Konata tile",
+                        );
+                    }
+                    WcpCommand::konata_set_bookmark { slot } => {
+                        self.send_error(
+                            "konata_set_bookmark",
+                            vec![slot.to_string()],
+                            "Bookmark slot must be in 0..=9",
+                        );
+                    }
+                    WcpCommand::konata_focus_instruction { transaction_id } => {
+                        let target = self.active_konata_tile().and_then(|tile_id| {
+                            let source = self.user.konata_tiles.get(&tile_id)?.spec.source;
+                            let model = self.active_konata_model(tile_id)?;
+                            model.row_for_transaction(*transaction_id).map(|_| source)
+                        });
+                        if let Some(source) = target {
+                            self.update(Message::FocusTransactionFromSource(
+                                Some(SourceTransactionRef::new(
+                                    source,
+                                    TransactionRef {
+                                        id: TransactionId(*transaction_id),
+                                    },
+                                )),
+                                None,
+                            ));
+                            self.send_response(WcpResponse::ack);
+                        } else {
+                            self.send_error(
+                                "konata_focus_instruction",
+                                vec![transaction_id.to_string()],
+                                "No active ready Konata tile contains that instruction",
+                            );
+                        }
+                    }
                     WcpCommand::shutdown => {
                         warn!("WCP Shutdown message should not reach this place");
                     }
@@ -400,6 +572,12 @@ impl SystemState {
             "zoom_to_fit",
             "add_markers",
             "set_viewport_range_to",
+            "konata_open",
+            "konata_goto_row",
+            "konata_goto_rid",
+            "konata_goto_cycle",
+            "konata_set_bookmark",
+            "konata_focus_instruction",
         ]
         .into_iter()
         .map(str::to_string)

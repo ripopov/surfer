@@ -102,6 +102,43 @@ primary_button_drag_behavior= "Cursor"
 # FTR transaction event convention support (event overlays, badges, tables)
 ftr_events_enabled = true
 
+# Defaults copied into each newly opened Konata pipeline tile. Saved tile
+# state remains independent, so changing these values does not rewrite a
+# checked-in .surf.ron session.
+[konata]
+detail_cache_mib_native = 256
+detail_cache_mib_web = 64
+splitter_px = 310.0
+hide_flushed = false
+lane_mode = "Merged"
+color_scheme = "Auto"
+arrow_style = "Inside"
+show_minimap = false
+text_lod_px = 10.0
+frame_lod_px = 4.0
+color_lod_px = 1.0
+arrow_lod_px = 4.0
+zoom_step = 1.4142135623730951
+execution_stages = "X,x,Ex,execute"
+stall_stages = "f,stl"
+stall_case_sensitive = true
+instruction_classifier = "Generic"
+include_estimated_flush_rates = false
+custom_stage_colors = {}
+ruler_cycles = true
+
+# Named schemes can override any HSL component per stage or lane. Use the
+# literal "auto" to inherit the generated component.
+[konata.custom_color_schemes.Muted.default]
+hue = "auto"
+saturation = 0.48
+lightness = 0.52
+
+[konata.custom_color_schemes.Muted.stages.stl]
+hue = "auto"
+saturation = 0.20
+lightness = 0.48
+
 [wcp]
 autostart = false
 address = "127.0.0.1:54321"

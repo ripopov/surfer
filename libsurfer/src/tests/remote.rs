@@ -3,10 +3,14 @@
 use super::snapshot::{render_and_compare, wait_for_waves_fully_loaded};
 use crate::SystemState;
 use crate::message::Message;
+use crate::source::SourceId;
+use crate::transaction_container::TransactionStreamRef;
 use crate::wave_container::{ScopeRef, ScopeRefExt};
 use crate::wave_source::LoadOptions;
+use ftr_parser::types::{GeneratorId, StreamId};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
+use surver::{SurverFileInfo, SurverFileKind};
 
 /// starts the remote server in a background thread
 fn start_server(bind_address: &str, port: u16, token: &str, filenames: &[String]) -> String {
@@ -115,6 +119,145 @@ snapshot_ui_remote!(
         Message::AddScope(ScopeRef::from_strs(&["tb", "dut"]), false),
     ]
 );
+
+#[test]
+fn remote_konata_pipeline() {
+    let port =
+        BASE_PORT + UNIQUE_PORT_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as u16;
+    let project_root: camino::Utf8PathBuf = project_root::get_project_root()
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let filenames = vec![
+        project_root
+            .join("examples/kanata-sample-2.ftr")
+            .to_string(),
+    ];
+    render_and_compare(&PathBuf::from("remote/remote_konata_pipeline"), || {
+        let mut state = run_with_server(DEFAULT_IP, port, DEFAULT_TOKEN, &filenames, || {
+            vec![Message::OpenKonataView {
+                source: SourceId::default(),
+                generator: TransactionStreamRef::new_gen(
+                    StreamId(1),
+                    GeneratorId(10),
+                    "instruction".to_string(),
+                ),
+            }]
+        });
+        let started = std::time::Instant::now();
+        while !state.konata_caches_ready() {
+            state.handle_async_messages();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(10),
+                "remote Konata projection did not finish"
+            );
+        }
+        let model = state
+            .konata_runtime
+            .values()
+            .next()
+            .and_then(|runtime| runtime.entry.as_ref())
+            .and_then(|entry| entry.model())
+            .expect("remote Konata model");
+        assert_eq!(model.row_count(), 4_041);
+        let tile_id = *state.user.konata_tiles.keys().next().unwrap();
+        let parent_tx = model.rows.tx_id[96];
+        let expected_events = model.stages_for_row_blocking(96).len();
+        state.update(Message::OpenKonataEventTable {
+            tile_id,
+            parent_tx: Some(parent_tx),
+        });
+        while !state.table_caches_ready() {
+            state.handle_async_messages();
+            std::thread::yield_now();
+        }
+        let event_table = state
+            .user
+            .table_tiles
+            .iter()
+            .find_map(|(id, tile)| {
+                matches!(
+                    tile.spec,
+                    crate::table::TableModelSpec::KonataEvents {
+                        parent_tx: Some(candidate),
+                        ..
+                    } if candidate == parent_tx
+                )
+                .then_some(*id)
+            })
+            .unwrap();
+        assert_eq!(
+            state.table_runtime[&event_table]
+                .cache
+                .as_ref()
+                .unwrap()
+                .get()
+                .unwrap()
+                .row_ids
+                .len(),
+            expected_events
+        );
+        let remote_transactions = state
+            .user
+            .waves
+            .as_ref()
+            .unwrap()
+            .transactions_for_source(SourceId::default())
+            .unwrap();
+        assert!(
+            !remote_transactions
+                .get_stream(StreamId(1))
+                .unwrap()
+                .transactions_loaded
+        );
+        assert!(
+            remote_transactions
+                .get_stream(StreamId(1))
+                .unwrap()
+                .generators
+                .iter()
+                .all(|generator| remote_transactions
+                    .get_generator(*generator)
+                    .unwrap()
+                    .transactions
+                    .is_empty())
+        );
+        state.update(Message::RemoveTableTile {
+            tile_id: event_table,
+        });
+        let tile = state.user.konata_tiles.values_mut().next().unwrap();
+        tile.title = "Konata — instruction (remote FTR)".to_string();
+        tile.viewport.top_visible_row = 96.0;
+        tile.viewport.set_left_tick(640);
+        super::snapshot::show_only_analysis_tiles(&mut state);
+        state
+    });
+}
+
+#[test]
+fn incompatible_surver_refuses_remote_ftr_without_full_download() {
+    let mut state = SystemState::new_default_config().unwrap();
+    state.user.surver_file_infos = Some(vec![SurverFileInfo {
+        bytes: 1024,
+        bytes_loaded: 1024,
+        filename: "pipeline.ftr".to_string(),
+        kind: SurverFileKind::Transaction,
+        format: None,
+        reloading: false,
+        last_load_ok: true,
+        last_modification_time: None,
+    }]);
+    assert!(state.user.surver_capabilities.transaction_pages.is_none());
+    state.load_surver_file(
+        "http://example.invalid/token".to_string(),
+        0,
+        LoadOptions::Clear,
+    );
+    assert!(state.progress_tracker.is_none());
+    assert!(state.user.waves.is_none());
+    assert!(state.user.show_logs);
+}
 
 snapshot_ui_remote!(
     example_fst_renders_with_multiple_files,

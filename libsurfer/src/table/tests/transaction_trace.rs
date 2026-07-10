@@ -148,7 +148,7 @@ fn transaction_trace_model_on_activate_returns_focus_transaction() {
             TableAction::FocusTransaction(source, tx_ref) => {
                 assert_eq!(source, crate::source::SourceId::default());
                 // Verify the transaction ref is valid
-                assert!(tx_ref.id.0 < usize::MAX, "tx_ref should have valid id");
+                assert!(tx_ref.id.0 < u64::MAX, "tx_ref should have valid id");
             }
             _ => panic!("Expected FocusTransaction action, got {:?}", action),
         }

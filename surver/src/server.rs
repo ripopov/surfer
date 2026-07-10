@@ -1,6 +1,7 @@
 //! Handling of external communication in Surver.
 use bincode::Options;
 use eyre::{Result, WrapErr as _, anyhow, bail};
+use ftr_parser::types::{BlockStatus, FTR, StreamId};
 use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::server::conn::http1;
@@ -13,7 +14,7 @@ use std::iter::repeat_with;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Instant, SystemTime};
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
@@ -24,8 +25,11 @@ use wellen::{
 
 use crate::{
     BINCODE_OPTIONS, HTTP_SERVER_KEY, HTTP_SERVER_VALUE_SURFER, SURFER_VERSION, SurverFileInfo,
-    SurverStatus, WELLEN_SURFER_DEFAULT_OPTIONS, WELLEN_VERSION, X_SURFER_VERSION,
-    X_WELLEN_VERSION, modification_time_string,
+    SurverFileKind, SurverStatus, TRANSACTION_DICTIONARY_PAGE_RECORDS,
+    TRANSACTION_PAGE_PROTOCOL_VERSION, TRANSACTION_RELATION_PAGE_RECORDS,
+    TransactionDictionaryPage, TransactionManifest, TransactionPageCapability,
+    TransactionRecordPage, TransactionRelationPage, WELLEN_SURFER_DEFAULT_OPTIONS, WELLEN_VERSION,
+    X_SURFER_VERSION, X_WELLEN_VERSION, modification_time_string,
 };
 
 struct ReadOnly {
@@ -35,8 +39,10 @@ struct ReadOnly {
 
 struct FileInfo {
     filename: String,
-    hierarchy: Arc<Hierarchy>,
-    file_format: FileFormat,
+    hierarchy: Option<Arc<Hierarchy>>,
+    file_format: Option<FileFormat>,
+    transaction: Option<Arc<Mutex<FTR>>>,
+    source_revision: u64,
     header_len: u64,
     body_len: u64,
     body_progress: Arc<AtomicU64>,
@@ -99,6 +105,11 @@ impl From<&FileInfo> for SurverFileInfo {
             bytes: file_info.body_len + file_info.header_len,
             bytes_loaded: file_info.body_progress.load(Ordering::SeqCst) + file_info.header_len,
             filename: file_info.filename.clone(),
+            kind: if file_info.transaction.is_some() {
+                SurverFileKind::Transaction
+            } else {
+                SurverFileKind::Waveform
+            },
             format: file_info.file_format,
             reloading: file_info.reloading,
             last_load_ok: file_info.last_reload_ok,
@@ -148,8 +159,15 @@ fn get_info_page(shared: &Arc<ReadOnly>, state: &Arc<RwLock<SurverState>>) -> St
 fn get_hierarchy(state: &Arc<RwLock<SurverState>>, file_index: usize) -> Result<Vec<u8>> {
     let state_guard = state.read().expect("State lock poisoned in get_hierarchy");
     let file_info = &state_guard.file_infos[file_index];
-    let mut raw = BINCODE_OPTIONS.serialize(&file_info.file_format)?;
-    let mut raw2 = BINCODE_OPTIONS.serialize(file_info.hierarchy.as_ref())?;
+    let file_format = file_info
+        .file_format
+        .ok_or_else(|| anyhow!("Selected file is not a waveform"))?;
+    let hierarchy = file_info
+        .hierarchy
+        .as_ref()
+        .ok_or_else(|| anyhow!("Selected file has no waveform hierarchy"))?;
+    let mut raw = BINCODE_OPTIONS.serialize(&file_format)?;
+    let mut raw2 = BINCODE_OPTIONS.serialize(hierarchy.as_ref())?;
     drop(state_guard);
     raw.append(&mut raw2);
     let compressed = lz4_flex::compress_prepend_size(&raw);
@@ -164,6 +182,9 @@ fn get_hierarchy(state: &Arc<RwLock<SurverState>>, file_index: usize) -> Result<
 async fn get_timetable(state: &Arc<RwLock<SurverState>>, file_index: usize) -> Result<Vec<u8>> {
     let notify = {
         let state_guard = state.read().expect("State lock poisoned in get_timetable");
+        if state_guard.file_infos[file_index].transaction.is_some() {
+            bail!("Selected file is not a waveform");
+        }
         state_guard.file_infos[file_index].notify.clone()
     };
 
@@ -201,15 +222,228 @@ fn get_status(state: &Arc<RwLock<SurverState>>) -> Result<Vec<u8>> {
     let status = SurverStatus {
         wellen_version: WELLEN_VERSION.to_string(),
         surfer_version: SURFER_VERSION.to_string(),
+        capabilities: crate::SurverCapabilities {
+            discovery_version: 1,
+            waveform_signals: true,
+            transaction_pages: Some(TransactionPageCapability {
+                protocol_version: TRANSACTION_PAGE_PROTOCOL_VERSION,
+                formats: vec!["ftr".to_string()],
+                revisioned: true,
+                byte_ranges: false,
+            }),
+        },
         file_infos,
     };
     Ok(serde_json::to_vec(&status)?)
 }
 
+fn transaction_file(
+    state: &Arc<RwLock<SurverState>>,
+    file_index: usize,
+) -> Result<(Arc<Mutex<FTR>>, u64)> {
+    let state_guard = state
+        .read()
+        .expect("State lock poisoned in transaction request");
+    let file = &state_guard.file_infos[file_index];
+    Ok((
+        file.transaction
+            .clone()
+            .ok_or_else(|| anyhow!("Selected file is not an FTR transaction trace"))?,
+        file.source_revision,
+    ))
+}
+
+fn check_transaction_revision(expected: u64, actual: u64) -> Result<()> {
+    if expected != actual {
+        bail!("Stale transaction source revision {expected}; current revision is {actual}");
+    }
+    Ok(())
+}
+
+fn encode_transaction_payload(value: &impl serde::Serialize) -> Result<Vec<u8>> {
+    Ok(lz4_flex::compress_prepend_size(
+        &BINCODE_OPTIONS.serialize(value)?,
+    ))
+}
+
+fn get_transaction_manifest(
+    state: &Arc<RwLock<SurverState>>,
+    file_index: usize,
+) -> Result<Vec<u8>> {
+    let (transaction, source_revision) = transaction_file(state, file_index)?;
+    let mut ftr = transaction
+        .lock()
+        .map_err(|_| anyhow!("Transaction trace lock poisoned"))?;
+    if ftr
+        .relation_blocks
+        .iter()
+        .any(|block| block.record_count.is_none())
+    {
+        ftr.visit_relation_blocks(|_, _| Ok(()))
+            .map_err(eyre::Report::msg)?;
+    }
+    let relation_count = ftr
+        .relation_blocks
+        .iter()
+        .map(|block| block.record_count.unwrap_or_default())
+        .sum::<u64>();
+    let mut streams = ftr.tx_streams.values().cloned().collect::<Vec<_>>();
+    streams.sort_by_key(|stream| stream.id);
+    for stream in &mut streams {
+        stream.transactions_loaded = false;
+        for block in &mut stream.tx_blocks {
+            block.status = BlockStatus::Indexed;
+        }
+    }
+    let mut generators = ftr.tx_generators.values().cloned().collect::<Vec<_>>();
+    generators.sort_by_key(|generator| generator.id);
+    for generator in &mut generators {
+        generator.transactions = Arc::new(Vec::new());
+    }
+    let manifest = TransactionManifest {
+        protocol_version: TRANSACTION_PAGE_PROTOCOL_VERSION,
+        source_revision,
+        time_scale: ftr.time_scale,
+        max_timestamp: ftr.max_timestamp,
+        streams,
+        generators,
+        dictionary_pages: ftr
+            .str_dict
+            .len()
+            .div_ceil(TRANSACTION_DICTIONARY_PAGE_RECORDS) as u64,
+        relation_pages: relation_count.div_ceil(TRANSACTION_RELATION_PAGE_RECORDS as u64),
+        relation_count,
+    };
+    encode_transaction_payload(&manifest)
+}
+
+fn get_transaction_dictionary_page(
+    state: &Arc<RwLock<SurverState>>,
+    file_index: usize,
+    source_revision: u64,
+    page_id: u64,
+) -> Result<Vec<u8>> {
+    let (transaction, actual_revision) = transaction_file(state, file_index)?;
+    check_transaction_revision(source_revision, actual_revision)?;
+    let ftr = transaction
+        .lock()
+        .map_err(|_| anyhow!("Transaction trace lock poisoned"))?;
+    let mut entries = ftr
+        .str_dict
+        .iter()
+        .map(|(id, value)| (*id, value.clone()))
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|(id, _)| *id);
+    let start = usize::try_from(page_id)
+        .ok()
+        .and_then(|page| page.checked_mul(TRANSACTION_DICTIONARY_PAGE_RECORDS))
+        .ok_or_else(|| anyhow!("Invalid dictionary page id {page_id}"))?;
+    if start > entries.len() {
+        bail!("Dictionary page {page_id} is unavailable");
+    }
+    let end = (start + TRANSACTION_DICTIONARY_PAGE_RECORDS).min(entries.len());
+    encode_transaction_payload(&TransactionDictionaryPage {
+        source_revision,
+        page_id,
+        entries: entries[start..end].to_vec(),
+    })
+}
+
+fn get_transaction_relation_page(
+    state: &Arc<RwLock<SurverState>>,
+    file_index: usize,
+    source_revision: u64,
+    page_id: u64,
+) -> Result<Vec<u8>> {
+    let (transaction, actual_revision) = transaction_file(state, file_index)?;
+    check_transaction_revision(source_revision, actual_revision)?;
+    let mut ftr = transaction
+        .lock()
+        .map_err(|_| anyhow!("Transaction trace lock poisoned"))?;
+    if ftr
+        .relation_blocks
+        .iter()
+        .any(|block| block.record_count.is_none())
+    {
+        ftr.visit_relation_blocks(|_, _| Ok(()))
+            .map_err(eyre::Report::msg)?;
+    }
+    let start = page_id
+        .checked_mul(TRANSACTION_RELATION_PAGE_RECORDS as u64)
+        .ok_or_else(|| anyhow!("Invalid relation page id {page_id}"))?;
+    let relation_count = ftr
+        .relation_blocks
+        .iter()
+        .map(|block| block.record_count.unwrap_or_default())
+        .sum::<u64>();
+    if start > relation_count {
+        bail!("Relation page {page_id} is unavailable");
+    }
+    let end = start
+        .saturating_add(TRANSACTION_RELATION_PAGE_RECORDS as u64)
+        .min(relation_count);
+    let blocks = ftr.relation_blocks.clone();
+    let mut block_start = 0u64;
+    let mut relations = Vec::with_capacity((end - start) as usize);
+    for block in blocks {
+        let block_end = block_start.saturating_add(block.record_count.unwrap_or_default());
+        if block_end > start && block_start < end {
+            let decoded = ftr
+                .read_relation_block(block.ordinal)
+                .map_err(eyre::Report::msg)?;
+            let local_start = start.saturating_sub(block_start) as usize;
+            let local_end = (end.min(block_end) - block_start) as usize;
+            relations.extend_from_slice(&decoded[local_start..local_end]);
+        }
+        block_start = block_end;
+        if block_start >= end {
+            break;
+        }
+    }
+    let page = TransactionRelationPage {
+        source_revision,
+        page_id,
+        relations,
+    };
+    encode_transaction_payload(&page)
+}
+
+fn get_transaction_record_page(
+    state: &Arc<RwLock<SurverState>>,
+    file_index: usize,
+    source_revision: u64,
+    stream_id: StreamId,
+    page_id: u64,
+) -> Result<Vec<u8>> {
+    let (transaction, actual_revision) = transaction_file(state, file_index)?;
+    check_transaction_revision(source_revision, actual_revision)?;
+    let mut ftr = transaction
+        .lock()
+        .map_err(|_| anyhow!("Transaction trace lock poisoned"))?;
+    let block = ftr
+        .get_stream(stream_id)
+        .and_then(|stream| stream.tx_blocks.get(page_id as usize))
+        .cloned()
+        .ok_or_else(|| {
+            anyhow!("Transaction page {page_id} for stream {stream_id} is unavailable")
+        })?;
+    let transactions = ftr
+        .read_stream_block_unlinked(stream_id, page_id)
+        .map_err(eyre::Report::msg)?;
+    let page = TransactionRecordPage {
+        source_revision,
+        stream_id,
+        page_id,
+        block,
+        transactions,
+    };
+    encode_transaction_payload(&page)
+}
+
 async fn get_signals(
     state: &Arc<RwLock<SurverState>>,
     file_index: usize,
-    txs: &[Sender<LoaderMessage>],
+    txs: &[Option<Sender<LoaderMessage>>],
     id_strings: &[&str],
 ) -> Result<Vec<u8>> {
     let ids = id_strings
@@ -231,7 +465,10 @@ async fn get_signals(
     let num_ids = ids.len();
 
     // send request to background thread
-    txs[file_index].send(LoaderMessage::SignalRequest(ids.clone()))?;
+    txs[file_index]
+        .as_ref()
+        .ok_or_else(|| anyhow!("Selected file is not a waveform"))?
+        .send(LoaderMessage::SignalRequest(ids.clone()))?;
 
     let notify = {
         let state_guard = state.read().expect("State lock poisoned in get_signals");
@@ -304,6 +541,36 @@ fn not_found_response(message: &[u8]) -> Result<Response<Full<Bytes>>> {
     build_response(StatusCode::NOT_FOUND, OCTET_MIME, message.to_vec())
 }
 
+fn transaction_response(result: Result<Vec<u8>>, immutable: bool) -> Result<Response<Full<Bytes>>> {
+    match result {
+        Ok(body) => {
+            let mut response = build_response(StatusCode::OK, OCTET_MIME, body)?;
+            if immutable {
+                response.headers_mut().insert(
+                    "Cache-Control",
+                    hyper::header::HeaderValue::from_static("private, max-age=31536000, immutable"),
+                );
+            }
+            Ok(response)
+        }
+        Err(error) => {
+            let message = format!("{error:#}");
+            let status = if message.contains("Stale transaction source revision") {
+                StatusCode::CONFLICT
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            build_response(status, OCTET_MIME, message.into_bytes())
+        }
+    }
+}
+
+fn parse_path_u64(value: &str, label: &str) -> Result<u64> {
+    value
+        .parse()
+        .with_context(|| format!("Invalid {label} `{value}`"))
+}
+
 fn mark_file_requested(state: &Arc<RwLock<SurverState>>, file_index: usize) {
     let mut state_guard = state
         .write()
@@ -311,9 +578,20 @@ fn mark_file_requested(state: &Arc<RwLock<SurverState>>, file_index: usize) {
     state_guard.file_infos[file_index].requested_in_session = true;
 }
 
+fn source_revision(metadata: &fs::Metadata) -> u64 {
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |duration| {
+            duration.as_secs() ^ u64::from(duration.subsec_nanos()).rotate_left(17)
+        });
+    metadata.len() ^ modified.rotate_left(29)
+}
+
 fn handle_reload_cmd(
     state: &Arc<RwLock<SurverState>>,
-    txs: &[Sender<LoaderMessage>],
+    txs: &[Option<Sender<LoaderMessage>>],
     file_index: usize,
 ) -> Result<Response<Full<Bytes>>> {
     let mtime = {
@@ -356,16 +634,41 @@ fn handle_reload_cmd(
     );
     file_info.reloading = true;
     file_info.last_reload_ok = false;
+    if file_info.transaction.is_some() {
+        let filename = file_info.filename.clone();
+        drop(state_guard);
+        let parsed =
+            ftr_parser::parse::parse_ftr(filename.clone().into()).map_err(eyre::Report::msg)?;
+        let metadata = fs::metadata(&filename)?;
+        let mut state_guard = state.write().expect("State lock poisoned after FTR reload");
+        let file_info = &mut state_guard.file_infos[file_index];
+        file_info.transaction = Some(Arc::new(Mutex::new(parsed)));
+        file_info.source_revision = source_revision(&metadata);
+        file_info.header_len = 0;
+        file_info.body_len = metadata.len();
+        file_info
+            .body_progress
+            .store(metadata.len(), Ordering::SeqCst);
+        file_info.reloading = false;
+        file_info.last_reload_ok = true;
+        file_info.last_reload_time = Some(Instant::now());
+        drop(state_guard);
+        let body = get_status(state)?;
+        return build_response(StatusCode::ACCEPTED, JSON_MIME, body);
+    }
     drop(state_guard);
     info!("Reload requested");
-    txs[file_index].send(LoaderMessage::Reload)?;
+    txs[file_index]
+        .as_ref()
+        .ok_or_else(|| anyhow!("Selected file cannot be reloaded"))?
+        .send(LoaderMessage::Reload)?;
     let body = get_status(state)?;
     build_response(StatusCode::ACCEPTED, JSON_MIME, body)
 }
 
 async fn handle_cmd(
     state: &Arc<RwLock<SurverState>>,
-    txs: &[Sender<LoaderMessage>],
+    txs: &[Option<Sender<LoaderMessage>>],
     cmd: &str,
     file_index: Option<usize>,
     args: &[&str],
@@ -398,6 +701,47 @@ async fn handle_cmd(
             let body = get_signals(state, file_index, txs, id_strings).await?;
             build_response(StatusCode::OK, OCTET_MIME, body)
         }
+        (Some(file_index), "get_transaction_manifest", []) => {
+            mark_file_requested(state, file_index);
+            transaction_response(get_transaction_manifest(state, file_index), false)
+        }
+        (Some(file_index), "get_transaction_dictionary_page", [revision, page]) => {
+            mark_file_requested(state, file_index);
+            let result = (|| {
+                get_transaction_dictionary_page(
+                    state,
+                    file_index,
+                    parse_path_u64(revision, "source revision")?,
+                    parse_path_u64(page, "dictionary page")?,
+                )
+            })();
+            transaction_response(result, true)
+        }
+        (Some(file_index), "get_transaction_relation_page", [revision, page]) => {
+            mark_file_requested(state, file_index);
+            let result = (|| {
+                get_transaction_relation_page(
+                    state,
+                    file_index,
+                    parse_path_u64(revision, "source revision")?,
+                    parse_path_u64(page, "relation page")?,
+                )
+            })();
+            transaction_response(result, true)
+        }
+        (Some(file_index), "get_transaction_page", [revision, stream_id, page_id]) => {
+            mark_file_requested(state, file_index);
+            let result = (|| {
+                get_transaction_record_page(
+                    state,
+                    file_index,
+                    parse_path_u64(revision, "source revision")?,
+                    StreamId(parse_path_u64(stream_id, "stream id")?),
+                    parse_path_u64(page_id, "transaction page")?,
+                )
+            })();
+            transaction_response(result, true)
+        }
         (Some(file_index), "reload", []) => handle_reload_cmd(state, txs, file_index),
         _ => {
             // unknown command or unexpected number of arguments
@@ -409,7 +753,7 @@ async fn handle_cmd(
 async fn handle(
     state: Arc<RwLock<SurverState>>,
     shared: Arc<ReadOnly>,
-    txs: Vec<Sender<LoaderMessage>>,
+    txs: Vec<Option<Sender<LoaderMessage>>>,
     req: Request<hyper::body::Incoming>,
 ) -> Result<Response<Full<Bytes>>> {
     // Check if favicon is requested
@@ -487,9 +831,48 @@ pub async fn surver_main(
 
     let state = Arc::new(RwLock::new(SurverState { file_infos: vec![] }));
 
-    let mut txs: Vec<Sender<LoaderMessage>> = Vec::new();
+    let mut txs: Vec<Option<Sender<LoaderMessage>>> = Vec::new();
     // load files
     for (file_index, filename) in filenames.iter().enumerate() {
+        if std::path::Path::new(filename)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("ftr"))
+        {
+            let start = web_time::Instant::now();
+            let ftr =
+                ftr_parser::parse::parse_ftr(filename.clone().into()).map_err(eyre::Report::msg)?;
+            let metadata = fs::metadata(filename)?;
+            let bytes = metadata.len();
+            info!(
+                "Loaded FTR directory of {filename} in {:?}",
+                start.elapsed()
+            );
+            let file_info = FileInfo {
+                filename: filename.clone(),
+                hierarchy: None,
+                file_format: None,
+                transaction: Some(Arc::new(Mutex::new(ftr))),
+                source_revision: source_revision(&metadata),
+                header_len: 0,
+                body_len: bytes,
+                body_progress: Arc::new(AtomicU64::new(bytes)),
+                notify: Arc::new(Notify::new()),
+                timetable: Vec::new(),
+                signals: HashMap::new(),
+                reloading: false,
+                requested_in_session: false,
+                last_reload_ok: true,
+                last_reload_time: Some(Instant::now()),
+                last_modification_time: metadata.modified().ok(),
+            };
+            state
+                .write()
+                .expect("State lock poisoned when adding transaction file")
+                .file_infos
+                .push(file_info);
+            txs.push(None);
+            continue;
+        }
         let start_read_header = web_time::Instant::now();
         let header_result = wellen::viewers::read_header_from_file(
             filename.clone(),
@@ -504,8 +887,10 @@ pub async fn surver_main(
 
         let file_info = FileInfo {
             filename: filename.clone(),
-            hierarchy: Arc::new(header_result.hierarchy),
-            file_format: header_result.file_format,
+            hierarchy: Some(Arc::new(header_result.hierarchy)),
+            file_format: Some(header_result.file_format),
+            transaction: None,
+            source_revision: 0,
             header_len: 0, // FIXME: get value from wellen
             body_len: header_result.body_len,
             body_progress: Arc::new(AtomicU64::new(0)),
@@ -524,7 +909,7 @@ pub async fn surver_main(
         }
         // channel to communicate with loader
         let (tx, rx) = std::sync::mpsc::channel::<LoaderMessage>();
-        txs.push(tx.clone());
+        txs.push(Some(tx.clone()));
         // start work thread
         let state_2 = state.clone();
         std::thread::spawn(move || loader(&state_2, header_result.body, file_index, &rx));
@@ -608,9 +993,13 @@ fn loader(
                 .read()
                 .expect("State lock poisoned in loader before body load");
             let file_info = &state_guard.file_infos[file_index];
+            let hierarchy = file_info
+                .hierarchy
+                .clone()
+                .ok_or_else(|| anyhow!("Waveform loader has no hierarchy"))?;
             (
                 file_info.filename.clone(),
-                file_info.hierarchy.clone(),
+                hierarchy,
                 file_info.body_progress.clone(),
             )
         };
@@ -683,7 +1072,10 @@ fn loader(
                             .expect("State lock poisoned in loader signal request");
                         source.load_signals(
                             &filtered_ids,
-                            &state_guard.file_infos[file_index].hierarchy,
+                            state_guard.file_infos[file_index]
+                                .hierarchy
+                                .as_deref()
+                                .ok_or_else(|| anyhow!("Waveform loader has no hierarchy"))?,
                             true,
                         )
                     };

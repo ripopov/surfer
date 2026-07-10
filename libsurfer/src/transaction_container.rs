@@ -2,7 +2,8 @@ use crate::time::{TimeScale, TimeUnit};
 use crate::transaction_events::{EventIndex, EventInfo};
 use crate::wave_container::MetaData;
 use ftr_parser::types::{
-    FTR, GeneratorId, StreamId, Transaction, TransactionId, TxGenerator, TxRelation, TxStream,
+    BlockMeta, FTR, FtrResult, GeneratorId, StreamId, Transaction, TransactionId, TxGenerator,
+    TxRelation, TxStream,
 };
 use itertools::Itertools;
 use num::BigUint;
@@ -10,19 +11,58 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::Not;
+use std::sync::Arc;
+use surver::TransactionManifest;
 
 pub struct TransactionContainer {
     pub inner: FTR,
     /// Index over the FTR event convention, rebuilt when streams are loaded.
     /// Boxed to keep the container (and the messages carrying it) small.
     event_index: Box<EventIndex>,
+    remote: Option<RemoteTransactionSource>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RemoteTransactionSource {
+    pub server: String,
+    pub file_index: usize,
+    pub manifest: Arc<TransactionManifest>,
 }
 
 impl TransactionContainer {
     #[must_use]
-    pub fn new(inner: FTR) -> Self {
+    pub fn new(mut inner: FTR) -> Self {
         let event_index = Box::new(EventIndex::build(&inner));
-        TransactionContainer { inner, event_index }
+        inner.release_relations_if_unloaded();
+        TransactionContainer {
+            inner,
+            event_index,
+            remote: None,
+        }
+    }
+
+    #[must_use]
+    pub fn new_remote(
+        inner: FTR,
+        server: String,
+        file_index: usize,
+        manifest: Arc<TransactionManifest>,
+    ) -> Self {
+        let event_index = Box::new(EventIndex::build(&inner));
+        Self {
+            inner,
+            event_index,
+            remote: Some(RemoteTransactionSource {
+                server,
+                file_index,
+                manifest,
+            }),
+        }
+    }
+
+    #[must_use]
+    pub fn remote_source(&self) -> Option<&RemoteTransactionSource> {
+        self.remote.as_ref()
     }
 
     /// Loads a stream's transactions into memory and refreshes the event
@@ -32,6 +72,28 @@ impl TransactionContainer {
         self.inner.load_stream_into_memory(stream_id)?;
         *self.event_index = EventIndex::build(&self.inner);
         Ok(())
+    }
+
+    /// Drop the eager file-backed relation graph while no generic stream is
+    /// resident. A later explicit whole-stream load restores it lazily.
+    pub fn release_relations_if_unloaded(&mut self) -> bool {
+        self.inner.release_relations_if_unloaded()
+    }
+
+    #[must_use]
+    pub fn block_metadata(&self, stream_id: StreamId) -> &[BlockMeta] {
+        self.inner
+            .get_stream(stream_id)
+            .map_or(&[], |stream| stream.tx_blocks.as_slice())
+    }
+
+    /// Parser-neutral block visitor used by compact projections that do not
+    /// need the resident generic transaction graph.
+    pub fn visit_stream_blocks<F>(&mut self, stream_id: StreamId, visit: F) -> FtrResult<()>
+    where
+        F: FnMut(&BlockMeta, &[Transaction]) -> FtrResult<()>,
+    {
+        self.inner.visit_stream_blocks(stream_id, visit)
     }
 
     /// The event structure index for this trace.

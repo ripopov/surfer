@@ -159,7 +159,7 @@ impl TransactionTraceModel {
         let mut attribute_names_order = Vec::new();
 
         // First pass: discover attribute columns
-        for tx in &generator.transactions {
+        for tx in generator.transactions.iter() {
             for attr in tx.attributes.iter() {
                 if !attribute_names_set.contains(&attr.name) {
                     attribute_names_set.insert(attr.name.clone());
@@ -169,7 +169,7 @@ impl TransactionTraceModel {
         }
 
         // Second pass: build rows
-        for tx in &generator.transactions {
+        for tx in generator.transactions.iter() {
             let tx_id = tx.get_tx_id();
             let start_time = tx.get_start_time();
             let end_time = tx.get_end_time();
@@ -178,7 +178,7 @@ impl TransactionTraceModel {
             let duration = end_time.saturating_sub(start_time);
 
             // Row ID is just the transaction ID (unique within generator)
-            let row_id = TableRowId(tx_id.0 as u64);
+            let row_id = TableRowId(tx_id.0);
 
             // Format times
             let start_time_text = self.time_formatter.format(&BigInt::from(start_time));

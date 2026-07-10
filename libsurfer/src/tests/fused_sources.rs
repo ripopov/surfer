@@ -1306,7 +1306,7 @@ fn additive_ftr_source_can_open_transaction_table() {
         panic!("expected focus transaction action");
     };
     assert_eq!(source, SourceId(1));
-    assert!(tx_ref.id.0 < usize::MAX);
+    assert!(tx_ref.id.0 < u64::MAX);
 }
 
 #[test]

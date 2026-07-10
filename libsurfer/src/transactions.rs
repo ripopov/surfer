@@ -908,6 +908,16 @@ fn draw_transaction_stream_variables(
                             gen_id,
                             generator.name.clone(),
                         );
+                        if !is_events_generator
+                            && index.events_generator_of(gen_id).is_some()
+                            && ui.button("Open in Konata view").clicked()
+                        {
+                            msgs.push(Message::OpenKonataView {
+                                source,
+                                generator: gen_ref.clone(),
+                            });
+                            ui.close();
+                        }
                         if ui.button("Show transactions in table").clicked() {
                             msgs.push(Message::OpenTransactionTable {
                                 source,
@@ -1021,6 +1031,28 @@ fn draw_transaction_root_variables(
                         TransactionStreamRef::new_stream(stream.id, stream.name.clone());
                     let generators =
                         inner.generators_in_stream(&StreamScopeRef::Stream(stream_ref));
+                    let pipelines = generators
+                        .iter()
+                        .filter(|generator| {
+                            generator.gen_id.is_some_and(|id| {
+                                inner.event_index().events_generator_of(id).is_some()
+                            })
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    if !pipelines.is_empty() {
+                        ui.menu_button("Open in Konata view", |ui| {
+                            for generator in &pipelines {
+                                if ui.button(&generator.name).clicked() {
+                                    msgs.push(Message::OpenKonataView {
+                                        source,
+                                        generator: generator.clone(),
+                                    });
+                                    ui.close();
+                                }
+                            }
+                        });
+                    }
                     if !generators.is_empty() && ui.button("Show transactions in table").clicked() {
                         for gen_ref in generators {
                             msgs.push(Message::OpenTransactionTable {

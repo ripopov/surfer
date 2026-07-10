@@ -168,11 +168,15 @@ impl<R: Read + Seek> CborDecoder<R> {
     }
 
     pub fn skip_byte_string(&mut self) -> FtrResult<()> {
+        self.skip_byte_string_len().map(|_| ())
+    }
+
+    pub fn skip_byte_string_len(&mut self) -> FtrResult<u64> {
         let len = self.read_major_type_with_size(TYPE_BYTE_STRING)?;
         self.input_stream
             .seek(SeekFrom::Current(len))
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        u64::try_from(len).map_err(|_| "Negative byte-string length".to_string())
     }
 
     pub fn read_int(&mut self) -> FtrResult<i64> {
