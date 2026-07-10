@@ -514,23 +514,26 @@ impl KonataDetailStore {
         Ok(Arc::new(page))
     }
 
-    pub(crate) fn row_detail(self: &Arc<Self>, row: usize, blocking: bool) -> KonataRowDetail {
-        let Some(page_id) = self.page_for_row(row) else {
-            return KonataRowDetail::empty();
-        };
+    pub(crate) fn try_row_detail(
+        self: &Arc<Self>,
+        row: usize,
+        blocking: bool,
+    ) -> Option<KonataRowDetail> {
+        let page_id = self.page_for_row(row)?;
         let query = if blocking {
             self.get_blocking(page_id)
         } else {
             self.query(page_id)
         };
         match query {
-            KonataDetailQuery::Ready(page) => {
-                KonataRowDetail::new(page, row).unwrap_or_else(KonataRowDetail::empty)
-            }
-            KonataDetailQuery::Pending | KonataDetailQuery::Unavailable(_) => {
-                KonataRowDetail::empty()
-            }
+            KonataDetailQuery::Ready(page) => KonataRowDetail::new(page, row),
+            KonataDetailQuery::Pending | KonataDetailQuery::Unavailable(_) => None,
         }
+    }
+
+    pub(crate) fn row_detail(self: &Arc<Self>, row: usize, blocking: bool) -> KonataRowDetail {
+        self.try_row_detail(row, blocking)
+            .unwrap_or_else(KonataRowDetail::empty)
     }
 
     pub(crate) fn row_annotations(
@@ -654,9 +657,9 @@ mod tests {
     #[tokio::test]
     async fn nonblocking_miss_reports_pending_then_publishes_page() {
         let store = three_page_store();
-        assert!(matches!(store.query(0), KonataDetailQuery::Pending));
+        assert!(store.try_row_detail(0, false).is_none());
         for _ in 0..100 {
-            if matches!(store.query(0), KonataDetailQuery::Ready(_)) {
+            if store.try_row_detail(0, false).is_some() {
                 assert!(store.is_idle());
                 return;
             }
