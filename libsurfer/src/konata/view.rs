@@ -2375,17 +2375,23 @@ fn paint_rows(
         return;
     }
 
-    let detailed_stage_count = (start..end)
-        .filter_map(|visible| physical_row(tile, model, visible))
-        .try_fold(0usize, |count, row| {
-            count
-                .checked_add(model.stages_for_row(row).len())
-                .filter(|count| *count <= MAX_DETAILED_STAGES)
-        });
-    if detailed_stage_count.is_none() {
+    let detailed_rows = (start..end)
+        .filter_map(|visible| physical_row(tile, model, visible).map(|row| (visible, row)))
+        .try_fold(
+            (0usize, Vec::with_capacity(end.saturating_sub(start))),
+            |(count, mut rows), (visible, row)| {
+                let detail = model.try_stages_for_row(row)?;
+                let count = count
+                    .checked_add(detail.len())
+                    .filter(|count| *count <= MAX_DETAILED_STAGES)?;
+                rows.push((visible, row, detail));
+                Some((count, rows))
+            },
+        );
+    let Some((_, detailed_rows)) = detailed_rows else {
         paint_density(painter, tile, model, canvas_rect, start, end);
         return;
-    }
+    };
 
     let label_painter = painter.with_clip_rect(label_rect);
     let canvas_painter = painter.with_clip_rect(canvas_rect);
@@ -2428,10 +2434,7 @@ fn paint_rows(
         .x_to_tick(canvas_rect.right(), canvas_rect.left())
         .clamp(0.0, u64::MAX as f64) as u64;
 
-    for visible in start..end {
-        let Some(row) = physical_row(tile, model, visible) else {
-            continue;
-        };
+    for (visible, row, row_stages) in detailed_rows {
         let y = visible_row_to_y(tile, model, visible as f64, canvas_rect.top());
         let height = row_pitch(tile, model) as f32;
         let row_rect = Rect::from_min_max(
@@ -2461,7 +2464,7 @@ fn paint_rows(
             );
         }
 
-        for stage in model.stages_for_row(row).iter().filter(|stage| {
+        for stage in row_stages.iter().filter(|stage| {
             stage.start <= visible_right && stage.end.max(stage.start) >= visible_left
         }) {
             paint_stage(
@@ -2795,21 +2798,12 @@ fn paint_stage(
         if invalid { stage.start } else { stage.end },
         canvas_rect.left(),
     );
-    let lane_count = model.lane_names.len().max(1) as f32;
-    let (top, bottom) = match tile.config.lane_mode {
-        KonataLaneMode::Merged => {
-            let inset = f32::from(stage.lane).min(3.0) * 1.2;
-            (
-                row_rect.top() + 2.0 + inset,
-                row_rect.bottom() - 2.0 - inset,
-            )
-        }
-        KonataLaneMode::SplitFixed | KonataLaneMode::SplitNatural => {
-            let lane_height = row_rect.height() / lane_count;
-            let top = row_rect.top() + f32::from(stage.lane) * lane_height;
-            (top + 1.0, top + lane_height - 1.0)
-        }
-    };
+    let (top, bottom) = stage_vertical_span(
+        row_rect,
+        tile.config.lane_mode,
+        usize::from(stage.lane),
+        model.lane_names.len(),
+    );
     let base_color = stage_color(tile, model, row, stage, theme, canvas_background);
     let color = Color32::from_rgba_unmultiplied(
         base_color.r(),
@@ -2927,6 +2921,32 @@ fn paint_stage(
     }
 }
 
+fn stage_vertical_span(
+    row_rect: Rect,
+    lane_mode: KonataLaneMode,
+    lane: usize,
+    lane_count: usize,
+) -> (f32, f32) {
+    let lane_count = lane_count.max(1);
+    let lane = lane.min(lane_count - 1);
+    let (top, bottom, desired_inset) = match lane_mode {
+        KonataLaneMode::Merged => (
+            row_rect.top(),
+            row_rect.bottom(),
+            2.0 + lane.min(3) as f32 * 1.2,
+        ),
+        KonataLaneMode::SplitFixed | KonataLaneMode::SplitNatural => {
+            let lane_height = row_rect.height() / lane_count as f32;
+            let top = row_rect.top() + lane as f32 * lane_height;
+            (top, top + lane_height, 1.0)
+        }
+    };
+    let height = (bottom - top).max(0.0);
+    let minimum_height = height.min(1.0);
+    let inset = desired_inset.min((height - minimum_height) * 0.5);
+    (top + inset, bottom - inset)
+}
+
 fn paint_density(
     painter: &egui::Painter,
     tile: &KonataTileState,
@@ -2954,7 +2974,10 @@ fn paint_density(
             continue;
         };
         let x0 = tile.viewport.tick_to_x(min_begin, canvas_rect.left());
-        let x1 = tile.viewport.tick_to_x(max_end, canvas_rect.left());
+        let x1 = tile
+            .viewport
+            .tick_to_x(max_end, canvas_rect.left())
+            .max(x0 + 1.0);
         let flush_ratio = flushed as f32 / count as f32;
         let color = Color32::from_rgb(
             (54.0 + 45.0 * flush_ratio) as u8,
@@ -3865,6 +3888,44 @@ mod tests {
 
         tile.config.clock_period_ticks = Some(8);
         assert_eq!(effective_detail(&tile), 4.0);
+    }
+
+    #[test]
+    fn stage_geometry_remains_visible_across_every_zoom_level() {
+        let lane_count = 4;
+        let mut row_height = 1.0_f32 / 1024.0;
+        while row_height <= 48.0 {
+            for lane_mode in [
+                KonataLaneMode::Merged,
+                KonataLaneMode::SplitFixed,
+                KonataLaneMode::SplitNatural,
+            ] {
+                let row_pitch = if lane_mode == KonataLaneMode::SplitNatural {
+                    row_height * lane_count as f32
+                } else {
+                    row_height
+                };
+                let row_rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(100.0, row_pitch));
+                for lane in 0..lane_count {
+                    let (top, bottom) = stage_vertical_span(row_rect, lane_mode, lane, lane_count);
+                    let available_height = if lane_mode == KonataLaneMode::Merged {
+                        row_pitch
+                    } else {
+                        row_pitch / lane_count as f32
+                    };
+                    let minimum_height = available_height.min(1.0);
+                    assert!(
+                        bottom > top,
+                        "{lane_mode:?} lane {lane} vanished at row height {row_height}"
+                    );
+                    assert!(
+                        bottom - top + f32::EPSILON >= minimum_height,
+                        "{lane_mode:?} lane {lane} shrank below its visible minimum at row height {row_height}"
+                    );
+                }
+            }
+            row_height *= 2.0_f32.sqrt();
+        }
     }
 
     #[test]

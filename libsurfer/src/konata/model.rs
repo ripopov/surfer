@@ -1103,11 +1103,19 @@ impl KonataModel {
         self.details.page_count()
     }
 
-    /// Non-blocking row detail for UI use. A cold page schedules background
-    /// decoding and returns `None`; callers render row extents or summaries.
+    /// Compatibility accessor for non-blocking UI detail. A cold page schedules
+    /// background decoding and appears empty until it becomes resident. Renderers
+    /// that need a visible fallback should use [`Self::try_stages_for_row`].
     #[must_use]
     pub fn stages_for_row(&self, row: usize) -> KonataRowDetail {
         self.details.row_detail(row, false)
+    }
+
+    /// Non-blocking detail accessor which distinguishes a cold or unavailable
+    /// page from a row that genuinely has no stages.
+    #[must_use]
+    pub fn try_stages_for_row(&self, row: usize) -> Option<KonataRowDetail> {
+        self.details.try_row_detail(row, false)
     }
 
     /// Detail accessor for search/statistics workers. This may decode a page
