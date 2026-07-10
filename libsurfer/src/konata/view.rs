@@ -16,7 +16,7 @@ use crate::{
 use super::{
     FlushState, KonataAlignmentMode, KonataArrowStyle, KonataColorScheme, KonataDependency,
     KonataInstructionClassifier, KonataLaneMode, KonataModel, KonataStage, KonataTileId,
-    KonataTileState, RowFlags, StageFlags,
+    KonataTileState, KonataViewport, RowFlags, StageFlags,
 };
 
 const RULER_HEIGHT: f32 = 28.0;
@@ -2536,7 +2536,13 @@ fn paint_rows(
         }
         if model.rows.flags[row].0 != 0 {
             canvas_painter.rect_stroke(
-                row_rect.shrink(0.5),
+                instruction_lifetime_rect(
+                    tile.viewport,
+                    model.rows.begin[row],
+                    model.rows.end[row],
+                    row_rect,
+                    canvas_rect.left(),
+                ),
                 0.0,
                 Stroke::new(1.0, pipeline_theme.warning),
                 StrokeKind::Inside,
@@ -2774,6 +2780,23 @@ fn paint_dependency(
     let base = target - direction * 6.0;
     painter.line_segment([target, base + normal * 3.5], stroke);
     painter.line_segment([target, base - normal * 3.5], stroke);
+}
+
+fn instruction_lifetime_rect(
+    viewport: KonataViewport,
+    begin: u64,
+    end: u64,
+    row_rect: Rect,
+    canvas_left: f32,
+) -> Rect {
+    let left = viewport.tick_to_x(begin, canvas_left);
+    let right = viewport
+        .tick_to_x(end.max(begin), canvas_left)
+        .max(left + 1.0);
+    Rect::from_min_max(
+        Pos2::new(left, row_rect.top()),
+        Pos2::new(right, row_rect.bottom()),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3926,6 +3949,25 @@ mod tests {
             }
             row_height *= 2.0_f32.sqrt();
         }
+    }
+
+    #[test]
+    fn row_warning_outline_tracks_instruction_lifetime() {
+        let viewport = KonataViewport {
+            left_tick: 100,
+            px_per_tick: 2.0,
+            ..Default::default()
+        };
+        let row_rect = Rect::from_min_max(Pos2::new(12.0, 30.0), Pos2::new(600.0, 54.0));
+
+        let warning_rect = instruction_lifetime_rect(viewport, 110, 125, row_rect, 12.0);
+
+        assert_eq!(warning_rect.min, Pos2::new(32.0, 30.0));
+        assert_eq!(warning_rect.max, Pos2::new(62.0, 54.0));
+        assert_ne!(warning_rect.right(), row_rect.right());
+
+        let zero_duration = instruction_lifetime_rect(viewport, 110, 110, row_rect, 12.0);
+        assert_eq!(zero_duration.width(), 1.0);
     }
 
     #[test]
