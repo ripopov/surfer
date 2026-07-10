@@ -519,8 +519,8 @@ large absolute cycle never creates work proportional to its value.
 Fit-all computes X bounds from the loaded min/max stage or instruction extent
 and Y bounds from the active layout prefix index, then chooses the smaller
 coupled scale that fits both axes with padding. X-only and Y-only zoom commands
-change one transform component; ordinary wheel/pinch zoom keeps Konata's
-coupled X/Y behavior.
+change one transform component. Ctrl-scroll zooms only X to match the waveform
+panel; Alt-scroll and pinch keep Konata's coupled X/Y behavior.
 
 Transient UI is an explicit priority stack: context menu/popover, active
 search, search result card, pinned tooltip, then instruction focus. `Esc` pops

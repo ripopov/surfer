@@ -85,6 +85,13 @@ impl KonataViewport {
         self.top_visible_row = anchor_row - anchor_y / self.row_height_px;
     }
 
+    pub fn zoom_x_at(&mut self, factor: f64, anchor_x: f64) {
+        let factor = factor.clamp(0.01, 100.0);
+        let anchor_tick = self.left_value() + anchor_x / self.px_per_tick;
+        self.px_per_tick = (self.px_per_tick * factor).clamp(MIN_PX_PER_TICK, MAX_PX_PER_TICK);
+        self.set_left(anchor_tick - anchor_x / self.px_per_tick);
+    }
+
     pub fn align_row(&mut self, begin: u64, visible_row: usize) {
         self.left_tick = i64::try_from(begin).unwrap_or(i64::MAX);
         self.left_frac = 0.0;
@@ -133,6 +140,31 @@ mod tests {
         viewport.zoom_at(2.0, 240.0, 120.0);
         assert!((viewport.x_to_tick(240.0, 0.0) - before_tick).abs() < 1e-9);
         assert!((viewport.y_to_visible_row(120.0, 0.0) - before_row).abs() < 1e-9);
+    }
+
+    #[test]
+    fn horizontal_zoom_preserves_pointer_anchor_and_vertical_view() {
+        let mut viewport = KonataViewport {
+            left_tick: 100,
+            top_visible_row: 20.0,
+            ..Default::default()
+        };
+        let before_tick = viewport.x_to_tick(240.0, 0.0);
+        let before_top = viewport.top_visible_row;
+        let before_row_height = viewport.row_height_px;
+
+        viewport.zoom_x_at(2.0, 240.0);
+
+        assert!((viewport.x_to_tick(240.0, 0.0) - before_tick).abs() < 1e-9);
+        assert_eq!(viewport.top_visible_row, before_top);
+        assert_eq!(viewport.row_height_px, before_row_height);
+
+        viewport.zoom_x_at(0.5, 240.0);
+
+        assert!((viewport.x_to_tick(240.0, 0.0) - before_tick).abs() < 1e-9);
+        assert_eq!(viewport.px_per_tick, KonataViewport::default().px_per_tick);
+        assert_eq!(viewport.top_visible_row, before_top);
+        assert_eq!(viewport.row_height_px, before_row_height);
     }
 
     #[test]

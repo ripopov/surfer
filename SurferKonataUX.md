@@ -379,7 +379,8 @@ when all visible rows share a timestamp, compensation becomes zero.
 | Wheel | Scroll rows (diagonal-following) |
 | Shift + wheel | Scroll rows, no horizontal compensation |
 | Horizontal wheel / touchpad | Scroll cycles |
-| Ctrl + wheel | Zoom in/out centered on the pointer |
+| Ctrl + wheel | Zoom the time axis centered on the pointer |
+| Alt + wheel | Zoom both axes centered on the pointer |
 | Left-drag | Pan freely in both axes |
 | Double-click | Zoom in at the pointer; Shift+double-click zooms out |
 | Pinch | Continuous zoom |

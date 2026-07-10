@@ -206,9 +206,10 @@ its own small `KonataViewport`:
   absolute tick magnitude (no loss at 10¹²⁺ ticks).
 * Zoom: half-steps of √2, ~32 of them spanning the row-height range
   [1/1024 px, 48 px] (the UX's "roughly 24" extremes; step granularity is a config
-  knob). X and Y zoom together by default (Konata behavior), with the
-  pointer-anchored invariant: the (tick, visible-row) under the cursor is preserved
-  across the zoom step. Pinch zoom is continuous over the same range.
+  knob). Alt-scroll, pinch, keyboard, and double-click zoom X and Y together (Konata
+  behavior); Ctrl-scroll zooms only X to match Surfer's waveform panel. Both modes
+  preserve the pointer's time anchor, and coupled zoom also preserves its visible-row
+  anchor. Pinch zoom is continuous over the same range.
 * Animation reuses the existing easing approach (`ViewportStrategy::EaseInOut`,
   viewport.rs): current + target states, eased with frame `stable_dt`, ~80–100 ms,
   instant when reduced-motion is set. While animating, the tile requests repaints —
