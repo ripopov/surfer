@@ -152,7 +152,7 @@ impl EventIndex {
                 continue;
             };
             let mut conforming = 0;
-            for tx in &generator.transactions {
+            for tx in generator.transactions.iter() {
                 if let Some(info) = self.resolve_event(ftr, tx, expected_parent_gen) {
                     self.parent_events
                         .entry(info.parent_tx)

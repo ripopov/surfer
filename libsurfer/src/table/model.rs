@@ -1,8 +1,12 @@
 use super::cache::TableCacheError;
 use crate::config::SurferTheme;
+use crate::konata::{
+    KonataInstructionClassifier, KonataModelEntry, KonataModelKey, KonataModelSpec,
+};
 use crate::source::SourceId;
 use crate::table::sources::{
-    EventTableModel, MultiSignalChangeListModel, SignalAnalysisResultsModel, SignalChangeListModel,
+    EventTableModel, KonataEventTableModel, KonataInstructionTableModel,
+    MultiSignalChangeListModel, SignalAnalysisResultsModel, SignalChangeListModel,
     TransactionTraceModelWithData, VirtualTableModel, infer_sampling_mode,
 };
 use crate::time::{TimeFormat, TimeUnit};
@@ -50,6 +54,29 @@ pub enum TableModelSpec {
         #[serde(default)]
         source: SourceId,
         generator: TransactionStreamRef,
+    },
+    /// Lazy instruction table over the same shared projection used by a Konata tile.
+    KonataInstructions {
+        spec: KonataModelSpec,
+    },
+    /// Lazy stage-event table over the paged Konata projection. `parent_tx`
+    /// restricts it to one instruction without loading the generic FTR graph.
+    KonataEvents {
+        spec: KonataModelSpec,
+        parent_tx: Option<u64>,
+    },
+    /// Asynchronously computed pipeline summary and per-stage/thread aggregates.
+    KonataStatistics {
+        spec: KonataModelSpec,
+        clock_period_ticks: Option<u64>,
+        clock_origin_tick: i64,
+        range: Option<(u64, u64)>,
+        stall_stages: String,
+        stall_case_sensitive: bool,
+        #[serde(default)]
+        instruction_classifier: KonataInstructionClassifier,
+        #[serde(default)]
+        include_estimated_flush_rates: bool,
     },
     /// Source-level search that produces a derived table model from waveform data.
     /// Named `source_query` to distinguish from view-level `display_filter`.
@@ -115,6 +142,9 @@ impl TableModelSpec {
                 source: spec_source,
                 ..
             } => *spec_source == source,
+            Self::KonataInstructions { spec }
+            | Self::KonataEvents { spec, .. }
+            | Self::KonataStatistics { spec, .. } => spec.references_source(source),
             Self::MultiSignalChangeList { variables } => {
                 variables.iter().any(|entry| entry.source == source)
             }
@@ -135,6 +165,9 @@ impl TableModelSpec {
             Self::SignalChangeList { source, .. }
             | Self::TransactionTrace { source, .. }
             | Self::EventTable { source, .. } => ctx.source_generation(*source),
+            Self::KonataInstructions { spec }
+            | Self::KonataEvents { spec, .. }
+            | Self::KonataStatistics { spec, .. } => konata_cache_generation(ctx, spec),
             Self::MultiSignalChangeList { variables } => {
                 combined_source_generation(ctx, variables.iter().map(|entry| entry.source))
             }
@@ -160,6 +193,11 @@ impl TableModelSpec {
             Self::SignalChangeList { source, .. }
             | Self::TransactionTrace { source, .. }
             | Self::EventTable { source, .. } => remap(source),
+            Self::KonataInstructions { spec }
+            | Self::KonataEvents { spec, .. }
+            | Self::KonataStatistics { spec, .. } => {
+                spec.remap_sources(source_map);
+            }
             Self::MultiSignalChangeList { variables } => {
                 for variable in variables {
                     remap(&mut variable.source);
@@ -201,6 +239,17 @@ impl TableModelSpec {
                 EventTableModel::new(*source, generator.clone(), ctx)
                     .map(|model| Arc::new(model) as Arc<dyn TableModel>)
             }
+            Self::KonataInstructions { spec } => {
+                KonataInstructionTableModel::new(spec.clone(), ctx)
+                    .map(|model| Arc::new(model) as Arc<dyn TableModel>)
+            }
+            Self::KonataEvents { spec, parent_tx } => {
+                KonataEventTableModel::new(spec.clone(), *parent_tx, ctx)
+                    .map(|model| Arc::new(model) as Arc<dyn TableModel>)
+            }
+            Self::KonataStatistics { .. } => Err(TableCacheError::ModelNotFound {
+                description: "Pipeline statistics are built asynchronously".to_string(),
+            }),
             Self::MultiSignalChangeList { variables } => {
                 MultiSignalChangeListModel::new(variables.clone(), ctx)
                     .map(|model| Arc::new(model) as Arc<dyn TableModel>)
@@ -264,6 +313,56 @@ impl TableModelSpec {
                 activate_on_select: true,
                 ..Default::default()
             },
+            Self::KonataInstructions { spec } => TableViewConfig {
+                title: source_table_title(
+                    ctx,
+                    spec.source,
+                    "Pipeline instructions",
+                    &spec.generator.name,
+                ),
+                sort: vec![TableSortSpec {
+                    key: TableColumnKey::Str("id".to_string()),
+                    direction: TableSortDirection::Ascending,
+                }],
+                selection_mode: TableSelectionMode::Single,
+                activate_on_select: true,
+                dense_rows: true,
+                ..Default::default()
+            },
+            Self::KonataEvents { spec, parent_tx } => TableViewConfig {
+                title: source_table_title(
+                    ctx,
+                    spec.source,
+                    "Pipeline events",
+                    &parent_tx.map_or_else(
+                        || spec.generator.name.clone(),
+                        |transaction| format!("{} — tx#{transaction}", spec.generator.name),
+                    ),
+                ),
+                sort: vec![TableSortSpec {
+                    key: TableColumnKey::Str("start".to_string()),
+                    direction: TableSortDirection::Ascending,
+                }],
+                selection_mode: TableSelectionMode::Single,
+                activate_on_select: true,
+                dense_rows: true,
+                ..Default::default()
+            },
+            Self::KonataStatistics { spec, range, .. } => TableViewConfig {
+                title: source_table_title(
+                    ctx,
+                    spec.source,
+                    "Pipeline statistics",
+                    &range.map_or_else(
+                        || spec.generator.name.clone(),
+                        |(start, end)| format!("{} [{start}, {end})", spec.generator.name),
+                    ),
+                ),
+                sort: vec![],
+                selection_mode: TableSelectionMode::Single,
+                dense_rows: true,
+                ..Default::default()
+            },
             Self::MultiSignalChangeList { .. } => TableViewConfig {
                 title: "Multi-signal change list".to_string(),
                 sort: vec![TableSortSpec {
@@ -305,6 +404,26 @@ fn combined_source_generation(
         .into_iter()
         .map(|source| ctx.source_generation(source))
         .fold(0, u64::wrapping_add)
+}
+
+fn konata_cache_generation(ctx: &TableModelContext<'_>, spec: &KonataModelSpec) -> u64 {
+    let source_generation = ctx.source_generation(spec.source);
+    let Some(parent_generator) = spec.generator.gen_id else {
+        return source_generation;
+    };
+    let projection_revision = ctx
+        .konata_models
+        .iter()
+        .find(|(key, _)| {
+            key.source == spec.source
+                && key.stream == spec.generator.stream_id
+                && key.parent_generator == parent_generator
+                && key.generation == source_generation
+        })
+        .map_or(0, |(_, entry)| entry.revision());
+    source_generation
+        .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        .wrapping_add(projection_revision)
 }
 
 fn source_table_title(
@@ -374,6 +493,7 @@ pub struct TableModelContext<'a> {
     pub theme: &'a SurferTheme,
     pub cache_generation: u64,
     pub source_generations: HashMap<SourceId, u64>,
+    pub konata_models: &'a HashMap<KonataModelKey, Arc<KonataModelEntry>>,
     /// FTR transaction event convention support is enabled
     pub ftr_events_enabled: bool,
 }

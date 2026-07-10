@@ -173,6 +173,12 @@ async fn greet(tx: &Sender<WcpCSMessage>, rx: &mut Receiver<WcpSCMessage>) -> Re
         "zoom_to_fit",
         "add_markers",
         "set_viewport_range_to",
+        "konata_open",
+        "konata_goto_row",
+        "konata_goto_rid",
+        "konata_goto_cycle",
+        "konata_set_bookmark",
+        "konata_focus_instruction",
     ];
     assert_eq!(commands, e_commands);
 

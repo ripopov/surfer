@@ -11,7 +11,7 @@ use epaint::{PathStroke, Stroke};
 use eyre::{Report, Result, WrapErr as _, anyhow};
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -20,6 +20,10 @@ use tracing::info;
 
 use crate::hierarchy::{HierarchyStyle, ParameterDisplayLocation};
 use crate::keyboard_shortcuts::{SurferShortcuts, deserialize_shortcuts};
+use crate::konata::{
+    KonataArrowStyle, KonataColorScheme, KonataCustomColorScheme, KonataInstructionClassifier,
+    KonataLaneMode, KonataViewConfig,
+};
 use crate::mousegestures::GestureZones;
 use crate::time::TimeFormat;
 use crate::trace_style::TraceStyle;
@@ -134,6 +138,8 @@ pub struct SurferConfig {
     /// Mouse gesture configurations. Color and linewidth are configured in the theme using [`SurferTheme::gesture`].
     pub gesture: SurferGesture,
     pub behavior: SurferBehavior,
+    /// Defaults copied into newly created instruction-pipeline tiles.
+    pub konata: KonataDefaults,
     /// Time stamp format
     pub default_time_format: TimeFormat,
     pub default_variable_name_type: VariableNameType,
@@ -166,6 +172,99 @@ pub struct SurferConfig {
     pub shortcuts: SurferShortcuts,
     /// Show the text label of dividers inline with the waveforms
     pub show_divider_text: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct KonataDefaults {
+    pub detail_cache_mib_native: usize,
+    pub detail_cache_mib_web: usize,
+    pub splitter_px: f32,
+    pub hide_flushed: bool,
+    pub lane_mode: KonataLaneMode,
+    pub color_scheme: KonataColorScheme,
+    pub arrow_style: KonataArrowStyle,
+    pub show_minimap: bool,
+    pub text_lod_px: f32,
+    pub frame_lod_px: f32,
+    pub color_lod_px: f32,
+    pub arrow_lod_px: f32,
+    pub zoom_step: f64,
+    pub execution_stages: String,
+    pub stall_stages: String,
+    pub stall_case_sensitive: bool,
+    pub instruction_classifier: KonataInstructionClassifier,
+    pub include_estimated_flush_rates: bool,
+    pub custom_stage_colors: BTreeMap<String, [u8; 3]>,
+    pub custom_color_schemes: BTreeMap<String, KonataCustomColorScheme>,
+    pub ruler_cycles: bool,
+}
+
+impl Default for KonataDefaults {
+    fn default() -> Self {
+        let defaults = KonataViewConfig::default();
+        Self {
+            detail_cache_mib_native: 256,
+            detail_cache_mib_web: 64,
+            splitter_px: defaults.splitter_px,
+            hide_flushed: defaults.hide_flushed,
+            lane_mode: defaults.lane_mode,
+            color_scheme: defaults.color_scheme,
+            arrow_style: defaults.arrow_style,
+            show_minimap: defaults.show_minimap,
+            text_lod_px: defaults.text_lod_px,
+            frame_lod_px: defaults.frame_lod_px,
+            color_lod_px: defaults.color_lod_px,
+            arrow_lod_px: defaults.arrow_lod_px,
+            zoom_step: defaults.zoom_step,
+            execution_stages: defaults.execution_stages,
+            stall_stages: defaults.stall_stages,
+            stall_case_sensitive: defaults.stall_case_sensitive,
+            instruction_classifier: defaults.instruction_classifier,
+            include_estimated_flush_rates: defaults.include_estimated_flush_rates,
+            custom_stage_colors: defaults.custom_stage_colors,
+            custom_color_schemes: defaults.custom_color_schemes,
+            ruler_cycles: defaults.ruler_cycles,
+        }
+    }
+}
+
+impl KonataDefaults {
+    #[must_use]
+    pub fn detail_cache_bytes(&self) -> usize {
+        let mib = if cfg!(target_arch = "wasm32") {
+            self.detail_cache_mib_web
+        } else {
+            self.detail_cache_mib_native
+        };
+        mib.max(1).saturating_mul(1024 * 1024)
+    }
+
+    #[must_use]
+    pub fn view_config(&self) -> KonataViewConfig {
+        KonataViewConfig {
+            splitter_px: self.splitter_px.max(80.0),
+            hide_flushed: self.hide_flushed,
+            lane_mode: self.lane_mode,
+            color_scheme: self.color_scheme,
+            arrow_style: self.arrow_style,
+            show_minimap: self.show_minimap,
+            text_lod_px: self.text_lod_px.max(0.0),
+            frame_lod_px: self.frame_lod_px.max(0.0),
+            color_lod_px: self.color_lod_px.max(0.0),
+            arrow_lod_px: self.arrow_lod_px.max(0.0),
+            zoom_step: self.zoom_step.max(1.01),
+            execution_stages: self.execution_stages.clone(),
+            stall_stages: self.stall_stages.clone(),
+            stall_case_sensitive: self.stall_case_sensitive,
+            instruction_classifier: self.instruction_classifier,
+            include_estimated_flush_rates: self.include_estimated_flush_rates,
+            custom_stage_colors: self.custom_stage_colors.clone(),
+            custom_color_schemes: self.custom_color_schemes.clone(),
+            ruler_cycles: self.ruler_cycles,
+            ..Default::default()
+        }
+    }
 }
 
 impl SurferConfig {
@@ -510,6 +609,67 @@ pub struct SurferRelationArrow {
     pub head_length: f32,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct KonataTheme {
+    #[serde(deserialize_with = "deserialize_hex_color_vec")]
+    pub stage_palette: Vec<Color32>,
+    #[serde(deserialize_with = "deserialize_hex_color_vec")]
+    pub color_blind_palette: Vec<Color32>,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub stall: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub flat_orange: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub flat_royal_blue: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub flush_overlay: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub warning: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub focus: Color32,
+    /// WCAG-style contrast ratio target against the canvas background.
+    pub minimum_contrast: f32,
+}
+
+impl Default for KonataTheme {
+    fn default() -> Self {
+        Self {
+            stage_palette: vec![
+                Color32::from_rgb(76, 149, 220),
+                Color32::from_rgb(75, 180, 168),
+                Color32::from_rgb(106, 177, 92),
+                Color32::from_rgb(174, 183, 71),
+                Color32::from_rgb(218, 166, 65),
+                Color32::from_rgb(224, 126, 68),
+                Color32::from_rgb(215, 93, 94),
+                Color32::from_rgb(190, 92, 143),
+                Color32::from_rgb(155, 104, 189),
+                Color32::from_rgb(118, 116, 207),
+                Color32::from_rgb(80, 137, 207),
+                Color32::from_rgb(70, 164, 190),
+            ],
+            color_blind_palette: vec![
+                Color32::from_rgb(0, 114, 178),
+                Color32::from_rgb(230, 159, 0),
+                Color32::from_rgb(0, 158, 115),
+                Color32::from_rgb(213, 94, 0),
+                Color32::from_rgb(86, 180, 233),
+                Color32::from_rgb(204, 121, 167),
+                Color32::from_rgb(240, 228, 66),
+                Color32::from_rgb(110, 110, 110),
+            ],
+            stall: Color32::from_rgb(110, 116, 124),
+            flat_orange: Color32::from_rgb(224, 126, 45),
+            flat_royal_blue: Color32::from_rgb(65, 105, 225),
+            flush_overlay: Color32::from_rgb(8, 8, 12),
+            warning: Color32::from_rgb(255, 190, 55),
+            focus: Color32::WHITE,
+            minimum_contrast: 3.0,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SurferTheme {
     /// Color used for text across the UI
@@ -530,6 +690,11 @@ pub struct SurferTheme {
     pub secondary_ui_color: ThemeColorPair,
     /// Color used for selected ui elements such as the currently selected hierarchy
     pub selected_elements_colors: ThemeColorPair,
+
+    /// Pipeline-view semantic palette. Themes that predate Konata inherit
+    /// deterministic defaults.
+    #[serde(default)]
+    pub konata: KonataTheme,
 
     pub accent_info: ThemeColorPair,
     pub accent_warn: ThemeColorPair,
@@ -1341,6 +1506,30 @@ mod hex_color_tests {
         assert_eq!(theme.ticks.style.width, 1.0);
         assert_eq!(theme.scope_icons.module, "\u{ebf0}");
         assert_eq!(theme.scope_icons.unknown, "\u{f092}");
+    }
+
+    #[test]
+    fn default_config_supplies_konata_tile_defaults() {
+        let config = SurferConfig::new(true).expect("default Surfer config");
+        let tile = config.konata.view_config();
+        assert_eq!(tile.color_scheme, KonataColorScheme::Auto);
+        assert_eq!(tile.lane_mode, KonataLaneMode::Merged);
+        assert_eq!(tile.arrow_style, KonataArrowStyle::Inside);
+        assert_eq!(tile.text_lod_px, 10.0);
+        assert!(tile.zoom_step > 1.0);
+        assert_eq!(config.konata.detail_cache_mib_native, 256);
+        let muted = tile
+            .custom_color_schemes
+            .get("Muted")
+            .expect("named custom Konata scheme");
+        assert!(matches!(
+            muted.default.hue,
+            crate::konata::KonataHslComponent::Auto(_)
+        ));
+        assert_eq!(
+            muted.default.saturation,
+            crate::konata::KonataHslComponent::Value(0.48)
+        );
     }
 }
 

@@ -14,6 +14,7 @@ use crate::{
     displayed_item_tree::{DisplayedItemTree, VisibleItemIndex},
     frame_buffer::FrameBufferSettings,
     hierarchy::{HierarchyStyle, ParameterDisplayLocation},
+    konata::{KonataBookmark, KonataModelSpec, KonataTileId, KonataTileState},
     message::Message,
     source::{SourceId, SourceStore, format_time_domain},
     system_state::SystemState,
@@ -37,7 +38,7 @@ use eyre::{Result, WrapErr as _};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use surfer_translation_types::{Translator, VariableType};
-use surver::SurverFileInfo;
+use surver::{SurverCapabilities, SurverFileInfo};
 use tracing::{error, info, trace, warn};
 
 #[derive(Clone, Copy)]
@@ -145,6 +146,8 @@ pub struct UserState {
     #[serde(skip, default)]
     pub(crate) surver_file_infos: Option<Vec<SurverFileInfo>>,
     #[serde(skip, default)]
+    pub(crate) surver_capabilities: SurverCapabilities,
+    #[serde(skip, default)]
     pub(crate) surver_url: Option<String>,
     #[serde(default)]
     pub(crate) transition_value: Option<TransitionValue>,
@@ -156,10 +159,16 @@ pub struct UserState {
     pub(crate) tile_tree: SurferTileTree,
     #[serde(default)]
     pub(crate) table_tiles: HashMap<TableTileId, TableTileState>,
+    #[serde(default)]
+    pub(crate) konata_tiles: HashMap<KonataTileId, KonataTileState>,
+    #[serde(default)]
+    pub(crate) konata_bookmarks: HashMap<KonataModelSpec, Vec<Option<KonataBookmark>>>,
     /// Show raw `.events` generators in the hierarchy sidebar instead of
     /// folding them into their parent generator's presentation
     #[serde(default)]
     pub(crate) show_raw_event_generators: bool,
+    #[serde(default)]
+    pub(crate) dismissed_konata_hint: bool,
 
     // Path of last saved-to state file
     // Do not serialize as this causes a few issues and doesn't help:
@@ -260,6 +269,7 @@ impl Default for UserState {
             selected_server_file_index: None,
             show_server_file_window: false,
             surver_file_infos: None,
+            surver_capabilities: SurverCapabilities::default(),
             surver_url: None,
             transition_value: None,
             show_annotation_list: false,
@@ -267,7 +277,10 @@ impl Default for UserState {
             toolbar_group_rows: Vec::new(),
             tile_tree: SurferTileTree::default(),
             table_tiles: HashMap::new(),
+            konata_tiles: HashMap::new(),
+            konata_bookmarks: HashMap::new(),
             show_raw_event_generators: false,
+            dismissed_konata_hint: false,
         }
     }
 }
@@ -901,7 +914,7 @@ impl SystemState {
         source_map: &HashMap<SourceId, SourceId>,
     ) {
         new_waves.remap_source_ids(source_map);
-        self.remap_table_sources(source_map);
+        self.remap_tile_sources(source_map);
 
         let Some(mut waves) = self.user.waves.take() else {
             return;
@@ -1038,10 +1051,20 @@ impl SystemState {
             .collect()
     }
 
-    fn remap_table_sources(&mut self, source_map: &HashMap<SourceId, SourceId>) {
+    fn remap_tile_sources(&mut self, source_map: &HashMap<SourceId, SourceId>) {
         for tile in self.user.table_tiles.values_mut() {
             tile.spec.remap_sources(source_map);
         }
+        for tile in self.user.konata_tiles.values_mut() {
+            tile.spec.remap_sources(source_map);
+        }
+        self.user.konata_bookmarks = std::mem::take(&mut self.user.konata_bookmarks)
+            .into_iter()
+            .map(|(mut spec, bookmarks)| {
+                spec.remap_sources(source_map);
+                (spec, bookmarks)
+            })
+            .collect();
     }
 
     /// Returns true if the waveform and all requested signals have been loaded.

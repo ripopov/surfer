@@ -4,7 +4,7 @@ use web_time::{Duration, Instant};
 
 use crate::time::{time_string, timeunit_menu};
 use crate::wave_source::draw_progress_information;
-use crate::{SystemState, message::Message, wave_data::WaveData};
+use crate::{SystemState, displayed_item::DisplayedItem, message::Message, wave_data::WaveData};
 
 /// Debounce duration for progress information display (in milliseconds)
 /// Progress is only shown after this duration to avoid flicker on fast operations
@@ -37,13 +37,13 @@ impl SystemState {
         ui.visuals_mut().override_text_color =
             Some(self.user.config.theme.primary_ui_color.foreground);
         ui.with_layout(Layout::left_to_right(Align::RIGHT), |ui| {
-            self.draw_statusbar_left(ui, waves);
+            self.draw_statusbar_left(ui, waves, msgs);
             self.draw_statusbar_right(ui, waves, msgs);
         });
     }
 
     /// Draw left-aligned status bar elements: wave source and generation date
-    fn draw_statusbar_left(&self, ui: &mut Ui, waves: Option<&WaveData>) {
+    fn draw_statusbar_left(&self, ui: &mut Ui, waves: Option<&WaveData>, msgs: &mut Vec<Message>) {
         if let Some(waves) = waves {
             ui.label(waves.source.to_string());
             if let Some(idx) = self.user.selected_server_file_index
@@ -62,6 +62,36 @@ impl SystemState {
         if let Some(state_file) = &self.user.state_file {
             ui.separator();
             ui.label(state_file.to_string_lossy());
+        }
+
+        if !self.user.dismissed_konata_hint
+            && self.user.konata_tiles.is_empty()
+            && let Some(waves) = waves
+            && let Some(stream) = waves.displayed_items.values().find_map(|item| {
+                let DisplayedItem::Stream(stream) = item else {
+                    return None;
+                };
+                let generator = stream.transaction_stream_ref.gen_id?;
+                waves
+                    .transactions_for_source(stream.source)?
+                    .event_index()
+                    .events_generator_of(generator)?;
+                Some(stream)
+            })
+        {
+            ui.separator();
+            if ui
+                .small_button("Pipeline trace detected — open in Konata view?")
+                .clicked()
+            {
+                msgs.push(Message::OpenKonataView {
+                    source: stream.source,
+                    generator: stream.transaction_stream_ref.clone(),
+                });
+            }
+            if ui.small_button("×").on_hover_text("Dismiss").clicked() {
+                msgs.push(Message::DismissKonataSuggestion);
+            }
         }
 
         if let Some(progress_data) = &self.progress_tracker

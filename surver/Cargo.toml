@@ -14,7 +14,7 @@ fastrand.workspace = true
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["http1", "server"] }
 hyper-util = { workspace = true, features = ["tokio"] }
-tokio = { workspace = true, features = ["net"] }
+tokio = { workspace = true, features = ["macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 whoami.workspace = true
 
 [dependencies]
@@ -23,6 +23,7 @@ bytesize.workspace = true
 chrono = { workspace = true, features = ["alloc"] }
 clap.workspace = true
 eyre.workspace = true
+ftr_parser.workspace = true
 leb128.workspace = true
 lz4_flex.workspace = true
 serde.workspace = true

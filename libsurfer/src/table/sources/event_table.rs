@@ -102,7 +102,7 @@ impl EventTableModel {
         // First pass: discover attribute columns (the promoted name BEGIN
         // attribute stays out of the dynamic columns)
         let mut attribute_columns: Vec<String> = vec![];
-        for tx in &events_generator.transactions {
+        for tx in events_generator.transactions.iter() {
             for attr in &tx.attributes {
                 let is_promoted_name = matches!(attr.kind, AttributeType::BEGIN)
                     && attr.name.as_ref() == EVENT_NAME_ATTRIBUTE;
@@ -153,7 +153,7 @@ impl EventTableModel {
                 search_text.truncate(MAX_SEARCH_TEXT_LEN);
 
                 EventRow {
-                    row_id: TableRowId(tx_id.0 as u64),
+                    row_id: TableRowId(tx_id.0),
                     tx_ref: TransactionRef { id: tx_id },
                     time,
                     duration,

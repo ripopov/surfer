@@ -187,6 +187,26 @@ pub enum WcpCommand {
         #[serde(deserialize_with = "deserialize_timestamp")]
         timestamp: BigInt,
     },
+    /// Opens the unique conforming pipeline generator with this name.
+    konata_open {
+        generator: String,
+        #[serde(default)]
+        source: Option<String>,
+    },
+    /// Navigates the active Konata tile by stable fetch-order row ID.
+    konata_goto_row { row: u64 },
+    /// Navigates the active Konata tile by unique retirement ID.
+    konata_goto_rid {
+        rid: u64,
+        #[serde(default)]
+        thread: Option<String>,
+    },
+    /// Navigates the active Konata tile to a configured pipeline cycle.
+    konata_goto_cycle { cycle: i64 },
+    /// Stores the active Konata viewport in a numbered bookmark slot.
+    konata_set_bookmark { slot: u8 },
+    /// Focuses an instruction transaction in the active Konata source.
+    konata_focus_instruction { transaction_id: u64 },
     /// Shut down the WCP server.
     // FIXME: What does this mean? Does it kill the server, the current connection or surfer itself?
     shutdown,
@@ -234,5 +254,38 @@ where
         Err(de::Error::custom(format!(
             "Error during deserialization of timestamp value {num}"
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn konata_commands_use_stable_tagged_json() {
+        let open = WcpCSMessage::command(WcpCommand::konata_open {
+            generator: "instruction".to_string(),
+            source: Some("trace.ftr".to_string()),
+        });
+        assert_eq!(
+            serde_json::to_value(&open).unwrap(),
+            serde_json::json!({
+                "type": "command",
+                "command": "konata_open",
+                "generator": "instruction",
+                "source": "trace.ftr",
+            })
+        );
+
+        let navigation: WcpCSMessage = serde_json::from_value(serde_json::json!({
+            "type": "command",
+            "command": "konata_goto_cycle",
+            "cycle": -12,
+        }))
+        .unwrap();
+        assert_eq!(
+            navigation,
+            WcpCSMessage::command(WcpCommand::konata_goto_cycle { cycle: -12 })
+        );
     }
 }

@@ -17,6 +17,7 @@ use crate::{
     file_history::FileHistory,
     frame_buffer::{FrameBufferArrayCache, FrameBufferContent, FrameBufferPixelCache},
     hierarchy::{AllVariableCacheKey, ScopeExpandType, VariableListRow},
+    konata::{KonataModelEntry, KonataModelKey, KonataRuntimeState, KonataTileId},
     memory_viewer::{ChangeModes, MemoryViewerCache, MemoryViewerFormat},
     message::Message,
     mousegestures::AnnotationKind,
@@ -147,6 +148,9 @@ pub struct SystemState {
 
     pub(crate) table_runtime: HashMap<TableTileId, TableRuntimeState>,
     pub(crate) table_inflight: HashMap<TableCacheKey, Arc<TableCacheEntry>>,
+    pub(crate) konata_runtime: HashMap<KonataTileId, KonataRuntimeState>,
+    pub(crate) konata_models: HashMap<KonataModelKey, Arc<KonataModelEntry>>,
+    pub(crate) active_konata_tile: Option<KonataTileId>,
     pub(crate) next_load_request_id: u64,
 
     // Only used for testing
@@ -220,6 +224,9 @@ impl SystemState {
             continuous_redraw: false,
             table_runtime: HashMap::new(),
             table_inflight: HashMap::new(),
+            konata_runtime: HashMap::new(),
+            konata_models: HashMap::new(),
+            active_konata_tile: None,
             next_load_request_id: 1,
             #[cfg(feature = "performance_plot")]
             rendering_cpu_times: VecDeque::new(),
@@ -242,6 +249,15 @@ impl SystemState {
     /// Returns true if no table caches are currently being built
     pub fn table_caches_ready(&self) -> bool {
         self.table_inflight.is_empty()
+    }
+
+    /// Returns true once every requested Konata projection has completed.
+    pub fn konata_caches_ready(&self) -> bool {
+        self.konata_models.values().all(|entry| {
+            entry.is_ready() && entry.model().is_none_or(|model| model.detail_cache_idle())
+        }) && self.konata_runtime.values().all(|runtime| {
+            runtime.producer_chain_root.is_none() || runtime.producer_chain.is_some()
+        })
     }
 
     pub(crate) fn next_load_request_id(&mut self) -> LoadRequestId {

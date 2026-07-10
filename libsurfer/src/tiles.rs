@@ -8,6 +8,7 @@ use egui_tiles::{
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 
+use crate::konata::{KonataTileId, KonataTileState, draw_konata_tile};
 use crate::message::Message;
 use crate::system_state::SystemState;
 use crate::table::{TableTileId, TableTileState, draw_table_tile};
@@ -26,6 +27,8 @@ pub enum SurferPane {
     DebugTile(SurferTileId),
     /// A table tile displaying tabular data (signal changes, transactions, etc.).
     Table(TableTileId),
+    /// An instruction-pipeline projection tile.
+    Konata(KonataTileId),
 }
 
 impl SurferPane {
@@ -33,6 +36,7 @@ impl SurferPane {
     fn title(
         &self,
         table_tiles: &std::collections::HashMap<TableTileId, TableTileState>,
+        konata_tiles: &std::collections::HashMap<KonataTileId, KonataTileState>,
     ) -> String {
         match self {
             SurferPane::Waveform => "Waveform".to_string(),
@@ -41,6 +45,10 @@ impl SurferPane {
                 .get(id)
                 .map(|state| state.config.title.clone())
                 .unwrap_or_else(|| format!("Table {}", id.0)),
+            SurferPane::Konata(id) => konata_tiles
+                .get(id)
+                .map(|state| state.title.clone())
+                .unwrap_or_else(|| format!("Konata {}", id.0)),
         }
     }
 }
@@ -55,6 +63,9 @@ pub struct SurferTileTree {
     /// Counter for generating unique table tile IDs
     #[serde(default)]
     next_table_tile_id: u64,
+    /// Counter for generating unique Konata tile IDs.
+    #[serde(default)]
+    next_konata_tile_id: u64,
 }
 
 impl Default for SurferTileTree {
@@ -74,21 +85,19 @@ impl SurferTileTree {
             tree: Tree::new("surfer_tiles", root, tiles),
             next_tile_id: 1,
             next_table_tile_id: 1,
+            next_konata_tile_id: 1,
         }
-    }
-
-    /// Returns the number of visible panes in the tree
-    fn pane_count(&self) -> usize {
-        self.tree
-            .tiles
-            .iter()
-            .filter(|(_, tile)| matches!(tile, Tile::Pane(_)))
-            .count()
     }
 
     /// Returns true if only the waveform pane exists (no additional tiles)
     pub fn is_single_waveform(&self) -> bool {
-        self.pane_count() == 1
+        let mut panes = self.tree.tiles.iter().filter_map(|(_, tile)| {
+            let Tile::Pane(pane) = tile else {
+                return None;
+            };
+            Some(pane)
+        });
+        matches!(panes.next(), Some(SurferPane::Waveform)) && panes.next().is_none()
     }
 
     /// Adds a new debug tile to the tree.
@@ -107,6 +116,10 @@ impl SurferTileTree {
     /// Layout strategy: same as add_debug_tile (vertical split with waveform on top).
     pub fn add_table_tile(&mut self, table_tile_id: TableTileId) {
         self.add_pane_with_bottom_split(SurferPane::Table(table_tile_id));
+    }
+
+    pub fn add_konata_tile(&mut self, konata_tile_id: KonataTileId) {
+        self.add_pane_with_bottom_split(SurferPane::Konata(konata_tile_id));
     }
 
     fn add_pane_with_bottom_split(&mut self, pane: SurferPane) {
@@ -160,6 +173,12 @@ impl SurferTileTree {
         id
     }
 
+    pub fn next_konata_id(&mut self) -> KonataTileId {
+        let id = KonataTileId(self.next_konata_tile_id);
+        self.next_konata_tile_id += 1;
+        id
+    }
+
     /// Removes a tile by its TileId.
     /// The waveform tile cannot be removed.
     fn remove_tile(&mut self, tile_id: TileId) {
@@ -184,6 +203,21 @@ impl SurferTileTree {
             self.remove_tile(*tile_id);
         }
     }
+
+    pub fn remove_konata_tile(&mut self, konata_tile_id: KonataTileId) {
+        let tile_id = self
+            .tree
+            .tiles
+            .iter()
+            .find_map(|(tile_id, tile)| match tile {
+                Tile::Pane(SurferPane::Konata(id)) if *id == konata_tile_id => Some(tile_id),
+                _ => None,
+            });
+
+        if let Some(tile_id) = tile_id {
+            self.remove_tile(*tile_id);
+        }
+    }
 }
 
 pub struct SurferTileBehavior<'a> {
@@ -193,8 +227,10 @@ pub struct SurferTileBehavior<'a> {
     pub hide_chrome: bool,
     pub tile_to_remove: Option<TileId>,
     pub table_tile_to_remove: Option<TableTileId>,
+    pub konata_tile_to_remove: Option<KonataTileId>,
     pub debug_tree: String,
     pub table_tiles: &'a std::collections::HashMap<TableTileId, TableTileState>,
+    pub konata_tiles: &'a mut std::collections::HashMap<KonataTileId, KonataTileState>,
 }
 
 impl Behavior<SurferPane> for SurferTileBehavior<'_> {
@@ -227,12 +263,22 @@ impl Behavior<SurferPane> for SurferTileBehavior<'_> {
                     self.table_tiles,
                 );
             }
+            SurferPane::Konata(konata_tile_id) => {
+                draw_konata_tile(
+                    self.state,
+                    self.ctx,
+                    ui,
+                    self.msgs,
+                    *konata_tile_id,
+                    self.konata_tiles,
+                );
+            }
         }
         egui_tiles::UiResponse::None
     }
 
     fn tab_title_for_pane(&mut self, pane: &SurferPane) -> egui::WidgetText {
-        pane.title(self.table_tiles).into()
+        pane.title(self.table_tiles, self.konata_tiles).into()
     }
 
     fn is_tab_closable(&self, tiles: &Tiles<SurferPane>, tile_id: TileId) -> bool {
@@ -247,6 +293,9 @@ impl Behavior<SurferPane> for SurferTileBehavior<'_> {
         // Track table tiles for cleanup
         if let Some(Tile::Pane(SurferPane::Table(table_tile_id))) = tiles.get(tile_id) {
             self.table_tile_to_remove = Some(*table_tile_id);
+        }
+        if let Some(Tile::Pane(SurferPane::Konata(konata_tile_id))) = tiles.get(tile_id) {
+            self.konata_tile_to_remove = Some(*konata_tile_id);
         }
         self.tile_to_remove = Some(tile_id);
         true
@@ -304,7 +353,8 @@ impl SystemState {
         // Take tree out of self to enable disjoint borrows.
         let mut tile_tree = std::mem::take(&mut self.user.tile_tree);
         let mut table_tiles = std::mem::take(&mut self.user.table_tiles);
-        let debug_tree_str = format_tile_tree_cli(&tile_tree.tree, &table_tiles);
+        let mut konata_tiles = std::mem::take(&mut self.user.konata_tiles);
+        let debug_tree_str = format_tile_tree_cli(&tile_tree.tree, &table_tiles, &konata_tiles);
         let hide_chrome = tile_tree.is_single_waveform();
 
         let mut behavior = SurferTileBehavior {
@@ -314,26 +364,46 @@ impl SystemState {
             hide_chrome,
             tile_to_remove: None,
             table_tile_to_remove: None,
+            konata_tile_to_remove: None,
             debug_tree: debug_tree_str,
             table_tiles: &table_tiles,
+            konata_tiles: &mut konata_tiles,
         };
 
         tile_tree.tree.ui(&mut behavior, ui);
 
+        let tile_to_remove = behavior.tile_to_remove;
+        let table_tile_to_remove = behavior.table_tile_to_remove;
+        let konata_tile_to_remove = behavior.konata_tile_to_remove;
+        drop(behavior);
+
         // Handle deferred tile removal
-        if let Some(tile_id) = behavior.tile_to_remove {
+        if let Some(tile_id) = tile_to_remove {
             tile_tree.remove_tile(tile_id);
         }
 
         // Handle table tile cleanup
-        if let Some(table_tile_id) = behavior.table_tile_to_remove {
+        if let Some(table_tile_id) = table_tile_to_remove {
             table_tiles.remove(&table_tile_id);
             self.table_runtime.remove(&table_tile_id);
+        }
+        if let Some(konata_tile_id) = konata_tile_to_remove {
+            konata_tiles.remove(&konata_tile_id);
+            if self.active_konata_tile == Some(konata_tile_id) {
+                self.active_konata_tile = konata_tiles.keys().next().copied();
+            }
+            if let Some(runtime) = self.konata_runtime.remove(&konata_tile_id) {
+                runtime
+                    .cancel_token
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
         }
 
         // Restore tree and table_tiles back to self
         self.user.tile_tree = tile_tree;
         self.user.table_tiles = table_tiles;
+        self.user.konata_tiles = konata_tiles;
+        self.retain_used_konata_models();
     }
 }
 
@@ -341,6 +411,7 @@ impl SystemState {
 fn format_tile_tree_cli(
     tree: &Tree<SurferPane>,
     table_tiles: &std::collections::HashMap<TableTileId, TableTileState>,
+    konata_tiles: &std::collections::HashMap<KonataTileId, KonataTileState>,
 ) -> String {
     let mut out = String::new();
     let Some(root) = tree.root else {
@@ -355,7 +426,10 @@ fn format_tile_tree_cli(
         let next_prefix = if is_last { "    " } else { "│   " };
 
         let description = match tree.tiles.get(tile_id) {
-            Some(Tile::Pane(pane)) => format!("{tile_id:?} Pane({})", pane.title(table_tiles)),
+            Some(Tile::Pane(pane)) => format!(
+                "{tile_id:?} Pane({})",
+                pane.title(table_tiles, konata_tiles)
+            ),
             Some(Tile::Container(container)) => {
                 let kind = match container {
                     Container::Tabs(_) => "Tabs".to_string(),
@@ -386,4 +460,20 @@ fn format_tile_tree_cli(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_single_non_waveform_pane_does_not_use_the_waveform_fast_path() {
+        let mut tree = SurferTileTree::new();
+        assert!(tree.is_single_waveform());
+
+        let mut tiles = Tiles::default();
+        let pane = tiles.insert_pane(SurferPane::Konata(KonataTileId(1)));
+        tree.tree = Tree::new("single_konata", pane, tiles);
+        assert!(!tree.is_single_waveform());
+    }
 }

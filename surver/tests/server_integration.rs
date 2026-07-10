@@ -5,7 +5,13 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+use bincode::Options as _;
 use reqwest::StatusCode;
+
+fn decode_transaction_payload<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> T {
+    let raw = lz4_flex::decompress_size_prepended(bytes).unwrap();
+    surver::BINCODE_OPTIONS.deserialize(&raw).unwrap()
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn server_end_to_end_basic() {
@@ -248,4 +254,162 @@ async fn server_loads_multiple_files() {
 
     // Cleanup
     handle.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn server_exposes_revisioned_ftr_pages() {
+    let port = {
+        let socket =
+            std::net::TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+                .unwrap();
+        socket.local_addr().unwrap().port()
+    };
+    let source_file = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../examples/kanata-sample-2.ftr")
+        .canonicalize()
+        .unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let file = temp.path().join("remote-sample.ftr");
+    std::fs::copy(source_file, &file).unwrap();
+    let token = "transactionpages123".to_string();
+    let started = Arc::new(AtomicBool::new(false));
+    let task = {
+        let started = started.clone();
+        let token = token.clone();
+        let served_file = file.clone();
+        tokio::spawn(async move {
+            let _ = surver::surver_main(
+                port,
+                "127.0.0.1".to_string(),
+                Some(token),
+                &[served_file.to_string_lossy().to_string()],
+                Some(started),
+            )
+            .await;
+        })
+    };
+    for _ in 0..100 {
+        if started.load(Ordering::SeqCst) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(started.load(Ordering::SeqCst));
+
+    let base = format!("http://127.0.0.1:{port}/{token}");
+    let client = reqwest::Client::new();
+    let status_response = client
+        .get(format!("{base}/get_status"))
+        .send()
+        .await
+        .unwrap();
+    let status: surver::SurverStatus =
+        serde_json::from_str(&status_response.text().await.unwrap()).unwrap();
+    assert_eq!(
+        status.file_infos[0].kind,
+        surver::SurverFileKind::Transaction
+    );
+    assert!(status.file_infos[0].format.is_none());
+    assert!(status.capabilities.transaction_pages.is_some());
+
+    let response = client
+        .get(format!("{base}/0/get_transaction_manifest"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let manifest: surver::TransactionManifest =
+        decode_transaction_payload(&response.bytes().await.unwrap());
+    assert_eq!(
+        manifest.protocol_version,
+        surver::TRANSACTION_PAGE_PROTOCOL_VERSION
+    );
+    assert!(
+        manifest
+            .generator(ftr_parser::types::GeneratorId(10))
+            .is_some()
+    );
+    assert!(manifest.relation_pages > 0);
+    assert!(manifest.dictionary_pages > 0);
+    let revision = manifest.source_revision;
+
+    let dictionary: surver::TransactionDictionaryPage = decode_transaction_payload(
+        &client
+            .get(format!(
+                "{base}/0/get_transaction_dictionary_page/{revision}/0"
+            ))
+            .send()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap(),
+    );
+    assert_eq!(dictionary.source_revision, revision);
+    assert!(!dictionary.entries.is_empty());
+
+    let relations: surver::TransactionRelationPage = decode_transaction_payload(
+        &client
+            .get(format!(
+                "{base}/0/get_transaction_relation_page/{revision}/0"
+            ))
+            .send()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap(),
+    );
+    assert!(!relations.relations.is_empty());
+
+    let records: surver::TransactionRecordPage = decode_transaction_payload(
+        &client
+            .get(format!("{base}/0/get_transaction_page/{revision}/1/0"))
+            .send()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap(),
+    );
+    assert_eq!(records.stream_id, ftr_parser::types::StreamId(1));
+    assert!(!records.transactions.is_empty());
+
+    let stale = client
+        .get(format!(
+            "{base}/0/get_transaction_page/{}/1/0",
+            revision.wrapping_add(1)
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stale.status(), StatusCode::CONFLICT);
+
+    filetime::set_file_mtime(
+        &file,
+        filetime::FileTime::from_system_time(
+            std::time::SystemTime::now() + std::time::Duration::from_secs(2),
+        ),
+    )
+    .unwrap();
+    let reload = client.get(format!("{base}/0/reload")).send().await.unwrap();
+    assert_eq!(reload.status(), StatusCode::ACCEPTED);
+    let refreshed: surver::TransactionManifest = decode_transaction_payload(
+        &client
+            .get(format!("{base}/0/get_transaction_manifest"))
+            .send()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap(),
+    );
+    assert_ne!(refreshed.source_revision, revision);
+    let stale_after_reload = client
+        .get(format!("{base}/0/get_transaction_page/{revision}/1/0"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stale_after_reload.status(), StatusCode::CONFLICT);
+    task.abort();
 }

@@ -5,6 +5,7 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -12,9 +13,49 @@ type IsCompressed = bool;
 
 pub type FtrResult<T> = Result<T, String>;
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BlockStatus {
+    #[default]
+    Indexed,
+    Loaded,
+    Error(String),
+}
+
+/// Seekable metadata for one transaction chunk. The offset points to the
+/// chunk payload framing: the byte string for uncompressed chunks and the
+/// uncompressed-size integer for compressed chunks.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockMeta {
+    pub stream_id: StreamId,
+    pub ordinal: u64,
+    pub encoded_offset: u64,
+    pub encoded_len: u64,
+    pub compressed: bool,
+    pub uncompressed_len: Option<u64>,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub status: BlockStatus,
+}
+
+/// Seekable metadata for one relationship chunk. Offsets use the same
+/// byte-string framing convention as [`BlockMeta`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelationBlockMeta {
+    pub ordinal: u64,
+    pub encoded_offset: u64,
+    pub encoded_len: u64,
+    pub compressed: bool,
+    pub uncompressed_len: Option<u64>,
+    #[serde(default)]
+    pub record_count: Option<u64>,
+    pub status: BlockStatus,
+}
+
 // Dedicated ID types
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct StreamId(pub usize);
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+pub struct StreamId(pub u64);
 
 impl fmt::Display for StreamId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -22,8 +63,10 @@ impl fmt::Display for StreamId {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct GeneratorId(pub usize);
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+pub struct GeneratorId(pub u64);
 
 impl fmt::Display for GeneratorId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -31,8 +74,10 @@ impl fmt::Display for GeneratorId {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TransactionId(pub usize);
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+pub struct TransactionId(pub u64);
 
 impl fmt::Display for TransactionId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -40,8 +85,10 @@ impl fmt::Display for TransactionId {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct NameId(pub usize);
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+pub struct NameId(pub u64);
 
 impl fmt::Display for NameId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -56,6 +103,12 @@ pub struct TxStream {
     pub kind: String,
     pub generators: Vec<GeneratorId>,
     pub transactions_loaded: bool,
+    /// Complete seekable transaction-block directory.
+    #[serde(default)]
+    pub tx_blocks: Vec<BlockMeta>,
+    /// Legacy offset directory retained for state/test compatibility. New
+    /// code uses `tx_blocks`.
+    #[serde(default)]
     pub(super) tx_block_ids: Vec<(u64, IsCompressed)>,
 }
 
@@ -70,7 +123,12 @@ pub struct TxGenerator {
     pub id: GeneratorId,
     pub stream_id: StreamId,
     pub name: String,
-    pub transactions: Vec<Transaction>,
+    /// Immutable transaction body shared by asynchronous projections.
+    ///
+    /// The parser retains exclusive ownership while loading through
+    /// [`Arc::make_mut`]. Once published, consumers can take a constant-time
+    /// snapshot without cloning every transaction.
+    pub transactions: Arc<Vec<Transaction>>,
 }
 
 impl PartialEq<Self> for TxGenerator {
@@ -241,32 +299,209 @@ pub struct FTR {
     pub str_dict: HashMap<NameId, Arc<str>>,
     pub tx_streams: HashMap<StreamId, TxStream>,
     pub tx_generators: HashMap<GeneratorId, TxGenerator>,
-    pub tx_relations: Vec<TxRelation>,
-    /// Relation indices keyed by source (parent) transaction id. Built while
-    /// relation chunks are parsed and used to attach relations to transactions
-    /// in O(1) instead of scanning the whole relation list per transaction.
+    /// Immutable relation body shared by asynchronous projections.
+    pub tx_relations: Arc<Vec<TxRelation>>,
+    /// Complete seekable relationship-chunk directory for file-backed FTRs.
+    #[serde(default)]
+    pub relation_blocks: Vec<RelationBlockMeta>,
+    /// Stable permutation of relation indices sorted by source transaction id
+    /// and then recorded order. A binary-searched equal range replaces one
+    /// heap allocation per transaction id.
     #[serde(skip)]
-    pub(crate) rel_by_source: HashMap<TransactionId, Vec<usize>>,
-    /// Relation indices keyed by sink (child) transaction id.
+    pub(crate) rel_by_source: Vec<usize>,
+    /// Stable permutation sorted by sink transaction id and recorded order.
     #[serde(skip)]
-    pub(crate) rel_by_sink: HashMap<TransactionId, Vec<usize>>,
+    pub(crate) rel_by_sink: Vec<usize>,
     pub(crate) path: Option<PathBuf>,
 }
 
 impl FTR {
+    #[must_use]
+    pub fn from_parts(
+        time_scale: Timescale,
+        max_timestamp: u64,
+        str_dict: HashMap<NameId, Arc<str>>,
+        tx_streams: HashMap<StreamId, TxStream>,
+        tx_generators: HashMap<GeneratorId, TxGenerator>,
+        tx_relations: Vec<TxRelation>,
+    ) -> Self {
+        let mut ftr = Self {
+            time_scale,
+            max_timestamp,
+            str_dict,
+            tx_streams,
+            tx_generators,
+            tx_relations: Arc::new(tx_relations),
+            relation_blocks: Vec::new(),
+            rel_by_source: Vec::new(),
+            rel_by_sink: Vec::new(),
+            path: None,
+        };
+        ftr.rebuild_relation_indices();
+        ftr
+    }
+
+    #[must_use]
+    pub fn file_path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    pub(crate) fn rebuild_relation_indices(&mut self) {
+        self.rel_by_source = (0..self.tx_relations.len()).collect();
+        self.rel_by_source
+            .sort_by_key(|index| (self.tx_relations[*index].source_tx_id, *index));
+        self.rel_by_sink = (0..self.tx_relations.len()).collect();
+        self.rel_by_sink
+            .sort_by_key(|index| (self.tx_relations[*index].sink_tx_id, *index));
+    }
+
+    pub(crate) fn relations_from(&self, id: TransactionId) -> &[usize] {
+        let start = self
+            .rel_by_source
+            .partition_point(|index| self.tx_relations[*index].source_tx_id < id);
+        let end = self
+            .rel_by_source
+            .partition_point(|index| self.tx_relations[*index].source_tx_id <= id);
+        &self.rel_by_source[start..end]
+    }
+
+    pub(crate) fn relations_to(&self, id: TransactionId) -> &[usize] {
+        let start = self
+            .rel_by_sink
+            .partition_point(|index| self.tx_relations[*index].sink_tx_id < id);
+        let end = self
+            .rel_by_sink
+            .partition_point(|index| self.tx_relations[*index].sink_tx_id <= id);
+        &self.rel_by_sink[start..end]
+    }
+
     // Takes a stream id and loads all associated transactions into memory
     pub fn load_stream_into_memory(&mut self, stream_id: StreamId) -> FtrResult<()> {
+        self.ensure_relations_loaded()?;
         let mut ftr_parser = FtrParser::new(self);
         ftr_parser.load_transactions(stream_id)
     }
 
+    /// Loads the file-backed relationship chunks without loading transaction
+    /// bodies. Repeated calls are cheap while the body is resident.
+    pub fn load_relations_into_memory(&mut self) -> FtrResult<()> {
+        self.ensure_relations_loaded()
+    }
+
+    /// Releases the eager relation body while every transaction stream is
+    /// still unloaded. File-backed compact projections can then own relation
+    /// data only for the duration of their build instead of retaining a
+    /// duplicate legacy graph in the UI container.
+    pub fn release_relations_if_unloaded(&mut self) -> bool {
+        if self.path.is_none()
+            || self
+                .tx_streams
+                .values()
+                .any(|stream| stream.transactions_loaded)
+        {
+            return false;
+        }
+        self.tx_relations = Arc::new(Vec::new());
+        self.rel_by_source.clear();
+        self.rel_by_sink.clear();
+        for block in &mut self.relation_blocks {
+            block.status = BlockStatus::Indexed;
+        }
+        true
+    }
+
+    fn ensure_relations_loaded(&mut self) -> FtrResult<()> {
+        if self.relation_blocks.is_empty()
+            || self
+                .relation_blocks
+                .iter()
+                .all(|block| block.status == BlockStatus::Loaded)
+        {
+            return Ok(());
+        }
+        let Some(path) = self.path.clone() else {
+            return Ok(());
+        };
+        let mut parser = FtrParser::new(self);
+        parser.load_relations_from_file(&path)
+    }
+
+    /// Visits file-backed transaction blocks in recorded order without
+    /// populating `TxGenerator::transactions`.
+    pub fn visit_stream_blocks<F>(&mut self, stream_id: StreamId, visit: F) -> FtrResult<()>
+    where
+        F: FnMut(&BlockMeta, &[Transaction]) -> FtrResult<()>,
+    {
+        self.ensure_relations_loaded()?;
+        let mut parser = FtrParser::new(self);
+        parser.visit_transaction_blocks(stream_id, visit)
+    }
+
+    /// Visits file-backed transaction blocks without populating per-record
+    /// relation-index vectors. Compact projections join the relationship
+    /// chunks separately and avoid materializing the global relation graph.
+    pub fn visit_stream_blocks_unlinked<F>(
+        &mut self,
+        stream_id: StreamId,
+        visit: F,
+    ) -> FtrResult<()>
+    where
+        F: FnMut(&BlockMeta, &[Transaction]) -> FtrResult<()>,
+    {
+        let mut parser = FtrParser::new(self);
+        parser.visit_transaction_blocks(stream_id, visit)
+    }
+
+    /// Visits relationship chunks in recorded order and releases each decoded
+    /// batch after the callback returns.
+    pub fn visit_relation_blocks<F>(&mut self, visit: F) -> FtrResult<()>
+    where
+        F: FnMut(&RelationBlockMeta, &[TxRelation]) -> FtrResult<()>,
+    {
+        let mut parser = FtrParser::new(self);
+        parser.visit_relation_blocks(visit)
+    }
+
+    /// Decodes one seekable file-backed transaction block without retaining
+    /// it in the generic transaction graph.
+    pub fn read_stream_block(
+        &mut self,
+        stream_id: StreamId,
+        ordinal: u64,
+    ) -> FtrResult<Vec<Transaction>> {
+        self.ensure_relations_loaded()?;
+        let mut parser = FtrParser::new(self);
+        parser.read_transaction_block(stream_id, ordinal)
+    }
+
+    /// Decodes one transaction block without constructing relation-index
+    /// vectors. The caller joins independently paged relationship records.
+    pub fn read_stream_block_unlinked(
+        &mut self,
+        stream_id: StreamId,
+        ordinal: u64,
+    ) -> FtrResult<Vec<Transaction>> {
+        let mut parser = FtrParser::new(self);
+        parser.read_transaction_block(stream_id, ordinal)
+    }
+
+    /// Decodes one relationship chunk without retaining it in [`FTR`].
+    pub fn read_relation_block(&mut self, ordinal: u64) -> FtrResult<Vec<TxRelation>> {
+        let mut parser = FtrParser::new(self);
+        parser.read_relation_block(ordinal)
+    }
+
     // drops all transactions from this stream from memory, but the stream itself doesn't get deleted
     pub fn drop_stream_from_memory(&mut self, stream_id: StreamId) {
-        if let Some(stream) = self.tx_streams.get(&stream_id) {
+        if let Some(stream) = self.tx_streams.get_mut(&stream_id) {
             for gen_id in &stream.generators {
                 if let Some(gen) = self.tx_generators.get_mut(gen_id) {
-                    gen.transactions.clear();
+                    Arc::make_mut(&mut gen.transactions).clear();
                 }
+            }
+            stream.transactions_loaded = false;
+            for block in &mut stream.tx_blocks {
+                block.status = BlockStatus::Indexed;
             }
         }
     }
