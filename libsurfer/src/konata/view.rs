@@ -27,6 +27,13 @@ const LABEL_PADDING: f32 = 7.0;
 const MINIMAP_WIDTH: f32 = 76.0;
 const MAX_DETAILED_STAGES: usize = 20_000;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ScrollGesture {
+    Pan(Vec2),
+    ZoomX(f64),
+    ZoomBoth(f64),
+}
+
 pub fn draw_konata_tile(
     state: &mut SystemState,
     _ctx: &egui::Context,
@@ -1166,22 +1173,35 @@ fn interact(
                 input.modifiers,
             )
         });
-        if zoom != 1.0 {
-            let pointer = pointer.unwrap_or(canvas_rect.center());
-            zoom_at(
-                tile,
-                model,
-                f64::from(zoom),
-                f64::from(pointer.x - canvas_rect.left()),
-                f64::from(pointer.y - canvas_rect.top()),
-            );
-        } else if scroll != Vec2::ZERO {
-            if scroll.x != 0.0 {
-                tile.viewport.pan_pixels(f64::from(scroll.x), 0.0);
-            }
-            if scroll.y != 0.0 {
-                let rows = -f64::from(scroll.y) / row_pitch(tile, model);
-                scroll_rows_with_diagonal(tile, model, rows, !modifiers.shift);
+        let scroll_zoom_speed = ui
+            .ctx()
+            .options(|options| options.input_options.scroll_zoom_speed);
+        if let Some(gesture) = resolve_scroll_gesture(scroll, zoom, modifiers, scroll_zoom_speed) {
+            match gesture {
+                ScrollGesture::ZoomX(factor) => {
+                    let pointer = pointer.unwrap_or(canvas_rect.center());
+                    tile.viewport
+                        .zoom_x_at(factor, f64::from(pointer.x - canvas_rect.left()));
+                }
+                ScrollGesture::ZoomBoth(factor) => {
+                    let pointer = pointer.unwrap_or(canvas_rect.center());
+                    zoom_at(
+                        tile,
+                        model,
+                        factor,
+                        f64::from(pointer.x - canvas_rect.left()),
+                        f64::from(pointer.y - canvas_rect.top()),
+                    );
+                }
+                ScrollGesture::Pan(scroll) => {
+                    if scroll.x != 0.0 {
+                        tile.viewport.pan_pixels(f64::from(scroll.x), 0.0);
+                    }
+                    if scroll.y != 0.0 {
+                        let rows = -f64::from(scroll.y) / row_pitch(tile, model);
+                        scroll_rows_with_diagonal(tile, model, rows, !modifiers.shift);
+                    }
+                }
             }
         }
     }
@@ -1493,6 +1513,29 @@ fn interact(
                 });
             }
         }
+    }
+}
+
+fn resolve_scroll_gesture(
+    scroll: Vec2,
+    zoom: f32,
+    modifiers: egui::Modifiers,
+    scroll_zoom_speed: f32,
+) -> Option<ScrollGesture> {
+    if modifiers.alt && scroll != Vec2::ZERO {
+        let factor = (f64::from(scroll.x + scroll.y) * f64::from(scroll_zoom_speed)).exp();
+        Some(ScrollGesture::ZoomBoth(factor))
+    } else if zoom != 1.0 {
+        let factor = f64::from(zoom);
+        Some(if modifiers.command {
+            ScrollGesture::ZoomX(factor)
+        } else {
+            ScrollGesture::ZoomBoth(factor)
+        })
+    } else if scroll != Vec2::ZERO {
+        Some(ScrollGesture::Pan(scroll))
+    } else {
+        None
     }
 }
 
@@ -3844,6 +3887,39 @@ mod tests {
 
         assert_eq!(viewport.left_value(), 104.0);
         assert_eq!(viewport.top_visible_row, 21.0);
+    }
+
+    #[test]
+    fn scroll_modifiers_select_horizontal_or_two_axis_zoom() {
+        let alt = egui::Modifiers {
+            alt: true,
+            ..Default::default()
+        };
+        let alt_gesture = resolve_scroll_gesture(Vec2::new(0.0, 40.0), 1.0, alt, 1.0 / 200.0);
+        let Some(ScrollGesture::ZoomBoth(alt_factor)) = alt_gesture else {
+            panic!("Alt + scroll should zoom both axes");
+        };
+        assert!((alt_factor - 0.2_f64.exp()).abs() < 1e-6);
+        let Some(ScrollGesture::ZoomBoth(alt_reverse_factor)) =
+            resolve_scroll_gesture(Vec2::new(0.0, -40.0), 1.0, alt, 1.0 / 200.0)
+        else {
+            panic!("reverse Alt + scroll should zoom both axes");
+        };
+        assert!((alt_factor * alt_reverse_factor - 1.0).abs() < 1e-6);
+
+        let command = egui::Modifiers {
+            command: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_scroll_gesture(Vec2::ZERO, 1.25, command, 1.0 / 200.0),
+            Some(ScrollGesture::ZoomX(1.25))
+        );
+
+        assert_eq!(
+            resolve_scroll_gesture(Vec2::ZERO, 1.25, Default::default(), 1.0 / 200.0),
+            Some(ScrollGesture::ZoomBoth(1.25))
+        );
     }
 
     #[test]
