@@ -72,6 +72,7 @@ pub mod variable_meta;
 pub mod variable_name_type;
 pub mod view;
 pub mod viewport;
+mod viewport_sync;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_api;
 #[cfg(target_arch = "wasm32")]

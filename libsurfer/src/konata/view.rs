@@ -1027,9 +1027,14 @@ fn display_options(ui: &mut Ui, tile: &mut KonataTileState, model: &KonataModel)
     if option_matches(&filter, &["minimap", "overview"]) {
         ui.checkbox(&mut tile.config.show_minimap, "Show minimap");
     }
-    if option_matches(&filter, &["synchronize", "sync", "compare"]) {
+    if option_matches(&filter, &["synchronize", "sync", "compare", "waveform"]) {
         if ui
             .checkbox(&mut tile.config.synchronize_scroll, "Synchronize scroll")
+            .on_hover_text(
+                "Keep this pipeline view, the other synchronized Konata tiles, and the main \
+                 waveform viewport on the same time range. Zooming or panning any of them moves \
+                 the others.",
+            )
             .changed()
         {
             tile.config.sync_group = tile.config.synchronize_scroll.then_some(0);

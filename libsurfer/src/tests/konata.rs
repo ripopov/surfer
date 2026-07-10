@@ -814,3 +814,101 @@ fn wcp_konata_commands_validate_and_drive_the_active_tile() {
         tx_id
     );
 }
+
+#[test]
+fn synchronize_scroll_couples_konata_and_waveform_time_axes() {
+    use num::{BigInt, ToPrimitive as _};
+
+    let (runtime, mut state) = loaded_sample();
+    let _guard = runtime.enter();
+    let tile = open_view(&mut state);
+    wait_for_model(&mut state);
+
+    let width = 800.0_f32;
+    // Pretend the tile has been drawn so it reports a canvas width to the sync driver.
+    state.konata_runtime.entry(tile).or_default().canvas_size = egui::Vec2::new(width, 400.0);
+
+    let num_timestamps = state
+        .user
+        .waves
+        .as_ref()
+        .unwrap()
+        .safe_canvas_num_timestamps()
+        .to_f64()
+        .unwrap();
+    assert!(num_timestamps > 20.0, "sample must have a usable time span");
+
+    // Focus the Konata tile on a sub-window well inside the trace and enable synchronization.
+    let konata_left = num_timestamps * 0.2;
+    let konata_right = num_timestamps * 0.4;
+    {
+        let tile_state = state.user.konata_tiles.get_mut(&tile).unwrap();
+        tile_state.config.synchronize_scroll = true;
+        tile_state.config.sync_group = Some(0);
+        tile_state
+            .viewport
+            .set_visible_tick_range(konata_left, konata_right, width);
+    }
+
+    let tol = num_timestamps * 1e-3;
+
+    // First pass seeds the shared window from the Konata tile and pulls the waveform onto it.
+    assert!(state.synchronize_konata_wave_viewports());
+    let (wave_left, wave_right) = state.user.waves.as_ref().unwrap().viewports[0].absolute_range(
+        &state
+            .user
+            .waves
+            .as_ref()
+            .unwrap()
+            .safe_canvas_num_timestamps(),
+    );
+    assert!(
+        (wave_left.inner() - konata_left).abs() < tol
+            && (wave_right.inner() - konata_right).abs() < tol,
+        "waveform did not adopt Konata window: got ({}, {}), want ({konata_left}, {konata_right})",
+        wave_left.inner(),
+        wave_right.inner(),
+    );
+
+    // Once settled, another pass with no user input must not move anything.
+    assert!(!state.synchronize_konata_wave_viewports());
+
+    // Now zoom the waveform; the Konata tile must follow onto the new window.
+    let new_left = num_timestamps * 0.5;
+    let new_right = num_timestamps * 0.6;
+    {
+        let waves = state.user.waves.as_mut().unwrap();
+        let n = waves.safe_canvas_num_timestamps();
+        waves.viewports[0].zoom_to_range(
+            &BigInt::from(new_left as i64),
+            &BigInt::from(new_right as i64),
+            &n,
+        );
+    }
+    assert!(state.synchronize_konata_wave_viewports());
+    let (konata_vis_left, konata_vis_right) = state.user.konata_tiles[&tile]
+        .viewport
+        .visible_tick_range(width);
+    assert!(
+        (konata_vis_left - new_left).abs() < tol && (konata_vis_right - new_right).abs() < tol,
+        "Konata did not follow the waveform: got ({konata_vis_left}, {konata_vis_right}), \
+         want ({new_left}, {new_right})",
+    );
+
+    // Disabling synchronization must release the coupling and reset the shared state.
+    state
+        .user
+        .konata_tiles
+        .get_mut(&tile)
+        .unwrap()
+        .config
+        .synchronize_scroll = false;
+    state
+        .user
+        .konata_tiles
+        .get_mut(&tile)
+        .unwrap()
+        .config
+        .sync_group = None;
+    assert!(!state.synchronize_konata_wave_viewports());
+}

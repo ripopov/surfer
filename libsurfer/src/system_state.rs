@@ -26,6 +26,7 @@ use crate::{
     table::{TableCacheEntry, TableCacheKey, TableRuntimeState, TableTileId},
     time::TimeInputState,
     translation::{TranslatorList, all_translators},
+    viewport_sync::ViewportSyncState,
     wave_container::{ScopeRef, VariableRef},
     wave_source::{LoadOptions, LoadProgress},
 };
@@ -151,6 +152,9 @@ pub struct SystemState {
     pub(crate) konata_runtime: HashMap<KonataTileId, KonataRuntimeState>,
     pub(crate) konata_models: HashMap<KonataModelKey, Arc<KonataModelEntry>>,
     pub(crate) active_konata_tile: Option<KonataTileId>,
+    /// Runtime-only X-axis (time) synchronization state coupling the primary waveform viewport
+    /// with the Konata "Synchronize scroll" group.
+    pub(crate) viewport_sync: ViewportSyncState,
     pub(crate) next_load_request_id: u64,
 
     // Only used for testing
@@ -227,6 +231,7 @@ impl SystemState {
             konata_runtime: HashMap::new(),
             konata_models: HashMap::new(),
             active_konata_tile: None,
+            viewport_sync: ViewportSyncState::default(),
             next_load_request_id: 1,
             #[cfg(feature = "performance_plot")]
             rendering_cpu_times: VecDeque::new(),

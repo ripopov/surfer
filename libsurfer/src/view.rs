@@ -125,6 +125,12 @@ impl eframe::App for SystemState {
         #[cfg(target_arch = "wasm32")]
         self.handle_wasm_external_messages();
 
+        // Keep the Konata "Synchronize scroll" group and the primary waveform viewport showing the
+        // same time window. Runs after messages so this frame's zoom/pan is already applied.
+        if self.synchronize_konata_wave_viewports() {
+            ui.request_repaint();
+        }
+
         let viewport_is_moving = if let Some(waves) = &mut self.user.waves {
             let mut is_moving = false;
             for vp in &mut waves.viewports {

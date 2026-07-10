@@ -3209,6 +3209,46 @@ snapshot_ui! {konata_pipeline_minimap_view, || {
     state
 }}
 
+snapshot_ui! {konata_pipeline_waveform_sync_view, || {
+    let mut state = konata_snapshot_state();
+    // Show the instruction transactions and an explicit time ruler in the waveform pane so the
+    // shared time window is visible in both panes at once. (The snapshot harness forces the
+    // *default* timeline off, so add an explicit `TimeLine` item.)
+    state.update(Message::AddTimeLine(None));
+    state.update(Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(
+        StreamId(1),
+        GeneratorId(10),
+        "instruction".to_string(),
+    )));
+
+    let tile_id = *state.user.konata_tiles.keys().next().unwrap();
+    {
+        let tile = state.user.konata_tiles.get_mut(&tile_id).unwrap();
+        tile.config.synchronize_scroll = true;
+        tile.config.sync_group = Some(0);
+        tile.config.splitter_px = 140.0;
+        tile.viewport.top_visible_row = 96.0;
+        tile.viewport.set_left_tick(640);
+        tile.viewport.px_per_tick = 16.0;
+    }
+    // Approximate the Konata canvas width in the horizontal split so the sync driver couples the
+    // waveform viewport onto the Konata tile's time window before rendering. The driver runs in
+    // the real per-frame loop; here we invoke it directly since the snapshot harness only calls
+    // `draw`.
+    state
+        .konata_runtime
+        .entry(tile_id)
+        .or_default()
+        .canvas_size = Vec2::new(494.0, 640.0);
+    assert!(
+        state.synchronize_konata_wave_viewports(),
+        "synchronization should move the waveform viewport onto the Konata window"
+    );
+
+    show_snapshot_panes(&mut state, vec![SurferPane::Waveform, SurferPane::Konata(tile_id)]);
+    state
+}}
+
 snapshot_ui! {konata_pipeline_hosted_startup_view, || {
     let mut state = SystemState::new_default_config()
         .unwrap()

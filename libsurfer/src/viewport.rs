@@ -353,17 +353,9 @@ impl Viewport {
         target_right: Relative,
         num_timestamps: &BigInt,
     ) {
-        let rel_min_width = self.min_width.relative(num_timestamps);
-
-        if (target_right - target_left) <= rel_min_width + Relative(f64::EPSILON) {
-            let center = (target_left + target_right) * 0.5;
-            self.set_viewport_to_clipped_no_width_check(
-                center - rel_min_width,
-                center + rel_min_width,
-            );
-        } else {
-            self.set_viewport_to_clipped_no_width_check(target_left, target_right);
-        }
+        let (left, right) = self.clipped(target_left, target_right, num_timestamps);
+        self.set_target_left(left);
+        self.set_target_right(right);
     }
 
     fn set_viewport_to_clipped_no_width_check(
@@ -371,6 +363,33 @@ impl Viewport {
         target_left: Relative,
         target_right: Relative,
     ) {
+        let (left, right) = self.clipped_no_width_check(target_left, target_right);
+        self.set_target_left(left);
+        self.set_target_right(right);
+    }
+
+    /// The range that [`Self::set_viewport_to_clipped`] would settle on, without moving anything.
+    fn clipped(
+        &self,
+        target_left: Relative,
+        target_right: Relative,
+        num_timestamps: &BigInt,
+    ) -> (Relative, Relative) {
+        let rel_min_width = self.min_width.relative(num_timestamps);
+
+        if (target_right - target_left) <= rel_min_width + Relative(f64::EPSILON) {
+            let center = (target_left + target_right) * 0.5;
+            self.clipped_no_width_check(center - rel_min_width, center + rel_min_width)
+        } else {
+            self.clipped_no_width_check(target_left, target_right)
+        }
+    }
+
+    fn clipped_no_width_check(
+        &self,
+        target_left: Relative,
+        target_right: Relative,
+    ) -> (Relative, Relative) {
         let width = target_right - target_left;
 
         let abs_min = Relative(-self.edge_space);
@@ -379,18 +398,62 @@ impl Viewport {
         let max_right = Relative(1.0) + width * self.edge_space;
         let min_left = -width * self.edge_space;
         if width > (abs_max - abs_min) {
-            self.set_target_left(abs_min);
-            self.set_target_right(abs_max);
+            (abs_min, abs_max)
         } else if target_left < min_left {
-            self.set_target_left(min_left);
-            self.set_target_right(min_left + width);
+            (min_left, min_left + width)
         } else if target_right > max_right {
-            self.set_target_left(max_right - width);
-            self.set_target_right(max_right);
+            (max_right - width, max_right)
         } else {
-            self.set_target_left(target_left);
-            self.set_target_right(target_right);
+            (target_left, target_right)
         }
+    }
+
+    /// The absolute time range currently displayed by this viewport.
+    #[must_use]
+    pub fn absolute_range(&self, num_timestamps: &BigInt) -> (Absolute, Absolute) {
+        (
+            self.curr_left.absolute(num_timestamps),
+            self.curr_right.absolute(num_timestamps),
+        )
+    }
+
+    /// The absolute time range this viewport would settle on if asked to show `left..right`,
+    /// after the same minimum-width and edge clipping that interactive zoom and pan apply.
+    #[must_use]
+    pub fn clip_absolute_range(
+        &self,
+        left: Absolute,
+        right: Absolute,
+        num_timestamps: &BigInt,
+    ) -> (Absolute, Absolute) {
+        let (left, right) = self.clipped(
+            left.relative(num_timestamps),
+            right.relative(num_timestamps),
+            num_timestamps,
+        );
+        (
+            left.absolute(num_timestamps),
+            right.absolute(num_timestamps),
+        )
+    }
+
+    /// Show `left..right` immediately, cancelling any in-flight easing movement.
+    ///
+    /// Unlike [`Self::zoom_to_range`] this ignores [`Self::move_strategy`], because the range is
+    /// driven by another view that has already animated the movement.
+    pub fn set_absolute_range(&mut self, left: Absolute, right: Absolute, num_timestamps: &BigInt) {
+        let (left, right) = self.clipped(
+            left.relative(num_timestamps),
+            right.relative(num_timestamps),
+            num_timestamps,
+        );
+        self.curr_left = left;
+        self.curr_right = right;
+        self.target_left = left;
+        self.target_right = right;
+        self.move_start_left = left;
+        self.move_start_right = right;
+        self.move_duration = None;
     }
 
     #[inline]
@@ -701,5 +764,32 @@ mod tests {
             expected_relative_width,
             actual_width
         );
+    }
+
+    #[test]
+    fn set_absolute_range_round_trips_and_cancels_movement() {
+        let n = bi(1000);
+        let mut vp = Viewport {
+            move_strategy: ViewportStrategy::EaseInOut { duration: 0.3 },
+            ..Default::default()
+        };
+        vp.set_absolute_range(Absolute(200.0), Absolute(400.0), &n);
+        assert!(!vp.is_moving(), "sync must snap, not animate");
+        let (left, right) = vp.absolute_range(&n);
+        assert!((left.0 - 200.0).abs() < 1e-6);
+        assert!((right.0 - 400.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn clip_absolute_range_matches_zoom_to_range() {
+        let n = bi(1000);
+        let mut moved = Viewport::default();
+        moved.zoom_to_range(&bi(200), &bi(400), &n);
+        let (left, right) = moved.absolute_range(&n);
+
+        let predicted =
+            Viewport::default().clip_absolute_range(Absolute(200.0), Absolute(400.0), &n);
+        assert!((predicted.0.0 - left.0).abs() < 1e-6);
+        assert!((predicted.1.0 - right.0).abs() < 1e-6);
     }
 }

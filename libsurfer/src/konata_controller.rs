@@ -18,6 +18,16 @@ use crate::{
 
 use ftr_parser::types::{GeneratorId, StreamId, Transaction};
 
+/// Whether a Konata tile participates in the waveform-linked synchronization group (group 0),
+/// which the "Synchronize scroll" checkbox joins. Legacy state files that only set
+/// `synchronize_scroll` are treated as group 0.
+fn konata_waveform_sync_enabled(tile: &KonataTileState) -> bool {
+    tile.config
+        .sync_group
+        .or(tile.config.synchronize_scroll.then_some(0))
+        == Some(0)
+}
+
 fn send_konata_find_result(
     sender: &std::sync::mpsc::Sender<Message>,
     tile_id: KonataTileId,
@@ -831,6 +841,116 @@ impl SystemState {
 
     pub(crate) fn active_konata_model(&self, tile_id: KonataTileId) -> Option<Arc<KonataModel>> {
         self.konata_runtime.get(&tile_id)?.entry.as_ref()?.model()
+    }
+
+    /// The representative Konata tile of the waveform-linked synchronization group (group 0),
+    /// chosen deterministically as the lowest tile id with a drawn canvas. Its siblings follow it
+    /// through [`crate::konata::synchronize_tiles`], so bridging the waveform to this one tile is
+    /// enough to keep the whole group's time axis in step.
+    fn waveform_sync_konata_tile(&self) -> Option<KonataTileId> {
+        self.user
+            .konata_tiles
+            .iter()
+            .filter(|(_, tile)| konata_waveform_sync_enabled(tile))
+            .filter(|(id, _)| {
+                self.konata_runtime
+                    .get(id)
+                    .is_some_and(|runtime| runtime.canvas_size.x > 0.0)
+            })
+            .map(|(id, _)| *id)
+            .min_by_key(|id| id.0)
+    }
+
+    /// Keep the primary waveform viewport and the Konata "Synchronize scroll" group showing the
+    /// same time window on the X axis. Called once per frame after messages are applied, so both
+    /// the waveform viewports and the Konata tiles reflect this frame's user input.
+    ///
+    /// Returns `true` when a viewport was moved, so the caller can request a repaint.
+    pub(crate) fn synchronize_konata_wave_viewports(&mut self) -> bool {
+        use crate::viewport::Absolute;
+        use crate::viewport_sync::SyncParticipant;
+
+        // The feature is off unless at least one Konata tile opts in to group 0.
+        let group_present = self
+            .user
+            .konata_tiles
+            .values()
+            .any(konata_waveform_sync_enabled);
+        if !group_present {
+            self.viewport_sync = crate::viewport_sync::ViewportSyncState::default();
+            return false;
+        }
+
+        let Some(waves) = self.user.waves.as_ref() else {
+            return false;
+        };
+        if waves.viewports.is_empty() {
+            return false;
+        }
+        let num_timestamps = waves.safe_canvas_num_timestamps();
+
+        let rep = self.waveform_sync_konata_tile();
+
+        // Snapshot each participant's currently visible window (raw trace ticks).
+        let mut participants: Vec<(SyncParticipant, (f64, f64))> = Vec::new();
+        let (wave_left, wave_right) = waves.viewports[0].absolute_range(&num_timestamps);
+        participants.push((
+            SyncParticipant::Waveform(0),
+            (wave_left.inner(), wave_right.inner()),
+        ));
+        if let Some(rep) = rep {
+            let width = self
+                .konata_runtime
+                .get(&rep)
+                .map_or(0.0, |runtime| runtime.canvas_size.x);
+            if let Some(tile) = self.user.konata_tiles.get(&rep) {
+                participants.push((
+                    SyncParticipant::Konata(rep),
+                    tile.viewport.visible_tick_range(width),
+                ));
+            }
+        }
+
+        let primary = rep.map(SyncParticipant::Konata);
+        let targets = self.viewport_sync.arbitrate(&participants, primary);
+
+        let mut waveform_changed = false;
+        let mut any_changed = false;
+        for (participant, (left, right)) in targets {
+            any_changed = true;
+            match participant {
+                SyncParticipant::Waveform(idx) => {
+                    let Some(waves) = self.user.waves.as_mut() else {
+                        continue;
+                    };
+                    let Some(viewport) = waves.viewports.get_mut(idx) else {
+                        continue;
+                    };
+                    viewport.set_absolute_range(Absolute(left), Absolute(right), &num_timestamps);
+                    let (actual_left, actual_right) = viewport.absolute_range(&num_timestamps);
+                    self.viewport_sync
+                        .record_applied(participant, (actual_left.inner(), actual_right.inner()));
+                    waveform_changed = true;
+                }
+                SyncParticipant::Konata(id) => {
+                    let width = self
+                        .konata_runtime
+                        .get(&id)
+                        .map_or(0.0, |runtime| runtime.canvas_size.x);
+                    let Some(tile) = self.user.konata_tiles.get_mut(&id) else {
+                        continue;
+                    };
+                    tile.viewport.set_visible_tick_range(left, right, width);
+                    let actual = tile.viewport.visible_tick_range(width);
+                    self.viewport_sync.record_applied(participant, actual);
+                }
+            }
+        }
+
+        if waveform_changed {
+            self.invalidate_draw_commands();
+        }
+        any_changed
     }
 
     fn move_konata_viewport(

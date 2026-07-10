@@ -92,6 +92,27 @@ impl KonataViewport {
         self.set_left(anchor_tick - anchor_x / self.px_per_tick);
     }
 
+    /// The tick range covered by a canvas `canvas_width_px` pixels wide.
+    #[must_use]
+    pub fn visible_tick_range(self, canvas_width_px: f32) -> (f64, f64) {
+        let left = self.left_value();
+        (left, left + f64::from(canvas_width_px) / self.px_per_tick)
+    }
+
+    /// Fit `left..right` into a canvas `canvas_width_px` pixels wide, leaving rows untouched.
+    ///
+    /// The zoom needed to show a very short range may exceed [`MAX_PX_PER_TICK`], in which case
+    /// the left edge is honoured and the range is widened.
+    pub fn set_visible_tick_range(&mut self, left: f64, right: f64, canvas_width_px: f32) {
+        let span = right - left;
+        if !span.is_finite() || span <= 0.0 || !left.is_finite() || canvas_width_px <= 0.0 {
+            return;
+        }
+        self.px_per_tick =
+            (f64::from(canvas_width_px) / span).clamp(MIN_PX_PER_TICK, MAX_PX_PER_TICK);
+        self.set_left(left);
+    }
+
     pub fn align_row(&mut self, begin: u64, visible_row: usize) {
         self.left_tick = i64::try_from(begin).unwrap_or(i64::MAX);
         self.left_frac = 0.0;
@@ -165,6 +186,36 @@ mod tests {
         assert_eq!(viewport.px_per_tick, KonataViewport::default().px_per_tick);
         assert_eq!(viewport.top_visible_row, before_top);
         assert_eq!(viewport.row_height_px, before_row_height);
+    }
+
+    #[test]
+    fn visible_tick_range_round_trips_through_set() {
+        let mut viewport = KonataViewport::default();
+        viewport.set_visible_tick_range(120.0, 320.0, 400.0);
+        let (left, right) = viewport.visible_tick_range(400.0);
+        assert!((left - 120.0).abs() < 1e-9);
+        assert!((right - 320.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn set_visible_tick_range_ignores_degenerate_input() {
+        let mut viewport = KonataViewport::default();
+        let before = viewport;
+        viewport.set_visible_tick_range(50.0, 50.0, 400.0); // zero-width
+        assert_eq!(viewport, before);
+        viewport.set_visible_tick_range(10.0, 20.0, 0.0); // zero canvas width
+        assert_eq!(viewport, before);
+        viewport.set_visible_tick_range(f64::NAN, 20.0, 400.0);
+        assert_eq!(viewport, before);
+    }
+
+    #[test]
+    fn set_visible_tick_range_clamps_extreme_zoom() {
+        let mut viewport = KonataViewport::default();
+        // A one-tick window over a wide canvas would exceed MAX_PX_PER_TICK; the left edge is kept.
+        viewport.set_visible_tick_range(100.0, 101.0, 100_000.0);
+        assert_eq!(viewport.px_per_tick, MAX_PX_PER_TICK);
+        assert_eq!(viewport.left_value(), 100.0);
     }
 
     #[test]
