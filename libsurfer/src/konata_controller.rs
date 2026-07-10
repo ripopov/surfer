@@ -93,6 +93,24 @@ impl SystemState {
             Message::OpenKonataView { source, generator } => {
                 self.open_konata_tile(source, generator)?;
             }
+            Message::OpenFirstKonataView => {
+                let (source, generator) = self.first_konata_generator()?;
+                self.open_konata_tile(source, generator)?;
+            }
+            Message::SetActiveKonataMinimap(show) => {
+                let tile_id = self.active_konata_tile?;
+                self.user
+                    .konata_tiles
+                    .get_mut(&tile_id)?
+                    .config
+                    .show_minimap = show;
+                self.invalidate_draw_commands();
+            }
+            Message::ShowActiveKonataOnly => {
+                let tile_id = self.active_konata_tile?;
+                self.user.tile_tree.show_only_konata(tile_id);
+                self.invalidate_draw_commands();
+            }
             Message::BuildKonataModel { tile_id } => {
                 self.build_konata_model(tile_id)?;
             }
@@ -318,6 +336,46 @@ impl SystemState {
             _ => unreachable!("non-Konata message dispatched to Konata controller"),
         }
         Some(())
+    }
+
+    fn first_konata_generator(&self) -> Option<(SourceId, TransactionStreamRef)> {
+        let waves = self.user.waves.as_ref()?;
+        waves
+            .source_ids()
+            .into_iter()
+            .flat_map(|source| {
+                waves
+                    .transactions_for_source(source)
+                    .into_iter()
+                    .flat_map(move |transactions| {
+                        transactions
+                            .get_generators()
+                            .into_iter()
+                            .filter_map(move |generator| {
+                                transactions
+                                    .event_index()
+                                    .events_generator_of(generator.id)
+                                    .map(|_| {
+                                        (
+                                            source,
+                                            TransactionStreamRef::new_gen(
+                                                generator.stream_id,
+                                                generator.id,
+                                                generator.name.clone(),
+                                            ),
+                                        )
+                                    })
+                            })
+                    })
+            })
+            .min_by_key(|(source, generator)| {
+                (
+                    source.0,
+                    generator.stream_id.0,
+                    generator.gen_id.map_or(u64::MAX, |id| id.0),
+                    generator.name.clone(),
+                )
+            })
     }
 
     fn open_konata_tile(

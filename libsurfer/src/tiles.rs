@@ -179,6 +179,14 @@ impl SurferTileTree {
         id
     }
 
+    /// Replaces the central layout with one tab containing `konata_tile_id`.
+    pub fn show_only_konata(&mut self, konata_tile_id: KonataTileId) {
+        let mut tiles = Tiles::default();
+        let pane = tiles.insert_pane(SurferPane::Konata(konata_tile_id));
+        let root = tiles.insert_tab_tile(vec![pane]);
+        self.tree = Tree::new("surfer_tiles", root, tiles);
+    }
+
     /// Removes a tile by its TileId.
     /// The waveform tile cannot be removed.
     fn remove_tile(&mut self, tile_id: TileId) {
@@ -475,5 +483,25 @@ mod tests {
         let pane = tiles.insert_pane(SurferPane::Konata(KonataTileId(1)));
         tree.tree = Tree::new("single_konata", pane, tiles);
         assert!(!tree.is_single_waveform());
+    }
+
+    #[test]
+    fn show_only_konata_removes_the_waveform_pane() {
+        let mut tree = SurferTileTree::new();
+        tree.show_only_konata(KonataTileId(7));
+
+        let panes = tree
+            .tree
+            .tiles
+            .iter()
+            .filter_map(|(_, tile)| match tile {
+                Tile::Pane(pane) => Some(pane),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            panes.as_slice(),
+            [SurferPane::Konata(KonataTileId(7))]
+        ));
     }
 }

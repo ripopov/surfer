@@ -9,6 +9,19 @@
     <!-- change this to your project name -->
     <title>Surfer</title>
 
+    <!-- Open the hosted pipeline trace by default while preserving explicit URL parameters. -->
+    <script>
+        if (!window.location.search) {
+            const params = new URLSearchParams();
+            params.set('load_url', new URL('kanata-sample-2.ftr', window.location.href).href);
+            params.set(
+                'startup_commands',
+                'konata_view_first;konata_minimap_show;konata_only'
+            );
+            window.history.replaceState(null, '', '?' + params.toString());
+        }
+    </script>
+
     <!-- config for our rust wasm binary. go to https://trunkrs.dev/assets/#rust for more customization -->
     <link data-trunk rel="rust" data-wasm-opt="2" data-typescript />
     <!-- this is the base url relative to which other urls will be constructed. trunk will insert this from the public-url option -->
@@ -27,6 +40,7 @@
 
     <link data-trunk rel="copy-file", href="assets/integration.js" />
     <link data-trunk rel="copy-file" href="assets/sw.js" />
+    <link data-trunk rel="copy-file" href="../examples/kanata-sample-2.ftr" />
     <link data-trunk rel="copy-file" href="assets/manifest.json" />
 
     <link rel="manifest" href="manifest.json">
