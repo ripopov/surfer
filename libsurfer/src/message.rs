@@ -610,6 +610,12 @@ pub enum Message {
         source: SourceId,
         generator: TransactionStreamRef,
     },
+    /// Open the first pipeline projection available after a trace has loaded.
+    OpenFirstKonataView,
+    /// Set minimap visibility on the active instruction-pipeline tile.
+    SetActiveKonataMinimap(bool),
+    /// Make the active instruction-pipeline tile the only central pane.
+    ShowActiveKonataOnly,
     /// Open a model-backed stage-event table, optionally filtered to one
     /// parent instruction, without loading the generic transaction graph.
     OpenKonataEventTable {

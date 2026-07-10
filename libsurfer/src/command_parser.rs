@@ -520,6 +520,7 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
             "exit",
         ]
     };
+    commands.extend(["konata_view_first", "konata_minimap_show", "konata_only"]);
     if !surver_file_names.is_empty() {
         commands.push("surver_select_file");
         commands.push("surver_switch_file");
@@ -1177,6 +1178,11 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                             })
                     }),
                 ),
+                "konata_view_first" => Some(Command::Terminal(Message::OpenFirstKonataView)),
+                "konata_minimap_show" => {
+                    Some(Command::Terminal(Message::SetActiveKonataMinimap(true)))
+                }
+                "konata_only" => Some(Command::Terminal(Message::ShowActiveKonataOnly)),
                 "konata_goto_row" | "j" => single_word(
                     vec![],
                     Box::new(|word| {

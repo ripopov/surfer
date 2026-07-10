@@ -3209,6 +3209,24 @@ snapshot_ui! {konata_pipeline_minimap_view, || {
     state
 }}
 
+snapshot_ui! {konata_pipeline_hosted_startup_view, || {
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/kanata-sample-2.ftr")
+                    .try_into()
+                    .unwrap(),
+            )),
+            startup_commands: vec!["konata_view_first;konata_minimap_show;konata_only".to_string()],
+            ..Default::default()
+        });
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state
+}}
+
 snapshot_ui! {konata_pipeline_overlay_view, || {
     let mut state = konata_snapshot_state();
     state.update(Message::OpenKonataView {

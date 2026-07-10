@@ -467,6 +467,52 @@ fn command_opens_named_pipeline_generator() {
 }
 
 #[test]
+fn startup_commands_open_minimap_in_a_konata_only_layout() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _guard = runtime.enter();
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/kanata-sample-2.ftr")
+                    .try_into()
+                    .unwrap(),
+            )),
+            startup_commands: vec!["konata_view_first;konata_minimap_show;konata_only".to_string()],
+            ..Default::default()
+        });
+
+    crate::tests::snapshot::wait_for_waves_fully_loaded(&mut state, 10);
+
+    let (&tile_id, tile) = state
+        .user
+        .konata_tiles
+        .iter()
+        .next()
+        .expect("startup Konata tile");
+    assert_eq!(state.user.konata_tiles.len(), 1);
+    assert!(tile.config.show_minimap);
+    let panes = state
+        .user
+        .tile_tree
+        .tree
+        .tiles
+        .iter()
+        .filter_map(|(_, tile)| match tile {
+            egui_tiles::Tile::Pane(pane) => Some(pane),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(matches!(panes.as_slice(), [SurferPane::Konata(id)] if *id == tile_id));
+}
+
+#[test]
 fn asynchronous_find_wraps_and_keeps_last_valid_results_on_error() {
     let (runtime, mut state) = loaded_sample();
     let _guard = runtime.enter();

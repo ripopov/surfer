@@ -3104,6 +3104,9 @@ impl SystemState {
                 self.handle_table_message(message)?;
             }
             message @ (Message::OpenKonataView { .. }
+            | Message::OpenFirstKonataView
+            | Message::SetActiveKonataMinimap(_)
+            | Message::ShowActiveKonataOnly
             | Message::BuildKonataModel { .. }
             | Message::KonataModelBuilt { .. }
             | Message::KonataModelProgress { .. }
