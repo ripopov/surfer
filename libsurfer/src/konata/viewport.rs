@@ -76,7 +76,14 @@ impl KonataViewport {
     }
 
     pub fn zoom_at(&mut self, factor: f64, anchor_x: f64, anchor_y: f64) {
-        let factor = factor.clamp(0.01, 100.0);
+        // Both axes zoom in lockstep: once either axis reaches its limit, the
+        // combined zoom stops instead of continuing on the other axis.
+        let factor = factor
+            .clamp(0.01, 100.0)
+            .min(MAX_PX_PER_TICK / self.px_per_tick)
+            .min(MAX_ROW_HEIGHT / self.row_height_px)
+            .max(MIN_PX_PER_TICK / self.px_per_tick)
+            .max(MIN_ROW_HEIGHT / self.row_height_px);
         let anchor_tick = self.left_value() + anchor_x / self.px_per_tick;
         let anchor_row = self.top_visible_row + anchor_y / self.row_height_px;
         self.px_per_tick = (self.px_per_tick * factor).clamp(MIN_PX_PER_TICK, MAX_PX_PER_TICK);
@@ -161,6 +168,26 @@ mod tests {
         viewport.zoom_at(2.0, 240.0, 120.0);
         assert!((viewport.x_to_tick(240.0, 0.0) - before_tick).abs() < 1e-9);
         assert!((viewport.y_to_visible_row(120.0, 0.0) - before_row).abs() < 1e-9);
+    }
+
+    #[test]
+    fn combined_zoom_stops_when_either_axis_reaches_its_limit() {
+        let mut viewport = KonataViewport::default();
+        // Zoom in far past the row-height limit.
+        for _ in 0..32 {
+            viewport.zoom_at(2.0, 240.0, 120.0);
+        }
+        assert_eq!(viewport.row_height_px, MAX_ROW_HEIGHT);
+        // The horizontal axis must stop at the same time as the vertical one:
+        // the ratio between the two scales is preserved, not zoomed further.
+        let expected_px_per_tick = KonataViewport::default().px_per_tick * MAX_ROW_HEIGHT
+            / KonataViewport::default().row_height_px;
+        assert!((viewport.px_per_tick - expected_px_per_tick).abs() < 1e-9);
+
+        // Zooming out again moves both axes together from the first step.
+        viewport.zoom_at(0.5, 240.0, 120.0);
+        assert!((viewport.row_height_px - MAX_ROW_HEIGHT / 2.0).abs() < 1e-9);
+        assert!((viewport.px_per_tick - expected_px_per_tick / 2.0).abs() < 1e-9);
     }
 
     #[test]
