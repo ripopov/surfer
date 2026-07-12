@@ -9,7 +9,7 @@
 use ecolor::Color32;
 use egui::{
     Align, CentralPanel, FontSelection, Frame, Layout, Panel, Pos2, Rect, RichText, ScrollArea,
-    Sense, SidePanel, TextStyle, Ui, UiBuilder, Vec2, WidgetText,
+    Sense, TextStyle, Ui, UiBuilder, Vec2, WidgetText,
 };
 use emath::{GuiRounding, RectTransform};
 use epaint::text::LayoutJob;
@@ -100,9 +100,9 @@ impl SystemState {
             return;
         }
 
-        SidePanel::left(ui.id().with("focus id list"))
-            .default_width(40.)
-            .width_range(40.0..=max_width)
+        Panel::left(ui.id().with("focus id list"))
+            .default_size(40.)
+            .size_range(40.0..=max_width)
             .show_inside(ui, |ui| {
                 let response = ScrollArea::both()
                     .vertical_scroll_offset(scroll_offset)
@@ -127,7 +127,7 @@ impl SystemState {
         scroll_offset: f32,
         max_width: f32,
     ) {
-        SidePanel::left(ui.id().with("variable list"))
+        Panel::left(ui.id().with("variable list"))
             .frame(
                 Frame::default()
                     .inner_margin(0)
@@ -135,8 +135,8 @@ impl SystemState {
                     .fill(self.user.config.theme.secondary_ui_color.background)
                     .stroke(Stroke::NONE),
             )
-            .default_width(100.)
-            .width_range(100.0..=max_width)
+            .default_size(100.)
+            .size_range(100.0..=max_width)
             .show_inside(ui, |ui| {
                 ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
                 ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
@@ -180,7 +180,7 @@ impl SystemState {
         scroll_offset: f32,
         max_width: f32,
     ) {
-        SidePanel::left(ui.id().with("variable values"))
+        Panel::left(ui.id().with("variable values"))
             .frame(
                 Frame::default()
                     .inner_margin(0)
@@ -188,8 +188,8 @@ impl SystemState {
                     .fill(self.user.config.theme.secondary_ui_color.background)
                     .stroke(Stroke::NONE),
             )
-            .default_width(100.)
-            .width_range(10.0..=max_width)
+            .default_size(100.)
+            .size_range(10.0..=max_width)
             .show_inside(ui, |ui| {
                 ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
                 ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
@@ -223,9 +223,9 @@ impl SystemState {
         ui.style_mut().visuals.widgets.noninteractive.bg_stroke = viewport_stroke;
 
         for viewport_idx in 1..number_of_viewports {
-            SidePanel::right(ui.id().with(format!("view port {viewport_idx}")))
-                .default_width(default_width)
-                .width_range(30.0..=available_width)
+            Panel::right(ui.id().with(format!("view port {viewport_idx}")))
+                .default_size(default_width)
+                .size_range(30.0..=available_width)
                 .frame(Frame {
                     inner_margin: Margin::ZERO,
                     outer_margin: Margin::ZERO,

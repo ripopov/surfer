@@ -88,9 +88,9 @@ impl SystemState {
 
         let events_enabled = self.user.config.behavior.ftr_events_enabled();
         let viewport_idx = waves.last_active_viewport_idx;
-        egui::SidePanel::right(parent_ui.id().with("Transaction Details"))
-            .default_width(330.)
-            .width_range(10.0..=max_width)
+        egui::Panel::right(parent_ui.id().with("Transaction Details"))
+            .default_size(330.)
+            .size_range(10.0..=max_width)
             .show_inside(parent_ui, |ui| {
                 ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                 self.handle_pointer_in_ui(ui, msgs);
