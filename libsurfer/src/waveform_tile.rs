@@ -103,7 +103,7 @@ impl SystemState {
         Panel::left(ui.id().with("focus id list"))
             .default_size(40.)
             .size_range(40.0..=max_width)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 let response = ScrollArea::both()
                     .vertical_scroll_offset(scroll_offset)
                     .show(ui, |ui| {
@@ -137,7 +137,7 @@ impl SystemState {
             )
             .default_size(100.)
             .size_range(100.0..=max_width)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
                 ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                 let text_margin = Self::item_text_margin(ui);
@@ -190,7 +190,7 @@ impl SystemState {
             )
             .default_size(100.)
             .size_range(10.0..=max_width)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
                 ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                 let response = ScrollArea::both()
@@ -231,7 +231,7 @@ impl SystemState {
                     outer_margin: Margin::ZERO,
                     ..Default::default()
                 })
-                .show_inside(ui, |ui| {
+                .show(ui, |ui| {
                     ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
                     self.draw_items(ui, msgs, viewport_idx);
                 });
@@ -272,7 +272,7 @@ impl SystemState {
                     .fill(self.user.config.theme.secondary_ui_color.background)
                     .stroke(std_stroke),
             )
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 waves.draw_annotation_list(ui, msgs, &time_formatter, annotation_groups);
             });
 
@@ -293,7 +293,7 @@ impl SystemState {
                 outer_margin: Margin::ZERO,
                 ..Default::default()
             })
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.set_clip_rect(ui.clip_rect().intersect(tile_clip));
                 self.draw_items(ui, msgs, 0);
                 if ui.input(|i| i.pointer.primary_clicked()) && !self.click_handled {
@@ -306,7 +306,7 @@ impl SystemState {
     pub(crate) fn draw_welcome_screen(&mut self, ui: &mut Ui, max_width: f32, max_height: f32) {
         CentralPanel::default()
             .frame(Frame::NONE.fill(self.user.config.theme.canvas_colors.background))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.add_space(max_height * 0.1);
                 ui.vertical_centered(|ui| {
                     ui.label(RichText::new("🏄 Surfer").monospace().size(24.));

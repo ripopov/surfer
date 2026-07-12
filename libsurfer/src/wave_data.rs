@@ -19,9 +19,7 @@ use crate::displayed_item_tree::{DisplayedItemTree, ItemIndex, TargetPosition, V
 use crate::graphics::{Graphic, GraphicId};
 use crate::item_drawing_info::ItemDrawingInfo;
 use crate::source::{LoadRequestId, SourceId, SourceStore, SourceTransactionRef, TimeDomain};
-use crate::transaction_container::{
-    StreamScopeRef, TransactionContainer, TransactionRef, TransactionStreamRef,
-};
+use crate::transaction_container::{StreamScopeRef, TransactionContainer, TransactionStreamRef};
 use crate::transaction_events::EventDisplayMode;
 use crate::transactions::calculate_rows_of_stream;
 use crate::translation::{DynTranslator, TranslatorList, VariableInfoExt};

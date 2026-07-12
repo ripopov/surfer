@@ -69,7 +69,7 @@ impl DrawConfig {
 }
 
 fn panel_slot_visible(ui: &mut Ui, visible: bool) -> bool {
-    // Panel::show_inside consumes one parent auto-ID. Reserve the same slot while hidden so
+    // Panel::show consumes one parent auto-ID. Reserve the same slot while hidden so
     // toggling an optional panel does not change the IDs of every panel that follows it.
     if !visible {
         ui.skip_ahead_auto_ids(1);
@@ -220,7 +220,7 @@ mod tests {
 
         let _ = ctx.run_ui(input, |ui| {
             assert!(panel_slot_visible(ui, true));
-            Panel::bottom("optional panel").show_inside(ui, |_| {});
+            Panel::bottom("optional panel").show(ui, |_| {});
             following_id.set(Some(ui.label("following").id));
         });
 
@@ -344,7 +344,7 @@ impl SystemState {
                     fill: self.user.config.theme.primary_ui_color.background,
                     ..Default::default()
                 })
-                .show_inside(ui, |ui| {
+                .show(ui, |ui| {
                     self.user.sidepanel_width = Some(ui.clip_rect().width());
                     match self.hierarchy_style() {
                         HierarchyStyle::Separate => self.separate(ui, &mut msgs),
@@ -376,8 +376,8 @@ impl SystemState {
             self.draw_waveform_tile(&ctx, ui, &mut msgs);
         } else {
             CentralPanel::default()
-                .frame(Frame::NONE)
-                .show_inside(ui, |ui| {
+                .frame(Frame::NONE.fill(self.user.config.theme.canvas_colors.background))
+                .show(ui, |ui| {
                     self.draw_tiles(&ctx, &mut msgs, ui);
                 });
         }

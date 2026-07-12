@@ -428,7 +428,8 @@ impl SystemState {
 
         if recursive && let Ok(children) = children {
             for child in children {
-                variables.append(&mut self.collect_scope_variables(source, &child, true, selection));
+                variables
+                    .append(&mut self.collect_scope_variables(source, &child, true, selection));
             }
         }
 

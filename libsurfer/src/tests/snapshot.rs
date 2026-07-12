@@ -3974,6 +3974,7 @@ snapshot_ui!(marker_set_then_remove_by_name, || {
         .unwrap()
         .with_params(StartupParams {
             waves: Some(WaveSource::File(wave_path)),
+            additional_waves: vec![],
             wcp_initiate: None,
             startup_commands: vec![],
         });
@@ -4003,6 +4004,7 @@ snapshot_ui!(marker_set_then_remove_by_number, || {
         .unwrap()
         .with_params(StartupParams {
             waves: Some(WaveSource::File(wave_path)),
+            additional_waves: vec![],
             wcp_initiate: None,
             startup_commands: vec![],
         });
@@ -4032,6 +4034,7 @@ snapshot_ui!(
             .unwrap()
             .with_params(StartupParams {
                 waves: Some(WaveSource::File(wave_path)),
+                additional_waves: vec![],
                 wcp_initiate: None,
                 startup_commands: vec![],
             });
