@@ -161,7 +161,7 @@ impl SystemState {
 pub fn start_logging() -> Result<()> {
     use std::io::stdout;
 
-    use tracing_subscriber::{Registry, fmt, layer::SubscriberExt};
+    use tracing_subscriber::{Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
     let filter =
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
@@ -174,7 +174,7 @@ pub fn start_logging() -> Result<()> {
         )
         .with(EguiLogger {}.with_filter(filter));
 
-    tracing::subscriber::set_global_default(subscriber).expect("unable to set global subscriber");
+    subscriber.try_init()?;
 
     Ok(())
 }
@@ -182,7 +182,7 @@ pub fn start_logging() -> Result<()> {
 /// Starts the logging and error handling. Can be used by unittests to get more insights.
 #[cfg(target_arch = "wasm32")]
 pub fn start_logging() -> Result<()> {
-    use tracing_subscriber::{Registry, fmt, layer::SubscriberExt};
+    use tracing_subscriber::{Registry, fmt, layer::SubscriberExt, util::SubscriberInitExt};
     use wasm_tracing::WasmLayer;
 
     let filter =
@@ -192,7 +192,7 @@ pub fn start_logging() -> Result<()> {
         .with(WasmLayer::default())
         .with(EguiLogger {}.with_filter(filter));
 
-    tracing::subscriber::set_global_default(subscriber).expect("unable to set global subscriber");
+    subscriber.try_init()?;
 
     Ok(())
 }
