@@ -68,6 +68,15 @@ impl DrawConfig {
     }
 }
 
+fn panel_slot_visible(ui: &mut Ui, visible: bool) -> bool {
+    // Panel::show_inside consumes one parent auto-ID. Reserve the same slot while hidden so
+    // toggling an optional panel does not change the IDs of every panel that follows it.
+    if !visible {
+        ui.skip_ahead_auto_ids(1);
+    }
+    visible
+}
+
 impl eframe::App for SystemState {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         #[cfg(feature = "performance_plot")]
@@ -189,6 +198,36 @@ impl eframe::App for SystemState {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn hidden_panel_slot_keeps_following_widget_id_stable() {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+            ..Default::default()
+        };
+        let following_id = Cell::new(None);
+
+        let _ = ctx.run_ui(input.clone(), |ui| {
+            assert!(!panel_slot_visible(ui, false));
+            following_id.set(Some(ui.label("following").id));
+        });
+        let id_without_panel = following_id.get().unwrap();
+
+        let _ = ctx.run_ui(input, |ui| {
+            assert!(panel_slot_visible(ui, true));
+            Panel::bottom("optional panel").show_inside(ui, |_| {});
+            following_id.set(Some(ui.label("following").id));
+        });
+
+        assert_eq!(following_id.get(), Some(id_without_panel));
+    }
+}
+
 impl SystemState {
     pub(crate) fn draw(&mut self, ui: &mut Ui, window_size: Option<Vec2>) -> Vec<Message> {
         let ctx = ui.ctx().clone();
@@ -262,15 +301,15 @@ impl SystemState {
             self.draw_marker_window(waves, &ctx, &mut msgs);
         }
 
-        if self
+        let show_menu = self
             .user
             .show_menu
-            .unwrap_or_else(|| self.user.config.layout.show_menu())
-        {
+            .unwrap_or_else(|| self.user.config.layout.show_menu());
+        if panel_slot_visible(ui, show_menu) {
             self.add_menu_panel(ui, &mut msgs);
         }
 
-        if self.show_toolbar() {
+        if panel_slot_visible(ui, self.show_toolbar()) {
             self.add_toolbar_panel(ui, &mut msgs);
         }
 
@@ -282,18 +321,22 @@ impl SystemState {
             self.draw_surver_file_window(&ctx, &mut msgs);
         }
 
-        if self.show_statusbar() {
+        if panel_slot_visible(ui, self.show_statusbar()) {
             self.add_statusbar_panel(ui, self.user.waves.as_ref(), &mut msgs);
         }
 
-        if let Some(waves) = &self.user.waves
-            && self.show_overview()
-            && !waves.items_tree.is_empty()
+        let overview_waves = self
+            .user
+            .waves
+            .as_ref()
+            .filter(|waves| self.show_overview() && !waves.items_tree.is_empty());
+        if panel_slot_visible(ui, overview_waves.is_some())
+            && let Some(waves) = overview_waves
         {
             self.add_overview_panel(ui, waves, &mut msgs);
         }
 
-        if self.show_hierarchy() {
+        if panel_slot_visible(ui, self.show_hierarchy()) {
             Panel::left("variable select left panel")
                 .default_size(300.)
                 .size_range(100.0..=max_width)
