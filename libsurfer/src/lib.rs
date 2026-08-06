@@ -1289,6 +1289,11 @@ impl SystemState {
                     .map_err(|e| error!("{e:#?}"))
                     .ok();
             }
+            Message::DroppedFileBytesLoaded(path, bytes) => {
+                self.load_from_dropped_bytes(path, bytes)
+                    .map_err(|e| error!("{e:#?}"))
+                    .ok();
+            }
             Message::StopProgressTracker => {
                 self.progress_tracker = None;
             }

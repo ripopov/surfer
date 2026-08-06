@@ -1,8 +1,9 @@
 use ecolor::Color32;
-use egui::epaint::Rgba;
 use egui::{FontId, PointerButton, Response, Sense, Ui};
 use emath::{Align2, Pos2, Rect, RectTransform, Vec2};
-use epaint::{CornerRadius, CubicBezierShape, PathShape, PathStroke, RectShape, Shape, Stroke};
+use epaint::{
+    CornerRadius, CubicBezierShape, PathShape, PathStroke, RectShape, Rgba, Shape, Stroke,
+};
 use eyre::WrapErr as _;
 use ftr_parser::types::{Transaction, TxGenerator};
 use itertools::Itertools;

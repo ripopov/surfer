@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use camino::Utf8PathBuf;
 use derive_more::Debug;
-use egui::{DroppedFile, Id, Rect};
+use egui::{DroppedFileHandle, Id, Rect};
 use emath::{Pos2, RectTransform, Vec2};
 use ftr_parser::types::Transaction;
 use num::BigInt;
@@ -224,8 +224,12 @@ pub enum Message {
     BlacklistTranslator(VariableRef, String),
     HideCommandPrompt,
     ShowCommandPrompt(String, Option<String>),
-    /// Message sent when file is loadedropped onto Surfer.
-    FileDropped(DroppedFile),
+    /// Message sent when file is dropped onto Surfer.
+    #[serde(skip)]
+    FileDropped(DroppedFileHandle),
+    #[serde(skip)]
+    /// Message sent when dropped-file bytes are asynchronously available.
+    DroppedFileBytesLoaded(Option<Utf8PathBuf>, Vec<u8>),
     #[serde(skip)]
     /// Message sent when download of a waveform file is complete.
     FileDownloaded(String, Bytes, LoadOptions),

@@ -133,7 +133,7 @@ pub(crate) fn render_and_compare_inner(
 
     // https://tokio.rs/tokio/topics/bridging
     // We want to run the gui in the main thread, but some long running tasks like
-    // laoading VCDs should be done asynchronously. We can't just use std::thread to
+    // loading VCDs should be done asynchronously. We can't just use std::thread to
     // do that due to wasm support, so we'll start a tokio runtime
     let runtime = tokio::runtime::Builder::new_current_thread()
         .worker_threads(1)
@@ -388,7 +388,8 @@ fn render_readme_screenshot() {
                     waves: Some(WaveSource::File(
                         get_project_root()
                             .unwrap()
-                            .join("examples/picorv32.vcd")
+                            .join("examples")
+                            .join("picorv32.vcd")
                             .try_into()
                             .unwrap(),
                     )),
@@ -527,7 +528,8 @@ snapshot_ui!(overview_can_be_hidden, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/counter.vcd")
+                    .join("examples")
+                    .join("counter.vcd")
                     .try_into()
                     .unwrap(),
             )),
@@ -562,7 +564,8 @@ snapshot_ui!(statusbar_can_be_hidden, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/counter.vcd")
+                    .join("examples")
+                    .join("counter.vcd")
                     .try_into()
                     .unwrap(),
             )),
@@ -592,7 +595,7 @@ snapshot_ui!(statusbar_can_be_hidden, || {
 
 snapshot_ui! {example_vcd_renders, || {
     let mut state = SystemState::new_default_config().unwrap().with_params(StartupParams {
-        waves: Some(WaveSource::File(get_project_root().unwrap().join("examples/counter.vcd").try_into().unwrap())),
+        waves: Some(WaveSource::File(get_project_root().unwrap().join("examples").join("counter.vcd").try_into().unwrap())),
         ..Default::default()
     });
 
@@ -655,7 +658,7 @@ snapshot_ui_with_file_and_msgs! {expand_all_scopes_works, "examples/counter.vcd"
 
 snapshot_ui! {resizing_the_canvas_redraws, || {
     let mut state = SystemState::new_default_config().unwrap().with_params(StartupParams {
-        waves: Some(WaveSource::File(get_project_root().unwrap().join("examples/counter.vcd").try_into().unwrap())),
+        waves: Some(WaveSource::File(get_project_root().unwrap().join("examples").join("counter.vcd").try_into().unwrap())),
         ..Default::default()
     });
 
@@ -1314,7 +1317,8 @@ snapshot_ui!(regex_error_indication, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/counter.vcd")
+                    .join("examples")
+                    .join("counter.vcd")
                     .try_into()
                     .unwrap(),
             )),
@@ -1381,7 +1385,8 @@ snapshot_ui!(fuzzy_signal_filter_works, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/picorv32.vcd")
+                    .join("examples")
+                    .join("picorv32.vcd")
                     .try_into()
                     .unwrap(),
             )),
@@ -1428,7 +1433,8 @@ snapshot_ui!(contain_signal_filter_works, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/picorv32.vcd")
+                    .join("examples")
+                    .join("picorv32.vcd")
                     .try_into()
                     .unwrap(),
             )),
@@ -1475,7 +1481,8 @@ snapshot_ui!(regex_signal_filter_works, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/picorv32.vcd")
+                    .join("examples")
+                    .join("picorv32.vcd")
                     .try_into()
                     .unwrap(),
             )),
@@ -1522,7 +1529,8 @@ snapshot_ui!(start_signal_filter_works, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/picorv32.vcd")
+                    .join("examples")
+                    .join("picorv32.vcd")
                     .try_into()
                     .unwrap(),
             )),
@@ -1569,7 +1577,8 @@ snapshot_ui!(case_sensitive_signal_filter_works, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/picorv32.vcd")
+                    .join("examples")
+                    .join("picorv32.vcd")
                     .try_into()
                     .unwrap(),
             )),
@@ -1617,7 +1626,8 @@ snapshot_ui!(signal_type_filter_works_1, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/many_sv_datatypes.fst")
+                    .join("examples")
+                    .join("many_sv_datatypes.fst")
                     .try_into()
                     .unwrap(),
             )),
@@ -1662,7 +1672,8 @@ snapshot_ui!(signal_type_filter_works_2, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/many_sv_datatypes.fst")
+                    .join("examples")
+                    .join("many_sv_datatypes.fst")
                     .try_into()
                     .unwrap(),
             )),
@@ -1708,7 +1719,8 @@ snapshot_ui!(signal_type_group_works, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/many_sv_datatypes.fst")
+                    .join("examples")
+                    .join("many_sv_datatypes.fst")
                     .try_into()
                     .unwrap(),
             )),
@@ -2084,7 +2096,9 @@ snapshot_ui!(signals_can_be_added_after_file_switch, || {
     let mut state = SystemState::new_default_config()
         .unwrap()
         .with_params(StartupParams {
-            waves: Some(WaveSource::File(project_root.join("examples/counter.vcd"))),
+            waves: Some(WaveSource::File(
+                project_root.join("examples").join("counter.vcd"),
+            )),
             ..Default::default()
         });
 
@@ -2100,7 +2114,7 @@ snapshot_ui!(signals_can_be_added_after_file_switch, || {
         VariableRef::from_hierarchy_string("tb.dut.counter"),
     ]));
     state.update(Message::LoadFile(
-        project_root.join("examples/counter2.vcd"),
+        project_root.join("examples").join("counter2.vcd"),
         LoadOptions::KeepAvailable,
     ));
 
@@ -2260,7 +2274,8 @@ snapshot_ui!(save_and_start_with_state, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/with_8_bit.vcd")
+                    .join("examples")
+                    .join("with_8_bit.vcd")
                     .try_into()
                     .unwrap(),
             )),
@@ -2325,7 +2340,8 @@ snapshot_ui!(save_and_start_with_state, || {
         waves: Some(WaveSource::File(
             get_project_root()
                 .unwrap()
-                .join("examples/with_8_bit.vcd")
+                .join("examples")
+                .join("with_8_bit.vcd")
                 .try_into()
                 .unwrap(),
         )),
@@ -2350,7 +2366,8 @@ snapshot_ui!(switch, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/with_8_bit.vcd")
+                    .join("examples")
+                    .join("with_8_bit.vcd")
                     .try_into()
                     .unwrap(),
             )),
@@ -2392,7 +2409,8 @@ snapshot_ui!(switch, || {
     state.update(Message::LoadFile(
         get_project_root()
             .unwrap()
-            .join("examples/with_1_bit.vcd")
+            .join("examples")
+            .join("with_1_bit.vcd")
             .try_into()
             .unwrap(),
         LoadOptions::KeepAll,
@@ -2420,7 +2438,8 @@ snapshot_ui!(switch_and_switch_back, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/with_8_bit.vcd")
+                    .join("examples")
+                    .join("with_8_bit.vcd")
                     .try_into()
                     .unwrap(),
             )),
@@ -2461,7 +2480,8 @@ snapshot_ui!(switch_and_switch_back, || {
     state.update(Message::LoadFile(
         get_project_root()
             .unwrap()
-            .join("examples/with_1_bit.vcd")
+            .join("examples")
+            .join("with_1_bit.vcd")
             .try_into()
             .unwrap(),
         LoadOptions::KeepAll,
@@ -2476,7 +2496,8 @@ snapshot_ui!(switch_and_switch_back, || {
     state.update(Message::LoadFile(
         get_project_root()
             .unwrap()
-            .join("examples/with_8_bit.vcd")
+            .join("examples")
+            .join("with_8_bit.vcd")
             .try_into()
             .unwrap(),
         LoadOptions::KeepAll,
@@ -2501,7 +2522,8 @@ snapshot_ui!(save_and_load, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/with_8_bit.vcd")
+                    .join("examples")
+                    .join("with_8_bit.vcd")
                     .try_into()
                     .unwrap(),
             )),
@@ -2542,7 +2564,8 @@ snapshot_ui!(save_and_load, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/with_8_bit.vcd")
+                    .join("examples")
+                    .join("with_8_bit.vcd")
                     .try_into()
                     .unwrap(),
             )),
@@ -2572,7 +2595,8 @@ snapshot_ui_with_file_and_msgs!(
         Message::LoadPythonTranslator(
             get_project_root()
                 .unwrap()
-                .join("examples/hexadecimal.py")
+                .join("examples")
+                .join("hexadecimal.py")
                 .try_into()
                 .unwrap()
         ),
@@ -2681,7 +2705,8 @@ snapshot_ui!(arrow_drawing, || {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/counter.vcd")
+                    .join("examples")
+                    .join("counter.vcd")
                     .try_into()
                     .unwrap(),
             )),
@@ -2865,7 +2890,8 @@ snapshot_ui!(command_file_loading_works, || {
     state.update(Message::LoadCommandFile(
         get_project_root()
             .unwrap()
-            .join("examples/counter.sucl")
+            .join("examples")
+            .join("counter.sucl")
             .try_into()
             .unwrap(),
     ));
@@ -2881,7 +2907,8 @@ snapshot_ui!(command_file_in_command_file_works, || {
     state.update(Message::LoadCommandFile(
         get_project_root()
             .unwrap()
-            .join("examples/script_running_script.sucl")
+            .join("examples")
+            .join("script_running_script.sucl")
             .try_into()
             .unwrap(),
     ));
@@ -2892,7 +2919,8 @@ snapshot_ui!(command_file_in_command_file_works, || {
 snapshot_ui!(marker_set_then_remove_by_name, || {
     let wave_path = get_project_root()
         .unwrap()
-        .join("examples/counter.vcd")
+        .join("examples")
+        .join("counter.vcd")
         .try_into()
         .unwrap();
     let mut state = SystemState::new_default_config()
@@ -2985,7 +3013,7 @@ snapshot_ui_with_file_and_msgs! {wasm_translator_works, "examples/picorv32.vcd",
     Message::LoadWasmTranslator(
         get_project_root()
             .unwrap()
-            .join("examples/wasm_example_translator.wasm")
+            .join("examples").join("wasm_example_translator.wasm")
             .try_into()
             .unwrap()
     ),
@@ -3693,7 +3721,8 @@ fn theme_menu_radio_button() {
             waves: Some(WaveSource::File(
                 get_project_root()
                     .unwrap()
-                    .join("examples/counter.vcd")
+                    .join("examples")
+                    .join("counter.vcd")
                     .try_into()
                     .unwrap(),
             )),

@@ -27,7 +27,7 @@ use crate::wave_source::LoadOptions;
 //   | `"waveform_keep_available"`| `LoadWaveformFileFromUrl(url, KeepAvailable)`  |
 //   | `"waveform_keep_all"`      | `LoadWaveformFileFromUrl(url, KeepAll)`        |
 //   | `"command_file"`           | `LoadCommandFileFromUrl(url)`                  |
-//   | "state_file"             | `LoadStateFromData(bytes)`                     |
+//   | `"state_file"`             | `LoadStateFromData(bytes)`                     |
 //
 //   `filters_json` is a JSON array of `{"name":str,"extensions":[str]}` objects.
 //

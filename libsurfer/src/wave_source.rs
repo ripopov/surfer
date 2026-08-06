@@ -297,54 +297,98 @@ impl SystemState {
         Ok(())
     }
 
-    pub fn load_from_dropped(&mut self, file: egui::DroppedFile) -> Result<()> {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn load_from_dropped(&mut self, file: egui::DroppedFileHandle) -> Result<()> {
         info!("Got a dropped file");
 
-        let path = file.path.and_then(|x| Utf8PathBuf::try_from(x).ok());
+        let path = file.path().to_str().map(Utf8PathBuf::from);
 
-        if let Some(bytes) = file.bytes {
-            if bytes.is_empty() {
-                Err(anyhow!("Dropped an empty file"))
-            } else {
-                if let Some(path) = path.clone() {
-                    if get_multi_extension(&path) == Some(STATE_FILE_EXTENSION.to_string()) {
-                        let sender = self.channels.msg_sender.clone();
-                        perform_async_work(async move {
-                            let new_state = match ron::de::from_bytes(&bytes)
-                                .context(format!("Failed loading {path}"))
-                            {
-                                Ok(s) => s,
-                                Err(e) => {
-                                    error!("Failed to load state: {e:#?}");
-                                    return;
-                                }
-                            };
+        if let Ok(bytes) = file.bytes() {
+            return self.load_from_dropped_bytes(path, bytes.clone());
+        }
 
-                            checked_send(&sender, Message::LoadState(new_state, Some(path)));
-                        });
-                    } else {
-                        self.load_from_bytes(
-                            WaveSource::DragAndDrop(Some(path)),
-                            bytes.to_vec(),
-                            LoadOptions::Clear,
-                        );
-                    }
-                } else {
-                    self.load_from_bytes(
-                        WaveSource::DragAndDrop(path),
-                        bytes.to_vec(),
-                        LoadOptions::Clear,
+        if let Some(path) = path {
+            return self.load_from_file(path, LoadOptions::Clear);
+        }
+
+        Err(anyhow!(
+            "Unknown how to load dropped file w/o path or bytes"
+        ))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn load_from_dropped(&mut self, file: egui::DroppedFileHandle) -> Result<()> {
+        info!("Got a dropped file");
+
+        let path = file
+            .path()
+            .to_str()
+            .and_then(|p| Some(Utf8PathBuf::from(p)));
+
+        let sender = self.channels.msg_sender.clone();
+        perform_async_work(async move {
+            match file.bytes_async().await {
+                Ok(bytes) => {
+                    checked_send(
+                        &sender,
+                        Message::DroppedFileBytesLoaded(path, bytes.to_vec()),
                     );
                 }
-                Ok(())
+                Err(_) => {
+                    if let Some(path) = path {
+                        checked_send(&sender, Message::LoadFile(path, LoadOptions::Clear));
+                    } else {
+                        checked_send(
+                            &sender,
+                            Message::Error(anyhow!(
+                                "Unknown how to load dropped file w/o path or bytes"
+                            )),
+                        );
+                    }
+                }
             }
-        } else if let Some(path) = path {
-            self.load_from_file(path, LoadOptions::Clear)
-        } else {
-            Err(anyhow!(
-                "Unknown how to load dropped file w/o path or bytes"
-            ))
+        });
+
+        Ok(())
+    }
+
+    pub fn load_from_dropped_bytes(
+        &mut self,
+        path: Option<Utf8PathBuf>,
+        bytes: Vec<u8>,
+    ) -> Result<()> {
+        if bytes.is_empty() {
+            return Err(anyhow!("Dropped an empty file"));
         }
+
+        if let Some(path) = path.clone() {
+            if get_multi_extension(&path) == Some(STATE_FILE_EXTENSION.to_string()) {
+                let sender = self.channels.msg_sender.clone();
+                perform_async_work(async move {
+                    let new_state = match ron::de::from_bytes(&bytes)
+                        .context(format!("Failed loading {path}"))
+                    {
+                        Ok(s) => s,
+                        Err(e) => {
+                            error!("Failed to load state: {e:#?}");
+                            return;
+                        }
+                    };
+
+                    checked_send(&sender, Message::LoadState(new_state, Some(path)));
+                });
+            } else {
+                self.load_from_bytes(
+                    WaveSource::DragAndDrop(Some(path)),
+                    bytes,
+                    LoadOptions::Clear,
+                );
+            }
+        } else {
+            self.load_from_bytes(WaveSource::DragAndDrop(None), bytes, LoadOptions::Clear);
+        }
+
+        Ok(())
     }
 
     pub fn load_wave_from_url(
