@@ -10,7 +10,35 @@ class Wavefile implements vscode.CustomDocument {
 }
 
 /** Maps an open-dialog `kind` to the Surfer `inject_message` JSON to fire once
- *  the user picks a file.  Returns `null` for unknown kinds. */
+ *  the user picks a file, for kinds whose contents the extension host reads
+ *  itself.  Returns `null` for kinds that are loaded by URL instead.
+ *
+ *  Injecting the bytes keeps the webview from having to fetch the file, which
+ *  in turn means `localResourceRoots` does not have to be widened for it.  See
+ *  `openDialogMessage` for why that matters. */
+function dataDialogMessage(kind: string, bytes: Uint8Array): string | null {
+  switch (kind) {
+    case 'state_file':
+      return JSON.stringify({ LoadStateFromData: Array.from(bytes) })
+    case 'command_file':
+      return JSON.stringify({ LoadCommandFromData: Array.from(bytes) })
+    default:
+      return null
+  }
+}
+
+/** Whether `kind` is handled by `dataDialogMessage`. */
+function isDataDialogKind(kind: string): boolean {
+  return kind === 'state_file' || kind === 'command_file'
+}
+
+/** Maps an open-dialog `kind` to the Surfer `inject_message` JSON to fire once
+ *  the user picks a file, for kinds that are loaded by URL.  Returns `null` for
+ *  unknown kinds, and for kinds handled by `dataDialogMessage`.
+ *
+ *  Waveforms stay on the URL path deliberately: they can be very large, and
+ *  marshalling one through `postMessage` as a JSON array of bytes would be far
+ *  more expensive than letting the webview fetch it. */
 function openDialogMessage(kind: string, fileUri: vscode.Uri, webview: vscode.Webview): string | null {
   const url = webview.asWebviewUri(fileUri).toString()
   switch (kind) {
@@ -20,13 +48,27 @@ function openDialogMessage(kind: string, fileUri: vscode.Uri, webview: vscode.We
       return JSON.stringify({ LoadWaveformFileFromUrl: [url, 'KeepAvailable'] })
     case 'waveform_keep_all':
       return JSON.stringify({ LoadWaveformFileFromUrl: [url, 'KeepAll'] })
-    case 'command_file':
-      return JSON.stringify({ LoadCommandFileFromUrl: url })
-    case 'state_file':
-      return null
     default:
       return null
   }
+}
+
+/** Whether `target` is already covered by one of `roots`, and so needs no new
+ *  entry in `localResourceRoots`.
+ *
+ *  Compares `.path` rather than `.fsPath` so that remote schemes (SSH, WSL,
+ *  vscode-server) are handled the same as local files.  The comparison is
+ *  deliberately exact: on a case-insensitive filesystem a false negative only
+ *  costs a redundant reload, whereas a false positive would leave the webview
+ *  unable to fetch the file at all. */
+function isCoveredByRoots(target: vscode.Uri, roots: readonly vscode.Uri[] | undefined): boolean {
+  return (roots ?? []).some((root) => {
+    if (target.scheme !== root.scheme || target.authority !== root.authority) {
+      return false
+    }
+    const prefix = root.path.endsWith('/') ? root.path : `${root.path}/`
+    return target.path === root.path || target.path.startsWith(prefix)
+  })
 }
 
 function normalizeDialogFilters(
@@ -108,11 +150,24 @@ export class SurferWaveformViewerEditorProvider
 
     const documentUri = webviewPanel.webview.asWebviewUri(document.uri).toString()
 
+    // Set when widening `localResourceRoots` forces a webview reload: the
+    // message that prompted the widening cannot be delivered to the outgoing
+    // document, so it is held here and posted once the new one reports in.
+    let pendingInject: string | undefined
+
     webviewPanel.webview.onDidReceiveMessage(async (message) => {
       switch (message.command) {
         case 'loaded': {
           console.log("Surfer got the loaded message from the web view")
-          webviewPanel.webview.postMessage({command: "LoadUrl", url: documentUri})
+          if (pendingInject !== undefined) {
+            // Reload was ours. Resume the load that caused it rather than
+            // reverting to the document this editor was opened on.
+            const msg = pendingInject
+            pendingInject = undefined
+            webviewPanel.webview.postMessage({ command: 'InjectMessage', message: msg })
+          } else {
+            webviewPanel.webview.postMessage({command: "LoadUrl", url: documentUri})
+          }
           break;
         }
 
@@ -125,29 +180,41 @@ export class SurferWaveformViewerEditorProvider
             title: message.title ?? 'Open file',
           })
           if (uris && uris.length > 0) {
-            // Grant the webview access to the directory containing the chosen file.
-            const chosenDir = vscode.Uri.joinPath(uris[0], '..')
-            webviewPanel.webview.options = {
-              ...webviewPanel.webview.options,
-              localResourceRoots: [
-                ...(webviewPanel.webview.options.localResourceRoots ?? []),
-                chosenDir,
-              ],
-            }
-            if (kind === 'state_file') {
+            const chosen = uris[0]
+
+            // Assigning to `webview.options` is not a cheap metadata update: VS
+            // Code compares the content options and, when they differ, re-sends
+            // the webview HTML.  That restarts the WASM app, discarding the
+            // current session along with any message posted right afterwards.
+            // So only widen `localResourceRoots` when there is no alternative.
+            if (isDataDialogKind(kind)) {
+              // The extension host can read this kind itself, so the webview
+              // never fetches it and the roots can stay as they are.
               try {
-                const bytes = await vscode.workspace.fs.readFile(uris[0])
-                const msg = JSON.stringify({ LoadStateFromData: Array.from(bytes) })
+                const bytes = await vscode.workspace.fs.readFile(chosen)
+                const msg = dataDialogMessage(kind, bytes)!
                 webviewPanel.webview.postMessage({ command: 'InjectMessage', message: msg })
               } catch (e) {
-                vscode.window.showErrorMessage(`Surfer: failed to read state file: ${e}`)
+                vscode.window.showErrorMessage(`Surfer: failed to read ${chosen.fsPath}: ${e}`)
               }
             } else {
-              const msg = openDialogMessage(kind, uris[0], webviewPanel.webview)
-              if (msg !== null) {
+              const msg = openDialogMessage(kind, chosen, webviewPanel.webview)
+              if (msg === null) {
+                console.log(`Surfer: unknown open-dialog kind '${kind}'`)
+              } else if (isCoveredByRoots(vscode.Uri.joinPath(chosen, '..'), webviewPanel.webview.options.localResourceRoots)) {
+                // Already reachable; no reload needed.
                 webviewPanel.webview.postMessage({ command: 'InjectMessage', message: msg })
               } else {
-                console.log(`Surfer: unknown open-dialog kind '${kind}'`)
+                // Granting the new root reloads the webview, so hold the message
+                // and post it once the fresh document announces itself.
+                pendingInject = msg
+                webviewPanel.webview.options = {
+                  ...webviewPanel.webview.options,
+                  localResourceRoots: [
+                    ...(webviewPanel.webview.options.localResourceRoots ?? []),
+                    vscode.Uri.joinPath(chosen, '..'),
+                  ],
+                }
               }
             }
           }
@@ -245,12 +312,13 @@ export class SurferWaveformViewerEditorProvider
             };
 
             // Listen for 'RequestState' from the host and reply with the current encoded state via get_state().
+            // 'InjectMessage' is deliberately not handled here: register_message_listener()
+            // in integration.js already handles it for every embedder, and handling it in
+            // both places injected each message twice.
             window.addEventListener('message', async (event) => {
                 if (event.data?.command === 'RequestState') {
                     const state = await get_state();
                     vscode.postMessage({ command: 'saveState', targetUri: event.data.targetUri, state });
-                } else if (event.data?.command === 'InjectMessage') {
-                    inject_message(event.data.message);
                 }
             });
 
