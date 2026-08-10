@@ -1,8 +1,8 @@
 use crate::{
     Message,
-    system_state::{MemoryViewerState, SystemState},
+    system_state::SystemState,
     translation::{TranslationResultExt, ValueKindExt},
-    wave_container::ScopeRefExt,
+    wave_container::{ScopeRef, ScopeRefExt},
 };
 use egui::collapsing_header::CollapsingState;
 use egui::{Button, DragValue};
@@ -28,6 +28,29 @@ impl MemoryViewerFormat {
         }
     }
 }
+pub(crate) struct MemoryViewerState {
+    pub(crate) open: bool,
+    pub(crate) scope: Option<ScopeRef>,
+    pub(crate) name: Option<String>,
+    jump_to_index: String,
+    search_value: String,
+    highlight_value: String,
+    search_match_mode: ValueMatchMode,
+    highlight_match_mode: ValueMatchMode,
+    highlight_case_insensitive: bool,
+    search_case_insensitive: bool,
+    filter_value: String,
+    filter_match_mode: ValueMatchMode,
+    filter_case_insensitive: bool,
+    index_format: MemoryViewerFormat,
+    value_format: String,
+    scroll_to_row: Option<usize>,
+    color_values: bool,
+    filter_mode: ChangeModes,
+    highlight_mode: ChangeModes,
+    value_column_count: usize,
+    selected_value_position: Option<usize>,
+}
 impl Default for MemoryViewerState {
     fn default() -> Self {
         Self {
@@ -41,6 +64,9 @@ impl Default for MemoryViewerState {
             highlight_value: String::new(),
             highlight_match_mode: ValueMatchMode::Contains,
             highlight_case_insensitive: true,
+            filter_value: String::new(),
+            filter_match_mode: ValueMatchMode::Contains,
+            filter_case_insensitive: true,
             index_format: MemoryViewerFormat::Decimal,
             value_format: "Hexadecimal".to_string(),
             scroll_to_row: None,
@@ -141,11 +167,14 @@ fn closest_row_index(rows: &[&MemoryRow], target_index: i64) -> Option<usize> {
         .min_by_key(|(_position, row)| (row.index - target_index).abs())
         .map(|(row_index, _)| row_index)
 }
+
+type ValueMatcher = Box<dyn Fn(&str) -> bool>;
+
 fn build_value_matcher(
     pattern: &str,
     mode: ValueMatchMode,
     case_insensitive: bool,
-) -> Option<Box<dyn Fn(&str) -> bool>> {
+) -> Option<ValueMatcher> {
     let pattern = pattern.trim();
 
     if pattern.is_empty() {
@@ -232,9 +261,12 @@ fn matching_text_edit(
             [width, 20.0],
             egui::TextEdit::singleline(value).hint_text(hint),
         )
-        .on_hover_text("Right-click for matching options");
+        .on_hover_text("Matching options");
 
     text_response.context_menu(|ui| {
+        value_match_menu(ui, mode, case_insensitive);
+    });
+    ui.menu_button(egui::RichText::new(icons::FILTER_FILL).size(12.0), |ui| {
         value_match_menu(ui, mode, case_insensitive);
     });
 
@@ -304,21 +336,9 @@ fn change_mode_menu(ui: &mut egui::Ui, marker_id: &'static str, selected: &mut C
         marker_combo(ui, marker_id, selected);
     }
 }
-fn change_mode_dropdown(
-    ui: &mut egui::Ui,
-    id: &'static str,
-    label: &'static str,
-    marker_id: &'static str,
-    selected: &mut ChangeModes,
-) {
-    ui.vertical(|ui| {
-        CollapsingState::load_with_default_open(ui.ctx(), ui.make_persistent_id(id), false)
-            .show_header(ui, |ui| {
-                ui.add_sized([120.0, 20.0], egui::Label::new(label));
-            })
-            .body(|ui| {
-                change_mode_menu(ui, marker_id, selected);
-            });
+fn left_aligned_header(ui: &mut egui::Ui, text: &str) {
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+        ui.label(text);
     });
 }
 fn highlight_dropdown(
@@ -335,7 +355,7 @@ fn highlight_dropdown(
             false,
         )
         .show_header(ui, |ui| {
-            ui.add_sized([120.0, 20.0], egui::Label::new("Highlight"));
+            left_aligned_header(ui, "Highlight");
         })
         .body(|ui| {
             ui.allocate_ui_with_layout(
@@ -351,6 +371,46 @@ fn highlight_dropdown(
                             ui,
                             highlight_value,
                             "Highlight",
+                            120.0,
+                            match_mode,
+                            case_insensitive,
+                        );
+                    });
+                },
+            );
+        });
+    });
+}
+fn filter_dropdown(
+    ui: &mut egui::Ui,
+    selected: &mut ChangeModes,
+    filter_value: &mut String,
+    match_mode: &mut ValueMatchMode,
+    case_insensitive: &mut bool,
+) {
+    ui.vertical(|ui| {
+        CollapsingState::load_with_default_open(
+            ui.ctx(),
+            ui.make_persistent_id("memory_viewer_filter"),
+            false,
+        )
+        .show_header(ui, |ui| {
+            left_aligned_header(ui, "Filter");
+        })
+        .body(|ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(260.0, 0.0),
+                egui::Layout::top_down(egui::Align::LEFT),
+                |ui| {
+                    change_mode_menu(ui, "memory_viewer_filter_marker", selected);
+
+                    ui.horizontal(|ui| {
+                        ui.label("Value:");
+
+                        matching_text_edit(
+                            ui,
+                            filter_value,
+                            "Filter",
                             120.0,
                             match_mode,
                             case_insensitive,
@@ -523,12 +583,12 @@ impl SystemState {
 
                 ui.horizontal_top(|ui| {
                     if self.memory_viewer.value_column_count == 1 {
-                        change_mode_dropdown(
+                        filter_dropdown(
                             ui,
-                            "memory_viewer_filter",
-                            "Filter",
-                            "memory_viewer_filter_marker",
                             &mut self.memory_viewer.filter_mode,
+                            &mut self.memory_viewer.filter_value,
+                            &mut self.memory_viewer.filter_match_mode,
+                            &mut self.memory_viewer.filter_case_insensitive,
                         );
                     }
                     highlight_dropdown(
@@ -541,6 +601,58 @@ impl SystemState {
 
                     ui.checkbox(&mut self.memory_viewer.color_values, "Color values");
                 });
+                let search_matcher = build_value_matcher(
+                    &self.memory_viewer.search_value,
+                    self.memory_viewer.search_match_mode,
+                    self.memory_viewer.search_case_insensitive,
+                );
+                let highlight_matcher = build_value_matcher(
+                    &self.memory_viewer.highlight_value,
+                    self.memory_viewer.highlight_match_mode,
+                    self.memory_viewer.highlight_case_insensitive,
+                );
+                let filter_matcher = build_value_matcher(
+                    &self.memory_viewer.filter_value,
+                    self.memory_viewer.filter_match_mode,
+                    self.memory_viewer.filter_case_insensitive,
+                );
+                let visible_rows: Vec<_> = rows
+                    .iter()
+                    .filter(|row| {
+                        let matches_change_filter = match self.memory_viewer.filter_mode {
+                            ChangeModes::AllValues => true,
+                            ChangeModes::ChangedAtCursor => row.changed_at_cursor,
+                            ChangeModes::ChangedBtwCursorAndMarker(_) => row.changed_for_filter,
+                        };
+
+                        let matches_text_filter = filter_matcher
+                            .as_ref()
+                            .is_none_or(|matcher| matcher(&row.value));
+
+                        matches_change_filter && matches_text_filter
+                    })
+                    .collect();
+                let matching_positions: Vec<usize> = search_matcher
+                    .as_ref()
+                    .map(|matcher| {
+                        visible_rows
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(position, row)| matcher(&row.value).then_some(position))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let current_match = self
+                    .memory_viewer
+                    .selected_value_position
+                    .and_then(|selected| {
+                        matching_positions
+                            .iter()
+                            .position(|&position| position == selected)
+                    })
+                    .map(|index| index + 1)
+                    .unwrap_or(0);
+                let total_matches = matching_positions.len();
                 let mut find_previous_requested = false;
                 let mut find_next_requested = false;
                 ui.horizontal(|ui| {
@@ -553,6 +665,7 @@ impl SystemState {
                         &mut self.memory_viewer.search_match_mode,
                         &mut self.memory_viewer.search_case_insensitive,
                     );
+
                     if ui
                         .add(egui::Button::new(icons::ARROW_UP_LINE).frame(false))
                         .on_hover_text("Previous match")
@@ -567,6 +680,13 @@ impl SystemState {
                         .clicked()
                     {
                         find_next_requested = true;
+                    }
+                    if !self.memory_viewer.search_value.is_empty() {
+                        if total_matches == 0 {
+                            ui.label("No results");
+                        } else {
+                            ui.label(format!("{current_match} of {total_matches}"));
+                        }
                     }
                 });
                 ui.separator();
@@ -650,26 +770,35 @@ impl SystemState {
                 });
 
                 let mut jump_requested = false;
+                let mut shrink_columns_requested = false;
 
                 ui.horizontal(|ui| {
                     ui.label("Jump to index:");
-                    ui.add_sized(
+                    let response = ui.add_sized(
                         [60.0, 20.0],
                         egui::TextEdit::singleline(&mut self.memory_viewer.jump_to_index),
                     );
 
-                    if ui.button("Jump").clicked() {
+                    if ui.button("Jump").clicked()
+                        || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                    {
                         jump_requested = true;
                     }
-
                     ui.label("Columns:");
 
                     ui.add(
                         DragValue::new(&mut self.memory_viewer.value_column_count).range(1..=32),
                     );
-
+                    if ui
+                        .add(Button::new(icons::ASPECT_RATIO_FILL).frame(false))
+                        .on_hover_text("Auto-size")
+                        .clicked()
+                    {
+                        shrink_columns_requested = true;
+                    }
                     if self.memory_viewer.value_column_count > 1 {
                         self.memory_viewer.filter_mode = ChangeModes::AllValues;
+                        self.memory_viewer.filter_value.clear();
                     }
 
                     ui.separator();
@@ -677,36 +806,7 @@ impl SystemState {
                 });
 
                 ui.separator();
-                let search_matcher = build_value_matcher(
-                    &self.memory_viewer.search_value,
-                    self.memory_viewer.search_match_mode,
-                    self.memory_viewer.search_case_insensitive,
-                );
-                let highlight_matcher = build_value_matcher(
-                    &self.memory_viewer.highlight_value,
-                    self.memory_viewer.highlight_match_mode,
-                    self.memory_viewer.highlight_case_insensitive,
-                );
-                let visible_rows: Vec<_> = rows
-                    .iter()
-                    .filter(|row| match self.memory_viewer.filter_mode {
-                        ChangeModes::AllValues => true,
 
-                        ChangeModes::ChangedAtCursor => row.changed_at_cursor,
-
-                        ChangeModes::ChangedBtwCursorAndMarker(_) => row.changed_for_filter,
-                    })
-                    .collect();
-                let matching_positions: Vec<usize> = search_matcher
-                    .as_ref()
-                    .map(|matcher| {
-                        visible_rows
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(position, row)| matcher(&row.value).then_some(position))
-                            .collect()
-                    })
-                    .unwrap_or_default();
                 let max_index = rows.iter().map(|row| row.index).max().unwrap_or(0);
                 let text_height = egui::TextStyle::Body
                     .resolve(ui.style())
@@ -783,7 +883,9 @@ impl SystemState {
                                 for _ in 0..value_column_count {
                                     table = table.column(Column::auto());
                                 }
-
+                                if shrink_columns_requested {
+                                    table.reset();
+                                }
                                 if let Some(row_index) = self.memory_viewer.scroll_to_row.take() {
                                     table =
                                         table.scroll_to_row(row_index, Some(egui::Align::Center));

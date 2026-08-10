@@ -17,40 +17,18 @@ use crate::{
     file_history::FileHistory,
     frame_buffer::{FrameBufferArrayCache, FrameBufferContent, FrameBufferPixelCache},
     hierarchy::{AllVariableCacheKey, ScopeExpandType, VariableListRow},
-    memory_viewer::{ChangeModes, MemoryViewerCache, MemoryViewerFormat, ValueMatchMode},
+    memory_viewer::{MemoryViewerCache, MemoryViewerState},
     message::Message,
     mousegestures::AnnotationKind,
     state::UserState,
     time::TimeInputState,
     translation::{TranslatorList, all_translators},
-    wave_container::{ScopeRef, VariableRef},
+    wave_container::VariableRef,
     wave_source::{LoadOptions, LoadProgress},
 };
 
 #[cfg(feature = "performance_plot")]
 use crate::benchmark::Timing;
-
-pub struct MemoryViewerState {
-    pub open: bool,
-    pub scope: Option<ScopeRef>,
-    pub name: Option<String>,
-    pub jump_to_index: String,
-    pub search_value: String,
-    pub highlight_value: String,
-    pub(crate) search_match_mode: ValueMatchMode,
-    pub(crate) highlight_match_mode: ValueMatchMode,
-    pub highlight_case_insensitive: bool,
-    pub search_case_insensitive: bool,
-    pub index_format: MemoryViewerFormat,
-    pub value_format: String,
-    pub scroll_to_row: Option<usize>,
-    pub color_values: bool,
-    pub filter_mode: ChangeModes,
-    pub highlight_mode: ChangeModes,
-    pub value_column_count: usize,
-    pub selected_value_position: Option<usize>,
-}
-
 pub struct SystemState {
     pub user: UserState,
     pub(crate) file_history: FileHistory,
