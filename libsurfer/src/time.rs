@@ -968,7 +968,7 @@ impl SystemState {
             &self.get_time_format(),
             self.user.config.theme.ticks.density,
             &waves.safe_max_timestamp(),
-            &time_offset,
+            time_offset,
         )
     }
 }

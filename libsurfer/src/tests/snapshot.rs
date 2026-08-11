@@ -1360,6 +1360,24 @@ snapshot_ui_with_file_and_msgs! {signal_list_works, "examples/counter.vcd", [
     Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.clk")]),
 ]}
 
+snapshot_ui_with_file_and_msgs! {draw_from_first_value, "examples/offset_100us.vcd", [
+    Message::AddVariables(vec![VariableRef::from_hierarchy_string("testbench.clock"),
+                               VariableRef::from_hierarchy_string("testbench.counter"),
+                               VariableRef::from_hierarchy_string("testbench.data"),
+                               VariableRef::from_hierarchy_string("testbench.state")]),
+    Message::SetDefaultTimeline(false),
+    Message::SetTimeOffsetEnabled(true)
+]}
+
+snapshot_ui_with_file_and_msgs! {draw_from_start_even_without_values, "examples/offset_100us.vcd", [
+    Message::AddVariables(vec![VariableRef::from_hierarchy_string("testbench.clock"),
+                               VariableRef::from_hierarchy_string("testbench.counter"),
+                               VariableRef::from_hierarchy_string("testbench.data"),
+                               VariableRef::from_hierarchy_string("testbench.state")]),
+    Message::SetDefaultTimeline(false),
+    Message::SetTimeOffsetEnabled(false)
+]}
+
 snapshot_ui!(fuzzy_signal_filter_works, || {
     let mut state = SystemState::new_default_config()
         .unwrap()

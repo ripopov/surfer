@@ -545,16 +545,11 @@ impl SystemState {
                     });
                 }
             });
-            ui.radio(
-                self.enable_time_offset(),
-                "Enable time offset",
-            )
-            .clicked()
-            .then(|| {
-                msgs.push(Message::SetTimeOffsetEnabled(
-                    !self.enable_time_offset(),
-                ));
-            });
+            ui.radio(self.enable_time_offset(), "Enable time offset")
+                .clicked()
+                .then(|| {
+                    msgs.push(Message::SetTimeOffsetEnabled(!self.enable_time_offset()));
+                });
         });
         ui.menu_button("Help", |ui| {
             b("Quick start", Message::SetQuickStartVisible(true)).add_closing_menu(msgs, ui);

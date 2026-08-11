@@ -113,6 +113,7 @@ Controls the initial UI layout and waveform rendering behavior.
 | `trace_style` | `"Default"` | `Default`, `Dinotrace`, `Zero` | Digital waveform trace style. `Dinotrace` draws no upper line and a bold lower line for all-zero vectors, and a bold upper line for all-one vectors. `Zero` draws all-zero vectors without the upper line. |
 | `transition_value` | `"Next"` | `Previous`, `Next`, `Both` | Which value to show when the cursor is exactly on a transition. |
 | `draw_vector_unknowns_as_line` | `false` | boolean | Draw vector unknowns as a line instead of a "box". |
+| `enable_time_offset` | `false` | boolean | If true, only draw from the first time where a waveform has values and not from 0. |
 
 The `layout` table also contains toolbar-group subtables under `layout.toolbar`, documented below: `layout.toolbar.row` and `layout.toolbar.visibility`.
 

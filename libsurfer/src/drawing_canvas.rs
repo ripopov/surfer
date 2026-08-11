@@ -1436,6 +1436,7 @@ impl SystemState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_region(
         &self,
         ((old_x, prev_region), (new_x, _)): (&(f32, DrawnRegion), &(f32, DrawnRegion)),
@@ -1647,6 +1648,7 @@ impl SystemState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_event(
         &self,
         (x, prev_region): &(f32, DrawnRegion),
@@ -1851,26 +1853,6 @@ impl SystemState {
             }
         }
         Some(timestamp)
-    }
-
-    /// Draw a vertical line at the given time position. Used for context menu.
-    pub fn draw_line(
-        &self,
-        time: &BigInt,
-        ctx: &mut DrawingContext,
-        viewport_idx: usize,
-        waves: &WaveData,
-    ) {
-        let max_timestamp = &waves.safe_max_timestamp();
-        let time_offset = waves.time_offset();
-        draw_vertical_line_at_time(
-            time,
-            ctx,
-            &self.user.config.theme.cursor,
-            max_timestamp,
-            &waves.viewports[viewport_idx],
-            time_offset,
-        );
     }
 }
 

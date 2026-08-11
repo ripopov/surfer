@@ -440,11 +440,7 @@ impl Viewport {
     }
 
     #[inline]
-    fn half_width_absolute(
-        &self,
-        max_timestamp: &BigInt,
-        time_offset: &BigInt,
-    ) -> Absolute {
+    fn half_width_absolute(&self, max_timestamp: &BigInt, time_offset: &BigInt) -> Absolute {
         (self.width() * 0.5).absolute(max_timestamp, time_offset)
     }
 

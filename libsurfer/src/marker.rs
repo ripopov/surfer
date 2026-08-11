@@ -59,27 +59,37 @@ impl WaveData {
     }
 
     pub fn draw_cursor(&self, theme: &SurferTheme, ctx: &mut DrawingContext, viewport: &Viewport) {
-        if let Some(marker) = &self.cursor {
+        if let Some(cursor_time) = &self.cursor {
             let max_timestamp = self.safe_max_timestamp();
             let time_offset = self.time_offset();
-            let stroke = Stroke {
-                color: theme.cursor.color,
-                width: theme.cursor.width,
-            };
-            draw_vertical_line_at_time(marker, ctx, stroke, &max_timestamp, viewport, time_offset);
+            draw_vertical_line_at_time(
+                cursor_time,
+                ctx,
+                &theme.cursor,
+                &max_timestamp,
+                viewport,
+                time_offset,
+            );
         }
     }
 
     pub fn draw_markers(&self, theme: &SurferTheme, ctx: &mut DrawingContext, viewport: &Viewport) {
         let max_timestamp = self.safe_max_timestamp();
         let time_offset = self.time_offset();
-        for (idx, marker) in &self.markers {
+        for (idx, marker_time) in &self.markers {
             let color = self.get_marker_color(*idx, theme);
             let stroke = Stroke {
                 color,
                 width: theme.cursor.width,
             };
-            draw_vertical_line_at_time(marker, ctx, stroke, &max_timestamp, viewport, time_offset);
+            draw_vertical_line_at_time(
+                marker_time,
+                ctx,
+                stroke,
+                &max_timestamp,
+                viewport,
+                time_offset,
+            );
         }
     }
 
