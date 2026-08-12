@@ -24,6 +24,22 @@ pub enum FrameBufferColorMode {
     YCbCr,
 }
 
+impl std::fmt::Display for FrameBufferColorMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.string())
+    }
+}
+
+impl FrameBufferColorMode {
+    fn string(&self) -> &'static str {
+        match self {
+            FrameBufferColorMode::Grayscale => "Grayscale",
+            FrameBufferColorMode::Rgb => "RGB",
+            FrameBufferColorMode::YCbCr => "YCbCr",
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(default)]
 pub(crate) struct PixelColorSettings {
@@ -122,7 +138,11 @@ pub(crate) enum FrameBufferContent {
 }
 
 impl SystemState {
-    pub fn draw_frame_buffer_window(&mut self, ctx: &egui::Context, msgs: &mut Vec<Message>) {
+    pub(crate) fn draw_frame_buffer_window(
+        &mut self,
+        ctx: &egui::Context,
+        msgs: &mut Vec<Message>,
+    ) {
         let mut open = true;
         egui::Window::new("Frame Buffer")
             .open(&mut open)
@@ -144,26 +164,22 @@ impl SystemState {
                     ui.horizontal(|ui| {
                         ui.label("Color mode");
                         egui::ComboBox::from_id_salt("frame_buffer_color_mode")
-                            .selected_text(match color_settings.color_mode {
-                                FrameBufferColorMode::Grayscale => "Grayscale",
-                                FrameBufferColorMode::Rgb => "RGB",
-                                FrameBufferColorMode::YCbCr => "YCbCr",
-                            })
+                            .selected_text(color_settings.color_mode.string())
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(
                                     &mut color_settings.color_mode,
                                     FrameBufferColorMode::Grayscale,
-                                    "Grayscale",
+                                    FrameBufferColorMode::Grayscale.string(),
                                 );
                                 ui.selectable_value(
                                     &mut color_settings.color_mode,
                                     FrameBufferColorMode::Rgb,
-                                    "RGB",
+                                    FrameBufferColorMode::Rgb.string(),
                                 );
                                 ui.selectable_value(
                                     &mut color_settings.color_mode,
                                     FrameBufferColorMode::YCbCr,
-                                    "YCbCr",
+                                    FrameBufferColorMode::YCbCr.string(),
                                 );
                             });
                     });
@@ -573,6 +589,7 @@ fn resolve_leaf_scopes_and_variables(
 
     Some(sorted_variables)
 }
+
 /// Analyses the scope hierarchy rooted at `scope_ref` and returns:
 /// - `levels`: one `ArrayLevel` per nesting level, where the last level is for variables
 /// - `all_leaf_vars`: every variable reachable from the root (for pre-loading)
@@ -670,14 +687,16 @@ fn variable_array_index(var_ref: &VariableRef) -> i64 {
 }
 
 fn frame_buffer_bits(value: &VariableValue, word_length: usize) -> Vec<bool> {
+    let mut out = Vec::with_capacity(word_length);
     match value {
         VariableValue::BigUint(v) => {
-            let mut out = Vec::with_capacity(word_length);
             append_biguint_lower_bits_with_left_zero_pad(v, word_length, &mut out);
-            out
         }
-        VariableValue::String(v) => bits_with_left_zero_pad(v, word_length),
+        VariableValue::String(v) => {
+            append_str_lower_bits_with_left_zero_pad(v, word_length, &mut out);
+        }
     }
+    out
 }
 
 fn append_str_lower_bits_with_left_zero_pad(src: &str, width: usize, out: &mut Vec<bool>) {
@@ -688,9 +707,7 @@ fn append_str_lower_bits_with_left_zero_pad(src: &str, width: usize, out: &mut V
     let start = src.len().saturating_sub(width);
     let suffix = &src.as_bytes()[start..];
 
-    for _ in suffix.len()..width {
-        out.push(false);
-    }
+    out.extend(std::iter::repeat_n(false, width - suffix.len()));
     out.extend(suffix.iter().map(|b| *b == b'1'));
 }
 
@@ -699,45 +716,70 @@ fn append_biguint_lower_bits_with_left_zero_pad(
     width: usize,
     out: &mut Vec<bool>,
 ) {
+    use num::ToPrimitive as _;
     if width == 0 {
         return;
     }
 
+    // Fast path for small values that fit in a u128.
+    if let Some(v) = value.to_u128() {
+        let value_bits = 128usize.saturating_sub(v.leading_zeros() as usize);
+        let actual = width.min(value_bits);
+        out.extend(std::iter::repeat_n(false, width - actual));
+        if actual > 0 {
+            let mut v = v << (127 - (actual - 1));
+            for _ in 0..actual {
+                out.push(v >> 127 != 0);
+                v <<= 1;
+            }
+        }
+        return;
+    }
+
+    let digits = value.to_u32_digits();
     let value_bits = value.bits() as usize;
-    if value_bits >= width {
-        for bit_idx in (0..width).rev() {
-            out.push(value.bit(bit_idx as u64));
-        }
-    } else {
-        for _ in 0..(width - value_bits) {
-            out.push(false);
-        }
-        for bit_idx in (0..value_bits).rev() {
-            out.push(value.bit(bit_idx as u64));
+    let actual = width.min(value_bits);
+    out.extend(std::iter::repeat_n(false, width - actual));
+    let top_limb = actual.saturating_sub(1) / 32;
+    // Top limb first: may be partial, so align its MSB before consuming.
+    let hi = (actual - 1) % 32;
+    let mut limb = digits.get(top_limb).copied().unwrap_or(0) << (31 - hi);
+    for _ in 0..=hi {
+        out.push(limb & 0x8000_0000 != 0);
+        limb <<= 1;
+    }
+    // Remaining limbs are always full 32-bit words; no conditional needed.
+    for limb_idx in (0..top_limb).rev() {
+        let mut limb = digits.get(limb_idx).copied().unwrap_or(0);
+        for _ in 0..32 {
+            out.push(limb & 0x8000_0000 != 0);
+            limb <<= 1;
         }
     }
-}
-
-fn bits_with_left_zero_pad(src: &str, width: usize) -> Vec<bool> {
-    let mut out = Vec::with_capacity(width);
-    append_str_lower_bits_with_left_zero_pad(src, width, &mut out);
-    out
 }
 
 fn decode_grayscale_pixels(bits: &[bool], grayscale_bits: usize) -> Vec<Color32> {
+    // Default mode: every bool maps directly to black or white.
+    if grayscale_bits == 1 {
+        return bits
+            .iter()
+            .map(|&b| {
+                let v = u8::from(b) * 255;
+                Color32::from_rgb(v, v, v)
+            })
+            .collect();
+    }
     let step = grayscale_bits.max(1);
-    let full = bits.len() / step;
-    let has_tail = !bits.len().is_multiple_of(step);
-    let mut out = Vec::with_capacity(full + usize::from(has_tail));
-    // Fast path: full groups — no bounds checks needed.
-    for start in (0..full * step).step_by(step) {
-        let gray = scale_to_u8(bits_to_u16(&bits[start..start + step]), step);
+    let scale = channel_scaler(step);
+    let mut chunks = bits.chunks_exact(step);
+    let mut out = Vec::with_capacity(bits.len().div_ceil(step));
+    for chunk in chunks.by_ref() {
+        let gray = apply_scale(bits_to_u16(chunk), scale);
         out.push(Color32::from_rgb(gray, gray, gray));
     }
-    // Slow path: partial trailing group.
-    if has_tail {
-        let start = full * step;
-        let gray = scale_to_u8(bits_to_u16_padded(bits, start, step), step);
+    let rem = chunks.remainder();
+    if !rem.is_empty() {
+        let gray = apply_scale(bits_to_u16_padded(rem, 0, step), scale);
         out.push(Color32::from_rgb(gray, gray, gray));
     }
     out
@@ -746,31 +788,24 @@ fn decode_grayscale_pixels(bits: &[bool], grayscale_bits: usize) -> Vec<Color32>
 fn decode_rgb_pixels(bits: &[bool], r_bits: usize, g_bits: usize, b_bits: usize) -> Vec<Color32> {
     let bits_per_pixel = r_bits + g_bits + b_bits;
     let step = bits_per_pixel.max(1);
-    let full = bits.len() / step;
-    let has_tail = !bits.len().is_multiple_of(step);
-    let mut out = Vec::with_capacity(full + usize::from(has_tail));
-    // Fast path: full pixels — no bounds checks needed.
-    for start in (0..full * step).step_by(step) {
-        let red = scale_to_u8(bits_to_u16(&bits[start..start + r_bits]), r_bits);
-        let green = scale_to_u8(
-            bits_to_u16(&bits[start + r_bits..start + r_bits + g_bits]),
-            g_bits,
-        );
-        let blue = scale_to_u8(
-            bits_to_u16(&bits[start + r_bits + g_bits..start + step]),
-            b_bits,
-        );
+    let (r_scale, g_scale, b_scale) = (
+        channel_scaler(r_bits),
+        channel_scaler(g_bits),
+        channel_scaler(b_bits),
+    );
+    let mut chunks = bits.chunks_exact(step);
+    let mut out = Vec::with_capacity(bits.len().div_ceil(step));
+    for chunk in chunks.by_ref() {
+        let red = apply_scale(bits_to_u16(&chunk[..r_bits]), r_scale);
+        let green = apply_scale(bits_to_u16(&chunk[r_bits..r_bits + g_bits]), g_scale);
+        let blue = apply_scale(bits_to_u16(&chunk[r_bits + g_bits..]), b_scale);
         out.push(Color32::from_rgb(red, green, blue));
     }
-    // Slow path: partial trailing pixel.
-    if has_tail {
-        let start = full * step;
-        let red = scale_to_u8(bits_to_u16_padded(bits, start, r_bits), r_bits);
-        let green = scale_to_u8(bits_to_u16_padded(bits, start + r_bits, g_bits), g_bits);
-        let blue = scale_to_u8(
-            bits_to_u16_padded(bits, start + r_bits + g_bits, b_bits),
-            b_bits,
-        );
+    let rem = chunks.remainder();
+    if !rem.is_empty() {
+        let red = apply_scale(bits_to_u16_padded(rem, 0, r_bits), r_scale);
+        let green = apply_scale(bits_to_u16_padded(rem, r_bits, g_bits), g_scale);
+        let blue = apply_scale(bits_to_u16_padded(rem, r_bits + g_bits, b_bits), b_scale);
         out.push(Color32::from_rgb(red, green, blue));
     }
     out
@@ -784,38 +819,28 @@ fn decode_ycbcr_pixels(
 ) -> Vec<Color32> {
     let bits_per_pixel = y_bits + cb_bits + cr_bits;
     let step = bits_per_pixel.max(1);
-    let full = bits.len() / step;
-    let has_tail = !bits.len().is_multiple_of(step);
-    let mut out = Vec::with_capacity(full + usize::from(has_tail));
-
-    // Fast path: full pixels — no bounds checks needed.
-    for start in (0..full * step).step_by(step) {
-        let y = scale_to_u8(bits_to_u16(&bits[start..start + y_bits]), y_bits);
-        let cb = scale_to_u8(
-            bits_to_u16(&bits[start + y_bits..start + y_bits + cb_bits]),
-            cb_bits,
-        );
-        let cr = scale_to_u8(
-            bits_to_u16(&bits[start + y_bits + cb_bits..start + step]),
-            cr_bits,
-        );
+    let (y_scale, cb_scale, cr_scale) = (
+        channel_scaler(y_bits),
+        channel_scaler(cb_bits),
+        channel_scaler(cr_bits),
+    );
+    let mut chunks = bits.chunks_exact(step);
+    let mut out = Vec::with_capacity(bits.len().div_ceil(step));
+    for chunk in chunks.by_ref() {
+        let y = apply_scale(bits_to_u16(&chunk[..y_bits]), y_scale);
+        let cb = apply_scale(bits_to_u16(&chunk[y_bits..y_bits + cb_bits]), cb_scale);
+        let cr = apply_scale(bits_to_u16(&chunk[y_bits + cb_bits..]), cr_scale);
         let (red, green, blue) = ycbcr_to_rgb(y, cb, cr);
         out.push(Color32::from_rgb(red, green, blue));
     }
-
-    // Slow path: partial trailing pixel.
-    if has_tail {
-        let start = full * step;
-        let y = scale_to_u8(bits_to_u16_padded(bits, start, y_bits), y_bits);
-        let cb = scale_to_u8(bits_to_u16_padded(bits, start + y_bits, cb_bits), cb_bits);
-        let cr = scale_to_u8(
-            bits_to_u16_padded(bits, start + y_bits + cb_bits, cr_bits),
-            cr_bits,
-        );
+    let rem = chunks.remainder();
+    if !rem.is_empty() {
+        let y = apply_scale(bits_to_u16_padded(rem, 0, y_bits), y_scale);
+        let cb = apply_scale(bits_to_u16_padded(rem, y_bits, cb_bits), cb_scale);
+        let cr = apply_scale(bits_to_u16_padded(rem, y_bits + cb_bits, cr_bits), cr_scale);
         let (red, green, blue) = ycbcr_to_rgb(y, cb, cr);
         out.push(Color32::from_rgb(red, green, blue));
     }
-
     out
 }
 
@@ -837,12 +862,17 @@ fn bits_to_u16(bits: &[bool]) -> u16 {
     value
 }
 
-fn scale_to_u8(value: u16, bits: usize) -> u8 {
+// Precompute a fixed-point reciprocal: (255 << 8) / max_in.
+fn channel_scaler(bits: usize) -> u32 {
     if bits == 0 {
         return 0;
     }
-    let max_in = (1u16 << bits) - 1;
-    ((u32::from(value) * 255) / u32::from(max_in)) as u8
+    (255u32 << 8) / ((1u32 << bits) - 1)
+}
+
+#[inline(always)]
+fn apply_scale(value: u16, multiplier: u32) -> u8 {
+    ((value as u32 * multiplier) >> 8) as u8
 }
 
 #[cfg(test)]
@@ -867,14 +897,6 @@ mod tests {
         let bits = vec![true, false, true];
         assert_eq!(bits_to_u16_padded(&bits, 0, 3), 0b101);
         assert_eq!(bits_to_u16_padded(&bits, 1, 4), 0b0100);
-    }
-
-    #[test]
-    fn scale_to_u8_scales_full_range() {
-        assert_eq!(scale_to_u8(0, 1), 0);
-        assert_eq!(scale_to_u8(1, 1), 255);
-        assert_eq!(scale_to_u8(7, 3), 255);
-        assert_eq!(scale_to_u8(4, 3), 145);
     }
 
     #[test]
