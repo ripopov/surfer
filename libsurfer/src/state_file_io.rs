@@ -9,8 +9,14 @@ use tracing::error;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::async_util::perform_async_work;
 use crate::channels::{checked_send, checked_send_many};
+#[cfg(any(
+    target_os = "macos",
+    all(target_arch = "wasm32", not(feature = "vscode"))
+))]
+use crate::file_dialog::STATE_FILE_FILTER_MACOS;
 #[cfg(all(target_arch = "wasm32", feature = "vscode"))]
 use crate::file_dialog::vscode_open_dialog_with_filter;
+use crate::file_dialog::{FileFilter, STATE_FILE_FILTER};
 
 use crate::{
     SystemState,
@@ -45,37 +51,29 @@ fn sanitize_file_stem(stem: &str) -> &str {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-/// Returns the state-file extension to use in desktop file dialogs.
-///
-/// macOS file dialogs do not accept multi-part extensions like `surf.ron`,
-/// so this falls back to `ron` there.
-fn state_file_dialog_extension() -> &'static str {
-    // macos cannot handle dual prefixes
+// Mac cannot handle multiple extensions in the file dialogs.
+fn state_file_filter() -> &'static FileFilter {
     #[cfg(target_os = "macos")]
     {
-        "ron"
+        &STATE_FILE_FILTER_MACOS
     }
     #[cfg(not(target_os = "macos"))]
     {
-        STATE_FILE_EXTENSION
+        &STATE_FILE_FILTER
     }
 }
 
 #[cfg(all(target_arch = "wasm32", not(feature = "vscode")))]
-/// Returns the state-file extension to use in browser file dialogs.
-///
-/// On macOS browsers, multi-part extensions are not handled reliably,
-/// so this returns `ron` for those platforms.
-fn state_file_dialog_extension() -> &'static str {
-    // macos cannot handle dual prefixes
+// Mac cannot handle multiple extensions in the file dialogs.
+fn state_file_filter() -> &'static FileFilter {
     if web_sys::window()
         .and_then(|w| w.navigator().platform().ok())
         .map(|p| p.starts_with("Mac"))
         .unwrap_or(false)
     {
-        "ron"
+        &STATE_FILE_FILTER_MACOS
     } else {
-        STATE_FILE_EXTENSION
+        &STATE_FILE_FILTER
     }
 }
 
@@ -118,11 +116,7 @@ impl SystemState {
             return;
         }
 
-        let filter = (
-            format!("Surfer state files (*.{STATE_FILE_EXTENSION})"),
-            vec![STATE_FILE_EXTENSION.to_string()],
-        );
-        vscode_open_dialog_with_filter("state_file", &filter);
+        vscode_open_dialog_with_filter("state_file", &STATE_FILE_FILTER);
     }
 
     #[cfg(all(target_arch = "wasm32", not(feature = "vscode")))]
@@ -140,15 +134,7 @@ impl SystemState {
                 vec![]
             }
         };
-        let ext = state_file_dialog_extension();
-        self.file_dialog_open(
-            "Load state",
-            (
-                format!("Surfer state files (*.{STATE_FILE_EXTENSION})"),
-                vec![ext.to_string()],
-            ),
-            message,
-        );
+        self.file_dialog_open("Load state", state_file_filter(), message);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -188,15 +174,7 @@ impl SystemState {
             let sender = self.channels.msg_sender.clone();
             checked_send_many(&sender, messages(path));
         } else {
-            let ext = state_file_dialog_extension();
-            self.file_dialog_open(
-                "Load state",
-                (
-                    format!("Surfer state files (*.{STATE_FILE_EXTENSION})"),
-                    vec![ext.to_string()],
-                ),
-                messages,
-            );
+            self.file_dialog_open("Load state", state_file_filter(), messages);
         }
     }
 
@@ -226,14 +204,9 @@ impl SystemState {
                 checked_send_many(&sender, messages(path.into()).await);
             });
         } else {
-            let ext = state_file_dialog_extension();
-
             self.file_dialog_save(
                 "Save state",
-                (
-                    format!("Surfer state files (*.{STATE_FILE_EXTENSION})"),
-                    vec![ext.to_string()],
-                ),
+                state_file_filter(),
                 Some(self.default_state_file_name()),
                 messages,
             );

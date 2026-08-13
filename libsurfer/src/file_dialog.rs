@@ -45,12 +45,48 @@ pub enum OpenMode {
     Switch,
 }
 
+pub(crate) struct FileFilter {
+    name: &'static str,
+    extensions: &'static [&'static str],
+}
+
+static WAVEFORM_FILE_FILTER: FileFilter = FileFilter {
+    name: "Waveform/Transaction-files (*.vcd, *.fst, *.ghw, *.ftr)",
+    extensions: &["vcd", "fst", "ghw", TRANSACTIONS_FILE_EXTENSION],
+};
+
+static COMMAND_FILE_FILTER: FileFilter = FileFilter {
+    name: "Command-file (*.sucl)",
+    extensions: &["sucl"],
+};
+
+pub(crate) static STATE_FILE_FILTER: FileFilter = FileFilter {
+    name: "Surfer state files (*.surf.ron)",
+    extensions: &["surf.ron"],
+};
+
+#[cfg(any(
+    target_os = "macos",
+    all(target_arch = "wasm32", not(feature = "vscode"))
+))]
+// Mac OS file dialogs don't support multi-part extensions like `surf.ron`, so we use a different filter for macOS and possibly on WASM.
+pub(crate) static STATE_FILE_FILTER_MACOS: FileFilter = FileFilter {
+    name: "Surfer state files (*.ron)",
+    extensions: &["ron"],
+};
+
+#[cfg(feature = "python")]
+static PYTHON_FILE_FILTER: FileFilter = FileFilter {
+    name: "Python files (*.py)",
+    extensions: &["py"],
+};
+
 impl SystemState {
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn file_dialog_open<F>(
         &mut self,
         title: &'static str,
-        filter: (String, Vec<String>),
+        filter: &'static FileFilter,
         messages: F,
     ) where
         F: FnOnce(PathBuf) -> Vec<Message> + Send + 'static,
@@ -68,7 +104,7 @@ impl SystemState {
     pub(crate) fn file_dialog_open<F>(
         &mut self,
         title: &'static str,
-        filter: (String, Vec<String>),
+        filter: &'static FileFilter,
         messages: F,
     ) where
         F: FnOnce(Vec<u8>) -> Vec<Message> + 'static,
@@ -86,7 +122,7 @@ impl SystemState {
     pub(crate) fn file_dialog_save<F, Fut>(
         &mut self,
         title: &'static str,
-        filter: (String, Vec<String>),
+        filter: &'static FileFilter,
         default_file_name: Option<String>,
         messages: F,
     ) where
@@ -110,7 +146,7 @@ impl SystemState {
     pub(crate) fn file_dialog_save<F, Fut>(
         &mut self,
         title: &'static str,
-        filter: (String, Vec<String>),
+        filter: &'static FileFilter,
         default_file_name: Option<String>,
         messages: F,
     ) where
@@ -133,16 +169,6 @@ impl SystemState {
     pub(crate) fn open_file_dialog(&mut self, mode: OpenMode) {
         let load_options: LoadOptions = (mode, self.user.config.behavior.keep_during_reload).into();
 
-        let filter = (
-            "Waveform/Transaction-files (*.vcd, *.fst, *.ghw, *.ftr)".to_string(),
-            vec![
-                "vcd".to_string(),
-                "fst".to_string(),
-                "ghw".to_string(),
-                TRANSACTIONS_FILE_EXTENSION.to_string(),
-            ],
-        );
-
         #[cfg(all(target_arch = "wasm32", feature = "vscode"))]
         {
             let kind = match load_options {
@@ -150,7 +176,7 @@ impl SystemState {
                 LoadOptions::KeepAvailable => "waveform_keep_available",
                 LoadOptions::KeepAll => "waveform_keep_all",
             };
-            vscode_open_dialog_with_filter(kind, &filter);
+            vscode_open_dialog_with_filter(kind, &WAVEFORM_FILE_FILTER);
         }
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -168,18 +194,13 @@ impl SystemState {
         let message = move |file: Vec<u8>| vec![Message::LoadFromData(file, load_options)];
 
         #[cfg(not(all(target_arch = "wasm32", feature = "vscode")))]
-        self.file_dialog_open("Open waveform file", filter, message);
+        self.file_dialog_open("Open waveform file", &WAVEFORM_FILE_FILTER, message);
     }
 
     pub(crate) fn open_command_file_dialog(&mut self) {
-        let filter = (
-            "Command-file (*.sucl)".to_string(),
-            vec!["sucl".to_string()],
-        );
-
         #[cfg(all(target_arch = "wasm32", feature = "vscode"))]
         {
-            vscode_open_dialog_with_filter("command_file", &filter);
+            vscode_open_dialog_with_filter("command_file", &COMMAND_FILE_FILTER);
         }
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -197,15 +218,13 @@ impl SystemState {
         let message = move |file: Vec<u8>| vec![Message::LoadCommandFromData(file)];
 
         #[cfg(not(all(target_arch = "wasm32", feature = "vscode")))]
-        self.file_dialog_open("Open command file", filter, message);
+        self.file_dialog_open("Open command file", &COMMAND_FILE_FILTER, message);
     }
 
     #[cfg(feature = "python")]
     pub(crate) fn open_python_file_dialog(&mut self) {
-        self.file_dialog_open(
-            "Open Python translator file",
-            ("Python files (*.py)".to_string(), vec!["py".to_string()]),
-            |file| match Utf8PathBuf::from_path_buf(file.clone()) {
+        self.file_dialog_open("Open Python translator file", &PYTHON_FILE_FILTER, |file| {
+            match Utf8PathBuf::from_path_buf(file.clone()) {
                 Ok(utf8_path) => vec![Message::LoadPythonTranslator(utf8_path)],
                 Err(_) => {
                     vec![Message::Error(eyre::eyre!(
@@ -213,26 +232,26 @@ impl SystemState {
                         file.display()
                     ))]
                 }
-            },
-        );
+            }
+        });
     }
 }
 
 #[cfg(not(all(target_arch = "wasm32", feature = "vscode")))]
 #[cfg(not(target_os = "macos"))]
-fn create_file_dialog(filter: (String, Vec<String>), title: &'static str) -> AsyncFileDialog {
+fn create_file_dialog(filter: &'static FileFilter, title: &'static str) -> AsyncFileDialog {
     AsyncFileDialog::new()
         .set_title(title)
-        .add_filter(filter.0, &filter.1)
+        .add_filter(filter.name, filter.extensions)
         .add_filter("All files", &["*"])
 }
 
 #[cfg(not(all(target_arch = "wasm32", feature = "vscode")))]
 #[cfg(target_os = "macos")]
-fn create_file_dialog(filter: (String, Vec<String>), title: &'static str) -> AsyncFileDialog {
+fn create_file_dialog(filter: &'static FileFilter, title: &'static str) -> AsyncFileDialog {
     AsyncFileDialog::new()
         .set_title(title)
-        .add_filter(filter.0, &filter.1)
+        .add_filter(filter.name, &filter.extensions)
 }
 
 /// Serialise a `(name, extensions)` filter pair into the JSON array expected by
@@ -240,18 +259,18 @@ fn create_file_dialog(filter: (String, Vec<String>), title: &'static str) -> Asy
 ///
 /// Example output: `[{"name":"Waveform files","extensions":["vcd","fst"]}]`
 #[cfg(all(target_arch = "wasm32", feature = "vscode"))]
-pub(crate) fn vscode_open_dialog_with_filter(kind: &str, filter: &(String, Vec<String>)) {
+pub(crate) fn vscode_open_dialog_with_filter(kind: &str, filter: &'static FileFilter) {
     let filters_json = filters_to_json(filter);
     vscode_show_open_dialog(kind, &filters_json);
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "vscode"))]
-fn filters_to_json(filter: &(String, Vec<String>)) -> String {
+fn filters_to_json(filter: &'static FileFilter) -> String {
     let exts = filter
-        .1
+        .extensions
         .iter()
         .map(|e| format!("{e:?}"))
         .collect::<Vec<_>>()
         .join(",");
-    format!("[{{\"name\":{:?},\"extensions\":[{exts}]}}]", filter.0)
+    format!("[{{\"name\":{:?},\"extensions\":[{exts}]}}]", filter.name)
 }
