@@ -252,13 +252,9 @@ impl SystemState {
                 .ok();
             vec![Message::AsyncDone(AsyncJob::SaveState)]
         };
-        let ext = state_file_dialog_extension();
         self.file_dialog_save(
             "Save state",
-            (
-                format!("Surfer state files (*.{STATE_FILE_EXTENSION})"),
-                vec![ext.to_string()],
-            ),
+            state_file_filter(),
             Some(self.default_state_file_name()),
             messages,
         );

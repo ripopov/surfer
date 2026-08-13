@@ -166,20 +166,22 @@ impl SystemState {
         });
     }
 
+    #[cfg(all(target_arch = "wasm32", feature = "vscode"))]
     pub(crate) fn open_file_dialog(&mut self, mode: OpenMode) {
         let load_options: LoadOptions = (mode, self.user.config.behavior.keep_during_reload).into();
 
-        #[cfg(all(target_arch = "wasm32", feature = "vscode"))]
-        {
-            let kind = match load_options {
-                LoadOptions::Clear => "waveform_clear",
-                LoadOptions::KeepAvailable => "waveform_keep_available",
-                LoadOptions::KeepAll => "waveform_keep_all",
-            };
-            vscode_open_dialog_with_filter(kind, &WAVEFORM_FILE_FILTER);
-        }
+        let kind = match load_options {
+            LoadOptions::Clear => "waveform_clear",
+            LoadOptions::KeepAvailable => "waveform_keep_available",
+            LoadOptions::KeepAll => "waveform_keep_all",
+        };
+        vscode_open_dialog_with_filter(kind, &WAVEFORM_FILE_FILTER);
+    }
 
-        #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn open_file_dialog(&mut self, mode: OpenMode) {
+        let load_options: LoadOptions = (mode, self.user.config.behavior.keep_during_reload).into();
+
         let message = move |file: PathBuf| match Utf8PathBuf::from_path_buf(file.clone()) {
             Ok(utf8_path) => vec![Message::LoadFile(utf8_path, load_options)],
             Err(_) => {
@@ -190,20 +192,25 @@ impl SystemState {
             }
         };
 
-        #[cfg(all(target_arch = "wasm32", not(feature = "vscode")))]
-        let message = move |file: Vec<u8>| vec![Message::LoadFromData(file, load_options)];
-
-        #[cfg(not(all(target_arch = "wasm32", feature = "vscode")))]
         self.file_dialog_open("Open waveform file", &WAVEFORM_FILE_FILTER, message);
     }
 
-    pub(crate) fn open_command_file_dialog(&mut self) {
-        #[cfg(all(target_arch = "wasm32", feature = "vscode"))]
-        {
-            vscode_open_dialog_with_filter("command_file", &COMMAND_FILE_FILTER);
-        }
+    #[cfg(all(target_arch = "wasm32", not(feature = "vscode")))]
+    pub(crate) fn open_file_dialog(&mut self, mode: OpenMode) {
+        let load_options: LoadOptions = (mode, self.user.config.behavior.keep_during_reload).into();
 
-        #[cfg(not(target_arch = "wasm32"))]
+        let message = move |file: Vec<u8>| vec![Message::LoadFromData(file, load_options)];
+
+        self.file_dialog_open("Open waveform file", &WAVEFORM_FILE_FILTER, message);
+    }
+
+    #[cfg(all(target_arch = "wasm32", feature = "vscode"))]
+    pub(crate) fn open_command_file_dialog(&mut self) {
+        vscode_open_dialog_with_filter("command_file", &COMMAND_FILE_FILTER);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn open_command_file_dialog(&mut self) {
         let message = move |file: PathBuf| match Utf8PathBuf::from_path_buf(file.clone()) {
             Ok(utf8_path) => vec![Message::LoadCommandFile(utf8_path)],
             Err(_) => {
@@ -214,11 +221,16 @@ impl SystemState {
             }
         };
 
-        #[cfg(all(target_arch = "wasm32", not(feature = "vscode")))]
-        let message = move |file: Vec<u8>| vec![Message::LoadCommandFromData(file)];
-
-        #[cfg(not(all(target_arch = "wasm32", feature = "vscode")))]
         self.file_dialog_open("Open command file", &COMMAND_FILE_FILTER, message);
+    }
+
+    #[cfg(all(target_arch = "wasm32", not(feature = "vscode")))]
+    pub(crate) fn open_command_file_dialog(&mut self) {
+        self.file_dialog_open(
+            "Open command file",
+            &COMMAND_FILE_FILTER,
+            |file: Vec<u8>| vec![Message::LoadCommandFromData(file)],
+        );
     }
 
     #[cfg(feature = "python")]
