@@ -72,15 +72,9 @@ impl RectAnnotation {
         ctx: &DrawingContext,
         y_offset: f32,
     ) -> Option<Pos2> {
-        let max_timestamp = waves.safe_max_timestamp();
-        let time_offset = waves.time_offset();
+        let range = waves.time_range();
 
-        let x = viewport.pixel_from_time(
-            &self.from.time,
-            ctx.cfg.canvas_size.x,
-            &max_timestamp,
-            time_offset,
-        );
+        let x = viewport.pixel_from_time(&self.from.time, ctx.cfg.canvas_size.x, range);
 
         let from_y = self.from.wave.as_ref().and_then(|f| waves.get_item_y(f))?;
         let to_y = self.to.wave.as_ref().and_then(|to| waves.get_item_y(to))?;
@@ -127,8 +121,7 @@ impl RectAnnotation {
         y_offset: f32,
     ) {
         let viewport = waves.viewports[viewport_idx];
-        let max_timestamp = waves.safe_max_timestamp();
-        let time_offset = waves.time_offset();
+        let range = waves.time_range();
 
         //Update size and coloring from theme and whether it selected or not
         self.annotation_data.stroke = Stroke::new(
@@ -139,18 +132,8 @@ impl RectAnnotation {
         let min_y = from_y.min(to_y) + y_offset;
         let max_y = from_y.max(to_y) + y_offset;
 
-        let min_x = viewport.pixel_from_time(
-            &self.from.time,
-            ctx.cfg.canvas_size.x,
-            &max_timestamp,
-            time_offset,
-        );
-        let max_x = viewport.pixel_from_time(
-            &self.to.time,
-            ctx.cfg.canvas_size.x,
-            &max_timestamp,
-            time_offset,
-        );
+        let min_x = viewport.pixel_from_time(&self.from.time, ctx.cfg.canvas_size.x, range);
+        let max_x = viewport.pixel_from_time(&self.to.time, ctx.cfg.canvas_size.x, range);
 
         self.rect = Rect {
             min: (ctx.to_screen)(min_x, min_y),
@@ -317,14 +300,8 @@ impl Annotatable for RectAnnotation {
         waves: &WaveData,
         offset: f32,
     ) -> Pos2 {
-        let max_timestamp = waves.safe_max_timestamp();
-        let time_offset = waves.time_offset();
-        let x = viewport.pixel_from_time(
-            &self.to.time,
-            ctx.cfg.canvas_size.x,
-            &max_timestamp,
-            time_offset,
-        );
+        let range = waves.time_range();
+        let x = viewport.pixel_from_time(&self.to.time, ctx.cfg.canvas_size.x, range);
         let y = calculate_y(self.to.wave.as_ref(), waves).unwrap() + offset;
         (ctx.to_screen)(x, y)
     }

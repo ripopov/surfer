@@ -9,7 +9,7 @@ use crate::message::Message;
 use crate::translation::TranslatorList;
 use crate::view::DrawingContext;
 use crate::viewport::Viewport;
-use crate::wave_data::WaveData;
+use crate::wave_data::{TimeRange, WaveData};
 use ecolor::Color32;
 use emath::{Align2, Pos2, Rect, Vec2};
 use epaint::{CornerRadius, PathShape, Stroke};
@@ -48,8 +48,7 @@ pub(crate) fn variable_analog_draw_commands(
     let displayed_field_ref: DisplayedFieldRef = display_id.into();
     let translator = waves.variable_translator(&displayed_field_ref, translators);
     let viewport = &waves.viewports[viewport_idx];
-    let max_timestamp = waves.safe_max_timestamp();
-    let time_offset = waves.time_offset();
+    let range = waves.time_range();
 
     let signal_id = wave_container
         .signal_id(&displayed_variable.variable_ref)
@@ -108,8 +107,7 @@ pub(crate) fn variable_analog_draw_commands(
     let analog_commands = CommandBuilder::new(
         cache,
         viewport,
-        &max_timestamp,
-        time_offset,
+        range,
         view_width,
         render_mode.settings,
         type_limits,
@@ -248,8 +246,7 @@ fn select_value_range(
 struct CommandBuilder<'a> {
     cache: &'a AnalogSignalCache,
     viewport: &'a Viewport,
-    max_timestamp: &'a BigInt,
-    time_offset: &'a BigInt,
+    range: &'a TimeRange,
     view_width: f32,
     min_valid_pixel: f32,
     max_valid_pixel: f32,
@@ -338,22 +335,18 @@ impl<'a> CommandBuilder<'a> {
     fn new(
         cache: &'a AnalogSignalCache,
         viewport: &'a Viewport,
-        max_timestamp: &'a BigInt,
-        time_offset: &'a BigInt,
+        range: &'a TimeRange,
         view_width: f32,
         analog_settings: AnalogSettings,
         type_limits: Option<NumericRange>,
     ) -> Self {
-        let min_valid_pixel =
-            viewport.pixel_from_time(&BigInt::from(0), view_width, max_timestamp, time_offset);
-        let max_valid_pixel =
-            viewport.pixel_from_time(max_timestamp, view_width, max_timestamp, time_offset);
+        let min_valid_pixel = viewport.pixel_from_time(&BigInt::from(0), view_width, range);
+        let max_valid_pixel = viewport.pixel_from_time(&range.end, view_width, range);
 
         Self {
             cache,
             viewport,
-            max_timestamp,
-            time_offset,
+            range,
             view_width,
             min_valid_pixel,
             max_valid_pixel,
@@ -375,19 +368,15 @@ impl<'a> CommandBuilder<'a> {
 
     fn time_at_pixel(&self, px: f64) -> u64 {
         self.viewport
-            .as_absolute_time(px, self.view_width, self.max_timestamp, self.time_offset)
+            .as_absolute_time(px, self.view_width, self.range)
             .0
             .to_u64()
             .unwrap_or(0)
     }
 
     fn pixel_at_time(&self, time: u64) -> f32 {
-        self.viewport.pixel_from_time(
-            &BigInt::from(time),
-            self.view_width,
-            self.max_timestamp,
-            self.time_offset,
-        )
+        self.viewport
+            .pixel_from_time(&BigInt::from(time), self.view_width, self.range)
     }
 
     fn query(&self, time: u64) -> CacheQueryResult {

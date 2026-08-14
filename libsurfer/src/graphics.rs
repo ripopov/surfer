@@ -102,8 +102,7 @@ impl WaveData {
         theme: &SurferTheme,
     ) {
         let color = theme.variable_dontcare;
-        let max_timestamp = self.safe_max_timestamp();
-        let time_offset = self.time_offset();
+        let range = self.time_range();
         for g in self.graphics.values() {
             match g {
                 Graphic::TextArrow {
@@ -111,20 +110,11 @@ impl WaveData {
                     to: (to_point, to_dir),
                     text,
                 } => {
-                    let from_x = viewport.pixel_from_time(
-                        &from_point.x,
-                        ctx.cfg.canvas_size.x,
-                        &max_timestamp,
-                        time_offset,
-                    );
+                    let from_x =
+                        viewport.pixel_from_time(&from_point.x, ctx.cfg.canvas_size.x, range);
                     let from_y = self.get_item_y(&from_point.y);
 
-                    let to_x = viewport.pixel_from_time(
-                        &to_point.x,
-                        ctx.cfg.canvas_size.x,
-                        &max_timestamp,
-                        time_offset,
-                    );
+                    let to_x = viewport.pixel_from_time(&to_point.x, ctx.cfg.canvas_size.x, range);
                     let to_y = self.get_item_y(&to_point.y);
 
                     if let (Some(from_y), Some(to_y)) = (from_y, to_y) {
@@ -161,12 +151,7 @@ impl WaveData {
                     pos: (pos, dir),
                     text,
                 } => {
-                    let to_x = viewport.pixel_from_time(
-                        &pos.x,
-                        ctx.cfg.canvas_size.x,
-                        &max_timestamp,
-                        time_offset,
-                    );
+                    let to_x = viewport.pixel_from_time(&pos.x, ctx.cfg.canvas_size.x, range);
                     let to_y = self.get_item_y(&pos.y);
                     if let Some(to_y) = to_y {
                         ctx.painter.text(
@@ -187,19 +172,11 @@ impl WaveData {
                     from: from_point,
                     to: to_point,
                 } => {
-                    let from_x = viewport.pixel_from_time(
-                        &from_point.x,
-                        ctx.cfg.canvas_size.x,
-                        &max_timestamp,
-                        time_offset,
-                    );
+                    let from_x =
+                        viewport.pixel_from_time(&from_point.x, ctx.cfg.canvas_size.x, range);
                     let from_y = self.get_item_y(&from_point.y);
-                    let to_x = viewport.pixel_from_time(
-                        &from_point.x,
-                        ctx.cfg.canvas_size.x,
-                        &max_timestamp,
-                        time_offset,
-                    );
+                    let to_x =
+                        viewport.pixel_from_time(&from_point.x, ctx.cfg.canvas_size.x, range);
                     let to_y = self.get_item_y(&to_point.y);
 
                     if let (Some(from_y), Some(to_y)) = (from_y, to_y) {

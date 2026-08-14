@@ -120,12 +120,11 @@ impl SystemState {
             }
             //Attach position to canvas, so it doesn't follow screen movement.
             if let Some(time) = &self.gesture_start_time {
-                let time_offset = waves.time_offset();
+                let range = waves.time_range();
                 let x_pixel = waves.viewports[viewport_idx].pixel_from_time(
                     time,
                     ctx.cfg.canvas_size.x,
-                    &waves.safe_max_timestamp(),
-                    time_offset,
+                    range,
                 );
                 start_location.x = x_pixel;
             }
@@ -180,7 +179,7 @@ impl SystemState {
         ui: &Context,
         y_offset: f32,
     ) {
-        let max_timestamp = waves.safe_max_timestamp();
+        let range = waves.time_range();
         let Some(end_location) = pointer_pos_canvas else {
             return;
         };
@@ -194,7 +193,6 @@ impl SystemState {
                         msgs,
                         viewport_idx,
                         waves,
-                        &max_timestamp,
                         frame_width,
                         ctx,
                         ui,
@@ -208,7 +206,6 @@ impl SystemState {
                         msgs,
                         viewport_idx,
                         waves,
-                        &max_timestamp,
                         frame_width,
                         ctx,
                         y_offset,
@@ -225,20 +222,17 @@ impl SystemState {
                             } else {
                                 (start_location.x, end_location.x)
                             };
-                            let time_offset = waves.time_offset();
                             msgs.push(Message::ZoomToRange {
                                 // FIXME: No need to go via bigint here, this could all be relative
                                 start: waves.viewports[viewport_idx].as_time_bigint(
                                     min_x,
                                     frame_width,
-                                    &max_timestamp,
-                                    time_offset,
+                                    range,
                                 ),
                                 end: waves.viewports[viewport_idx].as_time_bigint(
                                     max_x,
                                     frame_width,
-                                    &max_timestamp,
-                                    time_offset,
+                                    range,
                                 ),
                                 viewport_idx,
                             });
@@ -427,12 +421,12 @@ impl SystemState {
         msgs: &mut Vec<Message>,
         viewport_idx: usize,
         waves: &WaveData,
-        max_timestamp: &BigInt,
         frame_width: f32,
         ctx: &mut DrawingContext<'_>,
         ui: &Context,
         y_offset: f32,
     ) {
+        let range = waves.time_range();
         let modifiers = ui.input(|i| i.modifiers);
         let max_y = waves.get_content_height(ctx);
 
@@ -472,10 +466,8 @@ impl SystemState {
 
         let viewport = &waves.viewports[viewport_idx];
 
-        let time_offset = waves.time_offset();
-
-        let t1 = viewport.as_time_bigint(start_location.x, frame_width, max_timestamp, time_offset);
-        let t2 = viewport.as_time_bigint(end_location.x, frame_width, max_timestamp, time_offset);
+        let t1 = viewport.as_time_bigint(start_location.x, frame_width, range);
+        let t2 = viewport.as_time_bigint(end_location.x, frame_width, range);
 
         let (time_start, time_end) = (t1.clone().min(t2.clone()), t1.max(t2));
 
@@ -539,33 +531,23 @@ impl SystemState {
         msgs: &mut Vec<Message>,
         viewport_idx: usize,
         waves: &WaveData,
-        max_timestamp: &BigInt,
         frame_width: f32,
         ctx: &mut DrawingContext<'_>,
         offset: f32,
     ) {
+        let range = waves.time_range();
         let start_pos = (ctx.to_screen)(start_location.x, start_location.y);
         let end_pos = (ctx.to_screen)(end_location.x, end_location.y);
 
-        let time_offset = waves.time_offset();
-        let time_from: BigInt = waves.viewports[viewport_idx].as_time_bigint(
-            start_location.x,
-            frame_width,
-            max_timestamp,
-            time_offset,
-        );
+        let time_from: BigInt =
+            waves.viewports[viewport_idx].as_time_bigint(start_location.x, frame_width, range);
 
         let snap_pos = Some(Pos2::new(end_location.x, end_location.y - offset));
 
         let time_to = self
             .snap_to_edge(snap_pos, waves, frame_width, viewport_idx)
             .unwrap_or_else(|| {
-                waves.viewports[viewport_idx].as_time_bigint(
-                    end_location.x,
-                    frame_width,
-                    max_timestamp,
-                    time_offset,
-                )
+                waves.viewports[viewport_idx].as_time_bigint(end_location.x, frame_width, range)
             });
 
         let attached_item_to = waves.item_ref_at_canvas_y(end_location.y - offset);
@@ -700,12 +682,9 @@ impl SystemState {
         } else {
             (current_location.x, start_location.x)
         };
-        let max_timestamp = waves.safe_max_timestamp();
-        let time_offset = waves.time_offset();
-        let start_time =
-            waves.viewports[viewport_idx].as_time_bigint(minx, width, &max_timestamp, time_offset);
-        let end_time =
-            waves.viewports[viewport_idx].as_time_bigint(maxx, width, &max_timestamp, time_offset);
+        let range = waves.time_range();
+        let start_time = waves.viewports[viewport_idx].as_time_bigint(minx, width, range);
+        let end_time = waves.viewports[viewport_idx].as_time_bigint(maxx, width, range);
         let diff_time = &end_time - &start_time;
         let time_formatter = TimeFormatter::new(
             &waves.inner.metadata().timescale,
@@ -788,8 +767,7 @@ impl SystemState {
                     let x = waves.viewports[viewport_idx].pixel_from_time(
                         &snap_time,
                         frame_width,
-                        &waves.safe_max_timestamp(),
-                        waves.time_offset(),
+                        waves.time_range(),
                     );
                     current_location.x = x;
                 }

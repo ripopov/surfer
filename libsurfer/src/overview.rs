@@ -1,7 +1,10 @@
 use crate::message::Message;
 use crate::view::{DrawConfig, DrawingContext};
 use crate::viewport::Viewport;
-use crate::{SystemState, wave_data::WaveData};
+use crate::{
+    SystemState,
+    wave_data::{TimeRange, WaveData},
+};
 use egui::{Frame, Panel, PointerButton, Sense, Ui};
 use emath::{Align2, Pos2, Rect, RectTransform};
 use epaint::CornerRadius;
@@ -41,22 +44,16 @@ impl SystemState {
             theme: &self.user.config.theme,
         };
 
-        let max_timestamp = waves.safe_max_timestamp();
+        let range = waves.time_range();
         let viewport_all = waves.viewport_all();
         let base_fill_color = self.user.config.theme.canvas_colors.foreground;
 
         // Draw rectangles for each viewport
-        let time_offset = waves.time_offset();
         waves
             .viewports
             .iter()
             .enumerate()
-            .map(|(idx, viewport)| {
-                (
-                    idx,
-                    get_viewport_rect(&ctx, &max_timestamp, &viewport_all, viewport, time_offset),
-                )
-            })
+            .map(|(idx, viewport)| (idx, get_viewport_rect(&ctx, range, &viewport_all, viewport)))
             .for_each(|(idx, rect)| {
                 let gamma = if idx == waves.last_active_viewport_idx {
                     0.6
@@ -99,8 +96,7 @@ impl SystemState {
             let pointer_pos_global = ui.input(|i| i.pointer.interact_pos());
             let pos = pointer_pos_global.map(|p| to_screen.inverse().transform_pos(p));
             if let Some(pos) = pos {
-                let timestamp =
-                    viewport_all.as_time_bigint(pos.x, frame_size.x, &max_timestamp, time_offset);
+                let timestamp = viewport_all.as_time_bigint(pos.x, frame_size.x, range);
                 msgs.push(Message::GoToTime(Some(timestamp), 0));
             }
         });
@@ -109,22 +105,19 @@ impl SystemState {
 
 fn get_viewport_rect(
     ctx: &DrawingContext<'_>,
-    max_timestamp: &num::BigInt,
+    range: &TimeRange,
     viewport_all: &Viewport,
     viewport: &Viewport,
-    time_offset: &num::BigInt,
 ) -> Rect {
     let minx = viewport_all.pixel_from_absolute_time(
-        viewport.curr_left.absolute(max_timestamp, time_offset),
+        viewport.curr_left.absolute(range),
         ctx.cfg.canvas_size.x,
-        max_timestamp,
-        time_offset,
+        range,
     );
     let maxx = viewport_all.pixel_from_absolute_time(
-        viewport.curr_right.absolute(max_timestamp, time_offset),
+        viewport.curr_right.absolute(range),
         ctx.cfg.canvas_size.x,
-        max_timestamp,
-        time_offset,
+        range,
     );
     let mut min = (ctx.to_screen)(minx, 0.);
     let mut max = (ctx.to_screen)(maxx, ctx.cfg.canvas_size.y);

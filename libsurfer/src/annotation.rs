@@ -492,12 +492,8 @@ impl WaveData {
                 let mut menu_position = self.annotation_menu_pos.unwrap();
                 let menu_time = self.annotation_menu_time.clone().unwrap();
 
-                menu_position.x = viewport.pixel_from_time(
-                    &menu_time,
-                    ctx.cfg.canvas_size.x,
-                    &self.safe_max_timestamp(),
-                    self.time_offset(),
-                );
+                menu_position.x =
+                    viewport.pixel_from_time(&menu_time, ctx.cfg.canvas_size.x, self.time_range());
                 let temp_y = menu_position.y;
                 menu_position = (ctx.to_screen)(menu_position.x, menu_position.y);
                 menu_position.y = temp_y;
@@ -526,7 +522,7 @@ impl WaveData {
 impl SystemState {
     pub(crate) fn go_to_annotation_position(&mut self, anno_id: Id, viewport_idx: usize) {
         if let Some(waves) = self.user.waves.as_mut() {
-            if let Some(max_timestamp) = waves.max_timestamp() {
+            if waves.max_timestamp().is_some() {
                 if let Some(target) = waves.get_annotation_by_id(&anno_id) {
                     let mut left = target.get_start_time();
                     let mut right = target.get_end_time();
@@ -536,13 +532,8 @@ impl SystemState {
                     let difference = (&right - &left) / 2;
                     left -= &difference;
                     right += difference;
-                    let time_offset = waves.time_offset().clone();
-                    waves.viewports[viewport_idx].zoom_to_range(
-                        &left,
-                        &right,
-                        &max_timestamp,
-                        &time_offset,
-                    );
+                    let range = waves.time_range().clone();
+                    waves.viewports[viewport_idx].zoom_to_range(&left, &right, &range);
 
                     if let Some(from_wave) = from_wave
                         && let Some(to_wave) = to_wave

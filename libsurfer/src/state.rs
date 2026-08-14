@@ -24,7 +24,7 @@ use crate::{
     variable_filter::VariableFilter,
     viewport::Viewport,
     wave_container::{ScopeRef, VariableRef, WaveContainer},
-    wave_data::WaveData,
+    wave_data::{TimeRange, WaveData},
     wave_source::{LoadOptions, WaveFormat, WaveSource},
 };
 use egui::{
@@ -34,7 +34,6 @@ use egui::{
 use epaint::{CornerRadius, Stroke};
 use eyre::{Result, WrapErr as _};
 use itertools::Itertools;
-use num::{BigInt, Zero};
 use serde::{Deserialize, Serialize};
 use surfer_translation_types::Translator;
 use surver::SurverFileInfo;
@@ -389,7 +388,7 @@ impl SystemState {
                             inflight_caches: HashMap::new(),
                             annotation_groups: vec![],
                             annotation_list_visible: false,
-                            cached_time_offset: BigInt::zero(),
+                            cached_time_range: TimeRange::default(),
                         },
                         None,
                     ),
@@ -408,7 +407,7 @@ impl SystemState {
 
         // Refresh time offset cache after loading waves
         if let Some(waves) = &mut self.user.waves {
-            waves.refresh_time_offset(enable_time_offset);
+            waves.refresh_time_range(enable_time_offset);
         }
 
         // Update window title with waveform name
@@ -492,11 +491,11 @@ impl SystemState {
             inflight_caches: HashMap::new(),
             annotation_groups: vec![],
             annotation_list_visible: false,
-            cached_time_offset: BigInt::zero(),
+            cached_time_range: TimeRange::default(),
         };
 
         let enable_time_offset = self.enable_time_offset();
-        new_transaction_streams.refresh_time_offset(enable_time_offset);
+        new_transaction_streams.refresh_time_range(enable_time_offset);
 
         self.invalidate_draw_commands();
 
@@ -649,7 +648,7 @@ impl SystemState {
         let enable_time_offset = self.enable_time_offset();
         self.invalidate_draw_commands();
         if let Some(waves) = &mut self.user.waves {
-            waves.refresh_time_offset(enable_time_offset);
+            waves.refresh_time_range(enable_time_offset);
             waves.update_viewports();
         }
     }

@@ -16,7 +16,7 @@ use sys_locale::get_locale;
 
 use crate::config::SurferConfig;
 use crate::viewport::Viewport;
-use crate::wave_data::WaveData;
+use crate::wave_data::{TimeRange, WaveData};
 use crate::{
     Message, SystemState,
     translation::group_n_chars,
@@ -958,7 +958,7 @@ impl SystemState {
         viewport: &Viewport,
         cfg: &DrawConfig,
     ) -> Vec<(String, f32, i64)> {
-        let time_offset = waves.time_offset();
+        let range = waves.time_range();
         get_ticks_internal(
             viewport,
             &waves.inner.metadata().timescale,
@@ -967,8 +967,7 @@ impl SystemState {
             &self.user.wanted_timeunit,
             &self.get_time_format(),
             self.user.config.theme.ticks.density,
-            &waves.safe_max_timestamp(),
-            time_offset,
+            range,
         )
     }
 }
@@ -986,27 +985,26 @@ fn get_ticks_internal(
     wanted_timeunit: &TimeUnit,
     time_format: &TimeFormat,
     density: f32,
-    max_timestamp: &BigInt,
-    time_offset: &BigInt,
+    range: &TimeRange,
 ) -> Vec<(String, f32, i64)> {
     let char_width = text_size * (20. / 31.);
     let rightexp = viewport
         .curr_right
-        .absolute(max_timestamp, time_offset)
+        .absolute(range)
         .inner()
         .abs()
         .log10()
         .round() as i16;
     let leftexp = viewport
         .curr_left
-        .absolute(max_timestamp, time_offset)
+        .absolute(range)
         .inner()
         .abs()
         .log10()
         .round() as i16;
     let max_labelwidth = f32::from(rightexp.max(leftexp) + 3) * char_width;
     let max_labels = ((frame_width * density) / max_labelwidth).floor() + 2.;
-    let viewport_width = viewport.width_absolute(max_timestamp, time_offset);
+    let viewport_width = viewport.width_absolute(range);
     let scale = 10.0f64.powf(
         (viewport_width.inner() / f64::from(max_labels))
             .log10()
@@ -1016,14 +1014,8 @@ fn get_ticks_internal(
     let mut ticks: Vec<(String, f32, i64)> = [].to_vec();
     for step in &TICK_STEPS {
         let scaled_step = scale * step;
-        let left_abs = viewport
-            .curr_left
-            .absolute(max_timestamp, time_offset)
-            .inner();
-        let right_abs = viewport
-            .curr_right
-            .absolute(max_timestamp, time_offset)
-            .inner();
+        let left_abs = viewport.curr_left.absolute(range).inner();
+        let right_abs = viewport.curr_right.absolute(range).inner();
         let rounded_min_label_time = (left_abs / scaled_step).floor() * scaled_step;
         let high = ((right_abs - rounded_min_label_time) / scaled_step).ceil() as f32 + 1.;
 
@@ -1039,7 +1031,7 @@ fn get_ticks_internal(
                         // Time string
                         time_formatter.format(&tick),
                         // X position
-                        viewport.pixel_from_time(&tick, frame_width, max_timestamp, time_offset),
+                        viewport.pixel_from_time(&tick, frame_width, range),
                         // Absolute time
                         tick.to_i64().unwrap_or_default(),
                     )
@@ -1857,8 +1849,10 @@ mod get_ticks_tests {
         let wanted = TimeUnit::MicroSeconds;
         let time_format = TimeFormat::default();
         let config = crate::config::SurferConfig::default();
-        let max_timestamp = BigInt::from(1_000_000i64);
-
+        let range = TimeRange {
+            start: BigInt::from(0),
+            end: BigInt::from(1_000_000i64),
+        };
         let ticks = get_ticks_internal(
             &vp,
             &timescale,
@@ -1867,8 +1861,7 @@ mod get_ticks_tests {
             &wanted,
             &time_format,
             config.theme.ticks.density,
-            &max_timestamp,
-            &BigInt::from(0),
+            &range,
         );
 
         assert!(!ticks.is_empty(), "expected at least one tick");
@@ -1920,7 +1913,10 @@ mod get_ticks_tests {
         // make ticks dense
         config.theme.ticks.density = 1.0;
 
-        let max_timestamp = BigInt::from(1_000_000i64);
+        let range = TimeRange {
+            start: BigInt::from(0),
+            end: BigInt::from(1_000_000i64),
+        };
 
         let ticks = get_ticks_internal(
             &vp,
@@ -1930,8 +1926,7 @@ mod get_ticks_tests {
             &wanted,
             &time_format,
             config.theme.ticks.density,
-            &max_timestamp,
-            &BigInt::from(0),
+            &range,
         );
 
         assert!(!ticks.is_empty(), "expected ticks even for narrow view");
