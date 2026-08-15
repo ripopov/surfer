@@ -357,6 +357,8 @@ impl SystemState {
         force_switch: bool,
         file_index: Option<usize>,
     ) {
+        #[cfg(all(not(target_arch = "wasm32"), feature = "https"))]
+        crate::async_util::ensure_rustls_crypto_provider();
         if file_index.is_some() {
             self.user.selected_server_file_index = file_index;
             *self.surver_selected_file.borrow_mut() = file_index;

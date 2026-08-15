@@ -16,6 +16,8 @@ use surver::{
 };
 
 use super::HierarchyResponse;
+#[cfg(all(not(target_arch = "wasm32"), feature = "https"))]
+use crate::async_util::ensure_rustls_crypto_provider;
 use crate::async_util::{perform_async_work, sleep_ms};
 use crate::channels::checked_send;
 use crate::message::Message;
@@ -25,6 +27,8 @@ use crate::wellen::{BodyResult, HeaderResult};
 /// Returns a shared reqwest client to reuse HTTP connections and reduce TLS overhead.
 fn get_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    #[cfg(all(not(target_arch = "wasm32"), feature = "https"))]
+    ensure_rustls_crypto_provider();
     CLIENT.get_or_init(reqwest::Client::new)
 }
 

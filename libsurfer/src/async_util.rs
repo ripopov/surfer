@@ -12,6 +12,20 @@ pub enum AsyncJob {
     SaveState,
 }
 
+#[cfg(all(not(target_arch = "wasm32"), feature = "https"))]
+pub(crate) fn ensure_rustls_crypto_provider() {
+    use std::sync::Once;
+
+    static INSTALL_PROVIDER: Once = Once::new();
+    INSTALL_PROVIDER.call_once(|| {
+        if rustls::crypto::CryptoProvider::get_default().is_none() {
+            rustls::crypto::ring::default_provider()
+                .install_default()
+                .expect("the Rustls crypto provider should only be installed once");
+        }
+    });
+}
+
 // Platform-dependent trait alias for futures that can be spawned
 #[cfg(target_arch = "wasm32")]
 pub trait SpawnableFuture: Future<Output = ()> + 'static {}

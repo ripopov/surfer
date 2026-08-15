@@ -140,6 +140,8 @@ impl SystemState {
     }
 
     pub(crate) fn load_commands_from_url(&mut self, url: String) {
+        #[cfg(all(not(target_arch = "wasm32"), feature = "https"))]
+        crate::async_util::ensure_rustls_crypto_provider();
         let sender = self.channels.msg_sender.clone();
         let url_ = url.clone();
         perform_async_work(async move {

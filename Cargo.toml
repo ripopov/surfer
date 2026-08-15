@@ -92,6 +92,7 @@ rfd = { version = "0.17.1", default-features = false, features = [
     "xdg-portal",
 ] }
 ron = { version = "0.12", default-features = false, features = ["integer128"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 serde = { version = "1.0.218", default-features = false, features = ["derive"] }
 serde_json = "1.0.139"
 simple-eyre = "0.3.1"
