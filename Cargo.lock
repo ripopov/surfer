@@ -5175,6 +5175,7 @@ dependencies = [
  "leb128",
  "lz4_flex 0.13.0",
  "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",

@@ -7,6 +7,8 @@ use std::sync::{
 
 use reqwest::StatusCode;
 
+mod common;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn server_end_to_end_basic() {
     // Arrange: choose a free port
@@ -56,7 +58,7 @@ async fn server_end_to_end_basic() {
     );
 
     let base = format!("http://127.0.0.1:{port}/{token}");
-    let client = reqwest::Client::new();
+    let client = common::http_client();
 
     // 1) Invalid token should 404
     let resp = client
@@ -187,7 +189,7 @@ async fn server_loads_multiple_files() {
     assert!(started.load(Ordering::SeqCst), "server did not start");
 
     let base = format!("http://127.0.0.1:{port}/{token}");
-    let client = reqwest::Client::new();
+    let client = common::http_client();
 
     // Get status to verify both files are loaded
     let resp = client

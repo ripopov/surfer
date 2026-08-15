@@ -8,6 +8,8 @@ use std::{fs, time::Duration};
 
 use reqwest::StatusCode;
 
+mod common;
+
 // Integration test for reload using a temporary file location.
 // Copies `examples/counter.vcd` to a temp dir as `counter.vcd`, starts the server
 // on that path, then overwrites it with `examples/counter2.vcd` and triggers reload.
@@ -68,7 +70,7 @@ async fn server_reload_with_overwrite() {
     );
 
     let base = format!("http://127.0.0.1:{port}/{token}");
-    let client = reqwest::Client::new();
+    let client = common::http_client();
 
     // Ensure initial body load completes
     let mut initial_loaded = false;
@@ -203,7 +205,7 @@ async fn server_direct_reload_ok_then_not_modified() {
     );
 
     let base = format!("http://127.0.0.1:{port}/{token}");
-    let client = reqwest::Client::new();
+    let client = common::http_client();
 
     // Ensure initial body load completes
     let mut initial_loaded = false;
