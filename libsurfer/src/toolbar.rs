@@ -917,8 +917,10 @@ impl SystemState {
         } else if visible_index >= row_groups.len() {
             row_groups[row_groups.len() - 1].rect.right()
         } else {
-            (row_groups[visible_index - 1].rect.right() + row_groups[visible_index].rect.left())
-                * 0.5
+            f32::midpoint(
+                row_groups[visible_index - 1].rect.right(),
+                row_groups[visible_index].rect.left(),
+            )
         };
 
         ui.painter().line_segment(

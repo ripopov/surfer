@@ -445,7 +445,7 @@ impl TimeFormatter {
             .to_f64()
             .unwrap_or(f64::NAN);
 
-            let time = format!("{scaledtime:.precision$}",);
+            let time = format!("{scaledtime:.precision$}");
             strip_trailing_zeros_and_period(&time)
         } else {
             (time * self.timescale.multiplier.unwrap_or(1) * pow10((-exponent_diff) as u8))
@@ -491,7 +491,7 @@ fn pow10(exp: u8) -> BigInt {
         19 => BigInt::from(10_000_000_000_000_000_000i128),
         20 => BigInt::from(100_000_000_000_000_000_000i128),
         21 => BigInt::from(1_000_000_000_000_000_000_000i128),
-        _ => BigInt::from(10).pow(exp as u32),
+        _ => BigInt::from(10).pow(u32::from(exp)),
     }
 }
 

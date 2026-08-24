@@ -650,8 +650,7 @@ impl SystemState {
                             .iter()
                             .position(|&position| position == selected)
                     })
-                    .map(|index| index + 1)
-                    .unwrap_or(0);
+                    .map_or(0, |index| index + 1);
                 let total_matches = matching_positions.len();
                 let mut find_previous_requested = false;
                 let mut find_next_requested = false;

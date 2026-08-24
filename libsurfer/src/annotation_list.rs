@@ -165,15 +165,17 @@ impl WaveData {
             .show_header(ui, |ui| {
                 ui.label(format!("{} ({})", group.name, group.annotations.len()));
 
-                let delete_tooltip;
-                let delete_message;
-                if group.annotations.is_empty() {
-                    delete_tooltip = "Delete this group";
-                    delete_message = Message::DeleteAnnotationGroup(group.name.clone());
+                let (delete_tooltip, delete_message) = if group.annotations.is_empty() {
+                    (
+                        "Delete this group",
+                        Message::DeleteAnnotationGroup(group.name.clone()),
+                    )
                 } else {
-                    delete_tooltip = "Delete all annotations in this group";
-                    delete_message = Message::DeleteAllAnnotationInGroup(group.name.clone());
-                }
+                    (
+                        "Delete all annotations in this group",
+                        Message::DeleteAllAnnotationInGroup(group.name.clone()),
+                    )
+                };
                 // Push everything else to the right
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if group.name != DEFAULT_GROUP_NAME

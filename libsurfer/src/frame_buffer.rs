@@ -872,7 +872,7 @@ fn channel_scaler(bits: usize) -> u32 {
 
 #[inline(always)]
 fn apply_scale(value: u16, multiplier: u32) -> u8 {
-    ((value as u32 * multiplier) >> 8) as u8
+    ((u32::from(value) * multiplier) >> 8) as u8
 }
 
 #[cfg(test)]

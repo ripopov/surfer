@@ -1056,7 +1056,9 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                         }
 
                         let pairs = values
-                            .chunks_exact(2)
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
                             .map(|c| (c[0], c[1]))
                             .collect::<Vec<_>>();
                         Some(Command::Terminal(Message::SetFrameBufferRange(pairs)))

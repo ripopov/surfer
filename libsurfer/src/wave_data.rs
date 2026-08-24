@@ -118,6 +118,7 @@ pub struct TimeRange {
 }
 
 impl TimeRange {
+    #[must_use]
     pub fn length(&self) -> BigInt {
         &self.end - &self.start
     }
@@ -1116,8 +1117,7 @@ impl WaveData {
         let start = if enable_time_offset {
             self.inner
                 .min_timestamp()
-                .map(|ts| ts.to_bigint().unwrap())
-                .unwrap_or_else(BigInt::zero)
+                .map_or_else(BigInt::zero, |ts| ts.to_bigint().unwrap())
         } else {
             BigInt::zero()
         };
