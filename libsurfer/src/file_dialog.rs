@@ -63,6 +63,12 @@ pub(crate) static STATE_FILE_FILTER: FileFilter = FileFilter {
     extensions: &["surf.ron"],
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) static FST_EXPORT_FILTER: FileFilter = FileFilter {
+    name: "FST files (*.fst)",
+    extensions: &["fst"],
+};
+
 #[cfg(any(
     target_os = "macos",
     all(target_arch = "wasm32", not(feature = "vscode"))

@@ -27,7 +27,7 @@ static UNIQUE_ID_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 #[derive(Debug)]
 pub struct WellenContainer {
     #[debug(skip)]
-    hierarchy: std::sync::Arc<Hierarchy>,
+    pub(crate) hierarchy: std::sync::Arc<Hierarchy>,
     /// the url of a remote server, None if waveforms are loaded locally
     server: Option<String>,
     /// selected file index on the remote server, None for local waveforms
@@ -35,10 +35,10 @@ pub struct WellenContainer {
     scopes: Vec<String>,
     vars: Vec<String>,
     varrefs: Vec<VariableRef>,
-    signals: HashMap<SignalRef, Arc<Signal>>,
+    pub(crate) signals: HashMap<SignalRef, Arc<Signal>>,
     /// keeps track of signals that need to be loaded once the body of the waveform file has been loaded
     signals_to_be_loaded: HashSet<SignalRef>,
-    time_table: Arc<TimeTable>,
+    pub(crate) time_table: Arc<TimeTable>,
     #[debug(skip)]
     source: Option<SignalSource>,
     unique_id: u64,
@@ -455,7 +455,7 @@ impl WellenContainer {
         }
     }
 
-    fn get_var_ref(&self, r: &VariableRef) -> Result<VarRef> {
+    pub(crate) fn get_var_ref(&self, r: &VariableRef) -> Result<VarRef> {
         match r.id {
             VarId::Wellen(id) => Ok(id),
             VarId::None => {

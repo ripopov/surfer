@@ -10,6 +10,7 @@ use crate::spawn;
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub enum AsyncJob {
     SaveState,
+    ExportFst,
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "https"))]

@@ -1764,7 +1764,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2099,6 +2099,17 @@ dependencies = [
  "lz4_flex 0.13.0",
  "miniz_oxide 0.9.1",
  "num_enum",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "fst-writer"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77be37fdc968866fa4f0cee73e42185e6d4699a761a51a54e6ebc9a3d73ed537"
+dependencies = [
+ "lz4_flex 0.11.6",
+ "miniz_oxide 0.8.9",
  "thiserror 2.0.18",
 ]
 
@@ -3026,6 +3037,7 @@ dependencies = [
 name = "libsurfer"
 version = "0.7.0"
 dependencies = [
+ "ahash",
  "base64",
  "bincode",
  "bytes",
@@ -3050,6 +3062,7 @@ dependencies = [
  "extism-manifest",
  "eyre",
  "f128",
+ "fst-writer",
  "ftr_parser",
  "futures",
  "futures-core",
@@ -4660,7 +4673,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4726,7 +4739,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5296,7 +5309,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6726,7 +6739,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -32,19 +32,19 @@ extern "C" {
 
 /// Normalizes a suggested file stem into a safe, non-empty value.
 ///
-/// Returns `surfer_state` when the input is blank or contains characters that
+/// Returns `fallback` when the input is blank or contains characters that
 /// are broadly invalid in file names across supported platforms.
-fn sanitize_file_stem(stem: &str) -> &str {
+pub(crate) fn sanitize_file_stem<'a>(stem: &'a str, fallback: &'a str) -> &'a str {
     let trimmed = stem.trim_matches([' ', '.']);
     if trimmed.is_empty() {
-        return "surfer_state";
+        return fallback;
     }
 
     let has_illegal = trimmed
         .chars()
         .any(|c| matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'));
 
-    if has_illegal { "surfer_state" } else { trimmed }
+    if has_illegal { fallback } else { trimmed }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -77,7 +77,7 @@ fn state_file_filter() -> &'static FileFilter {
 /// Extracts a display-friendly base name from a wave source.
 ///
 /// For URLs, query and fragment parts are stripped before computing the stem.
-fn source_file_stem(source: &WaveSource) -> Option<&str> {
+pub(crate) fn source_file_stem(source: &WaveSource) -> Option<&str> {
     match source {
         WaveSource::File(path) | WaveSource::DragAndDrop(Some(path)) => path.file_stem(),
         WaveSource::Url(url) => {
@@ -101,7 +101,9 @@ impl SystemState {
             .waves
             .as_ref()
             .and_then(|waves| source_file_stem(&waves.source))
-            .map_or("surfer_state", sanitize_file_stem);
+            .map_or("surfer_state", |stem| {
+                sanitize_file_stem(stem, "surfer_state")
+            });
 
         format!("{stem}.{STATE_FILE_EXTENSION}")
     }
@@ -328,10 +330,16 @@ mod tests {
 
     #[test]
     fn test_sanitize_file_stem() {
-        assert_eq!(sanitize_file_stem("counter"), "counter");
-        assert_eq!(sanitize_file_stem("  counter.  "), "counter");
-        assert_eq!(sanitize_file_stem(""), "surfer_state");
-        assert_eq!(sanitize_file_stem("..."), "surfer_state");
-        assert_eq!(sanitize_file_stem("bad:name"), "surfer_state");
+        assert_eq!(sanitize_file_stem("counter", "surfer_state"), "counter");
+        assert_eq!(
+            sanitize_file_stem("  counter.  ", "surfer_state"),
+            "counter"
+        );
+        assert_eq!(sanitize_file_stem("", "surfer_state"), "surfer_state");
+        assert_eq!(sanitize_file_stem("...", "surfer_state"), "surfer_state");
+        assert_eq!(
+            sanitize_file_stem("bad:name", "surfer_state"),
+            "surfer_state"
+        );
     }
 }

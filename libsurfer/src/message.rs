@@ -320,6 +320,9 @@ pub enum Message {
     #[cfg(feature = "python")]
     ReloadPythonPlugin,
     SaveStateFile(Option<Utf8PathBuf>),
+    /// Export the currently displayed variables (and only the hierarchy needed for them) to an FST file.
+    #[cfg(not(target_arch = "wasm32"))]
+    ExportSignalsToFst(Option<Utf8PathBuf>),
     /// Load state from data.
     /// Note: the internal state is not a stable format and this should not be
     /// relied on to work across revisions.

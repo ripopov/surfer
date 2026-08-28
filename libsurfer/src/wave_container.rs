@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use surfer_translation_types::VariableValue;
 
 use crate::cxxrtl_container::CxxrtlContainer;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::fst_export::FstExport;
 use crate::time::{TimeScale, TimeUnit};
 use crate::wellen::{BodyResult, LoadSignalsCmd, LoadSignalsResult, WellenContainer};
 
@@ -522,6 +524,17 @@ impl WaveContainer {
                 f.is_signal_loaded(*signal_ref)
             }
             _ => false,
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    /// Prepares an owned snapshot of `variables` (and only the scopes needed to reach
+    /// them) that can later be written out to an FST file, e.g. from a background task.
+    pub(crate) fn prepare_fst_export(&self, variables: &[VariableRef]) -> Result<FstExport> {
+        match self {
+            WaveContainer::Wellen(f) => Ok(FstExport::Wellen(f.prepare_fst_export(variables)?)),
+            WaveContainer::Empty => bail!("No waveform data to export"),
+            WaveContainer::Cxxrtl(_) => bail!("Exporting to FST is not supported for Cxxrtl"),
         }
     }
 

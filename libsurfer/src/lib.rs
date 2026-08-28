@@ -26,6 +26,8 @@ pub mod file_dialog;
 pub mod file_history;
 pub mod file_watcher;
 pub mod frame_buffer;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod fst_export;
 pub mod fzcmd;
 pub mod graphics;
 pub mod help;
@@ -1797,6 +1799,8 @@ impl SystemState {
                 self.invalidate_draw_commands();
             }
             Message::SaveStateFile(path) => self.save_state_file(path),
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::ExportSignalsToFst(path) => self.export_signals_to_fst(path),
             Message::LoadStateFromData(bytes) => self.load_state_from_bytes(&bytes),
             Message::LoadStateFile(path) => self.load_state_file(path),
             Message::LoadState(state, path) => self.load_state(state, path),

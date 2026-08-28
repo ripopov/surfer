@@ -159,6 +159,13 @@ impl SystemState {
                 .add_closing_menu(msgs, ui);
             }
             b("Save state as...", Message::SaveStateFile(None)).add_closing_menu(msgs, ui);
+            #[cfg(not(target_arch = "wasm32"))]
+            b(
+                "Export variables to FST...",
+                Message::ExportSignalsToFst(None),
+            )
+            .enabled(waves_loaded)
+            .add_closing_menu(msgs, ui);
             b(
                 "Open URL...",
                 Message::SetUrlEntryVisible(

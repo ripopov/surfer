@@ -2586,6 +2586,81 @@ snapshot_ui!(save_and_load, || {
     state
 });
 
+snapshot_ui!(export_to_fst_and_reload, || {
+    let export_file =
+        Utf8PathBuf::from_path_buf(env::temp_dir().join("export_to_fst_and_reload.fst")).unwrap();
+
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples")
+                    .join("picorv32.vcd")
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    // Sparsely select variables from five different branches/depths of the hierarchy to
+    // check that only the displayed variables (and only the hierarchy needed to reach
+    // them) end up in the exported file.
+    state.update(Message::AddVariables(
+        [
+            VariableRef::from_hierarchy_string("testbench.clk"),
+            VariableRef::from_hierarchy_string("testbench.trace_data"),
+            VariableRef::from_hierarchy_string("testbench.top.clk"),
+            VariableRef::from_hierarchy_string("testbench.top.uut.pcpi_insn"),
+            VariableRef::from_hierarchy_string("testbench.top.uut.picorv32_core.mem_do_rinst"),
+        ]
+        .into(),
+    ));
+
+    handle_messages_until(
+        &mut state,
+        |msg| matches!(&msg, Message::SignalsLoaded(..)),
+        10,
+    );
+
+    state.update(Message::ExportSignalsToFst(Some(export_file.clone())));
+
+    handle_messages_until(
+        &mut state,
+        |msg| matches!(&msg, Message::AsyncDone(AsyncJob::ExportFst)),
+        10,
+    );
+
+    // Load the freshly exported FST file into a new state and show everything in it.
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(export_file.clone())),
+            ..Default::default()
+        });
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.update(Message::CloseOpenSiblingStateFileDialog {
+        load_state: false,
+        do_not_show_again: true,
+    });
+    state.update(Message::AddScope(ScopeRef::from_strs(&["testbench"]), true));
+
+    wait_for_waves_fully_loaded(&mut state, 10);
+
+    std::fs::remove_file(export_file).unwrap();
+
+    state
+});
+
 #[cfg(feature = "python")]
 snapshot_ui_with_file_and_msgs!(
     python_example_translator,
