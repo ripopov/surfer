@@ -1626,7 +1626,7 @@ impl SystemState {
                 }
                 let waves = self.user.waves.as_ref()?;
                 let state_file_path = waves.source.sibling_state_file()?;
-                self.load_state_file(Some(state_file_path.clone().into_std_path_buf()));
+                self.load_state_file(Some(state_file_path.clone()));
             }
             Message::SuggestOpenSiblingStateFile => match self.autoload_sibling_state_files() {
                 AutoLoad::Always => {

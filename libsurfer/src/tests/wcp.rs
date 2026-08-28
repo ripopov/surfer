@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use camino::Utf8PathBuf;
 
 use crate::SystemState;
 use crate::message::Message;
@@ -49,7 +49,7 @@ where
 {
     let test_name = format!("wcp/{test_name}");
 
-    render_and_compare(&PathBuf::from(test_name), move || {
+    render_and_compare(&Utf8PathBuf::from(test_name), move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .worker_threads(2)
             .enable_all()

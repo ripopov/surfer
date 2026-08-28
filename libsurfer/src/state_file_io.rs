@@ -1,6 +1,3 @@
-use std::path::PathBuf;
-
-#[cfg(not(target_arch = "wasm32"))]
 use camino::Utf8PathBuf;
 use eyre::WrapErr as _;
 use rfd::FileHandle;
@@ -111,7 +108,7 @@ impl SystemState {
 
     #[cfg(all(target_arch = "wasm32", feature = "vscode"))]
     /// Opens a state file through the VS Code host bridge in wasm+vscode builds.
-    pub(crate) fn load_state_file(&mut self, path: Option<PathBuf>) {
+    pub(crate) fn load_state_file(&mut self, path: Option<Utf8PathBuf>) {
         if path.is_some() {
             return;
         }
@@ -121,7 +118,7 @@ impl SystemState {
 
     #[cfg(all(target_arch = "wasm32", not(feature = "vscode")))]
     /// Opens and decodes a state file in plain wasm/browser builds.
-    pub(crate) fn load_state_file(&mut self, path: Option<PathBuf>) {
+    pub(crate) fn load_state_file(&mut self, path: Option<Utf8PathBuf>) {
         if path.is_some() {
             return;
         }
@@ -141,33 +138,22 @@ impl SystemState {
     /// Loads a state file from disk on native builds.
     ///
     /// When `path` is `None`, this opens a file picker and loads the selected file.
-    pub(crate) fn load_state_file(&mut self, path: Option<PathBuf>) {
-        let messages = move |path: PathBuf| {
-            let source = if let Ok(p) = Utf8PathBuf::from_path_buf(path.clone()) {
-                p
-            } else {
-                let err = eyre::eyre!("File path '{}' contains invalid UTF-8", path.display());
-                error!("{err:#?}");
-                return vec![Message::Error(err)];
-            };
-
-            match std::fs::read(source.as_std_path()) {
-                Ok(bytes) => match ron::de::from_bytes(&bytes)
-                    .context(format!("Failed loading {}", source.as_str()))
-                {
-                    Ok(s) => vec![Message::LoadState(s, Some(path))],
-                    Err(e) => {
-                        error!("Failed to load state: {e:#?}");
-                        vec![Message::Error(e)]
-                    }
-                },
+    pub(crate) fn load_state_file(&mut self, path: Option<Utf8PathBuf>) {
+        let messages = move |source: Utf8PathBuf| match std::fs::read(source.as_std_path()) {
+            Ok(bytes) => match ron::de::from_bytes(&bytes)
+                .context(format!("Failed loading {}", source.as_str()))
+            {
+                Ok(s) => vec![Message::LoadState(s, Some(source))],
                 Err(e) => {
-                    error!("Failed to load state file: {path:#?} {e:#?}");
-                    vec![Message::Error(eyre::eyre!(
-                        "Failed to read state file '{}': {e}",
-                        path.display()
-                    ))]
+                    error!("Failed to load state: {e:#?}");
+                    vec![Message::Error(e)]
                 }
+            },
+            Err(e) => {
+                error!("Failed to load state file: {source:#?} {e:#?}");
+                vec![Message::Error(eyre::eyre!(
+                    "Failed to read state file '{source}': {e}"
+                ))]
             }
         };
         if let Some(path) = path {
@@ -182,7 +168,7 @@ impl SystemState {
     /// Saves the current state to disk on native builds.
     ///
     /// When `path` is `None`, this opens a save dialog with a suggested filename.
-    pub(crate) fn save_state_file(&mut self, path: Option<PathBuf>) {
+    pub(crate) fn save_state_file(&mut self, path: Option<Utf8PathBuf>) {
         let Some(encoded) = self.encode_state() else {
             return;
         };
@@ -193,15 +179,22 @@ impl SystemState {
                 .await
                 .map_err(|e| error!("Failed to write state to {destination:#?} {e:#?}"))
                 .ok();
+            let state_file = match Utf8PathBuf::from_path_buf(destination.path().to_path_buf()) {
+                Ok(p) => p,
+                Err(p) => {
+                    error!("File path '{}' contains invalid UTF-8", p.display());
+                    return vec![Message::AsyncDone(AsyncJob::SaveState)];
+                }
+            };
             vec![
-                Message::SetStateFile(destination.path().into()),
+                Message::SetStateFile(state_file),
                 Message::AsyncDone(AsyncJob::SaveState),
             ]
         };
         if let Some(path) = path {
             let sender = self.channels.msg_sender.clone();
             perform_async_work(async move {
-                checked_send_many(&sender, messages(path.into()).await);
+                checked_send_many(&sender, messages(path.into_std_path_buf().into()).await);
             });
         } else {
             self.file_dialog_save(
@@ -218,7 +211,7 @@ impl SystemState {
     ///
     /// The webview cannot use `showSaveFilePicker`, so the host is responsible
     /// for showing the dialog and writing bytes.
-    pub(crate) fn save_state_file(&mut self, _path: Option<PathBuf>) {
+    pub(crate) fn save_state_file(&mut self, _path: Option<Utf8PathBuf>) {
         let Some(encoded) = self.encode_state() else {
             return;
         };
@@ -237,7 +230,7 @@ impl SystemState {
 
     #[cfg(all(target_arch = "wasm32", not(feature = "vscode")))]
     /// Saves state in plain wasm/browser builds via the browser save dialog.
-    pub(crate) fn save_state_file(&mut self, path: Option<PathBuf>) {
+    pub(crate) fn save_state_file(&mut self, path: Option<Utf8PathBuf>) {
         if path.is_some() {
             return;
         }

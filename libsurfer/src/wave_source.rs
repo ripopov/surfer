@@ -226,7 +226,7 @@ impl SystemState {
         match get_multi_extension(&filename) {
             Some(ext) => match ext.as_str() {
                 STATE_FILE_EXTENSION => {
-                    self.load_state_file(Some(filename.into_std_path_buf()));
+                    self.load_state_file(Some(filename));
                     Ok(())
                 }
                 TRANSACTIONS_FILE_EXTENSION => {
@@ -320,10 +320,7 @@ impl SystemState {
                                 }
                             };
 
-                            checked_send(
-                                &sender,
-                                Message::LoadState(new_state, Some(path.into_std_path_buf())),
-                            );
+                            checked_send(&sender, Message::LoadState(new_state, Some(path)));
                         });
                     } else {
                         self.load_from_bytes(

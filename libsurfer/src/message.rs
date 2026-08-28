@@ -6,7 +6,6 @@ use emath::{Pos2, RectTransform, Vec2};
 use ftr_parser::types::Transaction;
 use num::BigInt;
 use serde::Deserialize;
-use std::path::PathBuf;
 use std::sync::Arc;
 use surver::SurverStatus;
 
@@ -316,14 +315,14 @@ pub enum Message {
     OpenPythonPluginDialog,
     #[cfg(feature = "python")]
     ReloadPythonPlugin,
-    SaveStateFile(Option<PathBuf>),
+    SaveStateFile(Option<Utf8PathBuf>),
     /// Load state from data.
     /// Note: the internal state is not a stable format and this should not be
     /// relied on to work across revisions.
     LoadStateFromData(Vec<u8>),
-    LoadStateFile(Option<PathBuf>),
-    LoadState(Box<UserState>, Option<PathBuf>),
-    SetStateFile(PathBuf),
+    LoadStateFile(Option<Utf8PathBuf>),
+    LoadState(Box<UserState>, Option<Utf8PathBuf>),
+    SetStateFile(Utf8PathBuf),
     SetAboutVisible(bool),
     SetKeyHelpVisible(bool),
     SetGestureHelpVisible(bool),

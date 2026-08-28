@@ -1,12 +1,8 @@
-use std::{
-    env,
-    fs::File,
-    io::IsTerminal,
-    path::{Path, PathBuf},
-};
+use std::{env, fs::File, io::IsTerminal};
 
 use crate::{arrow::WavePoint, graphics::Anchor};
 use base64::{Engine, engine::general_purpose};
+use camino::{Utf8Path, Utf8PathBuf};
 use egui::{Event, Modifiers, PointerButton, Pos2, RawInput, Rect};
 use egui_skia_renderer::{EguiSkia, EncodedImageFormat, create_surface, draw_onto_surface};
 use emath::Vec2;
@@ -59,7 +55,7 @@ fn print_image(img: &DynamicImage) {
 /// Compare a rendered image against the stored snapshot, writing a new snapshot
 /// and diff if they differ.  Shared by [`render_and_compare_inner`] and tests
 /// that need custom rendering (e.g. injecting pointer events to open menus).
-fn compare_with_snapshot(filename: &Path, new: &DynamicImage) {
+fn compare_with_snapshot(filename: &Utf8Path, new: &DynamicImage) {
     let root = get_project_root().expect("Failed to get root");
     let previous_image_file = root.join("snapshots").join(filename).with_extension("png");
 
@@ -127,7 +123,7 @@ fn compare_with_snapshot(filename: &Path, new: &DynamicImage) {
 }
 
 pub(crate) fn render_and_compare_inner(
-    filename: &Path,
+    filename: &Utf8Path,
     state: impl Fn() -> SystemState,
     size: Vec2,
     feathering: bool,
@@ -268,7 +264,7 @@ pub(crate) fn render_and_compare_inner(
     }
 }
 
-pub(crate) fn render_and_compare(filename: &Path, state: impl Fn() -> SystemState) {
+pub(crate) fn render_and_compare(filename: &Utf8Path, state: impl Fn() -> SystemState) {
     render_and_compare_inner(filename, state, SNAPSHOT_SIZE, false, 0.99999);
 }
 
@@ -276,7 +272,7 @@ macro_rules! snapshot_ui {
     ($name:ident, $state:expr) => {
         #[test]
         fn $name() {
-            render_and_compare(&PathBuf::from(stringify!($name)), $state);
+            render_and_compare(&Utf8PathBuf::from(stringify!($name)), $state);
         }
     };
 }
@@ -384,7 +380,7 @@ macro_rules! snapshot_ui_with_theme {
 #[test]
 fn render_readme_screenshot() {
     render_and_compare_inner(
-        &PathBuf::from("render_readme_screenshot"),
+        &Utf8PathBuf::from("render_readme_screenshot"),
         || {
             let mut state = SystemState::new_default_config()
                 .unwrap()
@@ -2254,8 +2250,10 @@ fn handle_messages_until(
 snapshot_ui!(save_and_start_with_state, || {
     // FIXME refactor startup code so that we can test the actual code,
     // not with a separate load command like here
-    let save_file =
-        env::temp_dir().join(format!("save_and_start_with_state.{STATE_FILE_EXTENSION}"));
+    let save_file = Utf8PathBuf::from_path_buf(
+        env::temp_dir().join(format!("save_and_start_with_state.{STATE_FILE_EXTENSION}")),
+    )
+    .unwrap();
     let mut state = SystemState::new_default_config()
         .unwrap()
         .with_params(StartupParams {
@@ -2493,7 +2491,10 @@ snapshot_ui!(switch_and_switch_back, || {
 });
 
 snapshot_ui!(save_and_load, || {
-    let save_file = env::temp_dir().join(format!("save_and_load.{STATE_FILE_EXTENSION}"));
+    let save_file = Utf8PathBuf::from_path_buf(
+        env::temp_dir().join(format!("save_and_load.{STATE_FILE_EXTENSION}")),
+    )
+    .unwrap();
     let mut state = SystemState::new_default_config()
         .unwrap()
         .with_params(StartupParams {
@@ -3797,5 +3798,5 @@ fn theme_menu_radio_button() {
         .expect("Failed to encode image");
     let new = image::load_from_memory(&data).expect("Failed to decode png");
 
-    compare_with_snapshot(&PathBuf::from("theme_menu_radio_button"), &new);
+    compare_with_snapshot(&Utf8PathBuf::from("theme_menu_radio_button"), &new);
 }

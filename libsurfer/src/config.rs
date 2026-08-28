@@ -1,3 +1,5 @@
+#[cfg(not(target_arch = "wasm32"))]
+use camino::{Utf8Path, Utf8PathBuf};
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder};
 #[cfg(not(target_arch = "wasm32"))]
@@ -1102,11 +1104,11 @@ impl SurferTheme {
         if let Some(name) = theme_name.as_ref()
             && !name.is_empty()
         {
-            let theme_path = Path::new(THEMES_DIR).join(name.to_owned() + ".toml");
+            let theme_path = Utf8Path::new(THEMES_DIR).join(name.to_owned() + ".toml");
 
             // First filter out all the existing local themes and add them in the aforementioned
             // order.
-            let local_themes: Vec<PathBuf> = local_config_dirs
+            let local_themes: Vec<Utf8PathBuf> = local_config_dirs
                 .iter()
                 .map(|p| p.join(&theme_path))
                 .filter(|p| p.exists())
@@ -1120,9 +1122,9 @@ impl SurferTheme {
                     }
                 }
             } else {
-                theme = local_themes
-                    .into_iter()
-                    .fold(theme, |t, p| t.add_source(File::from(p).required(false)));
+                theme = local_themes.into_iter().fold(theme, |t, p| {
+                    t.add_source(File::from(p.into_std_path_buf()).required(false))
+                });
             }
         }
 
@@ -1194,7 +1196,7 @@ impl SurferConfig {
                 config = config.add_source(File::from(config_file).required(false));
             }
 
-            let old_config_path = Path::new(OLD_CONFIG_FILE);
+            let old_config_path = Utf8Path::new(OLD_CONFIG_FILE);
             if old_config_path.exists() {
                 warn!(
                     "Configuration in 'surfer.toml' is deprecated. Please move your configuration to '.surfer/config.toml'."
@@ -1202,14 +1204,16 @@ impl SurferConfig {
             }
 
             // `surfer.toml` will not be searched for upward, as it is deprecated.
-            config = config.add_source(File::from(old_config_path).required(false));
+            config = config.add_source(File::from(old_config_path.as_std_path()).required(false));
 
             // Add configs from most top-level to most local. This allows overwriting of
             // higher-level settings with a local `.surfer` directory.
             find_local_configs()
                 .into_iter()
                 .fold(config, |c, p| {
-                    c.add_source(File::from(p.join(CONFIG_FILE)).required(false))
+                    c.add_source(
+                        File::from(p.join(CONFIG_FILE).into_std_path_buf()).required(false),
+                    )
                 })
                 .add_source(Environment::with_prefix("surfer")) // Add environment finally
         };
@@ -1322,11 +1326,11 @@ where
 /// Searches for `.surfer` directories upward from the current location until it reaches root.
 ///
 /// Returns an empty vector in case the search fails in any way. If any `.surfer` directories
-/// are found, they will be returned in a `Vec<PathBuf>` in a pre-order of most top-level to most
+/// are found, they will be returned in a `Vec<Utf8PathBuf>` in a pre-order of most top-level to most
 /// local. All plain files are ignored.
 #[cfg(not(target_arch = "wasm32"))]
 #[must_use]
-pub fn find_local_configs() -> Vec<PathBuf> {
+pub fn find_local_configs() -> Vec<Utf8PathBuf> {
     use crate::util::search_upward;
     match std::env::current_dir() {
         Ok(dir) => {
@@ -1352,12 +1356,12 @@ pub fn write_default_config() -> eyre::Result<()> {
 
     if let Some(proj_dirs) = &*PROJECT_DIR {
         let config_dir = proj_dirs.config_dir();
-        let config_path = config_dir.join(CONFIG_FILE);
+        let config_path = Utf8PathBuf::from_path_buf(config_dir.join(CONFIG_FILE))
+            .map_err(|p| eyre::eyre!("Config path '{}' contains invalid UTF-8", p.display()))?;
 
         if config_path.exists() {
             return Err(eyre::eyre!(
-                "Config file already exists at {}. Delete it first if you want to recreate it.",
-                config_path.display()
+                "Config file already exists at {config_path}. Delete it first if you want to recreate it."
             ));
         }
 
@@ -1365,7 +1369,7 @@ pub fn write_default_config() -> eyre::Result<()> {
 
         fs::write(&config_path, default_config)?;
 
-        info!("Default config written to {}", config_path.display());
+        info!("Default config written to {config_path}");
     }
 
     Ok(())

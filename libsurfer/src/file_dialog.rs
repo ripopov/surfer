@@ -1,6 +1,4 @@
 use std::future::Future;
-#[cfg(not(target_arch = "wasm32"))]
-use std::path::PathBuf;
 
 #[cfg(not(target_arch = "wasm32"))]
 use camino::Utf8PathBuf;
@@ -89,13 +87,21 @@ impl SystemState {
         filter: &'static FileFilter,
         messages: F,
     ) where
-        F: FnOnce(PathBuf) -> Vec<Message> + Send + 'static,
+        F: FnOnce(Utf8PathBuf) -> Vec<Message> + Send + 'static,
     {
         let sender = self.channels.msg_sender.clone();
 
         perform_async_work(async move {
             if let Some(file) = create_file_dialog(filter, title).pick_file().await {
-                checked_send_many(&sender, messages(file.path().to_path_buf()));
+                let path = file.path().to_path_buf();
+                let result = match Utf8PathBuf::from_path_buf(path.clone()) {
+                    Ok(utf8_path) => messages(utf8_path),
+                    Err(_) => vec![Message::Error(eyre::eyre!(
+                        "File path '{}' contains invalid UTF-8",
+                        path.display()
+                    ))],
+                };
+                checked_send_many(&sender, result);
             }
         });
     }
@@ -182,15 +188,7 @@ impl SystemState {
     pub(crate) fn open_file_dialog(&mut self, mode: OpenMode) {
         let load_options: LoadOptions = (mode, self.user.config.behavior.keep_during_reload).into();
 
-        let message = move |file: PathBuf| match Utf8PathBuf::from_path_buf(file.clone()) {
-            Ok(utf8_path) => vec![Message::LoadFile(utf8_path, load_options)],
-            Err(_) => {
-                vec![Message::Error(eyre::eyre!(
-                    "File path '{}' contains invalid UTF-8",
-                    file.display()
-                ))]
-            }
-        };
+        let message = move |file: Utf8PathBuf| vec![Message::LoadFile(file, load_options)];
 
         self.file_dialog_open("Open waveform file", &WAVEFORM_FILE_FILTER, message);
     }
@@ -211,15 +209,7 @@ impl SystemState {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn open_command_file_dialog(&mut self) {
-        let message = move |file: PathBuf| match Utf8PathBuf::from_path_buf(file.clone()) {
-            Ok(utf8_path) => vec![Message::LoadCommandFile(utf8_path)],
-            Err(_) => {
-                vec![Message::Error(eyre::eyre!(
-                    "File path '{}' contains invalid UTF-8",
-                    file.display()
-                ))]
-            }
-        };
+        let message = move |file: Utf8PathBuf| vec![Message::LoadCommandFile(file)];
 
         self.file_dialog_open("Open command file", &COMMAND_FILE_FILTER, message);
     }
@@ -236,15 +226,7 @@ impl SystemState {
     #[cfg(feature = "python")]
     pub(crate) fn open_python_file_dialog(&mut self) {
         self.file_dialog_open("Open Python translator file", &PYTHON_FILE_FILTER, |file| {
-            match Utf8PathBuf::from_path_buf(file.clone()) {
-                Ok(utf8_path) => vec![Message::LoadPythonTranslator(utf8_path)],
-                Err(_) => {
-                    vec![Message::Error(eyre::eyre!(
-                        "File path '{}' contains invalid UTF-8",
-                        file.display()
-                    ))]
-                }
-            }
+            vec![Message::LoadPythonTranslator(file)]
         });
     }
 }

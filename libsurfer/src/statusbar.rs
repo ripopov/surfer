@@ -61,7 +61,7 @@ impl SystemState {
 
         if let Some(state_file) = &self.user.state_file {
             ui.separator();
-            ui.label(state_file.to_string_lossy());
+            ui.label(state_file.as_str());
         }
 
         if let Some(progress_data) = &self.progress_tracker

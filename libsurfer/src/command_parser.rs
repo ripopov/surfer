@@ -3,6 +3,8 @@ use regex::Regex;
 use std::sync::LazyLock;
 use std::{fs, str::FromStr};
 
+use camino::Utf8PathBuf;
+
 use crate::config::ArrowKeyBindings;
 use crate::displayed_item_tree::{Node, VisibleItemIndex};
 use crate::frame_buffer::FrameBufferColorMode;
@@ -1229,7 +1231,7 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                     vec![],
                     Box::new(|word| {
                         Some(Command::Terminal(Message::SaveStateFile(Some(
-                            std::path::Path::new(word).into(),
+                            Utf8PathBuf::from(word),
                         ))))
                     }),
                 ),
@@ -1237,7 +1239,7 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                     vec![],
                     Box::new(|word| {
                         Some(Command::Terminal(Message::LoadStateFile(Some(
-                            std::path::Path::new(word).into(),
+                            Utf8PathBuf::from(word),
                         ))))
                     }),
                 ),

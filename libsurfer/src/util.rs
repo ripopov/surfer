@@ -3,7 +3,7 @@ use crate::{displayed_item_tree::VisibleItemIndex, wave_data::WaveData};
 use camino::Utf8PathBuf;
 use egui::RichText;
 #[cfg(not(target_arch = "wasm32"))]
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// This function takes a number and converts it's digits into the range
 /// a-p. This is nice because it makes for some easily typed ids.
@@ -77,20 +77,22 @@ pub(crate) fn get_alpha_focus_id(vidx: VisibleItemIndex, waves: &WaveData) -> Ri
 
 /// This function searches upward from `start` for directories or files matching `item`.
 ///
-/// It returns a `Vec<PathBuf>` to all found instances in order of closest to furthest away.
-/// The function only searches up within subdirectories of `end`.
+/// It returns a `Vec<Utf8PathBuf>` to all found instances in order of closest to furthest away.
+/// The function only searches up within subdirectories of `end`. Paths that are not valid UTF-8
+/// are silently skipped.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn search_upward(
     start: impl AsRef<Path>,
     end: impl AsRef<Path>,
     item: impl AsRef<Path>,
-) -> Vec<PathBuf> {
+) -> Vec<Utf8PathBuf> {
     start
         .as_ref()
         .ancestors()
         .take_while(|p| p.starts_with(end.as_ref()))
         .map(|p| p.join(&item))
         .filter(|p| p.try_exists().is_ok_and(std::convert::identity))
+        .filter_map(|p| Utf8PathBuf::from_path_buf(p).ok())
         .collect()
 }
 
@@ -245,6 +247,8 @@ mod tests {
         // Start searching from c upwards, but only within root
         let found = search_upward(&c, root, item_name);
         // Expect closest-first order: c/target.txt, then a/target.txt
-        assert_eq!(found, vec![item_c, item_a]);
+        let expected =
+            [item_c, item_a].map(|p| Utf8PathBuf::from_path_buf(p).expect("valid UTF-8 temp path"));
+        assert_eq!(found, expected);
     }
 }

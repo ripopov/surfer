@@ -1,8 +1,9 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     mem,
-    path::PathBuf,
 };
+
+use camino::Utf8PathBuf;
 
 use crate::{
     CanvasState, StartupParams,
@@ -151,7 +152,7 @@ pub struct UserState {
     // - Bad interoperatility story between native and wasm builds
     // - Sequencing issue in serialization, due to us having to run that async
     #[serde(skip)]
-    pub state_file: Option<PathBuf>,
+    pub state_file: Option<Utf8PathBuf>,
 
     pub(crate) show_annotation_list: bool,
     #[serde(default)]
@@ -585,7 +586,11 @@ impl SystemState {
         }
     }
 
-    pub(crate) fn load_state(&mut self, mut loaded_state: Box<UserState>, path: Option<PathBuf>) {
+    pub(crate) fn load_state(
+        &mut self,
+        mut loaded_state: Box<UserState>,
+        path: Option<Utf8PathBuf>,
+    ) {
         // first swap everything, fix special cases afterwards
         mem::swap(&mut self.user, &mut loaded_state);
 

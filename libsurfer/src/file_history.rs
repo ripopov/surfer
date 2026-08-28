@@ -112,10 +112,9 @@ impl FileHistory {
 }
 
 #[cfg(all(not(target_arch = "wasm32"), not(test)))]
-fn storage_path() -> Option<std::path::PathBuf> {
-    crate::config::PROJECT_DIR
-        .as_ref()
-        .map(|dirs| dirs.data_local_dir().join(FILE_HISTORY_FILE))
+fn storage_path() -> Option<Utf8PathBuf> {
+    let dirs = crate::config::PROJECT_DIR.as_ref()?;
+    Utf8PathBuf::from_path_buf(dirs.data_local_dir().join(FILE_HISTORY_FILE)).ok()
 }
 
 fn is_connection_entry(path: &Utf8PathBuf) -> bool {

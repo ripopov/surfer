@@ -5,7 +5,6 @@ use crate::SystemState;
 use crate::message::Message;
 use crate::wave_container::{ScopeRef, ScopeRefExt};
 use crate::wave_source::LoadOptions;
-use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
 /// starts the remote server in a background thread
@@ -98,7 +97,7 @@ macro_rules! snapshot_ui_remote {
             let mut test_name = "remote/".to_string();
             test_name.push_str(stringify!($name));
 
-            render_and_compare(&PathBuf::from(&test_name), || {
+            render_and_compare(&camino::Utf8PathBuf::from(test_name.as_str()), || {
                 run_with_server(bind_address, port, token, &filenames, messages)
             })
         }
