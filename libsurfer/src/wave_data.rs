@@ -22,7 +22,6 @@ use crate::transaction_container::{StreamScopeRef, TransactionRef, TransactionSt
 use crate::transactions::calculate_rows_of_stream;
 use crate::translation::{DynTranslator, TranslatorList, VariableInfoExt};
 use crate::variable_name_type::VariableNameType;
-use crate::view::DrawingContext;
 use crate::viewport::Viewport;
 use crate::wave_container::{
     AnalogCacheKey, ScopeRef, ScopeRefExt as _, VariableMeta, VariableRef, VariableRefExt,
@@ -92,8 +91,9 @@ pub struct WaveData {
     /// These are just stored during operation, so no need to serialize
     #[serde(skip)]
     pub drawing_infos: Vec<ItemDrawingInfo>,
+    /// Cache signature for `drawing_infos`.
     #[serde(skip)]
-    pub top_item_draw_offset: f32,
+    pub(crate) drawing_infos_signature: Option<u64>,
     #[serde(skip)]
     pub total_height: f32,
     #[serde(skip)]
@@ -261,7 +261,7 @@ impl WaveData {
             display_variable_indices: self.display_variable_indices,
             scroll_offset: self.scroll_offset,
             drawing_infos: vec![],
-            top_item_draw_offset: 0.,
+            drawing_infos_signature: None,
             graphics: HashMap::new(),
             total_height: 0.,
             old_max_timestamp,
@@ -556,6 +556,7 @@ impl WaveData {
                 field_formats: vec![],
                 height_scaling_factor: None,
                 analog: None,
+                unfolded_fields: ahash::AHashSet::new(),
             });
 
             indices.push(self.insert_item(new_variable, Some(target_position), true));
@@ -910,78 +911,94 @@ impl WaveData {
         !self.displayed_items.is_empty()
     }
 
-    fn drawing_top(&self) -> Option<f32> {
-        self.drawing_infos
-            .iter()
-            .map(ItemDrawingInfo::top)
-            .min_by(f32::total_cmp)
+    pub(crate) fn drawing_bottom(&self) -> Option<f32> {
+        self.drawing_infos.last().map(ItemDrawingInfo::bottom)
     }
 
-    fn drawing_bottom(&self) -> Option<f32> {
-        self.drawing_infos
-            .iter()
-            .map(ItemDrawingInfo::bottom)
-            .max_by(f32::total_cmp)
+    pub(crate) fn drawing_bottom_at(&self, offset: f32) -> Option<f32> {
+        self.drawing_infos.last().map(|info| info.bottom_at(offset))
+    }
+
+    /// Return drawing infos overlapping the visible range.
+    ///
+    /// `drawing_infos` is sorted by both `top()` and `bottom()`, so use binary search to determine the start and end.
+    pub(crate) fn visible_drawing_infos(
+        &self,
+        visible_top: f32,
+        visible_bottom: f32,
+    ) -> std::slice::Iter<'_, ItemDrawingInfo> {
+        let start = self
+            .drawing_infos
+            .partition_point(|drawing_info| drawing_info.bottom() < visible_top);
+        let end = self.drawing_infos[start..]
+            .partition_point(|drawing_info| drawing_info.top() <= visible_bottom)
+            + start;
+
+        self.drawing_infos[start..end].iter()
     }
 
     /// Find the top-most of the currently visible items.
-    #[must_use]
+    ///
     /// Returns the index of the item currently at the top of the visible area.
+    #[must_use]
     pub fn get_top_item(&self) -> usize {
         if self.drawing_infos.is_empty() {
             return 0;
         }
-        // drawing_infos contains content-space positions from the last draw.
-        // The visible top is at: first_element_y + scroll_offset
-        let first_element_y = self.drawing_top().unwrap();
-        let visible_top = first_element_y + self.scroll_offset;
+        // `drawing_infos` is offset-free (canonical): the first row is always at y = 0, so
+        // the visible top is simply the scroll offset.
+        let visible_top = self.scroll_offset;
 
+        // Sorted by `top()`, so binary search for the first row at or past `visible_top`.
         self.drawing_infos
-            .iter()
-            .enumerate()
-            .find(|(_, di)| di.top() >= visible_top - 1.) // 1px margin for floating-point errors
-            .map_or(self.drawing_infos.len() - 1, |(idx, _)| idx)
+            .partition_point(|di| di.top() < visible_top - 1.) // 1px margin for floating-point errors
+            .min(self.drawing_infos.len() - 1)
     }
 
-    //Return the y-coordinate of the first visible item in global coordinates
-    pub fn get_content_start(&self, ctx: &mut DrawingContext<'_>) -> f32 {
-        let first_element_top = self.drawing_top().unwrap();
-        let y = (ctx.to_screen)(0., 0.).y;
-        first_element_top - y
-    }
-
-    //Returns the y-coordinate of the current visible items in global coordinates
-    pub fn get_content_height(&self, ctx: &mut DrawingContext<'_>) -> f32 {
-        let last_element_bottom = self.drawing_bottom().unwrap();
-        let y = (ctx.to_screen)(0., 0.).y;
-        last_element_bottom - y
-    }
-
-    /// Find the item at a given y-location.
+    /// Find the drawing info of the row at a given (canvas-local) y-location.
     #[must_use]
-    pub fn get_item_at_y(&self, y: f32) -> Option<VisibleItemIndex> {
-        if self.drawing_infos.is_empty() {
+    pub(crate) fn drawing_info_at_y(&self, y: f32) -> Option<&ItemDrawingInfo> {
+        if self.drawing_bottom()? <= y {
             return None;
         }
-        let threshold = y + self.top_item_draw_offset;
-        if self.drawing_bottom().unwrap() <= threshold {
-            return None;
-        }
+        // Sorted by `top()`, so binary search for the last row at or before `y`.
+        let idx = self.drawing_infos.partition_point(|di| di.top() <= y);
+        idx.checked_sub(1).map(|i| &self.drawing_infos[i])
+    }
 
-        self.drawing_infos
-            .iter()
-            .rev()
-            .find(|di| di.top() <= threshold)
-            .map(ItemDrawingInfo::vidx)
+    /// Find the item at a given (canvas-local) y-location.
+    #[must_use]
+    pub(crate) fn get_item_at_y(&self, y: f32) -> Option<VisibleItemIndex> {
+        self.drawing_info_at_y(y).map(ItemDrawingInfo::vidx)
+    }
+
+    /// Returns the displayed item reference located at the given canvas y-coordinate.
+    #[must_use]
+    pub(crate) fn item_ref_at_canvas_y(&self, y: f32) -> Option<DisplayedItemRef> {
+        let vidx = self.get_item_at_y(y)?;
+        let node = self.items_tree.get_visible(vidx)?;
+        Some(node.item_ref)
+    }
+
+    /// Returns the displayed item reference and drawing info of the row at the given canvas
+    /// y-coordinate, in a single lookup.
+    #[must_use]
+    pub(crate) fn item_and_drawing_info_at_y(
+        &self,
+        y: f32,
+    ) -> Option<(DisplayedItemRef, &ItemDrawingInfo)> {
+        let info = self.drawing_info_at_y(y)?;
+        let node = self.items_tree.get_visible(info.vidx())?;
+        Some((node.item_ref, info))
     }
 
     pub fn scroll_to_item(&mut self, idx: usize) {
         if self.drawing_infos.is_empty() {
             return;
         }
-        let first_element_y = self.drawing_top().unwrap();
-        let last_element_bottom = self.drawing_bottom().unwrap();
-        let content_height = last_element_bottom - first_element_y;
+        // `drawing_infos` is offset-free (canonical): the first row is always at y = 0, so
+        // the last row's bottom is the total content height.
+        let content_height = self.drawing_bottom().unwrap();
 
         // Don't scroll if all content fits in viewport
         let max_scroll = content_height - self.total_height;
@@ -994,10 +1011,9 @@ impl WaveData {
             .get(idx)
             .unwrap_or_else(|| self.drawing_infos.last().unwrap())
             .top();
-        let target_scroll = item_y - first_element_y;
 
         // Clamp scroll to valid range: [0, max_scroll]
-        self.scroll_offset = target_scroll.clamp(0.0, max_scroll);
+        self.scroll_offset = item_y.clamp(0.0, max_scroll);
     }
 
     /// Set cursor at next (or previous, if `next` is false) transition of `variable`.
@@ -1015,7 +1031,8 @@ impl WaveData {
                 .items_tree
                 .get_visible(vidx)
                 .and_then(|node| self.displayed_items.get(&node.item_ref))
-            && let Ok(Some(res)) = self.inner.as_waves().unwrap().query_variable(
+            && let Some(wave_container) = self.inner.as_waves()
+            && let Ok(Some(res)) = wave_container.query_variable(
                 &variable.variable_ref,
                 &cursor.to_biguint().unwrap_or_default(),
             )
@@ -1240,7 +1257,7 @@ mod tests {
     use crate::viewport::Viewport;
     use crate::wave_source::{WaveFormat, WaveSource};
 
-    fn wave_data_with_rows(top_item_draw_offset: f32) -> WaveData {
+    fn wave_data_with_rows() -> WaveData {
         WaveData {
             inner: DataContainer::Empty,
             source: WaveSource::Data,
@@ -1278,7 +1295,7 @@ mod tests {
                     bottom: 160.0,
                 }),
             ],
-            top_item_draw_offset,
+            drawing_infos_signature: None,
             total_height: 40.0,
             old_max_timestamp: None,
             cache_generation: 0,
@@ -1291,19 +1308,43 @@ mod tests {
     }
 
     #[test]
-    fn get_item_at_y_uses_top_item_draw_offset_space() {
-        let waves = wave_data_with_rows(120.0);
+    fn get_item_at_y_finds_correct_item() {
+        let waves = wave_data_with_rows();
 
-        assert_eq!(waves.get_item_at_y(5.0), Some(VisibleItemIndex(0)));
-        assert_eq!(waves.get_item_at_y(25.0), Some(VisibleItemIndex(1)));
-        assert_eq!(waves.get_item_at_y(45.0), None);
+        assert_eq!(waves.get_item_at_y(125.0), Some(VisibleItemIndex(0)));
+        assert_eq!(waves.get_item_at_y(145.0), Some(VisibleItemIndex(1)));
+        assert_eq!(waves.get_item_at_y(165.0), None);
     }
 
     #[test]
     fn get_item_at_y_is_not_shifted_by_scroll_offset() {
-        let waves = wave_data_with_rows(150.0);
+        let waves = wave_data_with_rows();
 
-        assert_eq!(waves.get_item_at_y(-25.0), Some(VisibleItemIndex(0)));
-        assert_eq!(waves.get_item_at_y(5.0), Some(VisibleItemIndex(1)));
+        assert_eq!(waves.get_item_at_y(125.0), Some(VisibleItemIndex(0)));
+        assert_eq!(waves.get_item_at_y(145.0), Some(VisibleItemIndex(1)));
+    }
+
+    #[test]
+    fn visible_drawing_infos_returns_overlapping_rows() {
+        let waves = wave_data_with_rows();
+
+        let visible = waves
+            .visible_drawing_infos(140.0, 150.0)
+            .map(ItemDrawingInfo::vidx)
+            .collect::<Vec<_>>();
+
+        assert_eq!(visible, vec![VisibleItemIndex(0), VisibleItemIndex(1)]);
+    }
+
+    #[test]
+    fn visible_drawing_infos_includes_boundary_rows() {
+        let waves = wave_data_with_rows();
+
+        let visible = waves
+            .visible_drawing_infos(140.0, 140.0)
+            .map(ItemDrawingInfo::vidx)
+            .collect::<Vec<_>>();
+
+        assert_eq!(visible, vec![VisibleItemIndex(0), VisibleItemIndex(1)]);
     }
 }

@@ -331,7 +331,7 @@ impl SystemState {
         waves: &WaveData,
         ctx: &mut DrawingContext,
         viewport: &Viewport,
-        y_zero: f32,
+        row_offset: f32,
     ) {
         let horizontal_padding = self.user.config.layout.waveforms_gap;
 
@@ -340,10 +340,15 @@ impl SystemState {
             &self.user.wanted_timeunit,
             &self.get_time_format(),
         );
-        for drawing_info in waves.drawing_infos.iter().filter_map(|item| match item {
-            ItemDrawingInfo::Marker(marker) => Some(marker),
-            _ => None,
-        }) {
+        let visible_top = -row_offset;
+        let visible_bottom = ctx.cfg.canvas_size.y - row_offset;
+        for drawing_info in waves
+            .visible_drawing_infos(visible_top, visible_bottom)
+            .filter_map(|item| match item {
+                ItemDrawingInfo::Marker(marker) => Some(marker),
+                _ => None,
+            })
+        {
             let Some(item) = waves
                 .items_tree
                 .get_visible(drawing_info.vidx)
@@ -352,11 +357,8 @@ impl SystemState {
                 continue;
             };
 
-            // We draw in absolute coords, but the variable offset in the y
-            // direction is also in absolute coordinates, so we need to
-            // compensate for that
-            let row_top = drawing_info.top - y_zero;
-            let row_bottom = drawing_info.bottom - y_zero;
+            let row_top = drawing_info.top + row_offset;
+            let row_bottom = drawing_info.bottom + row_offset;
 
             let background_color = get_marker_background_color(item, &self.user.config.theme);
 

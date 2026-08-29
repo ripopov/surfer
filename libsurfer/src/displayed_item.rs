@@ -1,4 +1,5 @@
 //! The items that are drawn in the main wave form view: waves, dividers, etc.
+use ahash::AHashSet;
 use ecolor::Color32;
 use egui::{FontSelection, RichText, Style, WidgetText};
 use emath::Align;
@@ -183,9 +184,20 @@ pub struct DisplayedVariable {
     pub field_formats: Vec<FieldFormat>,
     pub height_scaling_factor: Option<f32>,
     pub analog: Option<AnalogVarState>,
+    /// Field paths (relative to the variable's root) of compound subfields that are
+    /// expanded to show their own subfields.
+    #[serde(default)]
+    pub unfolded_fields: AHashSet<Vec<String>>,
 }
 
 impl DisplayedVariable {
+    /// Toggle whether `field` (a compound subfield's path) is expanded.
+    pub fn toggle_field_fold(&mut self, field: Vec<String>) {
+        if !self.unfolded_fields.remove(&field) {
+            self.unfolded_fields.insert(field);
+        }
+    }
+
     /// Downgrade `TypeLimits` to `Global` when the translator doesn't support numeric ranges.
     pub fn downgrade_type_limits_if_unsupported(
         &mut self,
@@ -331,6 +343,7 @@ impl DisplayedPlaceholder {
             field_formats: self.field_formats,
             height_scaling_factor: self.height_scaling_factor,
             analog: self.analog,
+            unfolded_fields: AHashSet::new(),
         }
     }
 

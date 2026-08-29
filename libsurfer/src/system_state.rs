@@ -1,15 +1,15 @@
+use ahash::AHashMap;
 use egui::{Pos2, Rect};
 use eyre::Result;
 use num::BigInt;
 use std::{
     cell::RefCell,
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
+    rc::Rc,
     sync::{Arc, atomic::AtomicBool},
 };
 use surfer_translation_types::translator::VariableNameInfo;
 use tokio::task::JoinHandle;
-
-use std::rc::Rc;
 
 use crate::{
     CachedDrawData, CanvasState, Channels, WcpClientCapabilities, command_prompt,
@@ -26,6 +26,9 @@ use crate::{
     wave_container::VariableRef,
     wave_source::{LoadOptions, LoadProgress},
 };
+
+type VariableInfoCache = AHashMap<VariableRef, Option<VariableNameInfo>>;
+type FlattenedRowsCache = AHashMap<DisplayedItemRef, (u64, Rc<Vec<crate::view::VariableFieldRow>>)>;
 
 #[cfg(feature = "performance_plot")]
 use crate::benchmark::Timing;
@@ -67,7 +70,12 @@ pub struct SystemState {
     // mutability
     pub(crate) draw_data: RefCell<Vec<Option<CachedDrawData>>>,
 
-    pub(crate) variable_name_info_cache: RefCell<HashMap<VariableRef, Option<VariableNameInfo>>>,
+    pub(crate) variable_name_info_cache: RefCell<VariableInfoCache>,
+
+    /// Cached flattened compound-field rows per variable, keyed by a signature of that
+    /// variable's fold state (`DisplayedVariable::unfolded_fields`); avoids re-walking the
+    /// (possibly large) field tree every frame when nothing changed.
+    pub(crate) flattened_rows_cache: RefCell<FlattenedRowsCache>,
 
     /// Monotonically increasing counter incremented when translators reload, to invalidate
     /// the `all_variable_rows_cache` when name info changes without a waveform reload.
@@ -90,10 +98,6 @@ pub struct SystemState {
     pub(crate) surver_selected_file: RefCell<Option<usize>>,
     pub(crate) surver_load_options: RefCell<LoadOptions>,
 
-    /// These items should be expanded into subfields in the next frame.
-    ///
-    /// Cleared after each frame
-    pub(crate) items_to_expand: RefCell<Vec<(DisplayedItemRef, usize)>>,
     /// Character to add to the command prompt if it is visible.
     ///
     /// This is only needed for presentations at them moment.
@@ -101,11 +105,11 @@ pub struct SystemState {
     /// This item works with the expand scope feature to determine what hierarchys to open.
     pub scope_ref_to_expand: RefCell<Option<ScopeExpandType>>,
 
-    pub(crate) time_widgets: RefCell<std::collections::HashMap<String, TimeInputState>>,
+    pub(crate) time_widgets: RefCell<AHashMap<String, TimeInputState>>,
     /// Map of widget id -> focused state.
-    pub(crate) text_edit_focused: std::collections::HashMap<String, bool>,
+    pub(crate) text_edit_focused: AHashMap<String, bool>,
     /// Map of widget id -> one-shot request focus flag.
-    pub(crate) text_edit_request_focus: std::collections::HashMap<String, bool>,
+    pub(crate) text_edit_request_focus: AHashMap<String, bool>,
     pub(crate) frame_buffer_content: Option<FrameBufferContent>,
     pub(crate) frame_buffer_array_cache: Option<FrameBufferArrayCache>,
     pub(crate) frame_buffer_pixel_cache: Option<FrameBufferPixelCache>,
@@ -179,20 +183,20 @@ impl SystemState {
             url: RefCell::new(String::new()),
             command_prompt_text: RefCell::new(String::new()),
             draw_data: RefCell::new(vec![None]),
-            variable_name_info_cache: RefCell::new(HashMap::new()),
+            variable_name_info_cache: RefCell::new(AHashMap::new()),
+            flattened_rows_cache: RefCell::new(AHashMap::new()),
             translator_generation: 0,
             all_variable_rows_cache: None,
             last_canvas_rect: RefCell::new(None),
 
-            items_to_expand: RefCell::new(vec![]),
             char_to_add_to_prompt: RefCell::new(None),
             scope_ref_to_expand: RefCell::new(None),
             surver_selected_file: RefCell::new(None),
             surver_load_options: RefCell::new(LoadOptions::Clear),
             expand_parameter_section: false,
-            time_widgets: RefCell::new(std::collections::HashMap::new()),
-            text_edit_focused: std::collections::HashMap::new(),
-            text_edit_request_focus: std::collections::HashMap::new(),
+            time_widgets: RefCell::new(AHashMap::new()),
+            text_edit_focused: AHashMap::new(),
+            text_edit_request_focus: AHashMap::new(),
             frame_buffer_content: None,
             frame_buffer_array_cache: None,
             frame_buffer_pixel_cache: None,

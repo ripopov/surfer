@@ -365,21 +365,6 @@ fn variable_digital_draw_commands(
 }
 
 impl SystemState {
-    fn canvas_pos_to_item_space(&self, response: &Response, waves: &WaveData, pos: Pos2) -> Pos2 {
-        let item_y_offset = (waves.top_item_draw_offset - response.rect.top()).max(0.0);
-
-        Pos2 {
-            x: pos.x,
-            y: pos.y - item_y_offset,
-        }
-    }
-
-    fn sorted_drawing_infos(waves: &WaveData) -> Vec<&ItemDrawingInfo> {
-        let mut sorted = waves.drawing_infos.iter().collect::<Vec<_>>();
-        sorted.sort_by(|a, b| a.top().total_cmp(&b.top()));
-        sorted
-    }
-
     pub fn invalidate_draw_commands(&mut self) {
         if let Some(waves) = &self.user.waves {
             for viewport in 0..waves.viewports.len() {
@@ -683,33 +668,14 @@ impl SystemState {
         }))
     }
 
-    // Transform from screen coordinates taking timeline into account if `consider_timeline` is true.
-    pub fn transform_pos(
-        &self,
-        to_screen: RectTransform,
-        p: Pos2,
-        default_timeline_height: f32,
-        consider_timeline: bool,
-    ) -> Pos2 {
-        to_screen
-            .inverse()
-            .transform_pos(if consider_timeline && self.show_default_timeline() {
-                Pos2 {
-                    x: p.x,
-                    y: p.y - default_timeline_height,
-                }
-            } else {
-                p
-            })
-    }
-
-    //Calculate the offset for annotations on the canvas.
-    pub fn get_annotation_offset(&self, default_timeline_height: f32) -> f32 {
-        let mut offset = 0.;
+    /// Calculate the offset reserved for the default timeline header, so the name/value
+    /// columns and the canvas all start their rows at the same y.
+    pub(crate) fn default_timeline_offset(&self) -> f32 {
         if self.show_default_timeline() {
-            offset += default_timeline_height + self.user.config.layout.waveforms_gap * 4.;
+            self.user.config.layout.waveforms_text_size + self.user.config.layout.waveforms_gap * 4.
+        } else {
+            0.0
         }
-        offset
     }
 
     pub fn draw_items(&mut self, ui: &mut Ui, msgs: &mut Vec<Message>, viewport_idx: usize) {
@@ -752,10 +718,9 @@ impl SystemState {
         let to_screen =
             RectTransform::from_to(Rect::from_min_size(Pos2::ZERO, frame_size), response.rect);
         let y_zero = to_screen.transform_pos(Pos2::ZERO).y;
-        let default_timeline_height = cfg.text_size;
         let pointer_pos_global = ui.input(|i| i.pointer.interact_pos());
-        let pointer_pos_mouse_gesture = pointer_pos_global
-            .map(|p| self.transform_pos(to_screen, p, default_timeline_height, false));
+        let pointer_pos_mouse_gesture =
+            pointer_pos_global.map(|p| to_screen.inverse().transform_pos(p));
         let range = waves.time_range();
 
         if response.clicked_by(PointerButton::Primary)
@@ -814,9 +779,7 @@ impl SystemState {
                 || response.clicked_by(PointerButton::Primary));
         let needs_pointer_pos_canvas = self.annotation_kind.is_none() || handle_cursor;
         let pointer_pos_canvas = if needs_pointer_pos_canvas {
-            pointer_pos_global
-                .map(|p| to_screen.inverse().transform_pos(p))
-                .map(|p| self.canvas_pos_to_item_space(&response, waves, p))
+            pointer_pos_global.map(|p| to_screen.inverse().transform_pos(p))
         } else {
             None
         };
@@ -842,23 +805,19 @@ impl SystemState {
         {
             msgs.push(Message::SetMouseGestureDragStart(
                 ui.input(|i| i.pointer.press_origin())
-                    .map(|p| self.transform_pos(to_screen, p, default_timeline_height, false)),
+                    .map(|p| to_screen.inverse().transform_pos(p)),
                 None,
             ));
         }
-        let annotation_offset = self.get_annotation_offset(default_timeline_height);
+        let timeline_offset = self.default_timeline_offset();
 
         if self.annotation_kind.is_some() && response.drag_started_by(PointerButton::Primary) {
             let start = ui
                 .input(|i| i.pointer.press_origin())
-                .map(|p| self.transform_pos(to_screen, p, default_timeline_height, false));
+                .map(|p| to_screen.inverse().transform_pos(p));
             let time =
                 waves.viewports[viewport_idx].as_time_bigint(start.unwrap().x, frame_width, range);
-            msgs.push(Message::SetMouseGestureDragStart(
-                ui.input(|i| i.pointer.press_origin())
-                    .map(|p| self.transform_pos(to_screen, p, default_timeline_height, false)),
-                Some(time),
-            ));
+            msgs.push(Message::SetMouseGestureDragStart(start, Some(time)));
         }
 
         // Check for measure drag starting. Snap the start X to the nearest transition
@@ -866,16 +825,12 @@ impl SystemState {
         if do_measure && response.drag_started_by(PointerButton::Primary) {
             let press_origin_local = ui
                 .input(|i| i.pointer.press_origin())
-                .map(|p| self.transform_pos(to_screen, p, default_timeline_height, false));
-            let press_origin_canvas =
-                press_origin_local.map(|p| self.canvas_pos_to_item_space(&response, waves, p));
+                .map(|p| to_screen.inverse().transform_pos(p));
 
-            let snapped_pos = if let (Some(start_pos), Some(start_pos_canvas)) =
-                (press_origin_local, press_origin_canvas)
-            {
+            let snapped_pos = if let Some(start_pos) = press_origin_local {
                 // Snap to nearest edge/time then convert back to pixel X
                 if let Some(snap_time) =
-                    self.snap_to_edge(Some(start_pos_canvas), waves, frame_width, viewport_idx)
+                    self.snap_to_edge(Some(start_pos), waves, frame_width, viewport_idx)
                 {
                     let x = waves.viewports[viewport_idx].pixel_from_time(
                         &snap_time,
@@ -900,17 +855,20 @@ impl SystemState {
             theme: &self.user.config.theme,
         };
 
-        let sorted_drawing_infos = Self::sorted_drawing_infos(waves);
+        // `waves.drawing_infos` holds offset-free (canonical) positions; the canvas isn't
+        // inside a `ScrollArea` like the name/value columns, so scrolling is applied here
+        // explicitly instead.
+        let row_offset = timeline_offset - waves.scroll_offset;
 
-        // We draw in absolute coords, but the variable offset in the y
-        // direction is also in absolute coordinates, so we need to
-        // compensate for that
-        for drawing_info in sorted_drawing_infos.iter().copied() {
+        let background_offset = y_zero + row_offset;
+        let visible_top = -row_offset;
+        let visible_bottom = ctx.cfg.canvas_size.y - row_offset;
+        for drawing_info in waves.visible_drawing_infos(visible_top, visible_bottom) {
             // Use vidx so all sub-fields of a compound share the same stripe index
             let background_color =
                 self.get_background_color(waves, drawing_info.vidx(), drawing_info.vidx().0);
 
-            self.draw_background(drawing_info, &ctx, background_color);
+            self.draw_background(drawing_info, background_offset, &ctx, background_color);
         }
 
         #[cfg(feature = "performance_plot")]
@@ -918,7 +876,7 @@ impl SystemState {
 
         match &self.draw_data.borrow()[viewport_idx] {
             Some(CachedDrawData::WaveDrawData(draw_data)) => {
-                self.draw_wave_data(waves, draw_data, &sorted_drawing_infos, &mut ctx);
+                self.draw_wave_data(waves, draw_data, row_offset, &mut ctx);
             }
             Some(CachedDrawData::TransactionDrawData(draw_data)) => {
                 self.draw_transaction_data(
@@ -927,7 +885,7 @@ impl SystemState {
                     viewport_idx,
                     ui,
                     msgs,
-                    &sorted_drawing_infos,
+                    row_offset,
                     &mut ctx,
                 );
             }
@@ -961,14 +919,14 @@ impl SystemState {
             &waves.viewports[viewport_idx],
         );
 
-        self.draw_marker_boxes(waves, &mut ctx, viewport, y_zero);
+        self.draw_marker_boxes(waves, &mut ctx, viewport, row_offset);
 
         if self.show_default_timeline() {
             let rect = Rect {
                 min: Pos2 { x: 0.0, y: y_zero },
                 max: Pos2 {
                     x: response.rect.max.x,
-                    y: y_zero + default_timeline_height,
+                    y: y_zero + timeline_offset,
                 },
             };
             ctx.painter.rect_filled(
@@ -993,7 +951,7 @@ impl SystemState {
             msgs,
             &mut ctx,
             viewport_idx,
-            annotation_offset,
+            timeline_offset,
         );
 
         waves.draw_annotations(
@@ -1003,7 +961,7 @@ impl SystemState {
             &mut ctx,
             &self.user.config.theme,
             msgs,
-            annotation_offset,
+            timeline_offset,
             response.rect,
             to_screen,
             &time_formatter,
@@ -1016,7 +974,7 @@ impl SystemState {
         &self,
         waves: &WaveData,
         draw_data: &CachedWaveDrawData,
-        sorted_drawing_infos: &[&ItemDrawingInfo],
+        row_offset: f32,
         ctx: &mut DrawingContext,
     ) {
         let clock_edges = &draw_data.clock_edges;
@@ -1036,12 +994,17 @@ impl SystemState {
         if draw_clock_edges {
             draw_clock_edge_marks(clock_edges, ctx, &self.user.config);
         }
-        let zero_y = (ctx.to_screen)(0., 0.).y;
-        for (item_count, drawing_info) in sorted_drawing_infos.iter().copied().enumerate() {
-            // We draw in absolute coords, but the variable offset in the y
-            // direction is also in absolute coordinates, so we need to
-            // compensate for that
-            let y_offset = drawing_info.top() - zero_y;
+        // Only the rows visible in the current scroll position need to be drawn; `top`/`bottom`
+        // are derived from `waves.drawing_infos`, which are themselves computed purely from the
+        // Surfer config layout constants (`waveforms_line_height`/`waveforms_gap`/etc.), not
+        // egui defaults.
+        let visible_top = -row_offset;
+        let visible_bottom = ctx.cfg.canvas_size.y - row_offset;
+        for (item_count, drawing_info) in waves
+            .visible_drawing_infos(visible_top, visible_bottom)
+            .enumerate()
+        {
+            let y_offset = drawing_info.top_at(row_offset);
 
             let displayed_item = waves
                 .items_tree
@@ -1248,7 +1211,7 @@ impl SystemState {
         viewport_idx: usize,
         ui: &mut Ui,
         msgs: &mut Vec<Message>,
-        sorted_drawing_infos: &[&ItemDrawingInfo],
+        row_offset: f32,
         ctx: &mut DrawingContext,
     ) {
         let draw_commands = &draw_data.draw_commands;
@@ -1276,9 +1239,12 @@ impl SystemState {
             self.user.config.theme.foreground,
         );
 
-        let zero_y = (ctx.to_screen)(0., 0.).y;
-        for (item_count, drawing_info) in sorted_drawing_infos.iter().copied().enumerate() {
-            let y_offset = drawing_info.top() - zero_y;
+        let visible_top = -row_offset;
+        let visible_bottom = ctx.cfg.canvas_size.y - row_offset;
+        // Loop over all items to enable drawing relations to non-visible transactions
+        for (item_count, drawing_info) in waves.drawing_infos.iter().enumerate() {
+            let is_visible = drawing_info.overlaps(visible_top, visible_bottom);
+            let y_offset = drawing_info.top_at(row_offset);
 
             let displayed_item = waves
                 .items_tree
@@ -1319,6 +1285,11 @@ impl SystemState {
                                     out_relation_starts.push(start);
                                 } else if is_transaction_focused {
                                     focused_transaction_start = Some(start);
+                                }
+
+                                // Skip rendering if the transaction is not visible
+                                if !is_visible {
+                                    continue;
                                 }
 
                                 let transaction_rect = Rect { min, max };
@@ -1374,14 +1345,19 @@ impl SystemState {
                                 }
                             }
                         }
-                        ctx.painter.hline(
-                            0.0..=((ctx.to_screen)(ctx.cfg.canvas_size.x, 0.0).x),
-                            drawing_info.bottom(),
-                            border_stroke,
-                        );
+                        if is_visible {
+                            ctx.painter.hline(
+                                0.0..=((ctx.to_screen)(ctx.cfg.canvas_size.x, 0.0).x),
+                                (ctx.to_screen)(0.0, drawing_info.bottom_at(row_offset)).y,
+                                border_stroke,
+                            );
+                        }
                     }
                 }
                 ItemDrawingInfo::TimeLine(_) => {
+                    if !is_visible {
+                        continue;
+                    }
                     let text_color = color.unwrap_or(
                         // Get background color and determine best text color
                         self.user
@@ -1854,8 +1830,6 @@ pub(crate) fn draw_vertical_line_at_time(
         stroke,
     );
 }
-
-impl WaveData {}
 
 fn shift_brightness(color: Color32, delta: f32, background: Color32) -> Color32 {
     // Lighten the color on dark backgrounds (blend toward white),

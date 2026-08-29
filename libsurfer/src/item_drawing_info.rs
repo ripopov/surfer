@@ -120,4 +120,31 @@ impl ItemDrawingInfo {
     pub(crate) fn height(&self) -> f32 {
         self.bottom() - self.top()
     }
+
+    /// Inverse of `get_y_from_anchor(Anchor::Percentual(_))`: where `y` falls within this
+    /// row's `[top, bottom]` range, as a fraction (0 = top, 1 = bottom).
+    #[must_use]
+    pub(crate) fn percent_of(&self, y: f32) -> f32 {
+        (y - self.top()) / self.height()
+    }
+
+    /// `top()` translated by `offset` (e.g. a panel's current on-screen starting position),
+    /// without allocating a full translated copy.
+    #[must_use]
+    pub(crate) fn top_at(&self, offset: f32) -> f32 {
+        self.top() + offset
+    }
+
+    /// `bottom()` translated by `offset`.
+    #[must_use]
+    pub(crate) fn bottom_at(&self, offset: f32) -> f32 {
+        self.bottom() + offset
+    }
+
+    /// True if this row overlaps `[clip_top, clip_bottom]` (must be in the same coordinate
+    /// space as `self`, e.g. both offset-free/canonical or both shifted by the same amount).
+    #[must_use]
+    pub(crate) fn overlaps(&self, clip_top: f32, clip_bottom: f32) -> bool {
+        self.bottom() >= clip_top && self.top() <= clip_bottom
+    }
 }

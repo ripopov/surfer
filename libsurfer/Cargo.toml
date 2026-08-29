@@ -13,7 +13,7 @@ repository.workspace = true
 notify.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-ahash.workspace = true
+ahash = { workspace = true, default-features = false, features = ["std", "runtime-rng"] }
 directories.workspace = true
 extism = { workspace = true, optional = true }
 extism-convert = { workspace = true, optional = true }
@@ -24,6 +24,7 @@ rustls = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["macros"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+ahash = { workspace = true, default-features = false, features = ["std", "no-rng"] }
 futures.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 wasm-bindgen.workspace = true

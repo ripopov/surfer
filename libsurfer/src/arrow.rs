@@ -48,7 +48,7 @@ struct ArrowSegments {
     start_right: Option<Pos2>,
 }
 
-// Returns the shortest distance between point `p` and the line segment `a -> b`.
+/// Returns the shortest distance between point `p` and the line segment `a -> b`.
 fn distance_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     let ab = b - a;
     let ap = p - a;
@@ -63,7 +63,7 @@ fn distance_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     (p - closest).length()
 }
 
-// Calculates the base, left, and right points of an arrow head ending at `to`.
+/// Calculates the base, left, and right points of an arrow head ending at `to`.
 fn arrow_geometry(from: Pos2, to: Pos2, width: f32) -> Option<(Pos2, Pos2, Pos2)> {
     let v = to - from;
     let len = v.length();
@@ -84,7 +84,8 @@ fn arrow_geometry(from: Pos2, to: Pos2, width: f32) -> Option<(Pos2, Pos2, Pos2)
 
     Some((base, left, right))
 }
-/// Returns the vertical center of a displayed waveform item in global coordinates.
+/// Returns the vertical center of a displayed waveform item, in the same canvas-local
+/// (offset-free) space as `WaveData::drawing_infos`; convert via `ctx.to_screen` before use.
 fn item_center_y(waves: &WaveData, item_ref: &DisplayedItemRef) -> Option<f32> {
     match waves.get_displayed_item_index(item_ref) {
         Some(vidx) => {
@@ -218,8 +219,8 @@ impl Annotatable for ArrowAnnotation {
         arrow_annotation.annotation_data.id =
             egui::Id::new(("arrow", self.annotation_data.id, viewport_idx));
 
-        // `item_center_y` returns a global y-coordinate, so it does not need to be
-        // converted through `ctx.to_screen`.
+        // `item_center_y` returns a canvas-local y-coordinate, so it must be converted
+        // through `ctx.to_screen` before use as a final screen position.
         let to_y = match self.to.attached_item.as_ref() {
             Some(item_ref) => match item_center_y(waves, item_ref) {
                 Some(y) => y,
@@ -246,12 +247,8 @@ impl Annotatable for ArrowAnnotation {
 
         let new_from_x = viewport.pixel_from_time(&arrow_annotation.from.time, frame_width, range);
 
-        let mut new_to: Pos2 = (ctx.to_screen)(new_to_x, to_y);
-        let mut new_from = (ctx.to_screen)(new_from_x, from_y);
-
-        //Preserve global y-coordinates because waveform rows already use global canvas y.
-        new_to.y = to_y;
-        new_from.y = from_y;
+        let new_to: Pos2 = (ctx.to_screen)(new_to_x, to_y);
+        let new_from = (ctx.to_screen)(new_from_x, from_y);
 
         arrow_annotation.to.screen_pos = new_to;
         arrow_annotation.from.screen_pos = new_from;
@@ -341,8 +338,7 @@ impl Annotatable for ArrowAnnotation {
                 x = f32::midpoint(x, to_x);
             }
         }
-        x = (ctx.to_screen)(x, 0.).x;
-        Pos2::new(x, y)
+        (ctx.to_screen)(x, y)
     }
 
     fn get_time_info(&self, time_formatter: &TimeFormatter) -> String {
@@ -543,15 +539,5 @@ impl Widget for ArrowAnnotation {
             }
         }
         _response
-    }
-}
-
-impl WaveData {
-    /// Returns the displayed item reference located at the given canvas y-coordinate.
-    #[must_use]
-    pub fn item_ref_at_canvas_y(&self, y: f32) -> Option<DisplayedItemRef> {
-        let vidx = self.get_item_at_y(y)?;
-        let node = self.items_tree.get_visible(vidx)?;
-        Some(node.item_ref)
     }
 }

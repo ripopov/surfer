@@ -55,7 +55,7 @@ pub struct GestureZones {
     northwest: GestureKind,
 }
 
-// The supported annotations.
+/// The supported annotations.
 #[derive(Clone, PartialEq, Copy, Display, Debug, Deserialize)]
 pub enum AnnotationKind {
     Rectangle,
@@ -64,7 +64,7 @@ pub enum AnnotationKind {
 }
 
 impl SystemState {
-    //Adjusts y_value to not go without scope and whether it should snap to waves or not.
+    /// Adjusts `y_value` to not go without scope and whether it should snap to waves or not.
     #[allow(clippy::too_many_arguments)]
     fn clamp_y(
         &self,
@@ -72,11 +72,11 @@ impl SystemState {
         max_y: f32,
         snap_y: bool,
         waves: &WaveData,
-        ctx: &mut DrawingContext<'_>,
         anchor: Anchor,
         y_offset: f32,
     ) -> Pos2 {
-        let mut y = pos.y.clamp(waves.get_content_start(ctx), max_y);
+        // `drawing_infos` is offset-free (canonical): the first row is always at y = 0.
+        let mut y = pos.y.clamp(0.0, max_y);
         if snap_y {
             let local_y = y - y_offset;
 
@@ -114,7 +114,8 @@ impl SystemState {
         if let Some(mut start_location) = self.gesture_start_location {
             if self.annotation_kind == Some(AnnotationKind::Rectangle)
                 && start_location.y
-                    > (waves.get_content_height(ctx) + self.user.config.layout.waveforms_gap)
+                    > (waves.drawing_bottom().unwrap_or(0.0)
+                        + self.user.config.layout.waveforms_gap)
             {
                 return;
             }
@@ -194,7 +195,6 @@ impl SystemState {
                         viewport_idx,
                         waves,
                         frame_width,
-                        ctx,
                         ui,
                         y_offset,
                     );
@@ -365,7 +365,7 @@ impl SystemState {
         y_offset: f32,
     ) {
         let modifiers = ui.input(|i| i.modifiers);
-        let max_y = waves.get_content_height(ctx);
+        let max_y = waves.drawing_bottom().unwrap_or(0.0);
         let current_anchor = {
             if current_location.y > start_location.y {
                 Anchor::Bottom
@@ -385,7 +385,6 @@ impl SystemState {
             max_y,
             !modifiers.shift,
             waves,
-            ctx,
             current_anchor,
             y_offset,
         );
@@ -394,7 +393,6 @@ impl SystemState {
             max_y,
             !modifiers.shift,
             waves,
-            ctx,
             start_anchor,
             y_offset,
         );
@@ -422,24 +420,17 @@ impl SystemState {
         viewport_idx: usize,
         waves: &WaveData,
         frame_width: f32,
-        ctx: &mut DrawingContext<'_>,
         ui: &Context,
         y_offset: f32,
     ) {
         let range = waves.time_range();
         let modifiers = ui.input(|i| i.modifiers);
-        let max_y = waves.get_content_height(ctx);
+        let max_y = waves.drawing_bottom().unwrap_or(0.0);
 
-        let end_anchor = if end_location.y > start_location.y {
-            Anchor::Bottom
+        let (start_anchor, end_anchor) = if end_location.y > start_location.y {
+            (Anchor::Top, Anchor::Bottom)
         } else {
-            Anchor::Top
-        };
-
-        let start_anchor = if start_location.y < end_location.y {
-            Anchor::Top
-        } else {
-            Anchor::Bottom
+            (Anchor::Bottom, Anchor::Top)
         };
 
         let end = self.clamp_y(
@@ -447,7 +438,6 @@ impl SystemState {
             max_y,
             !modifiers.shift,
             waves,
-            ctx,
             end_anchor,
             y_offset,
         );
@@ -457,7 +447,6 @@ impl SystemState {
             max_y,
             !modifiers.shift,
             waves,
-            ctx,
             start_anchor,
             y_offset,
         );
@@ -471,24 +460,16 @@ impl SystemState {
 
         let (time_start, time_end) = (t1.clone().min(t2.clone()), t1.max(t2));
 
-        let get_anchored_y = |y: f32, anchor: Anchor| {
-            waves
-                .item_ref_at_canvas_y(y)
-                .map(|item| GraphicsY { item, anchor })
-        };
-
-        let get_percentual_y = |lookup_y: f32, scale_y: f32| {
-            waves.item_ref_at_canvas_y(lookup_y).map(|item| {
-                let p = waves.get_item_y_scale(item, scale_y);
-
-                GraphicsY {
-                    item,
-                    anchor: Anchor::Percentual(p.unwrap_or(0.)),
-                }
-            })
-        };
-
         let (wave_from, wave_to) = if modifiers.shift {
+            let get_percentual_y = |lookup_y: f32, scale_y: f32| {
+                waves
+                    .item_and_drawing_info_at_y(lookup_y)
+                    .map(|(item, info)| GraphicsY {
+                        item,
+                        anchor: Anchor::Percentual(info.percent_of(scale_y)),
+                    })
+            };
+
             let from =
                 get_percentual_y(start.y.min(end.y) - y_offset, start.y.min(end.y) - y_offset);
 
@@ -499,13 +480,20 @@ impl SystemState {
 
             (from, to)
         } else {
+            let get_anchored_y = |y: f32, anchor: Anchor| {
+                waves
+                    .item_ref_at_canvas_y(y)
+                    .map(|item| GraphicsY { item, anchor })
+            };
+
             let y_from = start.y.min(end.y);
             let y_to = start.y.max(end.y);
 
             let from = get_anchored_y(y_from - y_offset, Anchor::Top);
 
             let mut adjusted_y = y_to - y_offset;
-            if y_to > waves.get_content_start(ctx) {
+            // `drawing_infos` is offset-free (canonical): the first row is always at y = 0.
+            if y_to > 0.0 {
                 adjusted_y -= self.user.config.layout.waveforms_gap * 2.0;
             }
 

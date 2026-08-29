@@ -81,18 +81,6 @@ impl WaveData {
             .zip(&self.drawing_infos)
             .find(|(node, _info)| node.item_ref == y.item)
             .map(|(_, info)| info.get_y_from_anchor(&y.anchor))
-            .map(|point| point - self.top_item_draw_offset)
-    }
-
-    /// Returns the y-value of an item given a percentual value
-    #[must_use]
-    pub fn get_item_y_scale(&self, item: DisplayedItemRef, y: f32) -> Option<f32> {
-        let y = y + self.top_item_draw_offset;
-        self.items_tree
-            .iter_visible()
-            .zip(&self.drawing_infos)
-            .find(|(node, _info)| node.item_ref == item)
-            .map(|(_, info)| (y - info.top()) / (info.height()))
     }
 
     pub(crate) fn draw_graphics(

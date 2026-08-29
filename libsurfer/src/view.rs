@@ -12,6 +12,7 @@ use crate::{
     tooltips::variable_tooltip_text,
     wave_container::{ScopeId, VarId, VariableMeta},
 };
+use ahash::{AHashSet, AHasher};
 use ecolor::Color32;
 #[cfg(not(target_arch = "wasm32"))]
 use egui::ViewportCommand;
@@ -26,6 +27,8 @@ use epaint::{
 };
 use itertools::Itertools;
 use num::{BigUint, One, Zero};
+use std::hash::{Hash, Hasher};
+use std::rc::Rc;
 use tracing::info;
 
 use surfer_translation_types::{
@@ -116,8 +119,6 @@ impl eframe::App for SystemState {
             ui.set_zoom_factor(ui_zoom_factor);
         }
 
-        self.items_to_expand.borrow_mut().clear();
-
         while let Some(msg) = msgs.pop() {
             #[cfg(not(target_arch = "wasm32"))]
             if let Message::Exit = msg {
@@ -192,6 +193,16 @@ impl eframe::App for SystemState {
                 .output_mut(|o| o.cursor_icon = egui::CursorIcon::Grabbing);
         }
     }
+}
+
+/// A single row produced by flattening a (possibly compound/nested) variable's expanded
+/// fields; see `SystemState::flatten_variable_rows`.
+pub(crate) struct VariableFieldRow {
+    field: FieldRef,
+    depth: u32,
+    is_compound: bool,
+    has_children: bool,
+    unfolded: bool,
 }
 
 impl SystemState {
@@ -319,13 +330,14 @@ impl SystemState {
                         .default_size(40.)
                         .size_range(40.0..=max_width)
                         .show(ui, |ui| {
+                            if self.show_default_timeline() {
+                                ui.add_space(self.default_timeline_offset());
+                            }
                             let response = ScrollArea::both()
                                 .vertical_scroll_offset(scroll_offset)
                                 .show(ui, |ui| {
                                     self.draw_item_focus_list(ui);
                                 });
-                            self.user.waves.as_mut().unwrap().top_item_draw_offset =
-                                response.inner_rect.min.y;
                             self.user.waves.as_mut().unwrap().total_height =
                                 response.inner_rect.height();
                             if (scroll_offset - response.state.offset.y).abs() > 5. {
@@ -347,7 +359,12 @@ impl SystemState {
                     .show(ui, |ui| {
                         ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
                         let text_margin = Self::item_text_margin(ui);
+                        // Zeroed so the gap between this header and the `ScrollArea` below
+                        // is exactly the reserved space added below, matching the canvas
+                        // (see `SystemState::default_timeline_offset`).
+                        ui.spacing_mut().item_spacing.y = 0.0;
                         if self.show_default_timeline() {
+                            let header_top = ui.cursor().top();
                             ui.allocate_ui_with_layout(
                                 Vec2::new(
                                     ui.available_width(),
@@ -361,6 +378,14 @@ impl SystemState {
                                     });
                                 },
                             );
+                            // The label's rendered height can exceed the requested size (e.g.
+                            // due to font metrics), so pad up to the exact reserved offset
+                            // instead of assuming it consumed `waveforms_text_size`.
+                            let target_bottom = header_top + self.default_timeline_offset();
+                            let next_y = ui.cursor().top();
+                            if next_y < target_bottom {
+                                ui.add_space(target_bottom - next_y);
+                            }
                         }
 
                         let response = ScrollArea::both()
@@ -369,8 +394,6 @@ impl SystemState {
                             .show(ui, |ui| {
                                 self.draw_item_list(&mut msgs, ui);
                             });
-                        self.user.waves.as_mut().unwrap().top_item_draw_offset =
-                            response.inner_rect.min.y;
                         self.user.waves.as_mut().unwrap().total_height =
                             response.inner_rect.height();
                         if (scroll_offset - response.state.offset.y).abs() > 5. {
@@ -393,6 +416,9 @@ impl SystemState {
                     .size_range(10.0..=max_width)
                     .show(ui, |ui| {
                         ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
+                        if self.show_default_timeline() {
+                            ui.add_space(self.default_timeline_offset());
+                        }
                         let response = ScrollArea::both()
                             .auto_shrink([false; 2])
                             .vertical_scroll_offset(scroll_offset)
@@ -575,13 +601,11 @@ impl SystemState {
     }
 
     /// Add bottom padding so the last item isn’t clipped or covered by the scrollbar.
-    fn add_padding_for_last_item(
-        ui: &mut Ui,
-        last_info: Option<&ItemDrawingInfo>,
-        line_height: f32,
-    ) {
-        if let Some(info) = last_info {
-            let target_bottom = info.bottom() + line_height;
+    /// `last_bottom` must already be in this `ui`'s coordinate space (see
+    /// `ItemDrawingInfo::bottom_at`).
+    fn add_padding_for_last_bottom(ui: &mut Ui, last_bottom: Option<f32>, line_height: f32) {
+        if let Some(bottom) = last_bottom {
+            let target_bottom = bottom + line_height;
             let next_y = ui.cursor().top();
             if next_y < target_bottom {
                 ui.add_space(target_bottom - next_y);
@@ -589,22 +613,8 @@ impl SystemState {
         }
     }
 
-    fn bottom_most_item<'a>(
-        infos: impl IntoIterator<Item = &'a ItemDrawingInfo>,
-    ) -> Option<&'a ItemDrawingInfo> {
-        infos
-            .into_iter()
-            .max_by(|a, b| a.bottom().total_cmp(&b.bottom()))
-    }
-
     fn item_text_margin(ui: &Ui) -> Vec2 {
         ui.spacing().item_spacing
-    }
-
-    fn clamp_rect_to_bounds(rect: Rect, bounds: Option<(f32, f32)>) -> Rect {
-        bounds.map_or(rect, |(top, bottom)| {
-            Rect::from_min_max(Pos2::new(rect.min.x, top), Pos2::new(rect.max.x, bottom))
-        })
     }
 
     fn enforce_stable_row_widget_expansion(ui: &mut Ui) {
@@ -634,57 +644,257 @@ impl SystemState {
         }
     }
 
-    fn variable_visible_height(
-        &self,
-        ui: &Ui,
-        displayed_item: &DisplayedItem,
+    /// Lists the rows a variable (and its expanded subfields, if any) occupies, in
+    /// top-to-bottom order. Pure function of the variable's shape and its persisted fold
+    /// state (`unfolded_fields`); see `flattened_variable_rows` for the cached wrapper used
+    /// during drawing.
+    fn flatten_variable_rows(
+        unfolded_fields: &AHashSet<Vec<String>>,
         field: &FieldRef,
         info: &VariableInfo,
-        levels_to_force_expand: Option<usize>,
-    ) -> f32 {
-        let desired_height = self.desired_item_row_height(displayed_item);
+        depth: u32,
+        out: &mut Vec<VariableFieldRow>,
+    ) {
         match info {
             VariableInfo::Compound { subfields } => {
-                let mut header = egui::collapsing_header::CollapsingState::load_with_default_open(
-                    ui.ctx(),
-                    egui::Id::new(field),
-                    false,
-                );
-                if let Some(level) = levels_to_force_expand {
-                    header.set_open(level > 0);
+                let unfolded = unfolded_fields.contains(&field.field);
+                out.push(VariableFieldRow {
+                    field: field.clone(),
+                    depth,
+                    is_compound: true,
+                    has_children: !subfields.is_empty(),
+                    unfolded,
+                });
+                if unfolded {
+                    for (name, child_info) in subfields {
+                        let mut child_field = field.clone();
+                        child_field.field.push(name.clone());
+                        Self::flatten_variable_rows(
+                            unfolded_fields,
+                            &child_field,
+                            child_info,
+                            depth + 1,
+                            out,
+                        );
+                    }
                 }
-
-                // Collapsing headers are laid out with `ui.horizontal`, whose baseline
-                // minimum height is `interact_size.y`.
-                let compound_header_height = desired_height.max(ui.spacing().interact_size.y);
-
-                if !header.is_open() {
-                    return compound_header_height;
-                }
-
-                compound_header_height
-                    + subfields
-                        .iter()
-                        .map(|(name, child_info)| {
-                            let mut child_path = field.clone();
-                            child_path.field.push(name.clone());
-                            self.variable_visible_height(
-                                ui,
-                                displayed_item,
-                                &child_path,
-                                child_info,
-                                levels_to_force_expand.map(|l| l.saturating_sub(1)),
-                            )
-                        })
-                        .sum::<f32>()
             }
             VariableInfo::Bool
             | VariableInfo::Bits
             | VariableInfo::Clock
             | VariableInfo::String
             | VariableInfo::Event
-            | VariableInfo::Real => desired_height,
+            | VariableInfo::Real => out.push(VariableFieldRow {
+                field: field.clone(),
+                depth,
+                is_compound: false,
+                has_children: false,
+                unfolded: false,
+            }),
         }
+    }
+
+    /// Recursively unfolds compound fields up to `levels` deep (0 = fold everything), for
+    /// `Message::ExpandDrawnItem`.
+    pub(crate) fn expand_levels_to_unfolded_fields(
+        info: &VariableInfo,
+        levels: usize,
+    ) -> AHashSet<Vec<String>> {
+        let mut out = AHashSet::new();
+        Self::collect_unfolded_fields(info, &mut Vec::new(), levels, &mut out);
+        out
+    }
+
+    fn collect_unfolded_fields(
+        info: &VariableInfo,
+        field: &mut Vec<String>,
+        levels: usize,
+        out: &mut AHashSet<Vec<String>>,
+    ) {
+        if levels == 0 {
+            return;
+        }
+        if let VariableInfo::Compound { subfields } = info {
+            out.insert(field.clone());
+            for (name, child_info) in subfields {
+                field.push(name.clone());
+                Self::collect_unfolded_fields(child_info, field, levels - 1, out);
+                field.pop();
+            }
+        }
+    }
+
+    fn unfolded_fields_signature(unfolded_fields: &AHashSet<Vec<String>>) -> u64 {
+        let mut items: Vec<&Vec<String>> = unfolded_fields.iter().collect();
+        items.sort();
+        let mut hasher = AHasher::default();
+        items.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Cached wrapper around `flatten_variable_rows`: only re-walks the (possibly large)
+    /// compound field tree when this variable's fold state has changed since last frame.
+    fn flattened_variable_rows(
+        &self,
+        item_ref: DisplayedItemRef,
+        field: &FieldRef,
+        info: &VariableInfo,
+        unfolded_fields: &AHashSet<Vec<String>>,
+    ) -> Rc<Vec<VariableFieldRow>> {
+        let signature = Self::unfolded_fields_signature(unfolded_fields);
+        if let Some((cached_signature, rows)) = self.flattened_rows_cache.borrow().get(&item_ref)
+            && *cached_signature == signature
+        {
+            return Rc::clone(rows);
+        }
+        let mut rows = Vec::new();
+        Self::flatten_variable_rows(unfolded_fields, field, info, 0, &mut rows);
+        let rows = Rc::new(rows);
+        self.flattened_rows_cache
+            .borrow_mut()
+            .insert(item_ref, (signature, Rc::clone(&rows)));
+        rows
+    }
+
+    /// Computes top/bottom for every row (including compound-variable subfields), as if the
+    /// first row started at y = 0. Pure function of Surfer state (item tree, displayed
+    /// items, fold state) and layout config - no `ui`/egui state involved - so the result
+    /// only needs to change when items are added/removed/reordered or a group/compound is
+    /// folded/unfolded; see `item_layout_signature` and its use in `draw_item_list`.
+    fn compute_item_drawing_infos(&self, waves: &WaveData) -> Vec<ItemDrawingInfo> {
+        let mut out = Vec::new();
+        let mut y = 0.0f32;
+        for info in waves.items_tree.iter_visible_extra() {
+            let item_ref = info.node.item_ref;
+            let vidx = info.vidx;
+            let Some(displayed_item) = waves.displayed_items.get(&item_ref) else {
+                continue;
+            };
+            let row_height = self.desired_item_row_height(displayed_item);
+            match displayed_item {
+                DisplayedItem::Variable(displayed_variable) => {
+                    let field = FieldRef::without_fields(displayed_variable.variable_ref.clone());
+                    let rows = self.flattened_variable_rows(
+                        item_ref,
+                        &field,
+                        &displayed_variable.info,
+                        &displayed_variable.unfolded_fields,
+                    );
+                    for row in rows.iter() {
+                        let top = y;
+                        let bottom = y + row_height;
+                        out.push(ItemDrawingInfo::Variable(VariableDrawingInfo {
+                            displayed_field_ref: DisplayedFieldRef {
+                                item: item_ref,
+                                field: row.field.field.clone(),
+                            },
+                            field_ref: row.field.clone(),
+                            vidx,
+                            top,
+                            bottom,
+                        }));
+                        y = bottom;
+                    }
+                }
+                DisplayedItem::Divider(_) => {
+                    out.push(ItemDrawingInfo::Divider(DividerDrawingInfo {
+                        vidx,
+                        top: y,
+                        bottom: y + row_height,
+                    }));
+                    y += row_height;
+                }
+                DisplayedItem::Marker(cursor) => {
+                    out.push(ItemDrawingInfo::Marker(MarkerDrawingInfo {
+                        vidx,
+                        top: y,
+                        bottom: y + row_height,
+                        idx: cursor.idx,
+                    }));
+                    y += row_height;
+                }
+                DisplayedItem::TimeLine(_) => {
+                    out.push(ItemDrawingInfo::TimeLine(TimeLineDrawingInfo {
+                        vidx,
+                        top: y,
+                        bottom: y + row_height,
+                    }));
+                    y += row_height;
+                }
+                DisplayedItem::Stream(stream) => {
+                    out.push(ItemDrawingInfo::Stream(StreamDrawingInfo {
+                        transaction_stream_ref: stream.transaction_stream_ref.clone(),
+                        vidx,
+                        top: y,
+                        bottom: y + row_height,
+                    }));
+                    y += row_height;
+                }
+                DisplayedItem::Group(_) => {
+                    out.push(ItemDrawingInfo::Group(GroupDrawingInfo {
+                        vidx,
+                        top: y,
+                        bottom: y + row_height,
+                    }));
+                    y += row_height;
+                }
+                DisplayedItem::Placeholder(_) => {
+                    out.push(ItemDrawingInfo::Placeholder(PlaceholderDrawingInfo {
+                        vidx,
+                        top: y,
+                        bottom: y + row_height,
+                    }));
+                    y += row_height;
+                }
+            }
+        }
+        out
+    }
+
+    /// Cheap structural signature of everything `compute_item_drawing_infos` depends on;
+    /// `draw_item_list` only rebuilds the cached layout when this changes.
+    fn item_layout_signature(&self, waves: &WaveData) -> u64 {
+        let mut hasher = AHasher::default();
+        let layout = &self.user.config.layout;
+        layout.waveforms_line_height.to_bits().hash(&mut hasher);
+        layout.waveforms_gap.to_bits().hash(&mut hasher);
+        layout.transactions_line_height.to_bits().hash(&mut hasher);
+        for info in waves.items_tree.iter_visible_extra() {
+            info.node.item_ref.0.hash(&mut hasher);
+            info.node.level.hash(&mut hasher);
+            info.node.unfolded.hash(&mut hasher);
+            match waves.displayed_items.get(&info.node.item_ref) {
+                Some(DisplayedItem::Variable(v)) => {
+                    v.height_scaling_factor.map(f32::to_bits).hash(&mut hasher);
+                    Self::unfolded_fields_signature(&v.unfolded_fields).hash(&mut hasher);
+                }
+                Some(DisplayedItem::Placeholder(p)) => {
+                    p.height_scaling_factor.map(f32::to_bits).hash(&mut hasher);
+                }
+                Some(DisplayedItem::Stream(s)) => {
+                    s.rows.hash(&mut hasher);
+                }
+                _ => {}
+            }
+        }
+        hasher.finish()
+    }
+
+    /// Refreshes `waves.drawing_infos` if the structural
+    /// signature changed (items added/removed/reordered/dragged, or a group/compound
+    /// folded/unfolded).
+    fn ensure_drawing_infos_cached(&mut self) {
+        let Some(waves) = self.user.waves.as_ref() else {
+            return;
+        };
+        let signature = self.item_layout_signature(waves);
+        if waves.drawing_infos_signature == Some(signature) {
+            return;
+        }
+        let infos = self.compute_item_drawing_infos(waves);
+        let waves = self.user.waves.as_mut().unwrap();
+        waves.drawing_infos = infos;
+        waves.drawing_infos_signature = Some(signature);
     }
 
     fn draw_item_focus_list(&self, ui: &mut Ui) {
@@ -695,29 +905,39 @@ impl SystemState {
         ui.with_layout(
             Layout::top_down(alignment).with_cross_justify(false),
             |ui| {
-                if self.show_default_timeline() {
-                    ui.add_space(self.user.config.layout.waveforms_text_size);
-                }
+                let start_y = ui.cursor().top();
+                let row_layout = if alignment == Align::LEFT {
+                    Layout::left_to_right(Align::Center)
+                } else {
+                    Layout::right_to_left(Align::Center)
+                };
+                let clip = ui.clip_rect();
+                let visible_top = clip.top() - start_y;
+                let visible_bottom = clip.bottom() - start_y;
                 // drawing_infos accounts for height_scaling_factor
-                for drawing_info in &waves.drawing_infos {
+                for drawing_info in waves.visible_drawing_infos(visible_top, visible_bottom) {
                     let next_y = ui.cursor().top();
                     // Align with the corresponding row in other panels
-                    if next_y < drawing_info.top() {
-                        ui.add_space(drawing_info.top() - next_y);
+                    if next_y < drawing_info.top_at(start_y) {
+                        ui.add_space(drawing_info.top_at(start_y) - next_y);
                     }
                     let vidx = drawing_info.vidx();
-                    ui.scope(|ui| {
-                        ui.style_mut().visuals.selection.bg_fill =
-                            self.user.config.theme.accent_warn.background;
-                        ui.style_mut().visuals.override_text_color =
-                            Some(self.user.config.theme.accent_warn.foreground);
-                        Self::enforce_stable_row_widget_expansion(ui);
-                        let _ = ui.selectable_label(true, get_alpha_focus_id(vidx, waves));
-                    });
+                    let row_rect = Rect::from_min_max(
+                        Pos2::new(ui.max_rect().left(), drawing_info.top_at(start_y)),
+                        Pos2::new(ui.max_rect().right(), drawing_info.bottom_at(start_y)),
+                    );
+                    let mut row_ui =
+                        ui.new_child(UiBuilder::new().max_rect(row_rect).layout(row_layout));
+                    Self::enforce_stable_row_widget_expansion(&mut row_ui);
+                    row_ui.style_mut().visuals.selection.bg_fill =
+                        self.user.config.theme.accent_warn.background;
+                    row_ui.style_mut().visuals.override_text_color =
+                        Some(self.user.config.theme.accent_warn.foreground);
+                    let _ = row_ui.selectable_label(true, get_alpha_focus_id(vidx, waves));
                 }
-                Self::add_padding_for_last_item(
+                Self::add_padding_for_last_bottom(
                     ui,
-                    Self::bottom_most_item(waves.drawing_infos.iter()),
+                    waves.drawing_bottom_at(start_y),
                     self.user.config.layout.waveforms_line_height,
                 );
             },
@@ -771,21 +991,29 @@ impl SystemState {
     }
 
     fn draw_item_list(&mut self, msgs: &mut Vec<Message>, ui: &mut Ui) {
-        let Some(waves) = self.user.waves.as_ref() else {
-            return;
+        let (any_groups, alignment) = {
+            let Some(waves) = self.user.waves.as_ref() else {
+                return;
+            };
+            (
+                waves.items_tree.iter().any(|node| node.level > 0),
+                self.get_name_alignment(),
+            )
         };
-        let mut item_offsets = Vec::new();
         let text_margin = Self::item_text_margin(ui);
 
-        let any_groups = waves.items_tree.iter().any(|node| node.level > 0);
-        let alignment = self.get_name_alignment();
+        // Refresh the cache purely based on Surfer state (items/fold/drag); ui-derived
+        // values like the panel's current position never influence this decision.
+        self.ensure_drawing_infos_cached();
+
         ui.with_layout(Layout::top_down(alignment).with_cross_justify(true), |ui| {
             let background_rect = ui.max_rect();
             let painter = ui.painter().clone();
 
-            // Add default margin for text/layout while keeping background marginless.
+            // Add default horizontal margin for text while keeping the vertical start
+            // exactly at `background_rect.min.y`, matching the value column and canvas.
             let rect_with_margin = Rect {
-                min: background_rect.min + text_margin,
+                min: background_rect.min + Vec2::new(text_margin.x, 0.0),
                 max: background_rect.max + Vec2::new(0.0, 40.0),
             };
 
@@ -794,66 +1022,54 @@ impl SystemState {
                 // No item_spacing between rows: gaps come from the explicit wave padding below.
                 ui.spacing_mut().item_spacing.y = 0.0;
                 let content_rect = ui.available_rect_before_wrap();
-                for (
-                    item_count,
-                    crate::displayed_item_tree::Info {
-                        node:
-                            crate::displayed_item_tree::Node {
-                                item_ref,
-                                level,
-                                unfolded,
-                                ..
-                            },
-                        vidx,
-                        has_children,
-                        last,
-                        ..
-                    },
-                ) in waves.items_tree.iter_visible_extra().enumerate()
-                {
-                    let Some(displayed_item) = waves.displayed_items.get(item_ref) else {
+                // `waves.drawing_infos` is offset-free (canonical); translate the clip rect
+                // into that same space instead, so visibility can be checked against the raw
+                // cached values, and `start_y` only gets added when a row is actually drawn.
+                let start_y = ui.cursor().top();
+                let clip = ui.clip_rect();
+                let clip_top = clip.top() - start_y;
+                let clip_bottom = clip.bottom() - start_y;
+
+                let Some(waves) = self.user.waves.as_ref() else {
+                    return;
+                };
+
+                let total_bottom = waves.drawing_bottom().unwrap_or(0.0);
+                let mut row_iter = waves.drawing_infos.iter().peekable();
+
+                for (item_count, info) in waves.items_tree.iter_visible_extra().enumerate() {
+                    let item_ref = info.node.item_ref;
+                    let vidx = info.vidx;
+                    let Some(displayed_item) = waves.displayed_items.get(&item_ref) else {
                         continue;
                     };
 
-                    let levels_to_force_expand =
-                        if matches!(displayed_item, DisplayedItem::Variable(_)) {
-                            self.items_to_expand
-                                .borrow()
-                                .iter()
-                                .find_map(
-                                    |(id, levels)| {
-                                        if item_ref == id { Some(*levels) } else { None }
-                                    },
-                                )
-                        } else {
-                            None
-                        };
-
-                    // Calculate background color for this item
-                    let background_color = self.get_background_color(waves, vidx, item_count);
-                    let row_top = ui.cursor().top();
-                    let row_height = match displayed_item {
-                        DisplayedItem::Variable(displayed_variable) => self
-                            .variable_visible_height(
-                                ui,
-                                displayed_item,
-                                &FieldRef::without_fields(displayed_variable.variable_ref.clone()),
-                                &displayed_variable.info,
-                                levels_to_force_expand,
-                            ),
-                        DisplayedItem::Divider(_)
-                        | DisplayedItem::Marker(_)
-                        | DisplayedItem::Placeholder(_)
-                        | DisplayedItem::TimeLine(_)
-                        | DisplayedItem::Stream(_)
-                        | DisplayedItem::Group(_) => self.desired_item_row_height(displayed_item),
+                    // Pull this item's precomputed rows out of the cache.
+                    let mut item_rows: Vec<&ItemDrawingInfo> = Vec::new();
+                    while row_iter.peek().is_some_and(|r| r.vidx() == vidx) {
+                        item_rows.push(row_iter.next().unwrap());
+                    }
+                    let Some(&first_row) = item_rows.first() else {
+                        continue;
                     };
+                    let last_row = item_rows.last().unwrap();
+
+                    let background_color = self.get_background_color(waves, vidx, item_count);
+
+                    let is_visible =
+                        last_row.bottom() >= clip_top && first_row.top() <= clip_bottom;
+                    if !is_visible {
+                        // Position is already known from the cache; nothing else to do.
+                        continue;
+                    }
+
+                    let row_top = first_row.top_at(start_y);
+                    let row_bottom = last_row.bottom_at(start_y);
+
                     let min = Pos2::new(background_rect.left(), row_top);
-                    let max = Pos2::new(background_rect.right(), row_top + row_height);
+                    let max = Pos2::new(background_rect.right(), row_bottom);
                     painter.rect_filled(Rect { min, max }, CornerRadius::ZERO, background_color);
 
-                    // Pre-allocate exactly row_height so the parent cursor always advances by a
-                    // fixed amount, regardless of widget hover-expansion in egui 0.34+.
                     // Center-align cross-axis so the (smaller) group/fold triangle icon is
                     // vertically centered in the row instead of stuck to its top.
                     let row_layout = if alignment == Align::LEFT {
@@ -861,38 +1077,45 @@ impl SystemState {
                     } else {
                         Layout::right_to_left(Align::Center)
                     };
-                    let (row_rect, _) = ui.allocate_exact_size(
-                        Vec2::new(ui.available_width(), row_height),
-                        Sense::hover(),
-                    );
+                    // Content starts at `content_rect.left()` (margin-adjusted), unlike the
+                    // background fill above which spans the full un-margined row width.
+                    let row_rect = Rect {
+                        min: Pos2::new(content_rect.left(), row_top),
+                        max,
+                    };
                     let mut row_ui =
                         ui.new_child(UiBuilder::new().max_rect(row_rect).layout(row_layout));
                     let row_ui = &mut row_ui;
 
-                    row_ui.add_space(10.0 * f32::from(*level));
+                    row_ui.add_space(10.0 * f32::from(info.node.level));
                     if any_groups {
-                        let response =
-                            self.hierarchy_icon(row_ui, has_children, *unfolded, alignment);
+                        let response = self.hierarchy_icon(
+                            row_ui,
+                            info.has_children,
+                            info.node.unfolded,
+                            alignment,
+                        );
                         if response.clicked() {
-                            if *unfolded {
-                                msgs.push(Message::GroupFold(Some(*item_ref)));
+                            if info.node.unfolded {
+                                msgs.push(Message::GroupFold(Some(item_ref)));
                             } else {
-                                msgs.push(Message::GroupUnfold(Some(*item_ref)));
+                                msgs.push(Message::GroupUnfold(Some(item_ref)));
                             }
                         }
                     }
 
-                    let item_rect = match displayed_item {
+                    match displayed_item {
                         DisplayedItem::Variable(displayed_variable) => self.draw_variable(
                             msgs,
                             vidx,
                             displayed_item,
-                            *item_ref,
+                            item_ref,
                             &FieldRef::without_fields(displayed_variable.variable_ref.clone()),
-                            &mut item_offsets,
                             &displayed_variable.info,
+                            &displayed_variable.unfolded_fields,
+                            &item_rows,
+                            start_y,
                             row_ui,
-                            levels_to_force_expand,
                             alignment,
                             background_color,
                         ),
@@ -902,49 +1125,55 @@ impl SystemState {
                         | DisplayedItem::TimeLine(_)
                         | DisplayedItem::Stream(_)
                         | DisplayedItem::Group(_) => {
-                            row_ui
-                                .with_layout(
-                                    row_ui
-                                        .layout()
-                                        .with_main_justify(true)
-                                        .with_main_align(alignment),
-                                    |ui| {
-                                        self.draw_plain_item(
-                                            msgs,
-                                            vidx,
-                                            *item_ref,
-                                            displayed_item,
-                                            &mut item_offsets,
-                                            ui,
-                                            background_color,
-                                        )
-                                    },
-                                )
-                                .inner
+                            row_ui.with_layout(
+                                row_ui
+                                    .layout()
+                                    .with_main_justify(true)
+                                    .with_main_align(alignment),
+                                |ui| {
+                                    self.draw_plain_item(
+                                        msgs,
+                                        vidx,
+                                        item_ref,
+                                        displayed_item,
+                                        ui,
+                                        background_color,
+                                    );
+                                },
+                            );
                         }
-                    };
+                    }
 
                     // expand to the left, but not over the icon size
-                    let mut expanded_rect = item_rect;
+                    let mut expanded_rect = Rect::from_min_max(
+                        Pos2::new(row_rect.min.x, row_top),
+                        Pos2::new(row_rect.max.x, first_row.bottom_at(start_y)),
+                    );
                     expanded_rect.set_left(
                         content_rect.left()
                             + self.user.config.layout.waveforms_text_size
                             + text_margin.x,
                     );
                     expanded_rect.set_right(content_rect.right());
-                    self.draw_drag_target(msgs, vidx, expanded_rect, content_rect, row_ui, last);
+                    self.draw_drag_target(
+                        msgs,
+                        vidx,
+                        expanded_rect,
+                        content_rect,
+                        row_ui,
+                        info.last,
+                    );
                 }
-                Self::add_padding_for_last_item(
-                    ui,
-                    Self::bottom_most_item(item_offsets.iter()),
-                    self.user.config.layout.waveforms_line_height
-                        + 2.0 * self.user.config.layout.waveforms_gap,
-                );
+
+                // Reserve the full content height once, instead of accumulating per-row space.
+                let target_bottom =
+                    total_bottom + start_y + self.user.config.layout.waveforms_line_height;
+                let next_y = ui.cursor().top();
+                if next_y < target_bottom {
+                    ui.add_space(target_bottom - next_y);
+                }
             });
         });
-
-        let waves = self.user.waves.as_mut().unwrap();
-        waves.drawing_infos = item_offsets;
 
         // Context menu for the unused part
         let response = ui.allocate_response(ui.available_size(), Sense::click());
@@ -1047,144 +1276,82 @@ impl SystemState {
         displayed_item: &DisplayedItem,
         displayed_id: DisplayedItemRef,
         field: &FieldRef,
-        drawing_infos: &mut Vec<ItemDrawingInfo>,
         info: &VariableInfo,
+        unfolded_fields: &AHashSet<Vec<String>>,
+        item_rows: &[&ItemDrawingInfo],
+        start_y: f32,
         ui: &mut Ui,
-        levels_to_force_expand: Option<usize>,
         alignment: Align,
         background_color: Color32,
-    ) -> Rect {
+    ) {
         let wave_top_padding = self.user.config.layout.waveforms_gap;
-        let precomputed_bounds = field
-            .field
-            .is_empty()
-            .then_some((ui.max_rect().top(), ui.max_rect().bottom()));
-        let displayed_field_ref = DisplayedFieldRef {
-            item: displayed_id,
-            field: field.field.clone(),
-        };
-        match info {
-            VariableInfo::Compound { subfields } => {
-                let mut header = egui::collapsing_header::CollapsingState::load_with_default_open(
-                    ui.ctx(),
-                    egui::Id::new(field),
-                    false,
-                );
-                let desired_height = self.desired_item_row_height(displayed_item);
-                let compound_header_height = desired_height.max(ui.spacing().interact_size.y);
+        // Row positions are already known (see `compute_item_drawing_infos`); only the
+        // per-row shape (depth/is_compound/...) is looked up here, from the same cache.
+        let rows = self.flattened_variable_rows(displayed_id, field, info, unfolded_fields);
+        // `item_rows` holds offset-free positions; translate the clip rect into that same
+        // space instead, so visibility is checked against the raw cached values.
+        let clip = ui.clip_rect();
+        let clip_top = clip.top() - start_y;
+        let clip_bottom = clip.bottom() - start_y;
 
-                if let Some(level) = levels_to_force_expand {
-                    header.set_open(level > 0);
+        ui.with_layout(Layout::top_down(alignment).with_cross_justify(true), |ui| {
+            for (row, position) in rows.iter().zip(item_rows.iter()) {
+                // Sub-fields deep inside a large expanded compound can be scrolled out of
+                // view; their position is already known, so skip the widget/text layout.
+                if !position.overlaps(clip_top, clip_bottom) {
+                    continue;
                 }
 
-                let row_top = ui.cursor().top();
-                let response = ui
-                    .with_layout(Layout::top_down(alignment).with_cross_justify(true), |ui| {
-                        ui.scope(|ui| {
-                            Self::enforce_stable_row_widget_expansion(ui);
-                            header
-                                .show_header(ui, |ui| {
-                                    ui.allocate_ui_with_layout(
-                                        Vec2::new(ui.available_width(), desired_height),
-                                        Layout::top_down(alignment).with_cross_justify(true),
-                                        |ui| {
-                                            ui.add_space(wave_top_padding);
-                                            self.draw_variable_label(
-                                                vidx,
-                                                displayed_item,
-                                                displayed_id,
-                                                field,
-                                                msgs,
-                                                ui,
-                                                None,
-                                                background_color,
-                                            )
-                                        },
-                                    );
-                                })
-                                .body(|ui| {
-                                    for (name, info) in subfields {
-                                        let mut new_path = field.clone();
-                                        new_path.field.push(name.clone());
-                                        self.draw_variable(
-                                            msgs,
-                                            vidx,
-                                            displayed_item,
-                                            displayed_id,
-                                            &new_path,
-                                            drawing_infos,
-                                            info,
-                                            ui,
-                                            levels_to_force_expand.map(|l| l.saturating_sub(1)),
-                                            alignment,
-                                            background_color,
-                                        );
-                                    }
-                                })
-                        })
-                        .inner
-                    })
-                    .inner;
-                // The compound header entry spans exactly one row; sub-fields
-                // push their own drawing_infos entries and must not be included
-                // in this rect (using precomputed_bounds / max_rect.bottom() here
-                // would span the entire N-row block and misalign the values panel).
-                let fixed_row_rect = Rect::from_min_max(
-                    Pos2::new(response.0.rect.min.x, row_top),
-                    Pos2::new(response.0.rect.max.x, row_top + compound_header_height),
+                let row_top = position.top_at(start_y);
+                let row_bottom = position.bottom_at(start_y);
+
+                let row_layout = if alignment == Align::LEFT {
+                    Layout::left_to_right(Align::Center)
+                } else {
+                    Layout::right_to_left(Align::Center)
+                };
+                let row_rect = Rect::from_min_max(
+                    Pos2::new(ui.max_rect().left(), row_top),
+                    Pos2::new(ui.max_rect().right(), row_bottom),
                 );
-                drawing_infos.push(ItemDrawingInfo::Variable(VariableDrawingInfo {
-                    displayed_field_ref,
-                    field_ref: field.clone(),
-                    vidx,
-                    top: fixed_row_rect.top(),
-                    bottom: fixed_row_rect.bottom(),
-                }));
-                fixed_row_rect
-            }
-            VariableInfo::Bool
-            | VariableInfo::Bits
-            | VariableInfo::Clock
-            | VariableInfo::String
-            | VariableInfo::Event
-            | VariableInfo::Real => {
-                let desired_height = self.desired_item_row_height(displayed_item);
-                let row_top = ui.cursor().top();
-                let row = ui.allocate_ui_with_layout(
-                    Vec2::new(ui.available_width(), desired_height),
-                    Layout::top_down(alignment).with_cross_justify(true),
-                    |ui| {
+                let mut row_ui =
+                    ui.new_child(UiBuilder::new().max_rect(row_rect).layout(row_layout));
+                Self::enforce_stable_row_widget_expansion(&mut row_ui);
+                row_ui.add_space(10.0 * row.depth as f32);
+
+                if row.is_compound {
+                    let icon_response =
+                        self.hierarchy_icon(&mut row_ui, row.has_children, row.unfolded, alignment);
+                    if icon_response.clicked() {
+                        msgs.push(Message::ToggleVariableFieldFold(
+                            displayed_id,
+                            row.field.field.clone(),
+                        ));
+                    }
+                }
+
+                let label_response = row_ui
+                    .with_layout(Layout::top_down(alignment).with_cross_justify(true), |ui| {
                         ui.add_space(wave_top_padding);
                         self.draw_variable_label(
                             vidx,
                             displayed_item,
                             displayed_id,
-                            field,
+                            &row.field,
                             msgs,
                             ui,
                             None,
                             background_color,
                         )
-                    },
-                );
-                let fixed_row_rect = Self::clamp_rect_to_bounds(
-                    Rect::from_min_max(
-                        Pos2::new(row.response.rect.min.x, row_top),
-                        Pos2::new(row.response.rect.max.x, row_top + desired_height),
-                    ),
-                    precomputed_bounds,
-                );
-                self.draw_drag_source(msgs, vidx, &row.inner, ui.input(|e| e.modifiers));
-                drawing_infos.push(ItemDrawingInfo::Variable(VariableDrawingInfo {
-                    displayed_field_ref,
-                    field_ref: field.clone(),
-                    vidx,
-                    top: fixed_row_rect.top(),
-                    bottom: fixed_row_rect.bottom(),
-                }));
-                fixed_row_rect
+                    })
+                    .inner;
+
+                // Compound header rows aren't draggable variables themselves.
+                if !row.is_compound {
+                    self.draw_drag_source(msgs, vidx, &label_response, ui.input(|e| e.modifiers));
+                }
             }
-        }
+        });
     }
 
     fn draw_drag_target(
@@ -1475,22 +1642,18 @@ impl SystemState {
         item_label
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn draw_plain_item(
         &self,
         msgs: &mut Vec<Message>,
         vidx: VisibleItemIndex,
         displayed_id: DisplayedItemRef,
         displayed_item: &DisplayedItem,
-        drawing_infos: &mut Vec<ItemDrawingInfo>,
         ui: &mut Ui,
         background_color: Color32,
-    ) -> Rect {
-        let row_top = ui.max_rect().top();
-        let row_bottom = ui.max_rect().bottom();
+    ) {
         let wave_top_padding = self.user.config.layout.waveforms_gap;
         let row = ui.allocate_ui_with_layout(
-            Vec2::new(ui.available_width(), row_bottom - row_top),
+            ui.available_size(),
             Layout::top_down(self.get_name_alignment()).with_cross_justify(true),
             |ui| {
                 ui.add_space(wave_top_padding);
@@ -1506,64 +1669,8 @@ impl SystemState {
                 )
             },
         );
-        let fixed_row_rect = Rect::from_min_max(
-            Pos2::new(row.response.rect.min.x, row_top),
-            Pos2::new(row.response.rect.max.x, row_bottom),
-        );
 
         self.draw_drag_source(msgs, vidx, &row.inner, ui.input(|e| e.modifiers));
-        match displayed_item {
-            DisplayedItem::Divider(_) => {
-                drawing_infos.push(ItemDrawingInfo::Divider(DividerDrawingInfo {
-                    vidx,
-                    top: fixed_row_rect.top(),
-                    bottom: fixed_row_rect.bottom(),
-                }));
-            }
-            DisplayedItem::Marker(cursor) => {
-                drawing_infos.push(ItemDrawingInfo::Marker(MarkerDrawingInfo {
-                    vidx,
-                    top: fixed_row_rect.top(),
-                    bottom: fixed_row_rect.bottom(),
-                    idx: cursor.idx,
-                }));
-            }
-            DisplayedItem::TimeLine(_) => {
-                drawing_infos.push(ItemDrawingInfo::TimeLine(TimeLineDrawingInfo {
-                    vidx,
-                    top: fixed_row_rect.top(),
-                    bottom: fixed_row_rect.bottom(),
-                }));
-            }
-            DisplayedItem::Stream(stream) => {
-                drawing_infos.push(ItemDrawingInfo::Stream(StreamDrawingInfo {
-                    transaction_stream_ref: stream.transaction_stream_ref.clone(),
-                    vidx,
-                    top: fixed_row_rect.top(),
-                    bottom: fixed_row_rect.bottom(),
-                }));
-            }
-            DisplayedItem::Group(_) => {
-                drawing_infos.push(ItemDrawingInfo::Group(GroupDrawingInfo {
-                    vidx,
-                    top: fixed_row_rect.top(),
-                    bottom: fixed_row_rect.bottom(),
-                }));
-            }
-            &DisplayedItem::Placeholder(_) => {
-                drawing_infos.push(ItemDrawingInfo::Placeholder(PlaceholderDrawingInfo {
-                    vidx,
-                    top: fixed_row_rect.top(),
-                    bottom: fixed_row_rect.bottom(),
-                }));
-            }
-            &DisplayedItem::Variable(_) => {
-                panic!(
-                    "draw_plain_item must not be called with a Variable - use draw_variable instead"
-                )
-            }
-        }
-        fixed_row_rect
     }
 
     fn item_is_focused(&self, vidx: VisibleItemIndex) -> bool {
@@ -1611,9 +1718,10 @@ impl SystemState {
 
         let ucursor = waves.cursor.as_ref().and_then(num::BigInt::to_biguint);
 
-        // Add default margin as it was removed when creating the frame
+        // Add default horizontal margin as it was removed when creating the frame; keep the
+        // vertical start exactly at `rect.min.y`, matching the name column and canvas.
         let rect_with_margin = Rect {
-            min: rect.min + ui.spacing().item_spacing,
+            min: rect.min + Vec2::new(ui.spacing().item_spacing.x, 0.0),
             max: rect.max + Vec2::new(0.0, 40.0),
         };
 
@@ -1622,24 +1730,27 @@ impl SystemState {
             let text_style = TextStyle::Monospace;
             ui.style_mut().override_text_style = Some(text_style);
             ui.spacing_mut().item_spacing.y = 0.0;
-            for drawing_info in waves.drawing_infos.iter().sorted_by_key(|o| o.top() as i32) {
+            let start_y = ui.cursor().top();
+            let clip = ui.clip_rect();
+            let clip_top = clip.top() - start_y;
+            let clip_bottom = clip.bottom() - start_y;
+            // `drawing_infos` is offset-free and already top-to-bottom sorted by
+            // construction (see `SystemState::compute_item_drawing_infos`), so no re-sort
+            // is needed here; `start_y` is only added when a row is actually drawn.
+            for drawing_info in waves.visible_drawing_infos(clip_top, clip_bottom) {
                 let next_y = ui.cursor().top();
                 // In order to align the text in this view with the variable tree,
                 // we need to keep track of how far away from the expected offset we are,
                 // and compensate for it
-                if next_y < drawing_info.top() {
-                    ui.add_space(drawing_info.top() - next_y);
+                if next_y < drawing_info.top_at(start_y) {
+                    ui.add_space(drawing_info.top_at(start_y) - next_y);
                 }
 
                 let backgroundcolor =
                     self.get_background_color(waves, drawing_info.vidx(), drawing_info.vidx().0);
-                self.draw_background(drawing_info, &ctx, backgroundcolor);
+                self.draw_background(drawing_info, start_y, &ctx, backgroundcolor);
                 match drawing_info {
                     ItemDrawingInfo::Variable(variable_info) => {
-                        let waveforms_gap = self.user.config.layout.waveforms_gap;
-                        let waveform_height =
-                            (variable_info.bottom - variable_info.top - 2.0 * waveforms_gap)
-                                .max(1.0);
                         if ucursor.as_ref().is_none() {
                             ui.label("");
                             continue;
@@ -1651,11 +1762,17 @@ impl SystemState {
                             ucursor.as_ref(),
                         );
                         if let Some(v) = v {
+                            let waveforms_gap = self.user.config.layout.waveforms_gap;
+                            let waveform_height =
+                                (drawing_info.height() - 2.0 * waveforms_gap).max(1.0);
+
                             ui.add_space(waveforms_gap);
                             // Reserve the full row height on the job but keep the glyph's own
                             // line_height natural, so `Align::Center` valign can center the text.
-                            let mut value_layout_job = LayoutJob::default();
-                            value_layout_job.first_row_min_height = waveform_height;
+                            let mut value_layout_job = LayoutJob {
+                                first_row_min_height: waveform_height,
+                                ..Default::default()
+                            };
                             RichText::new(v)
                                 .color(self.user.config.theme.get_best_text_color(backgroundcolor))
                                 .line_height(Some(self.user.config.layout.waveforms_line_height))
@@ -1680,9 +1797,6 @@ impl SystemState {
                     }
 
                     ItemDrawingInfo::Marker(numbered_cursor) => {
-                        let waveforms_gap = self.user.config.layout.waveforms_gap;
-                        let waveform_height =
-                            (drawing_info.height() - 2.0 * waveforms_gap).max(1.0);
                         if let Some(cursor) = &waves.cursor {
                             let delta = time_string(
                                 &(waves.numbered_marker_time(numbered_cursor.idx) - cursor),
@@ -1691,13 +1805,15 @@ impl SystemState {
                                 &self.get_time_format(),
                             );
 
-                            ui.add_space(waveforms_gap);
+                            ui.add_space(self.user.config.layout.waveforms_gap);
                             ui.label(
                                 RichText::new(format!("Δ: {delta}"))
                                     .color(
                                         self.user.config.theme.get_best_text_color(backgroundcolor),
                                     )
-                                    .line_height(Some(waveform_height)),
+                                    .line_height(Some(
+                                        self.user.config.layout.waveforms_line_height.max(1.0),
+                                    )),
                             )
                             .context_menu(|ui| {
                                 self.item_context_menu(
@@ -1722,9 +1838,9 @@ impl SystemState {
                     }
                 }
             }
-            Self::add_padding_for_last_item(
+            Self::add_padding_for_last_bottom(
                 ui,
-                Self::bottom_most_item(waves.drawing_infos.iter()),
+                waves.drawing_bottom_at(start_y),
                 self.user.config.layout.waveforms_line_height
                     + 2.0 * self.user.config.layout.waveforms_gap,
             );
@@ -1856,11 +1972,12 @@ impl SystemState {
     pub fn draw_background(
         &self,
         drawing_info: &ItemDrawingInfo,
+        y_offset: f32,
         ctx: &DrawingContext<'_>,
         background_color: Color32,
     ) {
-        let row_top = drawing_info.top();
-        let row_bottom = drawing_info.bottom();
+        let row_top = drawing_info.top_at(y_offset);
+        let row_bottom = drawing_info.bottom_at(y_offset);
         let left = (ctx.to_screen)(0.0, 0.0).x;
         let right = (ctx.to_screen)(ctx.cfg.canvas_size.x, 0.0).x;
         let min = Pos2::new(left, row_top);

@@ -82,6 +82,7 @@ use crate::annotation::Annotation;
 use crate::annotation_list::AnnotationGroup;
 use crate::annotation_list::DEFAULT_GROUP_NAME;
 use crate::arrow::ArrowAnnotation;
+use crate::channels::checked_send;
 use crate::comment::CommentMessage;
 use crate::config::AutoLoad;
 use crate::displayed_item_tree::ItemIndex;
@@ -95,7 +96,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, LazyLock, RwLock};
 
-use crate::channels::checked_send;
 use batch_commands::read_command_bytes;
 use batch_commands::read_command_file;
 #[cfg(target_arch = "wasm32")]
@@ -2431,7 +2431,18 @@ impl SystemState {
                 waves.graphics.retain(|k, _| k != &id);
             }
             Message::ExpandDrawnItem { item, levels } => {
-                self.items_to_expand.borrow_mut().push((item, levels));
+                self.invalidate_draw_commands();
+                let waves = self.user.waves.as_mut()?;
+                if let Some(DisplayedItem::Variable(var)) = waves.displayed_items.get_mut(&item) {
+                    var.unfolded_fields = Self::expand_levels_to_unfolded_fields(&var.info, levels);
+                }
+            }
+            Message::ToggleVariableFieldFold(item, field) => {
+                self.invalidate_draw_commands();
+                let waves = self.user.waves.as_mut()?;
+                if let Some(DisplayedItem::Variable(var)) = waves.displayed_items.get_mut(&item) {
+                    var.toggle_field_fold(field);
+                }
             }
             Message::SetMouseGestureAnnotation(annotation_kind) => {
                 self.annotation_kind = annotation_kind;

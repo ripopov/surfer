@@ -341,7 +341,7 @@ macro_rules! snapshot_ui_with_file_and_msgs {
 
             let late_msgs: Vec<Message> = $late_msgs.into();
             if !late_msgs.is_empty() {
-                // Do a preliminary draw to populate drawing_infos before processing late_msgs
+                // Do a preliminary draw to enable scrolling before processing late messages
                 let mut surface = create_surface((SNAPSHOT_WIDTH as i32, SNAPSHOT_HEIGHT as i32));
                 draw_onto_surface(
                     &mut surface,
