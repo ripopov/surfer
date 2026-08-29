@@ -466,9 +466,7 @@ impl DisplayedItem {
                     .unwrap_or_else(|| self.name());
                 RichText::new(name)
                     .color(color)
-                    .line_height(Some(
-                        config.layout.waveforms_line_height * self.height_scaling_factor(),
-                    ))
+                    .line_height(Some(config.layout.waveforms_line_height))
                     .append_to(layout_job, style, FontSelection::Default, Align::Center);
             }
             DisplayedItem::TimeLine(_) | DisplayedItem::Divider(_) => {

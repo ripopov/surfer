@@ -854,10 +854,12 @@ impl SystemState {
 
                     // Pre-allocate exactly row_height so the parent cursor always advances by a
                     // fixed amount, regardless of widget hover-expansion in egui 0.34+.
+                    // Center-align cross-axis so the (smaller) group/fold triangle icon is
+                    // vertically centered in the row instead of stuck to its top.
                     let row_layout = if alignment == Align::LEFT {
-                        Layout::left_to_right(Align::TOP)
+                        Layout::left_to_right(Align::Center)
                     } else {
-                        Layout::right_to_left(Align::TOP)
+                        Layout::right_to_left(Align::Center)
                     };
                     let (row_rect, _) = ui.allocate_exact_size(
                         Vec2::new(ui.available_width(), row_height),
@@ -1316,8 +1318,9 @@ impl SystemState {
         match displayed_item {
             DisplayedItem::Variable(var) if field.is_some() => {
                 let field = field.unwrap();
-                let line_height = self.user.config.layout.waveforms_line_height
-                    * displayed_item.height_scaling_factor();
+                let base_line_height = self.user.config.layout.waveforms_line_height;
+                layout_job.first_row_min_height =
+                    base_line_height * displayed_item.height_scaling_factor();
                 if field.field.is_empty() {
                     let name_info = self.get_variable_name_info(&var.variable_ref, meta);
 
@@ -1345,7 +1348,7 @@ impl SystemState {
                             color_pair.foreground,
                             monospace_width,
                             available_width,
-                            line_height,
+                            base_line_height,
                         );
                     } else {
                         displayed_item.add_to_layout_job(
@@ -1359,7 +1362,7 @@ impl SystemState {
                 } else {
                     RichText::new(field.field.last().unwrap().clone())
                         .color(color_pair.foreground)
-                        .line_height(Some(line_height))
+                        .line_height(Some(base_line_height))
                         .append_to(
                             &mut layout_job,
                             ui.style(),
@@ -1649,23 +1652,30 @@ impl SystemState {
                         );
                         if let Some(v) = v {
                             ui.add_space(waveforms_gap);
-                            ui.label(
-                                RichText::new(v)
-                                    .color(
-                                        self.user.config.theme.get_best_text_color(backgroundcolor),
-                                    )
-                                    .line_height(Some(waveform_height)),
-                            )
-                            .context_menu(|ui| {
-                                self.item_context_menu(
-                                    Some(&variable_info.field_ref),
-                                    msgs,
-                                    ui,
-                                    variable_info.vidx,
-                                    true,
-                                    crate::message::MessageTarget::CurrentSelection,
+                            // Reserve the full row height on the job but keep the glyph's own
+                            // line_height natural, so `Align::Center` valign can center the text.
+                            let mut value_layout_job = LayoutJob::default();
+                            value_layout_job.first_row_min_height = waveform_height;
+                            RichText::new(v)
+                                .color(self.user.config.theme.get_best_text_color(backgroundcolor))
+                                .line_height(Some(self.user.config.layout.waveforms_line_height))
+                                .append_to(
+                                    &mut value_layout_job,
+                                    ui.style(),
+                                    FontSelection::Default,
+                                    Align::Center,
                                 );
-                            });
+                            ui.label(WidgetText::LayoutJob(value_layout_job.into()))
+                                .context_menu(|ui| {
+                                    self.item_context_menu(
+                                        Some(&variable_info.field_ref),
+                                        msgs,
+                                        ui,
+                                        variable_info.vidx,
+                                        true,
+                                        crate::message::MessageTarget::CurrentSelection,
+                                    );
+                                });
                         }
                     }
 
@@ -2001,6 +2011,7 @@ pub fn draw_true_name(
                     font_id: font.clone(),
                     color: foreground.gamma_multiply(0.75),
                     line_height: Some(line_height),
+                    valign: Align::Center,
                     ..Default::default()
                 },
             );
@@ -2011,6 +2022,7 @@ pub fn draw_true_name(
                     font_id: font.clone(),
                     color: foreground.gamma_multiply(0.5),
                     line_height: Some(line_height),
+                    valign: Align::Center,
                     ..Default::default()
                 },
             );
@@ -2021,6 +2033,7 @@ pub fn draw_true_name(
                     font_id: font.clone(),
                     color: foreground,
                     line_height: Some(line_height),
+                    valign: Align::Center,
                     ..Default::default()
                 },
             );
@@ -2031,6 +2044,7 @@ pub fn draw_true_name(
                     font_id: font.clone(),
                     color: foreground.gamma_multiply(0.5),
                     line_height: Some(line_height),
+                    valign: Align::Center,
                     ..Default::default()
                 },
             );
