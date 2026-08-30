@@ -409,22 +409,18 @@ impl SystemState {
         // Refresh time offset cache after loading waves
         if let Some(waves) = &mut self.user.waves {
             waves.refresh_time_range(enable_time_offset);
-        }
 
-        // Update window title with waveform name
-        let title = match &filename_for_title {
-            WaveSource::File(path) => {
-                if let Some(name) = path.file_name() {
-                    format!("Surfer - {name}")
-                } else {
-                    "Surfer".to_string()
-                }
+            // Update window title with waveform name
+            let title = waves.window_title();
+            if let Some(ctx) = self.context.as_ref() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             }
-            WaveSource::Url(url) => format!("Surfer - {url}"),
-            _ => "Surfer".to_string(),
-        };
-        if let Some(ctx) = self.context.as_ref() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+            // eframe's web backend doesn't act on ViewportCommand::Title, so the browser
+            // tab title has to be set directly via web_sys.
+            #[cfg(target_arch = "wasm32")]
+            if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+                document.set_title(&title);
+            }
         }
 
         self.record_file_history(&filename_for_title);

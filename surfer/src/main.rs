@@ -159,6 +159,9 @@ mod main_impl {
         let state_file = args.state_file.clone();
         let startup_params = startup_params_from_args(args);
         let waves = startup_params.waves.clone();
+        let window_title = waves
+            .as_ref()
+            .map_or_else(|| "Surfer".to_string(), WaveSource::window_title);
 
         let state = match &state_file {
             Some(file) => std::fs::read_to_string(file)
@@ -229,7 +232,7 @@ mod main_impl {
         let options = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
                 .with_app_id("org.surfer-project.surfer")
-                .with_title("Surfer")
+                .with_title(window_title)
                 .with_icon(egui::viewport::IconData {
                     rgba: icon_data,
                     width: info.width,

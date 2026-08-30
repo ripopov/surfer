@@ -109,6 +109,44 @@ impl WaveSource {
             WaveSource::Cxxrtl(_) => Ws::Cxxrtl,
         }
     }
+
+    /// The file/URL name to show in the window title for this source, if it has one of
+    /// its own. `None` for sources with no inherent name (dropped raw data, cxxrtl), which
+    /// fall back to the design's top-level scope name(s); see `WaveData::window_title`.
+    #[must_use]
+    pub(crate) fn title_name(&self) -> Option<String> {
+        match self {
+            WaveSource::File(_) | WaveSource::DragAndDrop(Some(_)) => self
+                .path()
+                .and_then(|p| p.file_name())
+                .map(ToString::to_string),
+            WaveSource::Url(url) => url
+                .split(['?', '#'])
+                .next()
+                .and_then(|u| u.rsplit('/').next())
+                .filter(|name| !name.is_empty())
+                .map(ToString::to_string),
+            WaveSource::Data | WaveSource::DragAndDrop(None) | WaveSource::Cxxrtl(_) => None,
+        }
+    }
+
+    /// The window/tab title to show while this source is loaded, e.g. "foo.vcd - Surfer",
+    /// based only on the source's own name (see `title_name`). Used where no design
+    /// hierarchy is available yet to fall back on; see `WaveData::window_title` for that.
+    #[must_use]
+    pub fn window_title(&self) -> String {
+        format_window_title(self.title_name().as_deref())
+    }
+}
+
+/// Formats the final window/tab title, e.g. "foo.vcd - Surfer", falling back to plain
+/// "Surfer" when `name` is `None`.
+#[must_use]
+pub(crate) fn format_window_title(name: Option<&str>) -> String {
+    match name {
+        Some(name) => format!("{name} - Surfer"),
+        None => "Surfer".to_string(),
+    }
 }
 
 pub fn url_to_wavesource(url: &str) -> Option<WaveSource> {

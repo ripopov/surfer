@@ -1214,6 +1214,21 @@ impl WaveData {
         }
         Some(())
     }
+
+    /// The window/tab title to show when this waveform is loaded, e.g. "foo.vcd - Surfer".
+    #[must_use]
+    pub(crate) fn window_title(&self) -> String {
+        let name = self.source.title_name().or_else(|| {
+            let scope_names = self
+                .inner
+                .root_scopes()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            (!scope_names.is_empty()).then(|| scope_names.join(", "))
+        });
+        crate::wave_source::format_window_title(name.as_deref())
+    }
 }
 
 #[cfg(test)]
