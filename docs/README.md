@@ -86,13 +86,16 @@ Arguments:
   [WAVE_FILE]  Waveform file in VCD, FST, or GHW format
 
 Options:
-  -c, --command-file <COMMAND_FILE>  Path to a file containing 'commands' to run after a waveform has been loaded.
+  -c, --command-file <COMMAND_FILE>  Path to a file containing SUCL commands to run after a waveform has been loaded.
                                      The commands are the same as those used in the command line interface inside the program.
                                      Commands are separated by lines or ;. Empty lines are ignored. Line comments starting with
                                      `#` are supported
                                      NOTE: This feature is not permanent, it will be removed once a solid scripting system
                                      is implemented.
-      --script <SCRIPT>              Alias for --command_file to support VUnit
+      --script <SCRIPT>              Alias for --`command_file` to let `VUnit` use the same argument for both Surfer and GTKWave
+  -C, --command <COMMAND_STRING>     SUCL commands to run after a waveform has been loaded, given directly on the
+                                     command line instead of via --command-file. Multiple commands are
+                                     separated by ;.
   -s, --state-file <STATE_FILE>      Load previously saved state file
       --wcp-initiate <WCP_INITIATE>  Port for WCP to connect to
   -h, --help                         Print help

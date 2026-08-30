@@ -44,7 +44,7 @@ mod main_impl {
     struct Args {
         /// Waveform file in VCD, FST, or GHW format.
         wave_file: Option<String>,
-        /// Path to a file containing 'commands' to run after a waveform has been loaded.
+        /// Path to a file containing SUCL commands to run after a waveform has been loaded.
         /// The commands are the same as those used in the command line interface inside the program.
         /// Commands are separated by lines or ;. Empty lines are ignored. Line comments starting with
         /// `#` are supported
@@ -52,10 +52,14 @@ mod main_impl {
         /// is implemented.
         #[clap(long, short, verbatim_doc_comment)]
         command_file: Option<Utf8PathBuf>,
-        /// Alias for --`command_file` to support `VUnit`
+        /// Alias for --`command_file` to let `VUnit` use the same argument for both Surfer and GTKWave.
         #[clap(long)]
         script: Option<Utf8PathBuf>,
-
+        /// SUCL commands to run after a waveform has been loaded, given directly on the
+        /// command line instead of via --command-file. Multiple commands are
+        /// separated by ;.
+        #[clap(long = "command", short = 'C', verbatim_doc_comment)]
+        command_string: Option<String>,
         #[clap(long, short)]
         /// Load previously saved state file
         state_file: Option<Utf8PathBuf>,
@@ -84,10 +88,15 @@ mod main_impl {
 
     #[allow(dead_code)] // NOTE: Only used in desktop version
     fn startup_params_from_args(args: Args) -> StartupParams {
-        let startup_commands = args
-            .command_file()
-            .map(read_command_file)
-            .unwrap_or_default();
+        let mut startup_commands = Vec::new();
+        if let Some(command_string) = &args.command_string {
+            startup_commands.push(command_string.clone());
+        }
+        startup_commands.extend(
+            args.command_file()
+                .map(read_command_file)
+                .unwrap_or_default(),
+        );
         StartupParams {
             waves: args.wave_file.map(|s| string_to_wavesource(&s)),
             wcp_initiate: args.wcp_initiate,
