@@ -1248,6 +1248,16 @@ impl SystemState {
             Message::LoadCommandFromData(bytes) => {
                 self.add_batch_commands(read_command_bytes(bytes));
             }
+            Message::ExecuteBatchCommand { line, command } => {
+                match crate::fzcmd::parse_command(&command, command_parser::get_parser(self)) {
+                    Ok(message) => {
+                        self.update(message);
+                    }
+                    Err(error) => {
+                        error!("Error on batch commands line {line}: {error:#?}");
+                    }
+                }
+            }
             Message::SetupCxxrtl(kind) => self.connect_to_cxxrtl(kind, false),
             Message::SetSurverStatus(_start, server, status) => {
                 self.user.surver_file_infos = Some(status.file_infos.clone());

@@ -7,8 +7,6 @@ use crate::{
     SystemState,
     async_util::perform_async_work,
     channels::checked_send,
-    command_parser::get_parser,
-    fzcmd::parse_command,
     message::Message,
     wave_source::{LoadProgress, LoadProgressStatus},
 };
@@ -128,12 +126,7 @@ impl SystemState {
                     error!("Cannot use run_command_file in command files running on WASM");
                     None
                 } else {
-                    parse_command(&command, get_parser(self))
-                        .map_err(|e| {
-                            error!("Error on batch commands line {no}: {e:#?}");
-                            e
-                        })
-                        .ok()
+                    Some(Message::ExecuteBatchCommand { line: no, command })
                 }
             })
             .collect::<Vec<_>>()

@@ -187,6 +187,11 @@ pub enum Message {
     LoadCommandFromData(Vec<u8>),
     /// Load command file from URL.
     LoadCommandFileFromUrl(String),
+    #[serde(skip)]
+    ExecuteBatchCommand {
+        line: usize,
+        command: String,
+    },
     SetupCxxrtl(CxxrtlKind),
     #[serde(skip)]
     /// Message sent when waveform file header is loaded.
