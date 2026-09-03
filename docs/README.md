@@ -19,7 +19,7 @@ To install from source you must have a Rust compiler. To install the Rust compil
 Now, you can do
 
 ``` bash
-cargo install --git https://gitlab.com/surfer-project/surfer.git surfer
+cargo install --git https://gitlab.com/surfer-project/surfer.git surfer --locked
 ```
 
 Replace `surfer` with `surver` to install the server only version.
