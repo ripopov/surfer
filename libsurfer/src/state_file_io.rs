@@ -148,14 +148,12 @@ impl SystemState {
                 Ok(s) => vec![Message::LoadState(s, Some(source))],
                 Err(e) => {
                     error!("Failed to load state: {e:#?}");
-                    vec![Message::Error(e)]
+                    vec![]
                 }
             },
             Err(e) => {
                 error!("Failed to load state file: {source:#?} {e:#?}");
-                vec![Message::Error(eyre::eyre!(
-                    "Failed to read state file '{source}': {e}"
-                ))]
+                vec![]
             }
         };
         if let Some(path) = path {

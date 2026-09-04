@@ -149,7 +149,7 @@ impl SystemState {
             let response: reqwest::Response = match maybe_response {
                 Ok(r) => r,
                 Err(e) => {
-                    checked_send(&sender, Message::Error(e));
+                    error!("{e:?}");
                     return;
                 }
             };
@@ -160,11 +160,14 @@ impl SystemState {
                 .map(|e| e.with_context(|| format!("Failed to download {url}")))
                 .await;
 
-            let msg = match bytes {
-                Ok(b) => Message::CommandFileDownloaded(url, b),
-                Err(e) => Message::Error(e),
+            let bytes = match bytes {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    error!("{e:?}");
+                    return;
+                }
             };
-            checked_send(&sender, msg);
+            checked_send(&sender, Message::CommandFileDownloaded(url, bytes));
         });
 
         self.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::Downloading(url_)));

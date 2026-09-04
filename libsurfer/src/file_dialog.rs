@@ -4,6 +4,7 @@ use std::future::Future;
 use camino::Utf8PathBuf;
 use rfd::{AsyncFileDialog, FileHandle};
 use serde::Deserialize;
+use tracing::error;
 #[cfg(all(target_arch = "wasm32", feature = "vscode"))]
 use wasm_bindgen::prelude::*;
 
@@ -102,10 +103,10 @@ impl SystemState {
                 let path = file.path().to_path_buf();
                 let result = match Utf8PathBuf::from_path_buf(path.clone()) {
                     Ok(utf8_path) => messages(utf8_path),
-                    Err(_) => vec![Message::Error(eyre::eyre!(
-                        "File path '{}' contains invalid UTF-8",
-                        path.display()
-                    ))],
+                    Err(_) => {
+                        error!("File path '{}' contains invalid UTF-8", path.display());
+                        vec![]
+                    }
                 };
                 checked_send_many(&sender, result);
             }

@@ -7,7 +7,7 @@ use bincode::Options;
 use eyre::{Result, WrapErr as _, anyhow, bail, eyre};
 use reqwest::StatusCode;
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use wellen::CompressedTimeTable;
 
 use surver::{
@@ -271,15 +271,18 @@ pub fn get_hierarchy_from_server(
             .map_err(|e| anyhow!("{e:?}"))
             .with_context(|| format!("Failed to retrieve hierarchy from remote server {server}"));
 
-        let msg = match res {
-            Ok(h) => {
-                let header =
-                    HeaderResult::Remote(Arc::new(h.hierarchy), h.file_format, server, file_index);
-                Message::WaveHeaderLoaded(start, source, load_options, header)
+        let h = match res {
+            Ok(h) => h,
+            Err(e) => {
+                error!("{e:?}");
+                return;
             }
-            Err(e) => Message::Error(e),
         };
-        checked_send(&sender, msg);
+        let header = HeaderResult::Remote(Arc::new(h.hierarchy), h.file_format, server, file_index);
+        checked_send(
+            &sender,
+            Message::WaveHeaderLoaded(start, source, load_options, header),
+        );
     });
 }
 
@@ -293,11 +296,17 @@ pub fn get_time_table_from_server(sender: Sender<Message>, server: String, file_
             .map_err(|e| anyhow!("{e:?}"))
             .with_context(|| format!("Failed to retrieve time table from remote server {server}"));
 
-        let msg = match res {
-            Ok(table) => Message::WaveBodyLoaded(start, source, BodyResult::Remote(table, server)),
-            Err(e) => Message::Error(e),
+        let table = match res {
+            Ok(table) => table,
+            Err(e) => {
+                error!("{e:?}");
+                return;
+            }
         };
-        checked_send(&sender, msg);
+        checked_send(
+            &sender,
+            Message::WaveBodyLoaded(start, source, BodyResult::Remote(table, server)),
+        );
     });
 }
 
@@ -310,11 +319,14 @@ pub fn get_server_status(sender: Sender<Message>, server: String, delay_ms: u64)
             .map_err(|e| anyhow!("{e:?}"))
             .with_context(|| format!("Failed to retrieve status from remote server {server}"));
 
-        let msg = match res {
-            Ok(status) => Message::SetSurverStatus(start, server, status),
-            Err(e) => Message::Error(e),
+        let status = match res {
+            Ok(status) => status,
+            Err(e) => {
+                error!("{e:?}");
+                return;
+            }
         };
-        checked_send(&sender, msg);
+        checked_send(&sender, Message::SetSurverStatus(start, server, status));
     });
 }
 
@@ -327,20 +339,23 @@ pub fn server_reload(
     let start = web_time::Instant::now();
     perform_async_work(async move {
         let res = reload(server.clone(), file_index).await;
-        let mut request_hierarchy = false;
-
-        let msg = match res {
+        let request_hierarchy = match res {
             Ok(status) => {
-                request_hierarchy = true;
-                Message::SetSurverStatus(start, server.clone(), status)
+                checked_send(
+                    &sender,
+                    Message::SetSurverStatus(start, server.clone(), status),
+                );
+                true
             }
-            Err(crate::remote::ReloadError::FileUnchanged) => Message::StopProgressTracker,
+            Err(crate::remote::ReloadError::FileUnchanged) => {
+                checked_send(&sender, Message::StopProgressTracker);
+                false
+            }
             Err(e) => {
-                let err = anyhow!("{e:?}");
-                Message::Error(err)
+                error!("{e:?}");
+                false
             }
         };
-        checked_send(&sender, msg);
         if request_hierarchy {
             get_hierarchy_from_server(sender, server, load_options, file_index);
         }

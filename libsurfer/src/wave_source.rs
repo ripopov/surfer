@@ -13,7 +13,6 @@ use crate::remote::{get_hierarchy_from_server, get_server_status, server_reload}
 use crate::transactions::TRANSACTIONS_FILE_EXTENSION;
 use crate::util::get_multi_extension;
 use camino::{Utf8Path, Utf8PathBuf};
-use eyre::Report;
 use eyre::Result;
 use eyre::{WrapErr as _, anyhow};
 use ftr_parser::parse;
@@ -300,8 +299,7 @@ impl SystemState {
         let source_copy = source.clone();
         let sender = self.channels.msg_sender.clone();
         if !filename.exists() {
-            let msg = Message::Error(anyhow!("Waveform file is missing: {filename}"));
-            checked_send(&sender, msg);
+            error!("Waveform file is missing: {filename}");
             return Ok(());
         }
         perform_work(move || {
@@ -312,16 +310,22 @@ impl SystemState {
             .map_err(|e| anyhow!("{e:?}"))
             .with_context(|| format!("Failed to parse wave file: {source}"));
 
-            let msg = match header_result {
-                Ok(header) => Message::WaveHeaderLoaded(
+            let header = match header_result {
+                Ok(header) => header,
+                Err(e) => {
+                    error!("{e:?}");
+                    return;
+                }
+            };
+            checked_send(
+                &sender,
+                Message::WaveHeaderLoaded(
                     start,
                     source,
                     load_options,
                     HeaderResult::LocalFile(Box::new(header)),
                 ),
-                Err(e) => Message::Error(e),
-            };
-            checked_send(&sender, msg);
+            );
         });
 
         self.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::ReadingHeader(
@@ -376,12 +380,7 @@ impl SystemState {
                     if let Some(path) = path {
                         checked_send(&sender, Message::LoadFile(path, LoadOptions::Clear));
                     } else {
-                        checked_send(
-                            &sender,
-                            Message::Error(anyhow!(
-                                "Unknown how to load dropped file w/o path or bytes"
-                            )),
-                        );
+                        error!("Unknown how to load dropped file w/o path or bytes");
                     }
                 }
             }
@@ -463,7 +462,7 @@ impl SystemState {
                     let response: reqwest::Response = match maybe_response {
                         Ok(r) => r,
                         Err(e) => {
-                            checked_send(&sender, Message::Error(e));
+                            error!("{e:?}");
                             return;
                         }
                     };
@@ -525,11 +524,14 @@ impl SystemState {
                         .map(|e| e.with_context(|| format!("Failed to download {url}")))
                         .await;
 
-                    let msg = match bytes {
-                        Ok(b) => Message::FileDownloaded(url, b, load_options),
-                        Err(e) => Message::Error(e),
+                    let bytes = match bytes {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            error!("{e:?}");
+                            return;
+                        }
                     };
-                    checked_send(&sender, msg);
+                    checked_send(&sender, Message::FileDownloaded(url, bytes, load_options));
                 });
 
                 self.progress_tracker =
@@ -552,16 +554,18 @@ impl SystemState {
 
         info!("Done with loading ftr file");
 
-        let msg = match result {
-            Ok(ftr) => Message::TransactionStreamsLoaded(
-                source,
-                format,
-                TransactionContainer { inner: ftr },
-                load_options,
+        match result {
+            Ok(ftr) => checked_send(
+                &sender,
+                Message::TransactionStreamsLoaded(
+                    source,
+                    format,
+                    TransactionContainer { inner: ftr },
+                    load_options,
+                ),
             ),
-            Err(e) => Message::Error(Report::msg(e)),
+            Err(e) => error!("{e:?}"),
         };
-        checked_send(&sender, msg);
         Ok(())
     }
     pub fn load_transactions_from_bytes(
@@ -576,16 +580,18 @@ impl SystemState {
 
         info!("Done with loading ftr file");
 
-        let msg = match result {
-            Ok(ftr) => Message::TransactionStreamsLoaded(
-                source,
-                WaveFormat::Ftr,
-                TransactionContainer { inner: ftr },
-                load_options,
+        match result {
+            Ok(ftr) => checked_send(
+                &sender,
+                Message::TransactionStreamsLoaded(
+                    source,
+                    WaveFormat::Ftr,
+                    TransactionContainer { inner: ftr },
+                    load_options,
+                ),
             ),
-            Err(e) => Message::Error(Report::msg(e)),
+            Err(e) => error!("{e:?}"),
         };
-        checked_send(&sender, msg);
     }
 
     /// uses the server status in order to display a loading bar
@@ -642,16 +648,18 @@ impl SystemState {
             } else {
                 LoadOptions::Clear
             };
-            let msg = match container {
-                Ok(c) => Message::WavesLoaded(
-                    WaveSource::Cxxrtl(kind),
-                    WaveFormat::CxxRtl,
-                    Box::new(WaveContainer::Cxxrtl(Box::new(Mutex::new(c)))),
-                    load_options,
+            match container {
+                Ok(c) => checked_send(
+                    &sender,
+                    Message::WavesLoaded(
+                        WaveSource::Cxxrtl(kind),
+                        WaveFormat::CxxRtl,
+                        Box::new(WaveContainer::Cxxrtl(Box::new(Mutex::new(c)))),
+                        load_options,
+                    ),
                 ),
-                Err(e) => Message::Error(e),
+                Err(e) => error!("{e:?}"),
             };
-            checked_send(&sender, msg);
         };
         #[cfg(not(target_arch = "wasm32"))]
         futures::executor::block_on(task);
@@ -674,16 +682,22 @@ impl SystemState {
                     .map_err(|e| anyhow!("{e:?}"))
                     .with_context(|| format!("Failed to parse wave file: {source}"));
 
-            let msg = match header_result {
-                Ok(header) => Message::WaveHeaderLoaded(
+            let header = match header_result {
+                Ok(header) => header,
+                Err(e) => {
+                    error!("{e:?}");
+                    return;
+                }
+            };
+            checked_send(
+                &sender,
+                Message::WaveHeaderLoaded(
                     start,
                     source,
                     load_options,
                     HeaderResult::LocalBytes(Box::new(header)),
                 ),
-                Err(e) => Message::Error(e),
-            };
-            checked_send(&sender, msg);
+            );
         });
 
         self.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::ReadingHeader(
@@ -725,11 +739,17 @@ impl SystemState {
                     .map_err(|e| anyhow!("{e:?}"))
                     .with_context(|| format!("Failed to parse body of wave file: {source}"));
 
-                let msg = match body_result {
-                    Ok(body) => Message::WaveBodyLoaded(start, source, BodyResult::Local(body)),
-                    Err(e) => Message::Error(e),
+                let body = match body_result {
+                    Ok(body) => body,
+                    Err(e) => {
+                        error!("{e:?}");
+                        return;
+                    }
                 };
-                checked_send(&sender, msg);
+                checked_send(
+                    &sender,
+                    Message::WaveBodyLoaded(start, source, BodyResult::Local(body)),
+                );
             };
             if let Some(pool) = pool {
                 pool.install(action);
@@ -788,14 +808,15 @@ impl SystemState {
                             )
                         });
 
-                    let msg = match res {
-                        Ok(loaded) => {
-                            let res = LoadSignalsResult::remote(server, loaded, from_unique_id);
-                            Message::SignalsLoaded(start, res)
+                    let loaded = match res {
+                        Ok(loaded) => loaded,
+                        Err(e) => {
+                            error!("{e:?}");
+                            return;
                         }
-                        Err(e) => Message::Error(e),
                     };
-                    checked_send(&sender, msg);
+                    let res = LoadSignalsResult::remote(server, loaded, from_unique_id);
+                    checked_send(&sender, Message::SignalsLoaded(start, res));
                 });
             }
         }

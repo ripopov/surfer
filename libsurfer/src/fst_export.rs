@@ -101,7 +101,7 @@ impl SystemState {
                 Ok(()) => vec![Message::AsyncDone(AsyncJob::ExportFst)],
                 Err(e) => {
                     error!("Failed to export variables to FST: {e:#?}");
-                    vec![Message::Error(e), Message::AsyncDone(AsyncJob::ExportFst)]
+                    vec![Message::AsyncDone(AsyncJob::ExportFst)]
                 }
             }
         };

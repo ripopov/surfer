@@ -221,8 +221,6 @@ pub enum Message {
         LoadOptions,
     ),
     #[serde(skip)]
-    Error(eyre::Error),
-    #[serde(skip)]
     TranslatorLoaded(#[debug(skip)] Arc<DynTranslator>),
     /// Take note that the specified translator errored on a `translates` call on the
     /// specified variable

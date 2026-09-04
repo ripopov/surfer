@@ -6,6 +6,7 @@ use futures::executor::block_on;
 use itertools::Itertools;
 use std::sync::atomic::Ordering;
 use surfer_translation_types::{TranslationPreference, Translator};
+use tracing::error;
 
 use crate::config::{FocusHighlight, PrimaryMouseDrag, TransitionValue};
 use crate::displayed_item_tree::VisibleItemIndex;
@@ -1022,7 +1023,7 @@ impl SystemState {
                                 var.clone(),
                                 (*translator_name).to_string(),
                             ));
-                            msgs.push(Message::Error(e));
+                            error!("{e:?}");
                             false
                         }
                     }

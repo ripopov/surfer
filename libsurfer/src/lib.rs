@@ -1470,10 +1470,6 @@ impl SystemState {
             Message::BlacklistTranslator(idx, translator) => {
                 self.user.blacklisted_translators.insert((idx, translator));
             }
-            Message::Error(e) => {
-                error!("{e:?}");
-                self.user.show_logs = true;
-            }
             Message::TranslatorLoaded(t) => {
                 info!("Translator {} loaded", t.name());
                 t.set_wave_source(

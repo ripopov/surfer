@@ -1,4 +1,10 @@
-use std::{collections::BTreeMap, sync::Mutex};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use ecolor::Color32;
 use egui::{RichText, TextWrapMode};
@@ -13,6 +19,7 @@ use tracing_subscriber::Layer;
 use crate::{SystemState, message::Message};
 
 static RECORD_MUTEX: Mutex<Vec<LogMessage>> = Mutex::new(vec![]);
+static SHOW_LOGS_ON_ERROR: AtomicBool = AtomicBool::new(false);
 static LOG_FILTER: Mutex<(bool, bool, bool, bool, bool)> =
     Mutex::new((true, true, true, true, true));
 #[macro_export]
@@ -62,7 +69,18 @@ where
                 msg: fields.get("message").cloned().unwrap_or("-".to_string()),
                 level: *event.metadata().level(),
             });
+
+        if *event.metadata().level() == Level::ERROR {
+            SHOW_LOGS_ON_ERROR.store(true, Ordering::Release);
+            if let Some(ctx) = crate::EGUI_CONTEXT.read().unwrap().as_ref() {
+                ctx.request_repaint();
+            }
+        }
     }
+}
+
+pub(crate) fn take_error_notification() -> bool {
+    SHOW_LOGS_ON_ERROR.swap(false, Ordering::AcqRel)
 }
 
 impl SystemState {
