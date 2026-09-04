@@ -82,16 +82,15 @@ impl WaveData {
             ui.data_mut(|d| d.insert_temp(input_id, buffer.clone()));
 
             // create group when user press enter
-            if text_edit_res.ctx.input(|i| i.key_pressed(Key::Enter)) && !buffer.is_empty() {
-                let flag = annotation_groups.iter().any(|group| {
-                    if group.name == buffer.trim() {
-                        return true;
-                    }
-                    false
-                });
+            let trimmed_buffer = buffer.trim();
+            if text_edit_res.ctx.input(|i| i.key_pressed(Key::Enter)) && !trimmed_buffer.is_empty()
+            {
+                let flag = annotation_groups
+                    .iter()
+                    .any(|group| group.name == trimmed_buffer);
 
                 if !flag {
-                    msgs.push(Message::CreateAnnotationGroup(buffer.trim().to_string()));
+                    msgs.push(Message::CreateAnnotationGroup(trimmed_buffer.to_string()));
                     ui.data_mut(|d| d.insert_temp(input_id, String::new()));
                 }
                 // Keep focus here so users can type the next group immediately
@@ -102,9 +101,9 @@ impl WaveData {
                 .button(icons::ADD_LINE)
                 .on_hover_text("Create Group")
                 .clicked()
-                && !buffer.is_empty()
+                && !trimmed_buffer.is_empty()
             {
-                msgs.push(Message::CreateAnnotationGroup(buffer.trim().to_string()));
+                msgs.push(Message::CreateAnnotationGroup(trimmed_buffer.to_string()));
                 ui.data_mut(|d| d.insert_temp(input_id, String::new()));
             }
 
@@ -113,9 +112,9 @@ impl WaveData {
                 .button(icons::DELETE_BIN_LINE)
                 .on_hover_text("Delete Group")
                 .clicked()
-                && !buffer.is_empty()
+                && !trimmed_buffer.is_empty()
             {
-                msgs.push(Message::DeleteAnnotationGroup(buffer.trim().to_string()));
+                msgs.push(Message::DeleteAnnotationGroup(trimmed_buffer.to_string()));
                 ui.data_mut(|d| d.insert_temp(input_id, String::new()));
             }
         });

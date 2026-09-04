@@ -67,7 +67,6 @@ pub enum SignalAccessor {
 
 impl SignalAccessor {
     /// Iterator over signal changes as (`time_u64`, value) pairs
-    #[must_use]
     pub fn iter_changes(&self) -> Box<dyn Iterator<Item = (u64, VariableValue)> + '_> {
         match self {
             SignalAccessor::Wellen(accessor) => accessor.iter_changes(),
@@ -533,8 +532,12 @@ impl WaveContainer {
     pub(crate) fn prepare_fst_export(&self, variables: &[VariableRef]) -> Result<FstExport> {
         match self {
             WaveContainer::Wellen(f) => Ok(FstExport::Wellen(f.prepare_fst_export(variables)?)),
-            WaveContainer::Empty => bail!("No waveform data to export"),
-            WaveContainer::Cxxrtl(_) => bail!("Exporting to FST is not supported for Cxxrtl"),
+            WaveContainer::Empty => {
+                bail!("No waveform data to export");
+            }
+            WaveContainer::Cxxrtl(_) => {
+                bail!("Exporting to FST is not supported for Cxxrtl");
+            }
         }
     }
 

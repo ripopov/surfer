@@ -1,4 +1,3 @@
-use core::f32;
 use egui::{KeyboardShortcut, ModifierNames, Modifiers, Vec2};
 use eyre::Result;
 use serde::{Deserialize, Deserializer, Serialize};

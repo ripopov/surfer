@@ -23,8 +23,10 @@ const HEAD_WIDTH_FACTOR: f32 = 3.0;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum ArrowHeadMode {
-    End,    // one-headed arrow, with the head at the target/end point.
-    Double, // Double-headed arrow, with heads at both the start and end points.
+    /// One-headed arrow, with the head at the target/end point.
+    End,
+    /// Double-headed arrow, with heads at both the start and end points.
+    Double,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]

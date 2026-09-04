@@ -48,7 +48,7 @@ impl PythonTranslator {
 
 impl BasicTranslator<VarId, ScopeId> for PythonTranslator {
     fn name(&self) -> String {
-        let name = Python::attach(|py| {
+        Python::attach(|py| {
             self.module
                 .bind(py)
                 .getattr(self.class_name.as_str())
@@ -59,8 +59,7 @@ impl BasicTranslator<VarId, ScopeId> for PythonTranslator {
                 .unwrap()
                 .to_string_lossy()
                 .to_string()
-        });
-        name
+        })
     }
 
     fn basic_translate(&self, num_bits: u32, value: &VariableValue) -> (String, ValueKind) {

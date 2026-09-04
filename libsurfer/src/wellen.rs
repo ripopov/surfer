@@ -464,7 +464,7 @@ impl WellenContainer {
 
                 let Some(var) = h.lookup_var_with_index(r.path.strs(), r.name.clone(), &index)
                 else {
-                    bail!("Failed to find variable: {r:?}")
+                    bail!("Failed to find variable: {r:?}");
                 };
                 Ok(var)
             }
@@ -809,7 +809,6 @@ impl WellenSignalAccessor {
     }
 
     /// Iterator over signal changes as (`time_u64`, value) pairs
-    #[must_use]
     pub fn iter_changes(
         &self,
     ) -> Box<dyn Iterator<Item = (u64, surfer_translation_types::VariableValue)> + '_> {

@@ -318,11 +318,13 @@ impl WellenContainer {
         // The declared multiplier (e.g. the "10" in "10 ns") is restricted by the VCD/FST
         // spec to 1, 10 or 100, so its digits can be folded directly into the exponent
         // without ever needing to multiply the time stamps by a remainder.
-        let factor_digits = TimeScale {
-            unit: TimeUnit::from(timescale.unit),
-            multiplier: Some(timescale.factor),
-        }
-        .multiplier_digits() as u32;
+        let factor_digits = u32::from(
+            TimeScale {
+                unit: TimeUnit::from(timescale.unit),
+                multiplier: Some(timescale.factor),
+            }
+            .multiplier_digits(),
+        );
         let time_scale_shift = common_power_of_ten(&self.time_table);
         let time_scale_divisor = 10u128.pow(time_scale_shift);
         let timescale_exponent = base_exponent
@@ -374,7 +376,7 @@ fn common_power_of_ten(times: &[Time]) -> u32 {
         if t == 0 {
             continue;
         }
-        let zeros = trailing_zeros_base10(t as u128);
+        let zeros = trailing_zeros_base10(u128::from(t));
         common = common.min(zeros);
         if common == 0 {
             return 0;
@@ -386,7 +388,7 @@ fn common_power_of_ten(times: &[Time]) -> u32 {
 /// Rescales a raw time stamp from the source's timescale to the export's timescale,
 /// given the precomputed divisor `10.pow(time_scale_shift)` (see [`common_power_of_ten`]).
 fn scale_time(t: Time, divisor: u128) -> Time {
-    (t as u128 / divisor) as Time
+    (u128::from(t) / divisor) as Time
 }
 
 /// Recursively declares `node`'s scopes and variables in the FST header.

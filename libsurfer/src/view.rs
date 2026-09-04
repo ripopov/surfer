@@ -452,7 +452,7 @@ impl SystemState {
                     let max_width = ui.available_width();
                     let default_size = max_width / (number_of_viewports as f32);
                     for viewport_idx in 1..number_of_viewports {
-                        Panel::right(format! {"view port {viewport_idx}"})
+                        Panel::right(format!("view port {viewport_idx}"))
                             .default_size(default_size)
                             .size_range(30.0..=max_width)
                             .frame(Frame {

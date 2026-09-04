@@ -55,9 +55,9 @@ clippy:
         - cargo install gitlab_clippy
     script:
       - cargo -V
-      - cargo clippy --color=always
+      - cargo clippy --all-features --color=always
     after_script:
-        - cargo clippy --message-format=json | $CARGO_HOME/bin/gitlab-clippy > gl-code-quality-report.json
+        - cargo clippy --all-features --message-format=json | $CARGO_HOME/bin/gitlab-clippy > gl-code-quality-report.json
     artifacts:
         reports:
             codequality: gl-code-quality-report.json
@@ -173,6 +173,8 @@ test-beta:
         - rustc -V
         - cargo -V
         - cargo test --features python --color=always --locked -- --include-ignored
+        - rustup component add clippy
+        - cargo clippy --all-features --workspace --no-deps --color=always --locked -- -D warnings
     allow_failure: true
 
 test-nightly:
@@ -184,6 +186,8 @@ test-nightly:
         - rustc -V
         - cargo -V
         - cargo test --features python --color=always --locked -- --include-ignored
+        - rustup component add clippy
+        - cargo clippy --all-features --workspace --no-deps --color=always --locked -- -D warnings
     allow_failure: true
 
 test-macos-aarch64:
