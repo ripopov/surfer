@@ -209,6 +209,8 @@ impl SurferConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct SurferLayout {
+    /// Hide the tab bar when the workspace contains exactly one tile.
+    pub hide_single_tab_bar: bool,
     /// Flag to show/hide the hierarchy view
     show_hierarchy: bool,
     /// Flag to show/hide the menu
@@ -542,6 +544,9 @@ pub struct SurferTheme {
     pub accent_info: ThemeColorPair,
     pub accent_warn: ThemeColorPair,
     pub accent_error: ThemeColorPair,
+
+    /// Frame and tab accent for the focused tile.
+    pub tile_focus_stroke: SurferLineStyle,
 
     ///  Line style for cursor
     pub cursor: SurferLineStyle,
@@ -1048,8 +1053,8 @@ impl SurferTheme {
         (theme, theme_names)
     }
 
-    #[cfg(target_arch = "wasm32")]
-    pub fn new(theme_name: Option<String>) -> Result<Self> {
+    /// Load only bundled themes, without user or local-directory overrides.
+    pub fn builtin(theme_name: Option<String>) -> Result<Self> {
         let theme_name = theme_name.filter(|s| !s.is_empty());
         let (theme, _) = Self::generate_defaults(theme_name.as_ref());
 
@@ -1061,6 +1066,11 @@ impl SurferTheme {
             .map_err(|e| anyhow!("Failed to parse config {e}"))?;
         result.theme_name = theme_name.unwrap_or_default();
         Ok(result)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn new(theme_name: Option<String>) -> Result<Self> {
+        Self::builtin(theme_name)
     }
 
     #[cfg(not(target_arch = "wasm32"))]

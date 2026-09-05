@@ -92,14 +92,17 @@ fn add_toolbar_button(
     msgs: &mut Vec<Message>,
     icon_string: &str,
     hover_text: &str,
-    message: Message,
+    message: impl Into<Option<Message>>,
     enabled: bool,
 ) {
+    let message = message.into();
+    let enabled = enabled && message.is_some();
     let button = Button::new(RichText::new(icon_string).heading()).frame(false);
     if ui
         .add_enabled(enabled, button)
         .on_hover_text(hover_text)
         .clicked()
+        && let Some(message) = message
     {
         msgs.push(message);
     }
@@ -391,11 +394,10 @@ impl SystemState {
     }
 
     fn draw_toolbar_group_zoom(&self, ui: &mut Ui, msgs: &mut Vec<Message>, wave_loaded: bool) {
-        let viewport_idx = self
+        let tile_id = self
             .user
-            .waves
-            .as_ref()
-            .map_or(0, |waves| waves.last_active_viewport_idx);
+            .workspace
+            .resolve_waveform(crate::tiles::TileTarget::Focused);
         let cursor_set = self
             .user
             .waves
@@ -406,11 +408,11 @@ impl SystemState {
             msgs,
             icons::ZOOM_IN_FILL,
             "Zoom in",
-            Message::CanvasZoom {
+            tile_id.map(|tile_id| Message::CanvasZoom {
                 mouse_ptr: None,
                 delta: 0.5,
-                viewport_idx,
-            },
+                tile_id,
+            }),
             wave_loaded,
         );
         add_toolbar_button(
@@ -418,11 +420,11 @@ impl SystemState {
             msgs,
             icons::ZOOM_OUT_FILL,
             "Zoom out",
-            Message::CanvasZoom {
+            tile_id.map(|tile_id| Message::CanvasZoom {
                 mouse_ptr: None,
                 delta: 2.0,
-                viewport_idx,
-            },
+                tile_id,
+            }),
             wave_loaded,
         );
         add_toolbar_button(
@@ -430,10 +432,10 @@ impl SystemState {
             msgs,
             icons::TARGET_FILL,
             "Zoom in on cursor",
-            Message::ZoomToCursor {
+            tile_id.map(|tile_id| Message::ZoomToCursor {
                 delta: 0.5,
-                viewport_idx,
-            },
+                tile_id,
+            }),
             wave_loaded && cursor_set,
         );
         add_toolbar_button(
@@ -441,7 +443,7 @@ impl SystemState {
             msgs,
             icons::ASPECT_RATIO_FILL,
             "Zoom to fit",
-            Message::ZoomToFit { viewport_idx },
+            tile_id.map(|tile_id| Message::ZoomToFit { tile_id }),
             wave_loaded,
         );
     }
@@ -452,17 +454,16 @@ impl SystemState {
         msgs: &mut Vec<Message>,
         wave_loaded: bool,
     ) {
-        let viewport_idx = self
+        let tile_id = self
             .user
-            .waves
-            .as_ref()
-            .map_or(0, |waves| waves.last_active_viewport_idx);
+            .workspace
+            .resolve_waveform(crate::tiles::TileTarget::Focused);
         add_toolbar_button(
             ui,
             msgs,
             icons::REWIND_START_FILL,
             "Go to start",
-            Message::GoToStart { viewport_idx },
+            tile_id.map(|tile_id| Message::GoToStart { tile_id }),
             wave_loaded,
         );
         add_toolbar_button(
@@ -470,13 +471,13 @@ impl SystemState {
             msgs,
             icons::REWIND_FILL,
             "Go one page left",
-            Message::CanvasScroll {
+            tile_id.map(|tile_id| Message::CanvasScroll {
                 delta: Vec2 {
                     y: PER_SCROLL_EVENT * SCROLL_EVENTS_PER_PAGE,
                     x: 0.,
                 },
-                viewport_idx,
-            },
+                tile_id,
+            }),
             wave_loaded,
         );
         add_toolbar_button(
@@ -484,13 +485,13 @@ impl SystemState {
             msgs,
             icons::PLAY_REVERSE_FILL,
             "Go left",
-            Message::CanvasScroll {
+            tile_id.map(|tile_id| Message::CanvasScroll {
                 delta: Vec2 {
                     y: PER_SCROLL_EVENT,
                     x: 0.,
                 },
-                viewport_idx,
-            },
+                tile_id,
+            }),
             wave_loaded,
         );
         add_toolbar_button(
@@ -498,13 +499,13 @@ impl SystemState {
             msgs,
             icons::PLAY_FILL,
             "Go right",
-            Message::CanvasScroll {
+            tile_id.map(|tile_id| Message::CanvasScroll {
                 delta: Vec2 {
                     y: -PER_SCROLL_EVENT,
                     x: 0.,
                 },
-                viewport_idx,
-            },
+                tile_id,
+            }),
             wave_loaded,
         );
         add_toolbar_button(
@@ -512,13 +513,13 @@ impl SystemState {
             msgs,
             icons::SPEED_FILL,
             "Go one page right",
-            Message::CanvasScroll {
+            tile_id.map(|tile_id| Message::CanvasScroll {
                 delta: Vec2 {
                     y: -PER_SCROLL_EVENT * SCROLL_EVENTS_PER_PAGE,
                     x: 0.,
                 },
-                viewport_idx,
-            },
+                tile_id,
+            }),
             wave_loaded,
         );
         add_toolbar_button(
@@ -526,7 +527,7 @@ impl SystemState {
             msgs,
             icons::FORWARD_END_FILL,
             "Go to end",
-            Message::GoToEnd { viewport_idx },
+            tile_id.map(|tile_id| Message::GoToEnd { tile_id }),
             wave_loaded,
         );
     }
@@ -588,11 +589,7 @@ impl SystemState {
         msgs: &mut Vec<Message>,
         wave_loaded: bool,
     ) {
-        let multiple_viewports = self
-            .user
-            .waves
-            .as_ref()
-            .is_some_and(|waves| waves.viewports.len() > 1);
+        let multiple_viewports = !self.user.workspace.tiles.is_empty();
 
         add_toolbar_button(
             ui,
@@ -617,12 +614,12 @@ impl SystemState {
         let redo_available = !self.redo_stack.is_empty();
 
         let undo_tooltip = if let Some(undo_op) = self.undo_stack.last() {
-            format!("Undo: {}", undo_op.message)
+            format!("Undo: {}", undo_op.label())
         } else {
             "Undo".into()
         };
         let redo_tooltip = if let Some(redo_op) = self.redo_stack.last() {
-            format!("Redo: {}", redo_op.message)
+            format!("Redo: {}", redo_op.label())
         } else {
             "Redo".into()
         };
@@ -690,7 +687,12 @@ impl SystemState {
         icon_selected: &'a str,
         annotation_kind: AnnotationKind,
     ) -> (&'a str, Option<AnnotationKind>, &'a str) {
-        if self.annotation_kind == Some(annotation_kind) {
+        if self
+            .user
+            .waveform_read()
+            .and_then(|waves| waves.view.interaction.annotation_kind)
+            == Some(annotation_kind)
+        {
             (icon_selected, None, "Cancel Action")
         } else {
             (icon_unselected, Some(annotation_kind), hover_text)
@@ -710,7 +712,10 @@ impl SystemState {
             msgs,
             rect_icon,
             rect_text,
-            Message::SetMouseGestureAnnotation(rect_kind),
+            self.user
+                .workspace
+                .resolve_waveform(crate::tiles::TileTarget::Focused)
+                .map(|tile_id| Message::SetMouseGestureAnnotation(rect_kind, tile_id)),
             wave_loaded,
         );
         let (arrow_icon, arrow_kind, arrow_text) = self.annotation_helper(
@@ -724,7 +729,10 @@ impl SystemState {
             msgs,
             arrow_icon,
             arrow_text,
-            Message::SetMouseGestureAnnotation(arrow_kind),
+            self.user
+                .workspace
+                .resolve_waveform(crate::tiles::TileTarget::Focused)
+                .map(|tile_id| Message::SetMouseGestureAnnotation(arrow_kind, tile_id)),
             wave_loaded,
         );
 
@@ -739,7 +747,10 @@ impl SystemState {
             msgs,
             double_arrow_icon,
             double_arrow_text,
-            Message::SetMouseGestureAnnotation(double_arrow_kind),
+            self.user
+                .workspace
+                .resolve_waveform(crate::tiles::TileTarget::Focused)
+                .map(|tile_id| Message::SetMouseGestureAnnotation(double_arrow_kind, tile_id)),
             wave_loaded,
         );
 
@@ -748,7 +759,13 @@ impl SystemState {
             msgs,
             icons::LIST_CHECK,
             "Annotations list",
-            Message::ToggleAnnotationlistVisibility(),
+            Message::Workspace(crate::tiles::commands::WorkspaceCommand::OpenTile {
+                kind: "annotation_list".into(),
+                placement: crate::tiles::layout::Placement::Edge(
+                    crate::tiles::layout::Direction::Right,
+                ),
+                focus: true,
+            }),
             wave_loaded,
         );
     }
@@ -935,8 +952,11 @@ impl SystemState {
     fn draw_toolbar(&mut self, ui: &mut Ui, msgs: &mut Vec<Message>) {
         let wave_loaded = self.user.waves.is_some();
 
-        let (item_selected, cursor_set) = if let Some(waves) = &self.user.waves {
-            (waves.focused_item.is_some(), waves.cursor.is_some())
+        let (item_selected, cursor_set) = if let Some(waves) = self.user.waveform_read() {
+            (
+                waves.view.focused_index(waves.items).is_some(),
+                waves.cursor.is_some(),
+            )
         } else {
             (false, false)
         };

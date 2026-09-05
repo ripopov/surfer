@@ -5,11 +5,10 @@ use surfer_translation_types::VariableValue;
 
 use crate::translation::ycbcr_to_rgb;
 use crate::wave_container::{ScopeRef, ScopeRefExt, VariableRef, VariableRefExt, WaveContainer};
-use crate::{Message, system_state::SystemState};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(default)]
-pub(crate) struct FrameBufferSettings {
+pub struct FrameBufferSettings {
     pub pixels_per_row: usize,
     pub square_pixels: bool,
     #[serde(flatten)]
@@ -42,7 +41,7 @@ impl FrameBufferColorMode {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(default)]
-pub(crate) struct PixelColorSettings {
+pub struct PixelColorSettings {
     #[serde(default)]
     pub color_mode: FrameBufferColorMode,
     pub grayscale_bits: u8,
@@ -95,7 +94,7 @@ impl Default for FrameBufferSettings {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ArrayLevel {
+pub struct ArrayLevel {
     pub min_index: i64,
     pub max_index: i64,
     pub first_index: i64,
@@ -106,6 +105,7 @@ pub(crate) struct ArrayLevel {
 pub(crate) struct FrameBufferContentCacheKey {
     pub content: FrameBufferContent,
     pub cursor_position: num::BigUint,
+    pub document_generation: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -126,8 +126,9 @@ pub(crate) struct FrameBufferPixelCache {
     pub pixel_colors: std::sync::Arc<[Color32]>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum FrameBufferContent {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "FrameBufferContentFile", into = "FrameBufferContentFile")]
+pub enum FrameBufferContent {
     Array {
         scope_ref: ScopeRef,
         /// One range-selector per level of array nesting.
@@ -137,325 +138,383 @@ pub(crate) enum FrameBufferContent {
     Variable(VariableRef),
 }
 
-impl SystemState {
-    pub(crate) fn draw_frame_buffer_window(
-        &mut self,
-        ctx: &egui::Context,
-        msgs: &mut Vec<Message>,
-    ) {
-        let mut open = true;
-        egui::Window::new("Frame Buffer")
-            .open(&mut open)
-            .resizable(true)
-            .show(ctx, |ui| {
-                let frame_buffer_value = self.selected_variable_for_frame_buffer();
-                let Some((bits, array_cache_key, variable_name)) = frame_buffer_value.as_ref()
-                else {
-                    ui.label("Place the cursor.");
-                    return;
-                };
-
-                let color_settings_key = {
-                    let settings = &mut self.user.frame_buffer;
-                    let color_settings = &mut settings.color_settings;
-
-                    ui.checkbox(&mut settings.square_pixels, "Square pixels");
-
-                    ui.horizontal(|ui| {
-                        ui.label("Color mode");
-                        egui::ComboBox::from_id_salt("frame_buffer_color_mode")
-                            .selected_text(color_settings.color_mode.string())
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut color_settings.color_mode,
-                                    FrameBufferColorMode::Grayscale,
-                                    FrameBufferColorMode::Grayscale.string(),
-                                );
-                                ui.selectable_value(
-                                    &mut color_settings.color_mode,
-                                    FrameBufferColorMode::Rgb,
-                                    FrameBufferColorMode::Rgb.string(),
-                                );
-                                ui.selectable_value(
-                                    &mut color_settings.color_mode,
-                                    FrameBufferColorMode::YCbCr,
-                                    FrameBufferColorMode::YCbCr.string(),
-                                );
-                            });
-                    });
-
-                    match color_settings.color_mode {
-                        FrameBufferColorMode::Grayscale => {
-                            ui.horizontal(|ui| {
-                                ui.label("Grayscale bits");
-                                ui.add(
-                                    DragValue::new(&mut color_settings.grayscale_bits).range(1..=8),
-                                );
-                            });
-                        }
-                        FrameBufferColorMode::Rgb => {
-                            ui.horizontal(|ui| {
-                                ui.label("R bits");
-                                ui.add(DragValue::new(&mut color_settings.r_bits).range(0..=8));
-                                ui.label("G bits");
-                                ui.add(DragValue::new(&mut color_settings.g_bits).range(0..=8));
-                                ui.label("B bits");
-                                ui.add(DragValue::new(&mut color_settings.b_bits).range(0..=8));
-                            });
-                        }
-                        FrameBufferColorMode::YCbCr => {
-                            ui.horizontal(|ui| {
-                                ui.label("Y bits");
-                                ui.add(DragValue::new(&mut color_settings.y_bits).range(0..=8));
-                                ui.label("Cb bits");
-                                ui.add(DragValue::new(&mut color_settings.cb_bits).range(0..=8));
-                                ui.label("Cr bits");
-                                ui.add(DragValue::new(&mut color_settings.cr_bits).range(0..=8));
-                            });
-                        }
-                    }
-
-                    color_settings.clone()
-                };
-
-                ui.separator();
-
-                if bits.is_empty() {
-                    ui.label("No bits available");
-                    return;
+/// Persistent references contain paths and array selectors, never backend IDs.
+#[derive(Serialize, Deserialize)]
+enum FrameBufferContentFile {
+    Array {
+        scope: Vec<String>,
+        levels: Vec<ArrayLevel>,
+    },
+    Variable {
+        path: Vec<String>,
+        name: String,
+        index: Option<i64>,
+    },
+}
+impl From<FrameBufferContent> for FrameBufferContentFile {
+    fn from(content: FrameBufferContent) -> Self {
+        match content {
+            FrameBufferContent::Array { scope_ref, levels } => Self::Array {
+                scope: scope_ref.strs,
+                levels,
+            },
+            FrameBufferContent::Variable(variable) => Self::Variable {
+                path: variable.path.strs,
+                name: variable.name,
+                index: variable.index,
+            },
+        }
+    }
+}
+impl TryFrom<FrameBufferContentFile> for FrameBufferContent {
+    type Error = &'static str;
+    fn try_from(file: FrameBufferContentFile) -> Result<Self, Self::Error> {
+        Ok(match file {
+            FrameBufferContentFile::Array { scope, levels } => {
+                if levels.iter().any(|level| {
+                    level.min_index > level.first_index
+                        || level.first_index > level.last_index
+                        || level.last_index > level.max_index
+                }) {
+                    return Err("invalid framebuffer array range");
                 }
-
-                let pixel_cache_key = FrameBufferPixelCacheKey {
-                    array_key: array_cache_key.clone(),
-                    settings: color_settings_key.clone(),
-                };
-
-                let pixel_colors = if let Some(cache) = self
-                    .frame_buffer_pixel_cache
-                    .as_ref()
-                    .filter(|cache| cache.key == pixel_cache_key)
-                {
-                    cache.pixel_colors.clone()
-                } else {
-                    let decoded = match color_settings_key.color_mode {
-                        FrameBufferColorMode::Rgb => {
-                            let r_bits = color_settings_key.r_bits as usize;
-                            let g_bits = color_settings_key.g_bits as usize;
-                            let b_bits = color_settings_key.b_bits as usize;
-                            let bits_per_pixel = r_bits + g_bits + b_bits;
-                            if bits_per_pixel == 0 {
-                                ui.label("Set at least one RGB channel bit count above zero.");
-                                return;
-                            }
-                            decode_rgb_pixels(bits, r_bits, g_bits, b_bits)
-                        }
-                        FrameBufferColorMode::YCbCr => {
-                            let y_bits = color_settings_key.y_bits as usize;
-                            let cb_bits = color_settings_key.cb_bits as usize;
-                            let cr_bits = color_settings_key.cr_bits as usize;
-                            let bits_per_pixel = y_bits + cb_bits + cr_bits;
-                            if bits_per_pixel == 0 {
-                                ui.label("Set at least one YCbCr channel bit count above zero.");
-                                return;
-                            }
-                            decode_ycbcr_pixels(bits, y_bits, cb_bits, cr_bits)
-                        }
-                        FrameBufferColorMode::Grayscale => {
-                            let gray_bits = color_settings_key.grayscale_bits as usize;
-                            decode_grayscale_pixels(bits, gray_bits)
-                        }
-                    };
-
-                    let decoded: std::sync::Arc<[Color32]> = decoded.into();
-
-                    self.frame_buffer_pixel_cache = Some(FrameBufferPixelCache {
-                        key: pixel_cache_key,
-                        pixel_colors: decoded.clone(),
-                    });
-                    decoded
-                };
-
-                if pixel_colors.is_empty() {
-                    ui.label("No pixels to draw with current bit settings.");
-                    return;
+                Self::Array {
+                    scope_ref: ScopeRef {
+                        strs: scope,
+                        id: Default::default(),
+                    },
+                    levels,
                 }
+            }
+            FrameBufferContentFile::Variable { path, name, index } => Self::Variable(VariableRef {
+                path: ScopeRef {
+                    strs: path,
+                    id: Default::default(),
+                },
+                name,
+                id: Default::default(),
+                index,
+            }),
+        })
+    }
+}
 
-                let settings = &mut self.user.frame_buffer;
-                let columns = settings.pixels_per_row.min(pixel_colors.len()).max(1);
-                let rows = pixel_colors.len().div_ceil(columns);
-                ui.horizontal(|ui| {
-                    ui.label(format!("Var: {variable_name} | {columns}×{rows}"));
+pub(crate) fn draw_frame_buffer(
+    ui: &mut egui::Ui,
+    document: Option<&crate::wave_data::WaveData>,
+    settings: &mut FrameBufferSettings,
+    content: &mut Option<FrameBufferContent>,
+    array_cache: &mut Option<FrameBufferArrayCache>,
+    pixel_cache: &mut Option<FrameBufferPixelCache>,
+) {
+    let Some(waves) = document else {
+        ui.label("No waveform loaded");
+        return;
+    };
+    if content.is_none() {
+        ui.label("No framebuffer source selected");
+        return;
+    }
+    if waves.cursor.is_none() {
+        ui.label("Place the cursor.");
+        return;
+    }
+    let frame_buffer_value = read_frame_buffer(document, content, array_cache);
+    let Some((bits, array_cache_key, variable_name)) = frame_buffer_value.as_ref() else {
+        ui.label("Framebuffer source is unavailable at the cursor.");
+        return;
+    };
 
-                    if ui.button("Copy image").clicked() {
-                        let total = columns * rows;
-                        let mut padded = pixel_colors.to_vec();
-                        padded.resize(total, Color32::BLACK);
-                        ui.ctx().copy_image(egui::ColorImage {
-                            size: [columns, rows],
-                            pixels: padded,
-                            source_size: egui::vec2(columns as f32, rows as f32),
-                        });
-                    }
-                });
-                self.draw_array_index_range(ui);
+    let color_settings_key = {
+        let settings = &mut *settings;
+        let color_settings = &mut settings.color_settings;
 
-                let settings = &mut self.user.frame_buffer;
-                let max_columns = pixel_colors.len().max(1);
-                settings.pixels_per_row = settings.pixels_per_row.clamp(1, max_columns);
+        ui.checkbox(&mut settings.square_pixels, "Square pixels");
 
-                ui.horizontal(|ui| {
-                    ui.label("Pixels in x-direction");
-                    ui.add(
-                        egui::Slider::new(&mut settings.pixels_per_row, 1..=max_columns).integer(),
+        ui.horizontal(|ui| {
+            ui.label("Color mode");
+            egui::ComboBox::from_id_salt("frame_buffer_color_mode")
+                .selected_text(color_settings.color_mode.string())
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut color_settings.color_mode,
+                        FrameBufferColorMode::Grayscale,
+                        FrameBufferColorMode::Grayscale.string(),
+                    );
+                    ui.selectable_value(
+                        &mut color_settings.color_mode,
+                        FrameBufferColorMode::Rgb,
+                        FrameBufferColorMode::Rgb.string(),
+                    );
+                    ui.selectable_value(
+                        &mut color_settings.color_mode,
+                        FrameBufferColorMode::YCbCr,
+                        FrameBufferColorMode::YCbCr.string(),
                     );
                 });
+        });
 
-                ui.separator();
+        match color_settings.color_mode {
+            FrameBufferColorMode::Grayscale => {
+                ui.horizontal(|ui| {
+                    ui.label("Grayscale bits");
+                    ui.add(DragValue::new(&mut color_settings.grayscale_bits).range(1..=8));
+                });
+            }
+            FrameBufferColorMode::Rgb => {
+                ui.horizontal(|ui| {
+                    ui.label("R bits");
+                    ui.add(DragValue::new(&mut color_settings.r_bits).range(0..=8));
+                    ui.label("G bits");
+                    ui.add(DragValue::new(&mut color_settings.g_bits).range(0..=8));
+                    ui.label("B bits");
+                    ui.add(DragValue::new(&mut color_settings.b_bits).range(0..=8));
+                });
+            }
+            FrameBufferColorMode::YCbCr => {
+                ui.horizontal(|ui| {
+                    ui.label("Y bits");
+                    ui.add(DragValue::new(&mut color_settings.y_bits).range(0..=8));
+                    ui.label("Cb bits");
+                    ui.add(DragValue::new(&mut color_settings.cb_bits).range(0..=8));
+                    ui.label("Cr bits");
+                    ui.add(DragValue::new(&mut color_settings.cr_bits).range(0..=8));
+                });
+            }
+        }
 
-                let available = ui.available_size_before_wrap();
+        color_settings.clone()
+    };
 
-                if available.x <= 0.0 || available.y <= 0.0 {
+    ui.separator();
+
+    if bits.is_empty() {
+        ui.label("No bits available");
+        return;
+    }
+
+    let pixel_cache_key = FrameBufferPixelCacheKey {
+        array_key: array_cache_key.clone(),
+        settings: color_settings_key.clone(),
+    };
+
+    let pixel_colors = if let Some(cache) = pixel_cache
+        .as_ref()
+        .filter(|cache| cache.key == pixel_cache_key)
+    {
+        cache.pixel_colors.clone()
+    } else {
+        let decoded = match color_settings_key.color_mode {
+            FrameBufferColorMode::Rgb => {
+                let r_bits = color_settings_key.r_bits as usize;
+                let g_bits = color_settings_key.g_bits as usize;
+                let b_bits = color_settings_key.b_bits as usize;
+                let bits_per_pixel = r_bits + g_bits + b_bits;
+                if bits_per_pixel == 0 {
+                    ui.label("Set at least one RGB channel bit count above zero.");
                     return;
                 }
-
-                let (pixel_width, pixel_height) = if settings.square_pixels {
-                    let side = (available.x / columns as f32).min(available.y / rows as f32);
-                    (side, side)
-                } else {
-                    (available.x / columns as f32, available.y / rows as f32)
-                };
-
-                let image_size =
-                    egui::vec2(pixel_width * columns as f32, pixel_height * rows as f32);
-                let (rect, _) = ui.allocate_exact_size(image_size, Sense::hover());
-                let painter = ui.painter_at(rect);
-
-                for (index, color) in pixel_colors.iter().copied().enumerate() {
-                    let x = index % columns;
-                    let y = index / columns;
-
-                    let min = Pos2 {
-                        x: rect.min.x + x as f32 * pixel_width,
-                        y: rect.min.y + y as f32 * pixel_height,
-                    };
-                    let max = Pos2 {
-                        x: min.x + pixel_width,
-                        y: min.y + pixel_height,
-                    };
-
-                    painter.rect_filled(Rect { min, max }, CornerRadius::ZERO, color);
-                }
-
-                painter.rect_stroke(
-                    rect,
-                    CornerRadius::ZERO,
-                    Stroke::new(1.0, ui.visuals().weak_text_color()),
-                    egui::StrokeKind::Inside,
-                );
-            });
-
-        if !open {
-            msgs.push(Message::SetFrameBufferVisibleVariable(None));
-        }
-    }
-
-    fn draw_array_index_range(&mut self, ui: &mut egui::Ui) {
-        let Some(FrameBufferContent::Array {
-            scope_ref: _,
-            levels,
-        }) = self.frame_buffer_content.as_mut()
-        else {
-            return;
-        };
-
-        if levels.is_empty() {
-            return;
-        }
-
-        let total_levels = levels.len();
-
-        for (i, level) in levels.iter_mut().enumerate() {
-            let (min, max) = (level.min_index, level.max_index);
-            level.first_index = level.first_index.clamp(min, max);
-            level.last_index = level.last_index.clamp(min, max);
-            if level.first_index > level.last_index {
-                level.last_index = level.first_index;
+                decode_rgb_pixels(bits, r_bits, g_bits, b_bits)
             }
-            ui.horizontal(|ui| {
-                if total_levels == 1 {
-                    ui.label("First array index");
-                } else {
-                    ui.label(format!("Level {} first index", i + 1));
+            FrameBufferColorMode::YCbCr => {
+                let y_bits = color_settings_key.y_bits as usize;
+                let cb_bits = color_settings_key.cb_bits as usize;
+                let cr_bits = color_settings_key.cr_bits as usize;
+                let bits_per_pixel = y_bits + cb_bits + cr_bits;
+                if bits_per_pixel == 0 {
+                    ui.label("Set at least one YCbCr channel bit count above zero.");
+                    return;
                 }
-                ui.add(DragValue::new(&mut level.first_index).range(min..=max));
-                if total_levels == 1 {
-                    ui.label("Last array index");
-                } else {
-                    ui.label(format!("Level {} last index", i + 1));
-                }
-                ui.add(DragValue::new(&mut level.last_index).range(min..=max));
-            });
-            if level.first_index > level.last_index {
-                level.first_index = level.last_index;
+                decode_ycbcr_pixels(bits, y_bits, cb_bits, cr_bits)
             }
+            FrameBufferColorMode::Grayscale => {
+                let gray_bits = color_settings_key.grayscale_bits as usize;
+                decode_grayscale_pixels(bits, gray_bits)
+            }
+        };
+
+        let decoded: std::sync::Arc<[Color32]> = decoded.into();
+
+        *pixel_cache = Some(FrameBufferPixelCache {
+            key: pixel_cache_key,
+            pixel_colors: decoded.clone(),
+        });
+        decoded
+    };
+
+    if pixel_colors.is_empty() {
+        ui.label("No pixels to draw with current bit settings.");
+        return;
+    }
+
+    let settings = &mut *settings;
+    let columns = settings.pixels_per_row.min(pixel_colors.len()).max(1);
+    let rows = pixel_colors.len().div_ceil(columns);
+    ui.horizontal(|ui| {
+        ui.label(format!("Var: {variable_name} | {columns}×{rows}"));
+
+        if ui.button("Copy image").clicked() {
+            let total = columns * rows;
+            let mut padded = pixel_colors.to_vec();
+            padded.resize(total, Color32::BLACK);
+            ui.ctx().copy_image(egui::ColorImage {
+                size: [columns, rows],
+                pixels: padded,
+                source_size: egui::vec2(columns as f32, rows as f32),
+            });
+        }
+    });
+    draw_array_index_range(content, ui);
+
+    let settings = &mut *settings;
+    let max_columns = pixel_colors.len().max(1);
+    ui.horizontal(|ui| {
+        ui.label("Pixels in x-direction");
+        ui.add(
+            egui::Slider::new(&mut settings.pixels_per_row, 1..=max_columns)
+                .clamping(egui::SliderClamping::Edits)
+                .integer(),
+        );
+    });
+
+    ui.separator();
+
+    let available = ui.available_size_before_wrap();
+
+    if available.x <= 0.0 || available.y <= 0.0 {
+        return;
+    }
+
+    let (pixel_width, pixel_height) = if settings.square_pixels {
+        let side = (available.x / columns as f32).min(available.y / rows as f32);
+        (side, side)
+    } else {
+        (available.x / columns as f32, available.y / rows as f32)
+    };
+
+    let image_size = egui::vec2(pixel_width * columns as f32, pixel_height * rows as f32);
+    let (rect, _) = ui.allocate_exact_size(image_size, Sense::hover());
+    let painter = ui.painter_at(rect);
+
+    for (index, color) in pixel_colors.iter().copied().enumerate() {
+        let x = index % columns;
+        let y = index / columns;
+
+        let min = Pos2 {
+            x: rect.min.x + x as f32 * pixel_width,
+            y: rect.min.y + y as f32 * pixel_height,
+        };
+        let max = Pos2 {
+            x: min.x + pixel_width,
+            y: min.y + pixel_height,
+        };
+
+        painter.rect_filled(Rect { min, max }, CornerRadius::ZERO, color);
+    }
+
+    painter.rect_stroke(
+        rect,
+        CornerRadius::ZERO,
+        Stroke::new(1.0, ui.visuals().weak_text_color()),
+        egui::StrokeKind::Inside,
+    );
+}
+
+fn draw_array_index_range(content: &mut Option<FrameBufferContent>, ui: &mut egui::Ui) {
+    let Some(FrameBufferContent::Array {
+        scope_ref: _,
+        levels,
+    }) = content.as_mut()
+    else {
+        return;
+    };
+
+    if levels.is_empty() {
+        return;
+    }
+
+    let total_levels = levels.len();
+
+    for (i, level) in levels.iter_mut().enumerate() {
+        let (min, max) = (level.min_index, level.max_index);
+        level.first_index = level.first_index.clamp(min, max);
+        level.last_index = level.last_index.clamp(min, max);
+        if level.first_index > level.last_index {
+            level.last_index = level.first_index;
+        }
+        ui.horizontal(|ui| {
+            if total_levels == 1 {
+                ui.label("First array index");
+            } else {
+                ui.label(format!("Level {} first index", i + 1));
+            }
+            ui.add(DragValue::new(&mut level.first_index).range(min..=max));
+            if total_levels == 1 {
+                ui.label("Last array index");
+            } else {
+                ui.label(format!("Level {} last index", i + 1));
+            }
+            ui.add(DragValue::new(&mut level.last_index).range(min..=max));
+        });
+        if level.first_index > level.last_index {
+            level.first_index = level.last_index;
         }
     }
+}
 
-    fn selected_variable_for_frame_buffer(
-        &mut self,
-    ) -> Option<(std::sync::Arc<[bool]>, FrameBufferContentCacheKey, String)> {
-        let waves = self.user.waves.as_ref()?;
-        let cursor = waves.cursor.as_ref()?.to_biguint()?;
-        let wave_container = waves.inner.as_waves()?;
-        let content = self.frame_buffer_content.clone()?;
-        let cache_key = FrameBufferContentCacheKey {
-            content: content.clone(),
-            cursor_position: cursor.clone(),
-        };
-        let cached = self
-            .frame_buffer_array_cache
-            .as_ref()
-            .filter(|cache| cache.key == cache_key)
-            .cloned();
+pub(crate) fn read_frame_buffer(
+    document: Option<&crate::wave_data::WaveData>,
+    content: &Option<FrameBufferContent>,
+    array_cache: &mut Option<FrameBufferArrayCache>,
+) -> Option<(std::sync::Arc<[bool]>, FrameBufferContentCacheKey, String)> {
+    let waves = document?;
+    let cursor = waves.cursor.as_ref()?.to_biguint()?;
+    let wave_container = waves.inner.as_waves()?;
+    let content = content.clone()?;
+    let cache_key = FrameBufferContentCacheKey {
+        content: content.clone(),
+        cursor_position: cursor.clone(),
+        document_generation: waves.cache_generation,
+    };
+    let cached = array_cache
+        .as_ref()
+        .filter(|cache| cache.key == cache_key)
+        .cloned();
 
-        let cached = if let Some(cached) = cached {
-            cached
-        } else {
-            let cached = match &content {
-                FrameBufferContent::Variable(variable_ref) => build_variable_frame_buffer_cache(
-                    wave_container,
-                    variable_ref,
-                    &cursor,
-                    cache_key,
-                )?,
-                FrameBufferContent::Array { scope_ref, levels } => {
-                    if levels.is_empty() {
-                        return None;
-                    }
-
-                    let sorted_variables =
-                        resolve_leaf_scopes_and_variables(wave_container, scope_ref, levels)?;
-                    let cached_value =
-                        build_cached_variable_value(wave_container, &sorted_variables, &cursor);
-                    FrameBufferArrayCache {
-                        key: cache_key,
-                        cached_value,
-                    }
+    let cached = if let Some(cached) = cached {
+        cached
+    } else {
+        let cached = match &content {
+            FrameBufferContent::Variable(variable_ref) => {
+                build_variable_frame_buffer_cache(wave_container, variable_ref, &cursor, cache_key)?
+            }
+            FrameBufferContent::Array { scope_ref, levels } => {
+                if levels.is_empty() {
+                    return None;
                 }
-            };
-            self.frame_buffer_array_cache = Some(cached.clone());
-            cached
+
+                let sorted_variables =
+                    resolve_leaf_scopes_and_variables(wave_container, scope_ref, levels)?;
+                let cached_value =
+                    build_cached_variable_value(wave_container, &sorted_variables, &cursor);
+                FrameBufferArrayCache {
+                    key: cache_key,
+                    cached_value,
+                }
+            }
         };
+        *array_cache = Some(cached.clone());
+        cached
+    };
 
-        let bits = cached.cached_value.as_ref()?.clone();
+    let bits = cached.cached_value.as_ref()?.clone();
 
-        let variable_name = match &content {
-            FrameBufferContent::Variable(variable_ref) => variable_ref.full_path_string_no_index(),
-            FrameBufferContent::Array { scope_ref, .. } => scope_ref.full_name(),
-        };
+    let variable_name = match &content {
+        FrameBufferContent::Variable(variable_ref) => variable_ref.full_path_string_no_index(),
+        FrameBufferContent::Array { scope_ref, .. } => scope_ref.full_name(),
+    };
 
-        Some((bits, cached.key.clone(), variable_name))
-    }
+    Some((bits, cached.key.clone(), variable_name))
 }
 
 fn build_cached_variable_value(
@@ -879,6 +938,91 @@ fn apply_scale(value: u16, multiplier: u32) -> u8 {
 mod tests {
     use super::*;
     use num::BigUint;
+
+    #[test]
+    fn framebuffer_sources_round_trip_paths_and_selectors_without_backend_ids() {
+        let sources = [
+            FrameBufferContent::Variable(VariableRef {
+                path: ScopeRef {
+                    strs: vec!["dut".into()],
+                    id: Default::default(),
+                },
+                name: "pixels".into(),
+                id: Default::default(),
+                index: Some(-1),
+            }),
+            FrameBufferContent::Array {
+                scope_ref: ScopeRef {
+                    strs: vec!["dut".into(), "image".into()],
+                    id: Default::default(),
+                },
+                levels: vec![ArrayLevel {
+                    min_index: -8,
+                    max_index: 7,
+                    first_index: -4,
+                    last_index: 3,
+                }],
+            },
+        ];
+        for source in sources {
+            let serialized = ron::to_string(&source).unwrap();
+            assert!(!serialized.contains("id:"));
+            let restored: FrameBufferContent = ron::from_str(&serialized).unwrap();
+            assert_eq!(restored, source);
+            match restored {
+                FrameBufferContent::Variable(variable) => {
+                    assert_eq!(variable.id, crate::wave_container::VarId::None);
+                    assert_eq!(variable.path.id, crate::wave_container::ScopeId::None);
+                }
+                FrameBufferContent::Array { scope_ref, .. } => {
+                    assert_eq!(scope_ref.id, crate::wave_container::ScopeId::None)
+                }
+            }
+        }
+        let invalid = FrameBufferContentFile::Array {
+            scope: vec!["dut".into()],
+            levels: vec![ArrayLevel {
+                min_index: 0,
+                max_index: 7,
+                first_index: 5,
+                last_index: 2,
+            }],
+        };
+        assert!(ron::from_str::<FrameBufferContent>(&ron::to_string(&invalid).unwrap()).is_err());
+    }
+
+    #[test]
+    fn detached_framebuffer_render_preserves_settings_and_source() {
+        let mut settings = FrameBufferSettings::default();
+        let mut content = Some(FrameBufferContent::Variable(VariableRef {
+            path: ScopeRef {
+                strs: vec!["dut".into()],
+                id: Default::default(),
+            },
+            name: "pixels".into(),
+            id: Default::default(),
+            index: None,
+        }));
+        let original = content.clone();
+        let mut array_cache = None;
+        let mut pixel_cache = None;
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            draw_frame_buffer(
+                ui,
+                None,
+                &mut settings,
+                &mut content,
+                &mut array_cache,
+                &mut pixel_cache,
+            );
+        });
+        output.textures_delta.clear();
+        assert_eq!(content, original);
+        assert_eq!(settings, FrameBufferSettings::default());
+        assert!(array_cache.is_none());
+        assert!(pixel_cache.is_none());
+    }
 
     #[test]
     fn frame_buffer_bits_pads_to_word_length() {

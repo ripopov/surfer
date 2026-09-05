@@ -1,5 +1,5 @@
 //! Utility functions.
-use crate::{displayed_item_tree::VisibleItemIndex, wave_data::WaveData};
+use crate::displayed_item_tree::VisibleItemIndex;
 use camino::Utf8PathBuf;
 use egui::RichText;
 #[cfg(not(target_arch = "wasm32"))]
@@ -69,8 +69,11 @@ pub(crate) fn alpha_idx_to_uint_idx(idx: &str) -> Option<VisibleItemIndex> {
 }
 
 #[must_use]
-pub(crate) fn get_alpha_focus_id(vidx: VisibleItemIndex, waves: &WaveData) -> RichText {
-    let alpha_id = uint_idx_to_alpha_idx(vidx, waves.displayed_items.len());
+pub(crate) fn get_alpha_focus_id(
+    vidx: VisibleItemIndex,
+    items: &crate::item_list::ItemList,
+) -> RichText {
+    let alpha_id = uint_idx_to_alpha_idx(vidx, items.displayed_items.len());
 
     RichText::new(alpha_id).monospace()
 }

@@ -1,22 +1,22 @@
 use ecolor::Color32;
-use egui::{Context, RichText, WidgetText, Window};
+use egui::{RichText, WidgetText};
 use egui_extras::{Column, TableBuilder};
 use emath::{Align2, Pos2, Rect};
 use epaint::{CornerRadius, FontId, Stroke};
 use itertools::Itertools;
 use num::{BigInt, Zero};
 
-use crate::SystemState;
 use crate::drawing_canvas::draw_vertical_line_at_time;
 use crate::{
     config::SurferTheme,
     displayed_item::{DisplayedItem, DisplayedItemRef, DisplayedMarker},
     item_drawing_info::ItemDrawingInfo,
+    item_list::ItemList,
     message::Message,
     time::TimeFormatter,
     view::DrawingContext,
     viewport::Viewport,
-    wave_data::WaveData,
+    wave_data::{WaveData, WaveformData},
 };
 
 pub const DEFAULT_MARKER_NAME: &str = "Marker";
@@ -24,7 +24,245 @@ const MAX_MARKERS: usize = 255;
 const MAX_MARKER_INDEX: u8 = 254;
 const CURSOR_MARKER_IDX: u8 = 255;
 
-impl WaveData {
+impl WaveformData {
+    pub fn add_marker(
+        &mut self,
+        location: &BigInt,
+        name: Option<String>,
+        move_focus: bool,
+    ) -> Option<DisplayedItemRef> {
+        self.edit().add_marker(location, name, move_focus)
+    }
+    pub fn remove_marker(&mut self, idx: u8) {
+        self.edit().remove_marker(idx);
+    }
+    pub fn set_marker_position(
+        &mut self,
+        idx: u8,
+        location: &BigInt,
+    ) -> Result<(), crate::item_list::ItemEditError> {
+        self.edit().set_marker_position(idx, location)
+    }
+    pub fn move_marker_to_cursor(
+        &mut self,
+        idx: u8,
+    ) -> Result<(), crate::item_list::ItemEditError> {
+        self.edit().move_marker_to_cursor(idx)
+    }
+}
+
+impl crate::wave_data::WaveformEdit<'_> {
+    pub fn add_marker(
+        &mut self,
+        location: &BigInt,
+        name: Option<String>,
+        move_focus: bool,
+    ) -> Option<DisplayedItemRef> {
+        if !self.can_add_marker() {
+            return None;
+        }
+
+        let Some(idx) = (0..=MAX_MARKER_INDEX).find(|idx| !self.markers.contains_key(idx)) else {
+            // This shouldn't happen since can_add_marker() was already checked,
+            // but handle it gracefully
+            return None;
+        };
+
+        let item_ref = self
+            .insert_item(
+                DisplayedItem::Marker(DisplayedMarker {
+                    color: None,
+                    background_color: None,
+                    name,
+                    idx,
+                }),
+                None,
+                move_focus,
+            )
+            .ok()?;
+        self.markers.insert(idx, location.clone());
+
+        Some(item_ref)
+    }
+
+    pub fn remove_marker(&mut self, idx: u8) {
+        self.document.markers.remove(&idx);
+        let rows = self
+            .items
+            .displayed_items
+            .iter()
+            .filter_map(|(id, item)| match item {
+                DisplayedItem::Marker(marker) if marker.idx == idx => Some(*id),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        self.remove_displayed_items(&rows);
+    }
+
+    /// Set the marker with the specified id to the location.
+    ///
+    /// If the marker doesn't exist already, it will be created.
+    pub fn set_marker_position(
+        &mut self,
+        idx: u8,
+        location: &BigInt,
+    ) -> Result<(), crate::item_list::ItemEditError> {
+        if !self.markers.contains_key(&idx) {
+            self.insert_item(
+                DisplayedItem::Marker(DisplayedMarker {
+                    color: None,
+                    background_color: None,
+                    name: None,
+                    idx,
+                }),
+                None,
+                true,
+            )?;
+        }
+        self.markers.insert(idx, location.clone());
+        Ok(())
+    }
+
+    pub fn move_marker_to_cursor(
+        &mut self,
+        idx: u8,
+    ) -> Result<(), crate::item_list::ItemEditError> {
+        if let Some(location) = self.cursor.clone() {
+            self.set_marker_position(idx, &location)?;
+        }
+        Ok(())
+    }
+}
+
+impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
+    pub(crate) fn draw_marker_table(
+        &self,
+        waves: &crate::wave_data::WaveformRead<'_>,
+        ui: &mut egui::Ui,
+        msgs: &mut Vec<Message>,
+    ) {
+        // Construct markers list: cursor first (if present), then numbered markers
+        let markers: Vec<(u8, &BigInt, WidgetText)> = waves
+            .cursor
+            .as_ref()
+            .into_iter()
+            .map(|cursor| {
+                (
+                    CURSOR_MARKER_IDX,
+                    cursor,
+                    WidgetText::RichText(RichText::new("Primary").into()),
+                )
+            })
+            .chain(
+                waves
+                    .items
+                    .items_tree
+                    .iter()
+                    .filter_map(|node| waves.items.displayed_items.get(&node.item_ref))
+                    .filter_map(|displayed_item| match displayed_item {
+                        DisplayedItem::Marker(marker) => {
+                            let text_color = self.get_item_text_color(displayed_item);
+                            Some((
+                                marker.idx,
+                                waves.numbered_marker_time(marker.idx),
+                                marker.marker_text(text_color),
+                            ))
+                        }
+                        _ => None,
+                    })
+                    .sorted_by(|a, b| Ord::cmp(&a.0, &b.0)),
+            )
+            .collect();
+
+        ui.vertical_centered(|ui| {
+            // Table of markers: header row then rows of time differences.
+            let row_height = ui.text_style_height(&egui::TextStyle::Body);
+            TableBuilder::new(ui)
+                .striped(true)
+                .cell_layout(egui::Layout::right_to_left(emath::Align::TOP))
+                .columns(Column::auto().resizable(true), markers.len() + 1)
+                .auto_shrink(emath::Vec2b::new(false, true))
+                .header(row_height, |mut header| {
+                    header.col(|ui| {
+                        ui.label("");
+                    });
+                    for (marker_idx, _, widget_text) in &markers {
+                        header.col(|ui| {
+                            if ui
+                                .add(
+                                    egui::Label::new(widget_text.clone())
+                                        .sense(egui::Sense::click()),
+                                )
+                                .clicked()
+                            {
+                                msgs.push(marker_click_message(
+                                    *marker_idx,
+                                    waves.cursor.as_ref(),
+                                    waves.tile_id,
+                                ));
+                            }
+                        });
+                    }
+                })
+                .body(|body| {
+                    let time_formatter = TimeFormatter::new(
+                        &waves.inner.metadata().timescale,
+                        &self.wanted_timeunit,
+                        &self.time_format,
+                    );
+                    let numbber_of_markers = markers.len();
+                    body.rows(row_height, numbber_of_markers, |mut row| {
+                        let row_idx = row.index();
+                        let (marker_idx, row_marker_time, row_widget_text) = &markers[row_idx];
+                        row.col(|ui| {
+                            if ui
+                                .add(
+                                    egui::Label::new(row_widget_text.clone())
+                                        .sense(egui::Sense::click()),
+                                )
+                                .clicked()
+                            {
+                                msgs.push(marker_click_message(
+                                    *marker_idx,
+                                    waves.cursor.as_ref(),
+                                    waves.tile_id,
+                                ));
+                            }
+                        });
+                        for (_, col_marker_time, _) in &markers {
+                            let diff =
+                                time_formatter.format(&(*row_marker_time - *col_marker_time));
+                            row.col(|ui| {
+                                ui.label(diff);
+                            });
+                        }
+                    });
+                });
+        });
+    }
+}
+
+/// Get the background color for a marker or cursor, with fallback to theme cursor color
+fn get_marker_background_color(item: &DisplayedItem, theme: &SurferTheme) -> Color32 {
+    item.color()
+        .and_then(|color| theme.get_color(color))
+        .unwrap_or(theme.cursor.color)
+}
+
+/// Generate the message for a marker click based on its index
+fn marker_click_message(
+    marker_idx: u8,
+    cursor: Option<&BigInt>,
+    tile_id: crate::tiles::TileId,
+) -> Message {
+    if marker_idx < CURSOR_MARKER_IDX {
+        Message::GoToMarkerPosition(marker_idx, tile_id)
+    } else {
+        Message::GoToTime(cursor.cloned(), tile_id)
+    }
+}
+
+impl ItemList {
     #[must_use]
     pub fn resolve_marker_name(&self, name: &str) -> Option<u8> {
         if let Some(id_str) = name.strip_prefix('#') {
@@ -58,96 +296,21 @@ impl WaveData {
             .unwrap_or(theme.cursor.color)
     }
 
-    pub fn draw_cursor(&self, theme: &SurferTheme, ctx: &mut DrawingContext, viewport: &Viewport) {
-        if let Some(cursor_time) = &self.cursor {
-            let range = self.time_range();
-            draw_vertical_line_at_time(cursor_time, ctx, &theme.cursor, viewport, range);
-        }
-    }
-
-    pub fn draw_markers(&self, theme: &SurferTheme, ctx: &mut DrawingContext, viewport: &Viewport) {
-        let range = self.time_range();
-        for (idx, marker_time) in &self.markers {
+    pub fn draw_markers(
+        &self,
+        document: &WaveData,
+        theme: &SurferTheme,
+        ctx: &mut DrawingContext,
+        viewport: &Viewport,
+    ) {
+        let range = document.time_range();
+        for (idx, marker_time) in &document.markers {
             let color = self.get_marker_color(*idx, theme);
             let stroke = Stroke {
                 color,
                 width: theme.cursor.width,
             };
             draw_vertical_line_at_time(marker_time, ctx, stroke, viewport, range);
-        }
-    }
-
-    #[must_use]
-    pub fn can_add_marker(&self) -> bool {
-        self.markers.len() < MAX_MARKERS
-    }
-
-    pub fn add_marker(
-        &mut self,
-        location: &BigInt,
-        name: Option<String>,
-        move_focus: bool,
-    ) -> Option<DisplayedItemRef> {
-        if !self.can_add_marker() {
-            return None;
-        }
-
-        let Some(idx) = (0..=MAX_MARKER_INDEX).find(|idx| !self.markers.contains_key(idx)) else {
-            // This shouldn't happen since can_add_marker() was already checked,
-            // but handle it gracefully
-            return None;
-        };
-
-        let item_ref = self.insert_item(
-            DisplayedItem::Marker(DisplayedMarker {
-                color: None,
-                background_color: None,
-                name,
-                idx,
-            }),
-            None,
-            move_focus,
-        );
-        self.markers.insert(idx, location.clone());
-
-        Some(item_ref)
-    }
-
-    pub fn remove_marker(&mut self, idx: u8) {
-        if let Some(&marker_item_ref) =
-            self.displayed_items
-                .iter()
-                .find_map(|(id, item)| match item {
-                    DisplayedItem::Marker(marker) if marker.idx == idx => Some(id),
-                    _ => None,
-                })
-        {
-            self.remove_displayed_item(marker_item_ref);
-        }
-    }
-
-    /// Set the marker with the specified id to the location.
-    ///
-    /// If the marker doesn't exist already, it will be created.
-    pub fn set_marker_position(&mut self, idx: u8, location: &BigInt) {
-        if !self.markers.contains_key(&idx) {
-            self.insert_item(
-                DisplayedItem::Marker(DisplayedMarker {
-                    color: None,
-                    background_color: None,
-                    name: None,
-                    idx,
-                }),
-                None,
-                true,
-            );
-        }
-        self.markers.insert(idx, location.clone());
-    }
-
-    pub fn move_marker_to_cursor(&mut self, idx: u8) {
-        if let Some(location) = self.cursor.clone() {
-            self.set_marker_position(idx, &location);
         }
     }
 
@@ -191,6 +354,7 @@ impl WaveData {
 
     pub fn draw_marker_number_boxes(
         &self,
+        document: &WaveData,
         ctx: &mut DrawingContext,
         theme: &SurferTheme,
         viewport: &Viewport,
@@ -207,8 +371,11 @@ impl WaveData {
             let item = DisplayedItem::Marker(displayed_item.clone());
             let background_color = get_marker_background_color(&item, theme);
 
-            let x =
-                self.numbered_marker_location(displayed_item.idx, viewport, ctx.cfg.canvas_size.x);
+            let x = document.numbered_marker_location(
+                displayed_item.idx,
+                viewport,
+                ctx.cfg.canvas_size.x,
+            );
             let idx_string = displayed_item.idx.to_string();
 
             Self::draw_text_with_background(
@@ -223,136 +390,50 @@ impl WaveData {
     }
 }
 
-impl SystemState {
-    pub fn draw_marker_window(&self, waves: &WaveData, ctx: &Context, msgs: &mut Vec<Message>) {
-        let mut open = true;
-
-        // Construct markers list: cursor first (if present), then numbered markers
-        let markers: Vec<(u8, &BigInt, WidgetText)> = waves
-            .cursor
-            .as_ref()
-            .into_iter()
-            .map(|cursor| {
-                (
-                    CURSOR_MARKER_IDX,
-                    cursor,
-                    WidgetText::RichText(RichText::new("Primary").into()),
-                )
-            })
-            .chain(
-                waves
-                    .items_tree
-                    .iter()
-                    .filter_map(|node| waves.displayed_items.get(&node.item_ref))
-                    .filter_map(|displayed_item| match displayed_item {
-                        DisplayedItem::Marker(marker) => {
-                            let text_color = self.get_item_text_color(displayed_item);
-                            Some((
-                                marker.idx,
-                                waves.numbered_marker_time(marker.idx),
-                                marker.marker_text(text_color),
-                            ))
-                        }
-                        _ => None,
-                    })
-                    .sorted_by(|a, b| Ord::cmp(&a.0, &b.0)),
-            )
-            .collect();
-
-        Window::new("Markers")
-            .collapsible(true)
-            .resizable(true)
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    // Table of markers: header row then rows of time differences.
-                    let row_height = ui.text_style_height(&egui::TextStyle::Body);
-                    TableBuilder::new(ui)
-                        .striped(true)
-                        .cell_layout(egui::Layout::right_to_left(emath::Align::TOP))
-                        .columns(Column::auto().resizable(true), markers.len() + 1)
-                        .auto_shrink(emath::Vec2b::new(false, true))
-                        .header(row_height, |mut header| {
-                            header.col(|ui| {
-                                ui.label("");
-                            });
-                            for (marker_idx, _, widget_text) in &markers {
-                                header.col(|ui| {
-                                    if ui.label(widget_text.clone()).clicked() {
-                                        msgs.push(marker_click_message(
-                                            *marker_idx,
-                                            waves.cursor.as_ref(),
-                                        ));
-                                    }
-                                });
-                            }
-                        })
-                        .body(|body| {
-                            let time_formatter = TimeFormatter::new(
-                                &waves.inner.metadata().timescale,
-                                &self.user.wanted_timeunit,
-                                &self.get_time_format(),
-                            );
-                            let numbber_of_markers = markers.len();
-                            body.rows(row_height, numbber_of_markers, |mut row| {
-                                let row_idx = row.index();
-                                let (marker_idx, row_marker_time, row_widget_text) =
-                                    &markers[row_idx];
-                                row.col(|ui| {
-                                    if ui.label(row_widget_text.clone()).clicked() {
-                                        msgs.push(marker_click_message(
-                                            *marker_idx,
-                                            waves.cursor.as_ref(),
-                                        ));
-                                    }
-                                });
-                                for (_, col_marker_time, _) in &markers {
-                                    let diff = time_formatter
-                                        .format(&(*row_marker_time - *col_marker_time));
-                                    row.col(|ui| {
-                                        ui.label(diff);
-                                    });
-                                }
-                            });
-                        });
-                    ui.add_space(15.);
-                    if ui.button("Close").clicked() {
-                        msgs.push(Message::SetCursorWindowVisible(false));
-                    }
-                });
-            });
-        if !open {
-            msgs.push(Message::SetCursorWindowVisible(false));
+impl WaveData {
+    pub fn draw_cursor(&self, theme: &SurferTheme, ctx: &mut DrawingContext, viewport: &Viewport) {
+        if let Some(cursor_time) = &self.cursor {
+            let range = self.time_range();
+            draw_vertical_line_at_time(cursor_time, ctx, &theme.cursor, viewport, range);
         }
     }
 
+    #[must_use]
+    pub fn can_add_marker(&self) -> bool {
+        self.markers.len() < MAX_MARKERS
+    }
+}
+
+impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
     pub fn draw_marker_boxes(
         &self,
         waves: &WaveData,
+        items: &ItemList,
         ctx: &mut DrawingContext,
         viewport: &Viewport,
         row_offset: f32,
     ) {
-        let horizontal_padding = self.user.config.layout.waveforms_gap;
+        let horizontal_padding = self.config.layout.waveforms_gap;
 
         let time_formatter = TimeFormatter::new(
             &waves.inner.metadata().timescale,
-            &self.user.wanted_timeunit,
-            &self.get_time_format(),
+            &self.wanted_timeunit,
+            &self.time_format,
         );
         let visible_top = -row_offset;
         let visible_bottom = ctx.cfg.canvas_size.y - row_offset;
-        for drawing_info in waves
+        for drawing_info in items
             .visible_drawing_infos(visible_top, visible_bottom)
+            .iter()
             .filter_map(|item| match item {
                 ItemDrawingInfo::Marker(marker) => Some(marker),
                 _ => None,
             })
         {
-            let Some(item) = waves
+            let Some(item) = items
                 .items_tree
                 .get_visible(drawing_info.vidx)
-                .and_then(|node| waves.displayed_items.get(&node.item_ref))
+                .and_then(|node| items.displayed_items.get(&node.item_ref))
             else {
                 continue;
             };
@@ -360,7 +441,7 @@ impl SystemState {
             let row_top = drawing_info.top + row_offset;
             let row_bottom = drawing_info.bottom + row_offset;
 
-            let background_color = get_marker_background_color(item, &self.user.config.theme);
+            let background_color = get_marker_background_color(item, &self.config.theme);
 
             let x =
                 waves.numbered_marker_location(drawing_info.idx, viewport, ctx.cfg.canvas_size.x);
@@ -373,7 +454,7 @@ impl SystemState {
                     .unwrap_or(&BigInt::zero()),
             );
 
-            let text_color = self.user.config.theme.get_best_text_color(background_color);
+            let text_color = self.config.theme.get_best_text_color(background_color);
 
             // Create galley
             let galley = ctx.painter.layout_no_wrap(
@@ -400,21 +481,5 @@ impl SystemState {
                 text_color,
             );
         }
-    }
-}
-
-/// Get the background color for a marker or cursor, with fallback to theme cursor color
-fn get_marker_background_color(item: &DisplayedItem, theme: &SurferTheme) -> Color32 {
-    item.color()
-        .and_then(|color| theme.get_color(color))
-        .unwrap_or(theme.cursor.color)
-}
-
-/// Generate the message for a marker click based on its index
-fn marker_click_message(marker_idx: u8, cursor: Option<&BigInt>) -> Message {
-    if marker_idx < CURSOR_MARKER_IDX {
-        Message::GoToMarkerPosition(marker_idx, 0)
-    } else {
-        Message::GoToTime(cursor.cloned(), 0)
     }
 }

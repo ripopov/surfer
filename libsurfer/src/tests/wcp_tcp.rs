@@ -15,6 +15,35 @@ use std::future::Future;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, LazyLock, Mutex};
 
+#[test]
+fn variable_actions_require_current_capabilities_and_keep_the_captured_path() {
+    use crate::tiles::commands::WcpVariableAction;
+    use surfer_wcp::WcpEvent;
+    let mut state = SystemState::new_default_config().unwrap();
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(4);
+    state.channels.wcp_s2c_sender = Some(sender);
+    let send = |state: &mut SystemState| {
+        state.update(Message::WcpVariableAction {
+            action: WcpVariableAction::AddDrivers,
+            variable: "top.original.signal".into(),
+        })
+    };
+    send(&mut state);
+    assert!(receiver.try_recv().is_err());
+    state.wcp_greeted_signal.store(true, Ordering::Relaxed);
+    send(&mut state);
+    assert!(receiver.try_recv().is_err());
+    state.wcp_client_capabilities.add_drivers = true;
+    send(&mut state);
+    let expected = WcpSCMessage::event(WcpEvent::add_drivers {
+        variable: "top.original.signal".into(),
+    });
+    assert_eq!(
+        serde_json::to_value(receiver.try_recv().unwrap()).unwrap(),
+        serde_json::to_value(expected).unwrap()
+    );
+}
+
 fn get_test_port() -> u16 {
     static PORT_NUM: LazyLock<Arc<Mutex<u16>>> = LazyLock::new(|| Arc::new(Mutex::new(54321)));
     let mut port = PORT_NUM.lock().unwrap();

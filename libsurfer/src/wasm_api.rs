@@ -150,6 +150,7 @@ pub async fn id_of_name(name: String) -> Option<usize> {
         function: Box::new(move |state| {
             if let Some(waves) = &state.user.waves {
                 *block_on(result_clone.lock()) = waves
+                    .items
                     .displayed_items
                     .iter()
                     .find(|(_id, item)| {
@@ -238,8 +239,8 @@ pub async fn index_of_name(name: String) -> Option<usize> {
     perform_query(Box::new(move |state| {
         if let Some(waves) = &state.user.waves {
             let mut result = None;
-            for (idx, node) in waves.items_tree.iter().enumerate() {
-                if let Some(item) = waves.displayed_items.get(&node.item_ref) {
+            for (idx, node) in waves.items.items_tree.iter().enumerate() {
+                if let Some(item) = waves.items.displayed_items.get(&node.item_ref) {
                     let item_name = match item {
                         DisplayedItem::Variable(var) => var.variable_ref.full_path_string(),
                         _ => item.name().to_string(),

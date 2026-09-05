@@ -14,7 +14,6 @@ use crate::{
     },
     data_container::DataContainer,
     dialog::{OpenSiblingStateFileDialog, ReloadWaveformDialog},
-    displayed_item_tree::{DisplayedItemTree, VisibleItemIndex},
     frame_buffer::FrameBufferSettings,
     hierarchy::{HierarchyStyle, ParameterDisplayLocation},
     message::Message,
@@ -23,9 +22,8 @@ use crate::{
     trace_style::TraceStyle,
     transaction_container::TransactionContainer,
     variable_filter::VariableFilter,
-    viewport::Viewport,
     wave_container::{ScopeRef, VariableRef, WaveContainer},
-    wave_data::{TimeRange, WaveData},
+    wave_data::TimeRange,
     wave_source::{LoadOptions, WaveFormat, WaveSource},
 };
 use egui::{
@@ -40,10 +38,35 @@ use surfer_translation_types::Translator;
 use surver::SurverFileInfo;
 use tracing::{error, info, trace, warn};
 
+// Keep runtime state and its wire fields in one declaration. The decoder
+// inspects the original RON before choosing native or version-zero ownership.
+macro_rules! user_state_fields {
+    ($(#[$meta:meta])* pub struct UserState {
+        $($(#[$attr:meta])* $visibility:vis $field:ident: $ty:ty,)*
+    }) => {
+        $(#[$meta])*
+        #[derive(Serialize)]
+        pub struct UserState { $($(#[$attr])* $visibility $field: $ty,)* }
+
+        #[derive(Deserialize)]
+        #[serde(default)]
+        struct UserStateFields { $($(#[$attr])* $field: $ty,)* }
+        impl Default for UserStateFields {
+            fn default() -> Self {
+                let state = UserState::default();
+                Self { $($field: state.$field,)* }
+            }
+        }
+        impl From<UserStateFields> for UserState {
+            fn from(state: UserStateFields) -> Self { Self { $($field: state.$field,)* } }
+        }
+    };
+}
+
+user_state_fields! {
 /// The parts of the program state that need to be serialized when loading/saving state
-#[derive(Serialize, Deserialize)]
-#[serde(default)]
 pub struct UserState {
+    pub(crate) state_version: u32,
     #[serde(skip)]
     pub config: SurferConfig,
 
@@ -82,12 +105,11 @@ pub struct UserState {
     #[serde(default)]
     pub(crate) autoreload_files: Option<AutoLoad>,
 
-    pub(crate) waves: Option<WaveData>,
-    pub(crate) drag_started: bool,
-    pub(crate) drag_source_idx: Option<VisibleItemIndex>,
-    pub(crate) drag_target_idx: Option<crate::displayed_item_tree::TargetPosition>,
+    pub(crate) waves: Option<crate::wave_data::WaveData>,
 
-    pub(crate) previous_waves: Option<WaveData>,
+    pub(crate) workspace: crate::tiles::workspace::Workspace,
+
+    pub(crate) previous_waves: Option<crate::wave_data::WaveData>,
 
     /// Count argument for movements
     pub(crate) count: Option<String>,
@@ -101,10 +123,6 @@ pub struct UserState {
     pub(crate) show_quick_start: bool,
     pub(crate) show_license: bool,
     pub(crate) show_performance: bool,
-    pub(crate) show_logs: bool,
-    pub(crate) show_cursor_window: bool,
-    #[serde(default)]
-    pub(crate) frame_buffer: FrameBufferSettings,
     pub(crate) wanted_timeunit: TimeUnit,
     pub(crate) time_string_format: Option<TimeStringFormatting>,
     pub(crate) show_url_entry: bool,
@@ -154,9 +172,181 @@ pub struct UserState {
     #[serde(skip)]
     pub state_file: Option<Utf8PathBuf>,
 
-    pub(crate) show_annotation_list: bool,
     #[serde(default)]
     pub(crate) enable_time_offset: Option<bool>,
+}
+
+}
+
+fn present<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct StateOwnershipProbe {
+    #[serde(deserialize_with = "present")]
+    frame_buffer: Option<FrameBufferSettings>,
+    show_annotation_list: bool,
+    #[serde(alias = "show_marker_window")]
+    show_cursor_window: bool,
+    show_logs: bool,
+    #[serde(deserialize_with = "present")]
+    state_version: Option<u32>,
+    #[serde(deserialize_with = "present")]
+    workspace: Option<Box<ron::value::RawValue>>,
+    waves: Option<Box<ron::value::RawValue>>,
+    previous_waves: Option<Box<ron::value::RawValue>>,
+}
+
+impl<'de> Deserialize<'de> for UserState {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error as _;
+        let raw = Box::<ron::value::RawValue>::deserialize(deserializer)?;
+        let mut probe: StateOwnershipProbe =
+            crate::tiles::serde::decode(raw.get_ron()).map_err(D::Error::custom)?;
+        let version = probe
+            .state_version
+            .unwrap_or(u32::from(probe.workspace.is_some()));
+        if version > 1 {
+            return Err(D::Error::custom(format!(
+                "unsupported state version {version}"
+            )));
+        }
+        if version == 1 && probe.workspace.is_none() {
+            return Err(D::Error::custom("version-one state requires a workspace"));
+        }
+        if version == 0 && probe.workspace.is_some() {
+            return Err(D::Error::custom(
+                "version-zero state cannot contain a native workspace",
+            ));
+        }
+        let fields: UserStateFields =
+            crate::tiles::serde::decode(raw.get_ron()).map_err(D::Error::custom)?;
+        let mut state = UserState::from(fields);
+        if version == 0 {
+            let previous = probe.waves.is_none();
+            if let Some(old) = probe.waves.or(probe.previous_waves) {
+                let old: crate::wave_data::WaveformData =
+                    crate::tiles::serde::decode(old.get_ron()).map_err(D::Error::custom)?;
+                let mut runtime = crate::tiles::runtime::WorkspaceRuntime::default();
+                let migrated = old.into_workspace(&mut runtime).map_err(D::Error::custom)?;
+                state.workspace = migrated.workspace;
+                probe.show_annotation_list |= migrated.annotation_list_visible;
+                if previous {
+                    state.previous_waves = Some(migrated.document);
+                } else {
+                    state.waves = Some(migrated.document);
+                }
+            }
+        }
+        if probe.state_version.is_none() {
+            let mut runtime = crate::tiles::runtime::WorkspaceRuntime::default();
+            runtime
+                .install_workspace(
+                    state.workspace.tiles.keys().copied(),
+                    state.workspace.item_lists.keys().copied(),
+                )
+                .map_err(D::Error::custom)?;
+            for (visible, kind, direction) in [
+                (
+                    probe.show_annotation_list,
+                    "annotation_list",
+                    crate::tiles::layout::Direction::Right,
+                ),
+                (
+                    version == 0
+                        && state.workspace.layout.tile_order().into_iter().any(|id| {
+                            state
+                                .workspace
+                                .waveform_resources(id)
+                                .is_some_and(|(_, view)| view.focused_transaction.is_some())
+                        }),
+                    "transaction_details",
+                    crate::tiles::layout::Direction::Right,
+                ),
+                (
+                    probe.show_logs,
+                    "logs",
+                    crate::tiles::layout::Direction::Down,
+                ),
+                (
+                    probe.show_cursor_window,
+                    "markers",
+                    crate::tiles::layout::Direction::Right,
+                ),
+            ] {
+                if visible {
+                    state
+                        .workspace
+                        .apply_command(
+                            &mut runtime,
+                            crate::tiles::commands::WorkspaceCommand::OpenTile {
+                                kind: kind.into(),
+                                placement: crate::tiles::layout::Placement::Edge(direction),
+                                focus: false,
+                            },
+                        )
+                        .map_err(D::Error::custom)?;
+                }
+            }
+        }
+        if let Some(settings) = probe.frame_buffer
+            && settings != FrameBufferSettings::default()
+            && !state
+                .workspace
+                .tiles
+                .values()
+                .any(|entry| matches!(entry.kind, crate::tiles::kind::TileKind::FrameBuffer(_)))
+        {
+            let mut runtime = crate::tiles::runtime::WorkspaceRuntime::default();
+            runtime
+                .install_workspace(
+                    state.workspace.tiles.keys().copied(),
+                    state.workspace.item_lists.keys().copied(),
+                )
+                .map_err(D::Error::custom)?;
+            let before = state
+                .workspace
+                .tiles
+                .keys()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>();
+            state
+                .workspace
+                .apply_command(
+                    &mut runtime,
+                    crate::tiles::commands::WorkspaceCommand::CreateTile {
+                        kind: "frame_buffer".into(),
+                        placement: crate::tiles::layout::Placement::Edge(
+                            crate::tiles::layout::Direction::Right,
+                        ),
+                        focus: false,
+                    },
+                )
+                .map_err(D::Error::custom)?;
+            let entry = state
+                .workspace
+                .tiles
+                .iter_mut()
+                .find(|(id, _)| !before.contains(id))
+                .map(|(_, entry)| entry)
+                .unwrap();
+            let crate::tiles::kind::TileKind::FrameBuffer(tile) = &mut entry.kind else {
+                unreachable!()
+            };
+            tile.state.settings = settings;
+            tile.state.validate().map_err(D::Error::custom)?;
+        }
+        state.state_version = 1;
+        Ok(state)
+    }
 }
 
 // Impl needed since for loading we need to put State into a Message
@@ -182,6 +372,7 @@ impl UserState {
 impl Default for UserState {
     fn default() -> Self {
         Self {
+            state_version: 1,
             config: SurferConfig::default(),
             show_hierarchy: None,
             show_menu: None,
@@ -208,9 +399,7 @@ impl Default for UserState {
             autoreload_files: None,
             enable_time_offset: None,
             waves: None,
-            drag_started: false,
-            drag_source_idx: None,
-            drag_target_idx: None,
+            workspace: Default::default(),
             previous_waves: None,
             count: None,
             blacklisted_translators: HashSet::new(),
@@ -220,9 +409,6 @@ impl Default for UserState {
             show_quick_start: false,
             show_license: false,
             show_performance: false,
-            show_logs: false,
-            show_cursor_window: false,
-            frame_buffer: FrameBufferSettings::default(),
             wanted_timeunit: TimeUnit::None,
             time_string_format: None,
             show_url_entry: false,
@@ -241,12 +427,44 @@ impl Default for UserState {
             surver_file_infos: None,
             surver_url: None,
             transition_value: None,
-            show_annotation_list: false,
             toolbar_group_enabled: HashMap::new(),
             toolbar_group_rows: Vec::new(),
             draw_vector_unknowns_as_line: None,
             focus_highlight: None,
         }
+    }
+}
+
+impl UserState {
+    pub(crate) fn waveform_read(&self) -> Option<crate::wave_data::WaveformRead<'_>> {
+        let id = self
+            .workspace
+            .resolve_waveform(crate::tiles::TileTarget::Focused)?;
+        self.waveform_read_at(id)
+    }
+    pub(crate) fn waveform_read_at(
+        &self,
+        id: crate::tiles::TileId,
+    ) -> Option<crate::wave_data::WaveformRead<'_>> {
+        let (list, view) = self.workspace.waveform_resources(id)?;
+        Some(crate::wave_data::WaveformRead {
+            document: self.waves.as_ref()?,
+            items: list,
+            view,
+            tile_id: id,
+        })
+    }
+    pub(crate) fn waveform_edit(&mut self) -> Option<crate::wave_data::WaveformEdit<'_>> {
+        let id = self
+            .workspace
+            .resolve_waveform(crate::tiles::TileTarget::Focused)?;
+        self.waveform_edit_at(id)
+    }
+    pub(crate) fn waveform_edit_at(
+        &mut self,
+        id: crate::tiles::TileId,
+    ) -> Option<crate::wave_data::WaveformEdit<'_>> {
+        self.workspace.waveform_edit(id, self.waves.as_mut()?)
     }
 }
 
@@ -320,128 +538,18 @@ impl SystemState {
         &mut self,
         filename: WaveSource,
         format: WaveFormat,
-        new_waves: Box<WaveContainer>,
+        new_waves: WaveContainer,
         load_options: LoadOptions,
     ) {
-        let filename_for_title = filename.clone();
-        info!("{format} file loaded");
-        let viewport = Viewport::new();
-        let viewports = [viewport].to_vec();
-
         for translator in self.translators.all_translators() {
             translator.set_wave_source(Some(filename.into_translation_type()));
         }
-
-        let ((new_wave, load_commands), is_reload) =
-            if load_options != LoadOptions::Clear && self.user.waves.is_some() {
-                (
-                    self.user.waves.take().unwrap().update_with_waves(
-                        new_waves,
-                        filename,
-                        format,
-                        &self.translators,
-                        load_options == LoadOptions::KeepAll,
-                    ),
-                    true,
-                )
-            } else if let Some(old) = self.user.previous_waves.take() {
-                (
-                    old.update_with_waves(
-                        new_waves,
-                        filename,
-                        format,
-                        &self.translators,
-                        load_options == LoadOptions::KeepAll,
-                    ),
-                    true,
-                )
-            } else {
-                (
-                    (
-                        WaveData {
-                            inner: DataContainer::Waves(*new_waves),
-                            source: filename,
-                            format,
-                            active_scope: None,
-                            items_tree: DisplayedItemTree::default(),
-                            displayed_items: HashMap::new(),
-                            viewports,
-                            cursor: None,
-                            markers: HashMap::new(),
-                            annotations: Vec::new(),
-                            selected_annotation: None,
-                            annotation_counter: 0,
-                            last_active_viewport_idx: 0,
-                            annotation_menu_pos: None,
-                            annotation_menu_time: None,
-                            focused_item: None,
-                            focused_transaction: (None, None),
-                            default_variable_name_type: self.user.config.default_variable_name_type,
-                            display_variable_indices: self.show_variable_indices(),
-                            scroll_offset: 0.,
-                            drawing_infos: vec![],
-                            drawing_infos_signature: None,
-                            total_height: 0.,
-                            display_item_ref_counter: 0,
-                            old_max_timestamp: None,
-                            graphics: HashMap::new(),
-                            cache_generation: 0,
-                            inflight_caches: HashMap::new(),
-                            annotation_groups: vec![],
-                            annotation_list_visible: false,
-                            cached_time_range: TimeRange::default(),
-                        },
-                        None,
-                    ),
-                    false,
-                )
-            };
-
-        if let Some(cmd) = load_commands {
-            self.load_variables(cmd);
-        }
-        self.invalidate_draw_commands();
-
-        // Get enable_time_offset before modifying self.user.waves
-        let enable_time_offset = self.enable_time_offset();
-        self.user.waves = Some(new_wave);
-
-        // Refresh time offset cache after loading waves
-        if let Some(waves) = &mut self.user.waves {
-            waves.refresh_time_range(enable_time_offset);
-
-            // Update window title with waveform name
-            let title = waves.window_title();
-            if let Some(ctx) = self.context.as_ref() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
-            }
-            // eframe's web backend doesn't act on ViewportCommand::Title, so the browser
-            // tab title has to be set directly via web_sys.
-            #[cfg(target_arch = "wasm32")]
-            if let Some(document) = web_sys::window().and_then(|w| w.document()) {
-                document.set_title(&title);
-            }
-        }
-
-        self.record_file_history(&filename_for_title);
-
-        if !is_reload && let Some(waves) = &mut self.user.waves {
-            // Set time unit
-            self.user.wanted_timeunit = waves.inner.metadata().timescale.unit;
-
-            let ungrouped = AnnotationGroup {
-                name: String::from(DEFAULT_GROUP_NAME),
-                cycle_counter: 0,
-                annotations: Vec::new(),
-            };
-
-            waves.annotation_groups.push(ungrouped);
-
-            // Possibly open state file load dialog
-            if waves.source.sibling_state_file().is_some() {
-                self.update(Message::SuggestOpenSiblingStateFile);
-            }
-        }
+        self.install_document(
+            DataContainer::Waves(new_waves),
+            filename,
+            format,
+            load_options,
+        );
     }
 
     pub(crate) fn on_transaction_streams_loaded(
@@ -449,56 +557,118 @@ impl SystemState {
         filename: WaveSource,
         format: WaveFormat,
         new_ftr: TransactionContainer,
-        _loaded_options: LoadOptions,
+        load_options: LoadOptions,
     ) {
-        info!("Transaction streams are loaded.");
-        self.record_file_history(&filename);
+        self.install_document(
+            DataContainer::Transactions(new_ftr),
+            filename,
+            format,
+            load_options,
+        );
+        self.user.config.theme.alt_frequency = 0;
+    }
 
-        let viewport = Viewport::new();
-        let viewports = [viewport].to_vec();
-
-        let mut new_transaction_streams = WaveData {
-            inner: DataContainer::Transactions(new_ftr),
-            source: filename,
+    fn install_document(
+        &mut self,
+        inner: DataContainer,
+        source: WaveSource,
+        format: WaveFormat,
+        options: LoadOptions,
+    ) {
+        use crate::tiles::{commands::WorkspaceCommand, layout::Placement};
+        if let Err(error) = self.workspace_runtime.document_changed() {
+            error!("Document replacement rejected: {error}");
+            return;
+        }
+        if self.user.workspace.tiles.is_empty() && !self.workspace_runtime.workspace_initialized() {
+            if let Err(error) = self.user.workspace.apply_command(
+                &mut self.workspace_runtime,
+                WorkspaceCommand::CreateTile {
+                    kind: "waveform".into(),
+                    placement: Placement::Root,
+                    focus: true,
+                },
+            ) {
+                error!("Initial waveform creation failed: {error}");
+                return;
+            }
+            for list in self.user.workspace.item_lists.values_mut() {
+                list.default_variable_name_type = self.user.config.default_variable_name_type;
+            }
+        }
+        let previous = self
+            .user
+            .waves
+            .take()
+            .or_else(|| self.user.previous_waves.take());
+        let clear = options == LoadOptions::Clear;
+        let mut document = crate::wave_data::WaveData {
+            inner,
+            source: source.clone(),
             format,
             active_scope: None,
-            items_tree: DisplayedItemTree::default(),
-            displayed_items: HashMap::new(),
-            viewports,
             cursor: None,
             markers: HashMap::new(),
-            annotations: Vec::new(),
-            selected_annotation: None,
-            annotation_counter: 1,
-            last_active_viewport_idx: 0,
-            annotation_menu_pos: None,
-            annotation_menu_time: None,
-            focused_item: None,
-            focused_transaction: (None, None),
-            default_variable_name_type: self.user.config.default_variable_name_type,
             display_variable_indices: self.show_variable_indices(),
-            scroll_offset: 0.,
-            drawing_infos: vec![],
-            drawing_infos_signature: None,
-            total_height: 0.,
-            display_item_ref_counter: 0,
             old_max_timestamp: None,
-            graphics: HashMap::new(),
             cache_generation: 0,
             inflight_caches: HashMap::new(),
-            annotation_groups: vec![],
-            annotation_list_visible: false,
             cached_time_range: TimeRange::default(),
         };
-
-        let enable_time_offset = self.enable_time_offset();
-        new_transaction_streams.refresh_time_range(enable_time_offset);
-
+        if let Some(previous) = previous {
+            document.cache_generation = previous.cache_generation.saturating_add(1);
+            if !clear {
+                document.old_max_timestamp = previous.max_timestamp();
+                document.cursor = previous.cursor;
+                document.markers = previous.markers;
+                document.active_scope = previous.active_scope.filter(|scope| match scope {
+                    crate::wave_data::ScopeType::WaveScope(scope) => document
+                        .inner
+                        .as_waves()
+                        .is_some_and(|waves| waves.scope_exists(scope)),
+                    crate::wave_data::ScopeType::StreamScope(scope) => document
+                        .inner
+                        .as_transactions()
+                        .is_some_and(|transactions| transactions.stream_scope_exists(scope)),
+                });
+            }
+        }
+        document.refresh_time_range(self.enable_time_offset());
+        let loads = self.user.workspace.attach_document(
+            &mut document,
+            &self.translators,
+            clear,
+            options == LoadOptions::KeepAll,
+        );
+        self.user.workspace.update_viewports(&mut document);
+        for list in self.user.workspace.item_lists.values_mut() {
+            if list.annotation_groups.is_empty() {
+                list.annotation_groups.push(AnnotationGroup {
+                    name: DEFAULT_GROUP_NAME.into(),
+                    annotations: Vec::new(),
+                });
+            }
+        }
+        self.user.wanted_timeunit = document.inner.metadata().timescale.unit;
+        let title = document.window_title();
+        self.user.waves = Some(document);
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        for load in loads {
+            self.load_variables(load);
+        }
         self.invalidate_draw_commands();
-
-        self.user.config.theme.alt_frequency = 0;
-        self.user.wanted_timeunit = new_transaction_streams.inner.metadata().timescale.unit;
-        self.user.waves = Some(new_transaction_streams);
+        self.record_file_history(&source);
+        if let Some(context) = &self.context {
+            context.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            #[cfg(target_arch = "wasm32")]
+            if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+                document.set_title(&title);
+            }
+        }
+        if source.sibling_state_file().is_some() {
+            self.update(Message::SuggestOpenSiblingStateFile);
+        }
     }
 
     fn record_file_history(&mut self, source: &WaveSource) {
@@ -587,60 +757,50 @@ impl SystemState {
         mut loaded_state: Box<UserState>,
         path: Option<Utf8PathBuf>,
     ) {
+        if let Err(error) = self.workspace_runtime.install_workspace(
+            loaded_state.workspace.tiles.keys().copied(),
+            loaded_state.workspace.item_lists.keys().copied(),
+        ) {
+            error!("State replacement rejected: {error}");
+            return;
+        }
         // first swap everything, fix special cases afterwards
         mem::swap(&mut self.user, &mut loaded_state);
 
         // swap back waves for inner, source, format since we want to keep the file
         // fix up all wave references from paths if a wave is loaded
         mem::swap(&mut loaded_state.waves, &mut self.user.waves);
-        let load_commands = if let (Some(waves), Some(new_waves)) =
-            (&mut self.user.waves, &mut loaded_state.waves)
-        {
-            mem::swap(&mut waves.active_scope, &mut new_waves.active_scope);
-            let items = std::mem::take(&mut new_waves.displayed_items);
-            let items_tree = std::mem::take(&mut new_waves.items_tree);
-            let load_commands = waves.update_with_items(&items, items_tree, &self.translators);
+        let loads = if let Some(document) = self.user.waves.as_mut() {
+            if let Some(saved) = loaded_state.waves.take() {
+                document.active_scope = saved.active_scope;
+                document.cursor = saved.cursor;
+                document.markers = saved.markers;
+            }
+            self.user
+                .workspace
+                .attach_document(document, &self.translators, false, true)
+        } else {
+            Vec::new()
+        };
+        for load in loads {
+            self.load_variables(load);
+        }
+        self.undo_stack.clear();
+        self.redo_stack.clear();
 
-            mem::swap(&mut waves.viewports, &mut new_waves.viewports);
-            mem::swap(&mut waves.cursor, &mut new_waves.cursor);
-            mem::swap(&mut waves.markers, &mut new_waves.markers);
-            mem::swap(&mut waves.focused_item, &mut new_waves.focused_item);
+        if let Some(ctx) = &self.context {
+            egui::DragAndDrop::clear_payload(ctx);
+        }
 
-            mem::swap(&mut waves.annotations, &mut new_waves.annotations);
-            //load annotations
-            mem::swap(
-                &mut waves.annotation_groups,
-                &mut new_waves.annotation_groups,
-            );
-            mem::swap(
-                &mut waves.annotation_list_visible,
-                &mut new_waves.annotation_list_visible,
-            );
-            mem::swap(
-                &mut waves.annotation_counter,
-                &mut new_waves.annotation_counter,
-            );
-            mem::swap(
-                &mut waves.selected_annotation,
-                &mut new_waves.selected_annotation,
-            );
-            waves.default_variable_name_type = new_waves.default_variable_name_type;
-            waves.scroll_offset = new_waves.scroll_offset;
-            load_commands
+        // Keep saved document settings with the pending workspace until a file loads.
+        self.user.previous_waves = if self.user.waves.is_none() {
+            loaded_state
+                .waves
+                .take()
+                .or_else(|| self.user.previous_waves.take())
         } else {
             None
         };
-        if let Some(load_commands) = load_commands {
-            self.load_variables(load_commands);
-        }
-
-        // reset drag to avoid confusion
-        self.user.drag_started = false;
-        self.user.drag_source_idx = None;
-        self.user.drag_target_idx = None;
-
-        // reset previous_waves & count to prevent unintuitive state here
-        self.user.previous_waves = None;
         self.user.count = None;
 
         // use just loaded path since path is not part of the export as it might have changed anyways
@@ -650,7 +810,7 @@ impl SystemState {
         self.invalidate_draw_commands();
         if let Some(waves) = &mut self.user.waves {
             waves.refresh_time_range(enable_time_offset);
-            waves.update_viewports();
+            self.user.workspace.update_viewports(waves);
         }
     }
 
@@ -673,33 +833,95 @@ impl SystemState {
     }
 
     /// Returns the current canvas state
-    pub(crate) fn current_canvas_state(waves: &WaveData, message: String) -> CanvasState {
+    pub(crate) fn current_canvas_state(
+        list: crate::tiles::ItemListId,
+        document: Option<&crate::wave_data::WaveData>,
+        items: &crate::item_list::ItemList,
+        message: String,
+    ) -> CanvasState {
         CanvasState {
             message,
-            focused_item: waves.focused_item,
-            focused_transaction: waves.focused_transaction.clone(),
-            items_tree: waves.items_tree.clone(),
-            displayed_items: waves.displayed_items.clone(),
-            markers: waves.markers.clone(),
-            annotations: waves.annotations.clone(),
-            annotation_group: waves.annotation_groups.clone(),
-            annotation_list: waves.annotation_list_visible,
-            selected_annotation: waves.selected_annotation,
-            annotation_counter: waves.annotation_counter,
+            list,
+            items_tree: items.items_tree.clone(),
+            displayed_items: items.displayed_items.clone(),
+            markers: document.map(|document| document.markers.clone()),
+            annotations: items.annotations.clone(),
+            annotation_group: items.annotation_groups.clone(),
+            annotation_counter: items.annotation_counter,
         }
+    }
+
+    /// Restore the recorded list, regardless of current focus. Surviving views
+    /// retain navigation and repair only references invalidated by the edit.
+    pub(crate) fn restore_canvas_state(
+        &mut self,
+        previous: CanvasState,
+    ) -> Result<CanvasState, Box<CanvasState>> {
+        let Some(items) = self.user.workspace.item_lists.get_mut(&previous.list) else {
+            return Err(Box::new(previous));
+        };
+        if previous.markers.is_some() && self.user.waves.is_none() {
+            return Err(Box::new(previous));
+        }
+        let inverse = Self::current_canvas_state(
+            previous.list,
+            previous.markers.as_ref().and(self.user.waves.as_ref()),
+            items,
+            previous.message.clone(),
+        );
+        let mut views = self
+            .user
+            .workspace
+            .tiles
+            .values_mut()
+            .filter_map(|entry| match &mut entry.kind {
+                crate::tiles::kind::TileKind::Waveform(tile) if tile.items == previous.list => {
+                    Some(&mut tile.view)
+                }
+                _ => None,
+            })
+            .map(|view| {
+                let focus = view.focus_snapshot(items);
+                (view, focus)
+            })
+            .collect::<Vec<_>>();
+        items.items_tree = previous.items_tree;
+        items.displayed_items = previous.displayed_items;
+        items.annotations = previous.annotations;
+        items.annotation_groups = previous.annotation_group;
+        items.annotation_counter = previous.annotation_counter;
+        *items.layout_cache.get_mut() = Default::default();
+        items.flattened_rows_cache.get_mut().clear();
+        for (view, focus) in &mut views {
+            view.reconcile_item_focus(items, *focus);
+            view.reconcile_annotations(items);
+            view.invalidate_draw_cache();
+        }
+        if let Some(markers) = previous.markers {
+            self.user.waves.as_mut().unwrap().markers = markers;
+            self.invalidate_draw_commands();
+        }
+        Ok(inverse)
     }
 
     /// Push the current canvas state to the undo stack
     pub(crate) fn save_current_canvas(&mut self, message: String) {
-        if let Some(waves) = &self.user.waves {
-            self.undo_stack
-                .push(SystemState::current_canvas_state(waves, message));
-
-            if self.undo_stack.len() > self.user.config.undo_stack_size {
-                self.undo_stack.remove(0);
-            }
-            self.redo_stack.clear();
+        if let Some(waves) = self.user.waveform_read() {
+            self.record_canvas_edit(SystemState::current_canvas_state(
+                self.user.workspace.tiles[&waves.tile_id]
+                    .kind
+                    .item_list()
+                    .unwrap(),
+                Some(waves.document),
+                waves.items,
+                message,
+            ));
         }
+    }
+
+    /// Record a pre-edit snapshot only after a checked edit succeeds.
+    pub(crate) fn record_canvas_edit(&mut self, before: CanvasState) {
+        self.record_edit(crate::tiles::history::UndoRecord::Items(Box::new(before)));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -768,5 +990,67 @@ impl SystemState {
             self.channels.wcp_c2s_receiver = None;
             info!("Stopped WCP server");
         }
+    }
+}
+
+#[cfg(test)]
+mod empty_workspace_tests {
+    use super::*;
+    #[test]
+    fn explicit_empty_layout_is_preserved_but_rejected_commands_do_not_initialize_it() {
+        use crate::{
+            Message,
+            tiles::{TileId, commands::WorkspaceCommand},
+        };
+        for explicit in [true, false] {
+            let mut state = SystemState::new_default_config().unwrap();
+            if explicit {
+                state
+                    .update(Message::Workspace(WorkspaceCommand::SetLayout(None)))
+                    .unwrap();
+            } else {
+                assert!(
+                    state
+                        .update(Message::Workspace(WorkspaceCommand::CloseTile(TileId(99))))
+                        .is_none()
+                );
+            }
+            state.install_document(
+                DataContainer::Empty,
+                WaveSource::Data,
+                WaveFormat::Vcd,
+                LoadOptions::KeepAll,
+            );
+            assert_eq!(state.user.workspace.tiles.is_empty(), explicit);
+        }
+    }
+
+    #[test]
+    fn reload_and_saved_empty_layout_do_not_recreate_a_closed_waveform() {
+        let mut state = SystemState::new_default_config().unwrap();
+        let install = |state: &mut SystemState| {
+            state.install_document(
+                DataContainer::Empty,
+                WaveSource::Data,
+                WaveFormat::Vcd,
+                LoadOptions::KeepAll,
+            )
+        };
+        install(&mut state);
+        assert_eq!(state.user.workspace.tiles.len(), 1);
+        let id = state.user.workspace.layout.focused().unwrap();
+        state
+            .update(crate::Message::Workspace(
+                crate::tiles::commands::WorkspaceCommand::CloseTile(id),
+            ))
+            .unwrap();
+        install(&mut state);
+        assert!(state.user.workspace.tiles.is_empty());
+        let saved = state.encode_state().unwrap();
+        let restored: UserState = crate::tiles::serde::decode(&saved).unwrap();
+        let mut fresh = SystemState::new_default_config().unwrap();
+        fresh.load_state(Box::new(restored), None);
+        install(&mut fresh);
+        assert!(fresh.user.workspace.tiles.is_empty());
     }
 }

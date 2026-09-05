@@ -1,0 +1,6 @@
+(
+    title: Some("Future pipeline"),
+    kind: "future.pipeline",
+    kind_version: 17,
+    payload: Record(children: [Tuple(42, Unit), Record(children: [])]),
+)

@@ -1,4 +1,5 @@
 //! Time handling and formatting.
+use crate::tiles::commands::DocumentCommand;
 use derive_more::Display;
 use ecolor::Color32;
 use egui::{Button, Key, RichText, Ui};
@@ -737,6 +738,13 @@ impl SystemState {
         waves: &WaveData,
         msgs: &mut Vec<Message>,
     ) {
+        let Some(tile_id) = self
+            .user
+            .workspace
+            .resolve_waveform(crate::tiles::TileTarget::Focused)
+        else {
+            return;
+        };
         ui.horizontal(|ui| {
             // Acquire or create the TimeInputState for this id
             let mut widgets = self.time_widgets.borrow_mut();
@@ -744,7 +752,7 @@ impl SystemState {
 
             let on_commit = |time_stamp: BigInt| {
                 // This closure captures the provided id_prefix and can be used for both buttons
-                Message::GoToTime(Some(time_stamp), 0)
+                Message::GoToTime(Some(time_stamp), tile_id)
             };
             // Render text edit and combobox
             self.time_input_controls(ui, state, id_prefix, waves, msgs, &on_commit);
@@ -772,7 +780,7 @@ impl SystemState {
                 && let Some(time_stamp) =
                     state.to_timescale_ticks(&waves.inner.metadata().timescale)
             {
-                msgs.push(Message::CursorSet(time_stamp));
+                msgs.push(Message::ToDocument(DocumentCommand::CursorSet(time_stamp)));
             }
         });
     }
@@ -851,15 +859,15 @@ impl SystemState {
     }
 }
 
-impl WaveData {
-    pub(crate) fn draw_tick_line(&self, x: f32, ctx: &mut DrawingContext, stroke: &Stroke) {
+impl DrawingContext<'_> {
+    pub(crate) fn draw_tick_line(&self, x: f32, stroke: &Stroke) {
         let Pos2 {
             x: x_pos,
             y: y_start,
-        } = (ctx.to_screen)(x, 0.);
-        ctx.painter.vline(
+        } = (self.to_screen)(x, 0.);
+        self.painter.vline(
             x_pos,
-            (y_start)..=(y_start + ctx.cfg.canvas_size.y),
+            (y_start)..=(y_start + self.cfg.canvas_size.y),
             *stroke,
         );
     }
@@ -868,16 +876,15 @@ impl WaveData {
         &self,
         color: Color32,
         ticks: &[(String, f32, i64)],
-        ctx: &DrawingContext<'_>,
         y_offset: f32,
         align: Align2,
     ) {
         for (tick_text, x, _) in ticks {
-            ctx.painter.text(
-                (ctx.to_screen)(*x, y_offset),
+            self.painter.text(
+                (self.to_screen)(*x, y_offset),
                 align,
                 tick_text,
-                FontId::proportional(ctx.cfg.text_size),
+                FontId::proportional(self.cfg.text_size),
                 color,
             );
         }
@@ -889,14 +896,13 @@ impl WaveData {
         color: Option<Color32>,
         text: &str,
         ticks: &[(String, f32, i64)],
-        ctx: &DrawingContext<'_>,
         y_offset: f32,
         config: &SurferConfig,
     ) {
-        let font = FontId::monospace(ctx.cfg.text_size);
+        let font = FontId::monospace(self.cfg.text_size);
         let color = color.unwrap_or(config.theme.foreground);
 
-        let layout = ctx
+        let layout = self
             .painter
             .layout_no_wrap(text.to_string(), font.clone(), color);
         let text_width = layout.rect.width() + (font.size * 2.);
@@ -922,8 +928,8 @@ impl WaveData {
             }
             last_stamp = *stamp;
 
-            ctx.painter.text(
-                (ctx.to_screen)(*x, y_offset),
+            self.painter.text(
+                (self.to_screen)(*x, y_offset),
                 Align2::CENTER_TOP,
                 text.to_string(),
                 font.clone(),
@@ -941,34 +947,6 @@ impl SystemState {
         } else {
             time_format
         }
-    }
-
-    pub(crate) fn get_ticks_for_viewport_idx(
-        &self,
-        waves: &WaveData,
-        viewport_idx: usize,
-        cfg: &DrawConfig,
-    ) -> Vec<(String, f32, i64)> {
-        self.get_ticks_for_viewport(waves, &waves.viewports[viewport_idx], cfg)
-    }
-
-    pub(crate) fn get_ticks_for_viewport(
-        &self,
-        waves: &WaveData,
-        viewport: &Viewport,
-        cfg: &DrawConfig,
-    ) -> Vec<(String, f32, i64)> {
-        let range = waves.time_range();
-        get_ticks_internal(
-            viewport,
-            &waves.inner.metadata().timescale,
-            cfg.canvas_size.x,
-            cfg.text_size,
-            &self.user.wanted_timeunit,
-            &self.get_time_format(),
-            self.user.config.theme.ticks.density,
-            range,
-        )
     }
 }
 
@@ -1080,6 +1058,27 @@ fn scale_time(value: &BigInt, exponent_diff: i8, timescale: &TimeScale) -> Optio
     };
 
     Some(result)
+}
+
+impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
+    pub(crate) fn get_ticks_for_viewport(
+        &self,
+        waves: &WaveData,
+        viewport: &Viewport,
+        cfg: &DrawConfig,
+    ) -> Vec<(String, f32, i64)> {
+        let range = waves.time_range();
+        get_ticks_internal(
+            viewport,
+            &waves.inner.metadata().timescale,
+            cfg.canvas_size.x,
+            cfg.text_size,
+            &self.wanted_timeunit,
+            &self.time_format,
+            self.config.theme.ticks.density,
+            range,
+        )
+    }
 }
 
 #[cfg(test)]

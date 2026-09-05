@@ -1,8 +1,8 @@
 //! Functions for drawing the left hand panel showing scopes and variables.
 use crate::SystemState;
 use crate::data_container::{DataContainer, VariableType as VarType};
-use crate::displayed_item_tree::VisibleItemIndex;
 use crate::message::Message;
+use crate::tiles::commands::DocumentCommand;
 use crate::tooltips::{scope_tooltip_text, variable_tooltip_text};
 use crate::transaction_container::StreamScopeRef;
 use crate::transactions::{draw_transaction_root, draw_transaction_variable_list};
@@ -487,37 +487,25 @@ impl SystemState {
         } else {
             ui.add(egui::Button::selectable(is_selected, name))
         };
-        let _ = response.interact(egui::Sense::click_and_drag());
-        response.drag_started().then(|| {
-            msgs.push(Message::VariableDragStarted(VisibleItemIndex(
-                wave.display_item_ref_counter,
-            )));
-        });
-
+        response = response.interact(egui::Sense::click_and_drag());
         if scroll_to_label {
             response.scroll_to_me(Some(Align::Center));
         }
 
-        response.drag_stopped().then(|| {
-            if ui.input(|i| i.pointer.hover_pos().unwrap_or_default().x)
-                > self.user.sidepanel_width.unwrap_or_default()
-            {
-                let scope_t = ScopeType::WaveScope(scope.clone());
-                let variables = wave
-                    .inner
-                    .variables_in_scope(&scope_t)
-                    .iter()
-                    .filter_map(|var| match var {
-                        VarType::Variable(var) => Some(var.clone()),
-                        VarType::Generator(_) => None,
-                    })
-                    .collect_vec();
-
-                msgs.push(Message::AddDraggedVariables(
-                    self.filtered_variables(variables.as_slice(), false),
-                ));
-            }
-        });
+        if response.drag_started() {
+            let variables = wave
+                .inner
+                .variables_in_scope(&ScopeType::WaveScope(scope.clone()))
+                .iter()
+                .filter_map(|var| match var {
+                    VarType::Variable(var) => Some(var.clone()),
+                    VarType::Generator(_) => None,
+                })
+                .collect_vec();
+            response.dnd_set_drag_payload(crate::tile_kinds::waveform::WaveformDrag::Variables(
+                self.filtered_variables(&variables, false),
+            ));
+        }
         if self.show_scope_tooltip() {
             response = response.on_hover_ui(|ui| {
                 ui.set_max_width(ui.spacing().tooltip_width);
@@ -559,11 +547,13 @@ impl SystemState {
             }
         });
         response.clicked().then(|| {
-            msgs.push(Message::SetActiveScope(if is_selected {
-                None
-            } else {
-                Some(ScopeType::WaveScope(scope.clone()))
-            }));
+            msgs.push(Message::ToDocument(DocumentCommand::SetActiveScope(
+                if is_selected {
+                    None
+                } else {
+                    Some(ScopeType::WaveScope(scope.clone()))
+                },
+            )));
         });
     }
 
@@ -735,7 +725,9 @@ impl SystemState {
             .iter()
             .map(|var| {
                 let meta = wave_container.variable_meta(var).ok();
-                let name_info = self.get_variable_name_info(var, meta.as_ref());
+                let name_info = self
+                    .waveform_services()
+                    .get_variable_name_info(var, meta.as_ref());
                 VariableListRow {
                     variable: var.clone(),
                     meta,
@@ -906,7 +898,7 @@ impl SystemState {
 
                     let mut response = ui.add(egui::Button::selectable(false, label));
 
-                    let _ = response.interact(egui::Sense::click_and_drag());
+                    response = response.interact(egui::Sense::click_and_drag());
 
                     if self.show_tooltip() {
                         // Reuse the already-obtained `meta` and pass a clone of the variable
@@ -921,18 +913,11 @@ impl SystemState {
                             )));
                         });
                     }
-                    response.drag_started().then(|| {
-                        msgs.push(Message::VariableDragStarted(VisibleItemIndex(
-                            self.user.waves.as_ref().unwrap().display_item_ref_counter,
-                        )));
-                    });
-                    response.drag_stopped().then(|| {
-                        if ui.input(|i| i.pointer.hover_pos().unwrap_or_default().x)
-                            > self.user.sidepanel_width.unwrap_or_default()
-                        {
-                            msgs.push(Message::AddDraggedVariables(vec![variable.clone()]));
-                        }
-                    });
+                    response.dnd_set_drag_payload(
+                        crate::tile_kinds::waveform::WaveformDrag::Variables(vec![
+                            variable.clone(),
+                        ]),
+                    );
                     response
                         .clicked()
                         .then(|| msgs.push(Message::AddVariables(vec![variable.clone()])));

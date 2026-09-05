@@ -16,6 +16,7 @@ show_space = true
 show_unit = true
 
 [layout]
+hide_single_tab_bar = false
 show_hierarchy = true
 show_menu = true
 show_toolbar = true

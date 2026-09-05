@@ -1,6 +1,7 @@
 # Tiles & Tabs in Surfer — Design
 
-Status: proposal, to be implemented on the `vtr` branch.
+Status: revised proposal, to be implemented on the `vtr` branch.
+Code snippets specify contracts; exact library adapter signatures are verified during implementation.
 Baseline: `db1ca915` (egui 0.36.1, y-location cache rework included).
 Reference: `origin/table-ftr-event-vibes` (PoC, egui 0.35, `egui_tiles` 0.16) — ideas only, not a baseline.
 
@@ -13,22 +14,23 @@ Surfer gets a VSCode-like workspace: the central area is a tree of **splits** an
 loaded (immutable) data: a waveform view, a memory viewer, a marker table, a log
 panel, later signal tables and pipeline views. Tiles can be created, split,
 dragged into other groups, tabbed, closed, and focused with mouse or keyboard.
-Commands and the palette act on the focused tile. The whole layout round-trips
+Tile commands act on an explicit target captured from focus or their originating view. The whole layout round-trips
 through the `.surf.ron` state file.
 
-The design in one paragraph:
+Core decisions:
 
-* `UserState` becomes tile-native: `layout` (the tree), `tiles` (tile state by
+* `UserState` becomes tile-native: `layout` (the tree), `tiles` (tile entries by
   id), `item_lists` (what waveform tiles display, shareable between tiles), and
   `waves` (the shared document: data container, cursor, markers, time range).
-* The layout engine is `egui_tiles` 0.17 at runtime; Surfer owns the
+* The proposed layout engine is `egui_tiles` 0.17 at runtime; Surfer owns the
   serialized layout format and the tile identity, so the file format does not
   depend on the crate.
 * A tile kind is a struct implementing one trait (`TileView`) plus one variant
   in a registry enum (`TileKind`). Its state, rendering, messages and
   serialization live in its own module. The layout core never matches on a
   concrete kind.
-* All state mutation stays message-driven. Tile `ui` takes `&self`.
+* Persistent workspace state changes through commands. Tile `ui` takes `&self`;
+  rendering may update only disposable caches and interaction scratch state.
 * Existing floating/side widgets that present data (memory viewer, markers,
   logs, frame buffer, annotation list, transaction details) become tile kinds.
   Chrome (menu, toolbar, statusbar, overview, hierarchy sidebar) and transient
@@ -56,7 +58,7 @@ current tree):
 | Undo (`CanvasState`) snapshots items, markers, annotations only | `lib.rs:293`, `state.rs:597-612` | Decide whether tile open/close is undoable |
 | Widgets never mutate state; they push `Message`s, drained in `App::ui` | `view.rs:105-132` | Keep this invariant; the PoC broke it for one tile kind |
 
-Assets to reuse unchanged: `Viewport` (`Copy`, serde, relative time),
+Assets to reuse, adapting ownership and call sites where needed: `Viewport` (`Copy`, serde, relative time),
 `DisplayedItemTree`/`DisplayedItem`/`DisplayedItemRef` and the reattachment logic
 in `WaveData::update_with_items`, the y-location cache
 (`compute_item_drawing_infos` / `item_layout_signature`), the analog cache
@@ -70,12 +72,12 @@ the snapshot test harness.
 ```
 UserState
 ├── layout: Layout            ─ tree of Split / Tabs / Tile(TileId); focused tile
-├── tiles: BTreeMap<TileId, TileKind>
-│     ├── 1 → Waveform(WaveformTile { items: ItemListId(1), viewport, scroll, focus… })
-│     ├── 2 → Waveform(WaveformTile { items: ItemListId(1), viewport, … })   ← linked
-│     ├── 3 → Waveform(WaveformTile { items: ItemListId(2), … })             ← independent
-│     ├── 4 → Memory(MemoryTile { scope, name, formats, filters… })
-│     └── 5 → Markers(MarkersTile {})
+├── tiles: BTreeMap<TileId, TileEntry>
+│     ├── 1 → kind: Waveform(WaveformTile { items: ItemListId(1), viewport, scroll, focus… })
+│     ├── 2 → kind: Waveform(WaveformTile { items: ItemListId(1), viewport, … })   ← linked
+│     ├── 3 → kind: Waveform(WaveformTile { items: ItemListId(2), … })             ← independent
+│     ├── 4 → kind: Memory(MemoryTile { scope, name, formats, filters… })
+│     └── 5 → kind: Markers(MarkersTile {})
 ├── item_lists: BTreeMap<ItemListId, ItemList>
 │     ├── 1 → ItemList { items_tree, displayed_items, annotations, graphics, … }
 │     └── 2 → ItemList { … }
@@ -95,7 +97,7 @@ Ownership rules:
   vertical scroll, focused item, focused transaction, column visibility, a
   user-given title, and for non-waveform kinds all their settings.
 * **Runtime** (never serialized): draw caches, y-location cache, in-flight
-  async work. Lives in `#[serde(skip)]` fields on the owning struct.
+  async work. Lives on the owning struct but is absent from file DTOs.
 
 ---
 
@@ -107,10 +109,12 @@ Module layout:
 libsurfer/src/tiles/
 ├── mod.rs        re-exports; TileId, ItemListId, TileTarget
 ├── layout.rs     Layout, LayoutNode, split/tabs/move/close operations, focus navigation
-├── kind.rs       TileKind + TileMessage registry (the only place that lists all kinds)
+├── kind.rs       TileKind + TileMessage registry and context-aware factories
 ├── view.rs       TileView trait, TileCtx
 ├── render.rs     egui_tiles::Behavior impl, draw_layout, tab bar chrome, focus detection
-└── serde.rs      Layout <-> LayoutNode conversion, legacy migration
+├── serde.rs      versioned file DTOs, validation, legacy migration
+├── commands.rs   target resolution, workspace transactions, undo records
+└── runtime.rs    session allocators, workspace epochs, async request tokens
 libsurfer/src/tile_kinds/
 ├── waveform.rs   WaveformTile (moves canvas/name/value column code out of view.rs)
 ├── memory.rs     MemoryTile (from memory_viewer.rs)
@@ -132,11 +136,25 @@ pub struct TileId(pub u64);
 pub struct ItemListId(pub u64);
 ```
 
-Allocation: `UserState` keeps `#[serde(skip)] next_tile_id: u64` and
-`next_item_list_id: u64`. Both are **recomputed on load** as `max(keys) + 1`,
-exactly like `display_item_ref_counter` today (`wave_data.rs:293-298`). This
-avoids the PoC bug where `#[serde(default)]` counters restarted at 0 and
-aliased existing tiles.
+Allocation lives in `SystemState` runtime state, outside serialization and undo.
+Tile and item-list allocators are monotonic for the lifetime of the application:
+loading a workspace advances each allocator to at least `max(loaded keys) + 1`
+and never decreases it. Allocation uses checked arithmetic; exhausted or invalid
+IDs produce a load/command error. Undo may restore the same logical tile under
+its old ID; it never assigns that ID to a different tile.
+
+Persisted IDs are local to a workspace. Loading another workspace may contain
+the same numeric IDs, so a runtime `WorkspaceEpoch` is advanced whenever a
+workspace is replaced, including loading a state file. Document replacement or
+reload separately advances `DocumentGeneration`. Neither counter is restored
+by undo. Egui IDs include the workspace epoch and application `TileId`.
+
+Every async request carries `(workspace_epoch, document_generation, tile_id,
+request_id)` plus its complete input key. Each new request gets a session-wide
+monotonic request ID. Accept a completion only if the workspace/document still
+match, the tile exists, and its pending request and input key match. Closing,
+undo-restoring or reconfiguring a tile clears its pending request. Cancellation
+is an optimization; rejecting stale completions is mandatory.
 
 `egui_tiles::TileId` (the crate's node id) is a runtime detail and is never
 serialized or exposed in messages. Panes in the runtime tree carry our `TileId`.
@@ -145,8 +163,9 @@ serialized or exposed in messages. Panes in the runtime tree carry our `TileId`.
 
 ```rust
 pub struct Layout {
-    /// Runtime layout engine. Rebuilt from `LayoutNode` on load.
-    #[serde(skip)]
+    /// Authoritative layout, changed only by workspace commands.
+    root: Option<LayoutNode>,
+    /// Runtime adapter and interaction state; rebuilt/reconciled from root.
     tree: egui_tiles::Tree<TileId>,
     /// The tile that receives ambient commands and keyboard input.
     pub focused: Option<TileId>,
@@ -167,17 +186,32 @@ pub enum LayoutNode {
 pub enum SplitDir { Horizontal, Vertical }
 ```
 
-`Layout` implements `Serialize`/`Deserialize` by hand via a private
-`LayoutFile { root: Option<LayoutNode>, focused, focus_history }`. Conversion
-`tree -> LayoutNode` walks `egui_tiles::Tiles`:
-`Container::Linear` → `Split` (shares taken from `Linear::shares` in child
-order), `Container::Tabs` → `Tabs` (`active` as index), `Container::Grid` →
-`Split { Horizontal }` (grids are never created by Surfer; tolerated on read).
-`LayoutNode -> tree` inserts panes and containers and sets shares. Both
-directions are pure functions with unit tests (round trip, and "every `Tile`
-id exists in `tiles`").
+Persistence uses an explicit `LayoutFile { root, focused, focus_history }` DTO;
+`Layout` itself is not the file format. `LayoutNode` is the authoritative tree.
+The runtime adapter maps its nodes to `egui_tiles` containers and panes, keeping
+node IDs stable across frames when the corresponding node survives.
 
-Operations (all on `Layout`, all pure tree edits, used by message handlers):
+Only linear splits and tab groups are supported. Disable grid creation in the
+adapter; an unexpected runtime grid is an adapter error, not a lossy conversion
+to a horizontal split. Tabs contain tile leaves; splits contain splits or tab
+groups. Normalize bare leaves into single-tab groups. Preserve a single-tab
+group even when simplifying; remove empty containers and redundant splits.
+
+Validate the whole workspace atomically on load and on `SetLayout`: each tile
+appears exactly once, each referenced tile/list exists, and every list has an
+owner (except conservatively retained unknown-kind resources, §8.2). Validate that
+tab indices are in range, split shares match child counts and are finite and
+positive, and focus/history refer to existing tiles without duplicates. Bound parser
+recursion and input size, then enforce node-count/depth limits before conversion. Report invalid
+input without replacing the current workspace. Normalize shares and discard
+stale saved focus/history entries as explicitly documented repairs; do not
+silently invent missing tiles or item lists. Focus must be visible; explicitly
+focusing a hidden tile activates its tab first.
+
+The adapter returns a proposed layout edit after a UI pass. It cannot commit
+persistent changes itself; §6.1 defines how proposals enter the command path.
+
+Internal layout operations, called only by the validated workspace dispatcher:
 
 ```rust
 impl Layout {
@@ -189,8 +223,8 @@ impl Layout {
     pub fn set_active_tab(&mut self, tile: TileId);        // makes tile visible in its group
     pub fn neighbor(&self, from: TileId, dir: Direction) -> Option<TileId>;  // spatial, by rect
     pub fn next_in_group(&self, from: TileId, delta: isize) -> Option<TileId>;
-    pub fn rect(&self, tile: TileId) -> Option<Rect>;      // last frame's rect, for hit tests
-    pub fn simplify(&mut self);                            // prune empty/single-child containers
+    pub fn rect(&self, tile: TileId) -> Option<Rect>;      // revision-checked adapter geometry
+    pub fn simplify(&mut self);                            // preserve single-tab groups
 }
 
 /// Where a new or moved tile goes.
@@ -202,7 +236,7 @@ pub enum Placement {
     Beside(TileId, Direction),
     /// Split the whole layout; e.g. logs at the bottom.
     Edge(Direction),
-    /// Empty layout or no anchor: become the root.
+    /// Empty layout only: become the root; reject if nonempty.
     Root,
 }
 
@@ -216,10 +250,19 @@ layout creates one waveform tile.
 
 ### 4.3 Tile kinds: the registry and the trait
 
+A generic entry owns metadata common to all tile kinds:
+
+```rust
+pub struct TileEntry {
+    pub title: Option<String>,
+    pub kind: TileKind,
+}
+```
+
 `tiles/kind.rs` is the **only** file that enumerates kinds:
 
 ```rust
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Clone)]
 pub enum TileKind {
     Waveform(WaveformTile),
     Memory(MemoryTile),
@@ -235,6 +278,7 @@ pub enum TileKind {
 /// Kind-specific messages. `Message::ToTile(target, TileMessage)` routes them.
 #[derive(Debug, Deserialize)]
 pub enum TileMessage {
+    Waveform(WaveformMessage),
     Memory(MemoryMessage),
     Markers(MarkersMessage),
     Logs(LogsMessage),
@@ -250,36 +294,37 @@ impl TileKind {
     /// Deliver a kind-specific message. Mismatched kind is a logged no-op.
     pub fn update(&mut self, msg: TileMessage, cx: &mut TileUpdateCtx) {
         match (self, msg) {
+            (Self::Waveform(t), TileMessage::Waveform(m)) => t.update(m, cx),
             (Self::Memory(t), TileMessage::Memory(m)) => t.update(m, cx),
             (Self::Markers(t), TileMessage::Markers(m)) => t.update(m, cx),
             /* … */
             (t, m) => warn!("{} tile ignored {m:?}", t.kind_name()),
         }
     }
-    /// For menus, the palette and `tile_new <kind>`.
-    pub const CREATABLE: &[(&str, fn() -> TileKind)] = &[
-        ("waveform", || TileKind::Waveform(WaveformTile::default())),
-        ("memory", || TileKind::Memory(MemoryTile::default())),
-        ("markers", || TileKind::Markers(MarkersTile::default())),
-        ("logs", || TileKind::Logs(LogsTile::default())),
-        /* … */
-    ];
+    // Registry metadata: stable name, singleton policy, payload version,
+    // decoder/encoder and create(&mut TileCreateCtx) -> Result<TileKind>.
+    // Waveform creation allocates a valid empty ItemList in the same transaction.
 }
 ```
 
-Four match sites in one file, plus the enum variant. A `tile_kinds!` macro can
-generate them if the list grows; not required initially.
+Use one explicit registry with enum dispatch; a macro is unnecessary initially.
+The enum provides exhaustive internal dispatch, while dedicated file DTOs and
+per-kind codecs implement persistence (§8). No runtime plugin registry is needed.
+Factories receive the context they need: `WaveformTile::default()` cannot create
+a valid list reference on its own. Singleton policy is registry metadata and is
+enforced by every creation path, including split and file validation.
 
-Why an enum and not `Box<dyn TileView>` with a deserialization registry:
-serde derives handle the file format and messages for free, exhaustiveness
-checks catch missing arms, and it works on wasm32 (where `typetag`/`inventory`
-style registries are unreliable). The cost — one variant plus four one-line
-arms per kind — is small and local.
+Waveform-local operations use `TileMessage::Waveform`, just like other kinds.
+Move existing item, zoom and annotation operations into `WaveformMessage` and
+update their callers together. Cursor and marker-time changes remain shared
+`DocumentCommand`s; marker-row changes belong to an explicit item list.
+Global application operations (load, preferences, dialogs) remain top-level.
+Legacy textual command names may translate at the input boundary; the internal
+message architecture has no compatibility exception for waveforms.
 
-Why waveform-tile messages are **not** in `TileMessage`: the waveform tile has
-~100 existing top-level `Message` variants (items, zoom, markers…). Moving them
-would churn most of `update` for no gain. They stay top-level and act on the
-**target waveform tile** (§5.1). New kinds use `Message::ToTile`.
+`TileMessage` contains deserializable user commands only. Async completions use
+a separate internal `TileCompletion` registry with request tokens (§4.1), so
+runtime `Arc` payloads do not become part of the injection/file API.
 
 The trait each kind implements (`tiles/view.rs`):
 
@@ -288,46 +333,49 @@ pub trait TileView {
     /// Stable kind name: menus, palette, tab default title, docs.
     fn kind_name(&self) -> &'static str;
 
-    /// Tab title. Default: kind name; a tile with `title: Some(..)` overrides.
+    /// Default tab title; the renderer applies TileEntry::title if set.
     fn title(&self, cx: &TileCtx) -> String;
 
     /// Draw the tile body. Immutable: all changes are sent as messages via `cx`.
-    /// Per-frame scratch state lives in egui memory or `#[serde(skip)] RefCell` fields.
+    /// Per-frame scratch state lives in egui memory or runtime RefCell fields.
     fn ui(&self, ui: &mut egui::Ui, cx: &mut TileCtx);
 
     /// A copy suitable for "split": `None` means the kind cannot be split-cloned
     /// and the split menu entry is disabled for it.
     fn split_clone(&self) -> Option<TileKind> { None }
 
-    /// Only one instance makes sense (logs, markers): "open" focuses the existing tile.
-    fn singleton(&self) -> bool { false }
-
     /// Called after the shared document changed (reload, switch_file, new file).
-    /// Fix up references or degrade gracefully; return false to close the tile.
-    fn on_waves_changed(&mut self, change: WavesChange, cx: &mut TileUpdateCtx) -> bool { true }
+    /// Reattach stable references and clear caches. Missing targets render an
+    /// unavailable state while retaining settings; document changes do not close tiles.
+    fn on_waves_changed(&mut self, change: WavesChange, cx: &mut TileUpdateCtx) {}
 
     /// Extra entries for the tab context menu (after the generic ones).
     fn tab_context_menu(&self, ui: &mut egui::Ui, cx: &mut TileCtx) {}
 
-    /// For tests: false while async work (caches) is pending.
+    /// Optional palette commands for this kind, resolved to this tile before queuing.
+    fn commands(&self) -> Vec<CommandSpec> { Vec::new() }
+
+    /// For tests: false while required async work is pending; failures are terminal.
     fn is_ready(&self, cx: &TileCtx) -> bool { true }
 }
 
 pub enum WavesChange { Loaded, Reloaded { keep_unavailable: bool }, Cleared }
 
 pub struct TileCtx<'a> {
-    pub app: &'a SystemState,
+    services: TileReadServices<'a>, // document, list lookup, config and shared services
     pub tile_id: TileId,
     pub focused: bool,
-    pub msgs: &'a mut Vec<Message>,
+    commands: &'a mut CommandSink,
 }
 impl TileCtx<'_> {
     pub fn waves(&self) -> Option<&WaveData>;
     pub fn config(&self) -> &SurferConfig;
     pub fn theme(&self) -> &SurferTheme;
     pub fn translators(&self) -> &TranslatorList;
-    pub fn send(&mut self, m: Message);
-    /// Shorthand for `Message::ToTile(TileTarget::Id(self.tile_id), m)`.
+    pub fn item_list(&self, id: ItemListId) -> Option<&ItemList>;
+    pub fn send_document(&mut self, m: DocumentCommand);
+    pub fn request(&mut self, request: TileWorkRequest);
+    /// Shorthand for `Message::ToTile(self.tile_id, m)`.
     pub fn send_self(&mut self, m: TileMessage);
     /// Salted egui id for widgets inside this tile.
     pub fn id(&self, salt: impl Hash) -> egui::Id;
@@ -335,19 +383,27 @@ impl TileCtx<'_> {
 
 pub struct TileUpdateCtx<'a> {
     pub tile_id: TileId,
-    pub waves: Option<&'a mut WaveData>,
-    pub item_lists: &'a mut BTreeMap<ItemListId, ItemList>,
+    pub waves: Option<&'a WaveData>,
     pub config: &'a SurferConfig,
     pub translators: &'a TranslatorList,
-    /// Messages to run after this update (e.g. invalidate caches).
-    pub followups: &'a mut Vec<Message>,
+    // Private transaction service: checked access to the tile's owned resources,
+    // before/after recording, invalidation and concretely targeted followups.
+    transaction: &'a mut TileTransaction,
 }
 ```
 
+`TileTransaction` exposes checked list-edit operations for the current tile and
+records content before mutation. Shared document changes go through document
+commands; kinds do not get mutable access to all lists or the whole document.
+Tile-local setting edits use a transaction helper that records the kind's
+before/after undo payload when the operation is semantic, and omits navigation.
+Read-only context is composed from disjoint services; there is no unrestricted
+`&SystemState` escape hatch in the kind contract.
+
 `ui` takes `&self` on purpose: it is what the rest of Surfer already does
-(widgets push messages, `update` mutates), it makes the borrow story trivial
-(the tile pass borrows `SystemState` immutably, §6.1), and it keeps undo and
-snapshot tests deterministic. The PoC's Konata tile mutated serialized state
+(widgets push messages, `update` mutates). Disjoint services keep the tile pass
+read-only (§6.1), and the command boundary makes undo and interaction tests
+reproducible. The PoC's Konata tile mutated serialized state
 during draw and paid for it.
 
 ### 4.4 Shared document: `WaveData` after the split
@@ -356,7 +412,6 @@ during draw and paid for it.
 
 ```rust
 pub struct WaveData {
-    #[serde(skip, default = "DataContainer::__new_empty")]
     pub inner: DataContainer,
     pub source: WaveSource,
     pub format: WaveFormat,
@@ -365,20 +420,20 @@ pub struct WaveData {
     pub markers: HashMap<u8, BigInt>,        // marker times; rows live in item lists
     pub display_variable_indices: bool,
     // runtime
-    #[serde(skip)] pub old_max_timestamp: Option<BigInt>,
-    #[serde(skip)] pub cache_generation: u64,
-    #[serde(skip)] pub inflight_caches: HashMap<AnalogCacheKey, Arc<AnalogCacheEntry>>,
-    #[serde(skip)] pub cached_time_range: TimeRange,
+    pub old_max_timestamp: Option<BigInt>,
+    pub cache_generation: u64,
+    pub inflight_caches: HashMap<AnalogCacheKey, Arc<AnalogCacheEntry>>,
+    pub cached_time_range: TimeRange,
 }
 ```
 
 Removed from `WaveData` and moved: `items_tree`, `displayed_items`,
 `display_item_ref_counter`, `default_variable_name_type`, `annotations`,
-`annotation_groups`, `annotation_counter`, `annotation_list_visible`,
-`selected_annotation`, `annotation_menu_*`, `graphics`, `drawing_infos`,
+`annotation_groups`, `annotation_counter`, `graphics`, `drawing_infos`,
 `drawing_infos_signature`, `total_height` → `ItemList`;
 `viewports`, `last_active_viewport_idx`, `scroll_offset`, `focused_item`,
-`focused_transaction` → `WaveformTile`.
+`focused_transaction` → `WaveformTile`; annotation selection/menu scratch →
+the relevant view; annotation-list visibility → presence of its tile.
 
 `WaveData::update_with_waves` (reload/switch) keeps only shared fields; the
 per-list and per-tile reattachment is driven from `SystemState::on_waves_loaded`
@@ -387,7 +442,7 @@ per-list and per-tile reattachment is driven from `SystemState::on_waves_loaded`
 ### 4.5 Item list
 
 ```rust
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Default)]
 pub struct ItemList {
     pub items_tree: DisplayedItemTree,
     pub displayed_items: HashMap<DisplayedItemRef, DisplayedItem>,
@@ -397,39 +452,48 @@ pub struct ItemList {
     pub annotations: Vec<Annotation>,
     pub annotation_groups: Vec<AnnotationGroup>,
     pub annotation_counter: i32,
-    pub selected_annotation: Option<egui::Id>,
     pub graphics: HashMap<GraphicId, Graphic>,
-    // runtime: y-location cache (was WaveData::drawing_infos)
-    #[serde(skip)]
+    // runtime: y-location cache (was WaveData::drawing_infos); content-space only
     pub layout_cache: RefCell<ItemLayoutCache>,   // { signature: u64, infos: Vec<ItemDrawingInfo>, total_height: f32 }
 }
 ```
 
 Everything that today takes `&WaveData` to read items takes `&ItemList`
-instead (`add_variables`, `remove_items`, `move_item`, `compute_variable_display_names`,
-`update_with_items`, `visible_drawing_infos`, …). This is a mechanical move; the
-methods' bodies do not change. `DisplayedItemRef` and `VisibleItemIndex` are
-scoped to a list; a `(ItemListId, DisplayedItemRef)` pair is only needed at the
-WCP boundary (§5.6).
+instead (`compute_variable_display_names`, `visible_drawing_infos`, …).
+Mutations (`add_variables`, `remove_items`, `move_item`, reattachment) go through
+the owning transaction. `DisplayedItemRef` is list-local; cross-list references
+carry `(ItemListId, DisplayedItemRef)`. `VisibleItemIndex` is a derived position,
+not stable identity; save focused items by `DisplayedItemRef` and sanitize them
+after edits or reattachment.
+
+The shared layout cache contains content-space row positions, never a tile's
+scroll offset, clip rectangle or pixel origin. Its key includes all shared
+row-height, translation and fold inputs. Any future per-tile row sizing moves
+this cache to the tile or adds those inputs to a multi-entry cache.
+`selected_annotation` and annotation-menu interaction state belong to the
+view displaying them, not the shared list. Use domain IDs for saved references,
+never persisted `egui::Id`s.
 
 An item list with no referencing tile is dropped when the last tile closes
-(after the undo snapshot is taken, §9).
+(with its content retained by the close undo record, §9), except for the
+unknown-kind preservation rule in §8.2. Content-copy and split-clone methods
+explicitly reset caches; do not derive cloning that copies runtime state.
 
 ### 4.6 Waveform tile
 
 ```rust
-#[derive(Serialize, Deserialize, Clone)]
 pub struct WaveformTile {
     pub items: ItemListId,
     pub viewport: Viewport,                       // zoom/pan; was WaveData::viewports[i]
     pub scroll_offset: f32,
-    pub focused_item: Option<VisibleItemIndex>,
-    pub focused_transaction: (Option<TransactionRef>, Option<Transaction>),
+    pub link_vertical_scroll: bool, // participants with the same ItemListId
+    pub focused_item: Option<DisplayedItemRef>,
+    pub focused_transaction: Option<StableTransactionRef>, // resolve against current document
     pub show_name_column: bool,                   // default true
     pub show_value_column: bool,                  // default true
-    pub title: Option<String>,                    // user rename; None = "Waveform" / "Waveform N"
+    pub selected_annotation: Option<AnnotationId>, // view selection, stable domain ID
     // runtime
-    #[serde(skip)] draw_cache: RefCell<Option<WaveDrawCache>>,   // { canvas_rect, viewport, list_signature, data: CachedDrawData }
+    draw_cache: RefCell<Option<WaveDrawCache>>,   // { canvas_rect, viewport, list_signature, data: CachedDrawData }
 }
 ```
 
@@ -438,28 +502,43 @@ One waveform tile = one canvas plus its own name and value columns. Today's
 **linked split**: a second waveform tile referencing the same `ItemListId`,
 with `show_name_column = false` on the right-hand tile if the user wants the
 old look. Two tiles on the same list show the same items, folds, selection and
-markers; each has its own zoom, scroll and focused item. Editing the list from
-either tile is visible in both, which is exactly what the old viewports did.
+markers; each has its own zoom, scroll and focused item. Independent scrolling
+means hiding columns alone does not maintain row alignment. When
+`link_vertical_scroll` is enabled, participants with the same list share the
+content-space offset: scrolling one updates all in one non-undoable command.
+Clamp to the largest offset valid for all visible participants, using the same
+row heights and canvas header alignment. Joining the group adopts its offset;
+independent splits leave it. Migration enables it for the old extra viewports.
+Editing the list from either tile is visible in both.
 
-The draw cache is keyed by (canvas rect, viewport, item-list signature) and
-lives in the tile. `invalidate_draw_commands()` becomes:
+The draw cache lives in the tile. Its key covers document generation, canvas
+geometry, viewport, list/content revision, scroll, translator/config/theme
+revision, and any cursor/selection input used by cached drawing. Keep overlays
+that vary independently outside cached waveform commands where practical. `invalidate_draw_commands()` becomes:
 
 * `invalidate_tile(id)` — after zoom/pan/resize of one tile;
 * `invalidate_list(list_id)` — after an item edit: every tile whose `items == list_id`;
 * `invalidate_all()` — reload, config, theme.
 
-This fixes the every-frame regeneration caused by the shared `last_canvas_rect`.
+This removes shared-rectangle cache contention; verify actual cache hit rates
+with multiple tiles before claiming a performance improvement.
 
 ### 4.7 Migrated widget kinds
 
 | Kind | State (serialized) | Reads (shared) | Notes |
 |---|---|---|---|
-| `MemoryTile` | `scope: ScopeRef`, `name: String`, formats, filter/search/highlight settings, `value_column_count`, `color_values` (all of `MemoryViewerState` minus `open`/scroll/selection); runtime: `RefCell<Option<MemoryViewerCache>>` | `waves.cursor`, `waves.inner` | Multiple instances allowed (different arrays). "Show Memory Viewer" in the item context menu opens one beside the focused tile. `on_waves_changed` → keep if the array still exists, else close. |
+| `MemoryTile` | stable array path, formats, filter/search/highlight settings, `value_column_count`, `color_values` (all of `MemoryViewerState` minus `open`/scroll/selection); runtime: `RefCell<Option<MemoryViewerCache>>` | `waves.cursor`, `waves.inner` | Multiple instances allowed (different arrays). "Show Memory Viewer" in the item context menu opens one beside the focused tile. `on_waves_changed` reattaches by stable path; missing arrays show an unavailable state. |
 | `MarkersTile` | none | `waves.cursor`, `waves.markers`, marker rows of the target waveform's list | Singleton. Replaces `show_cursor_window`. |
-| `LogsTile` | `filter: LevelFilter` | global log buffer | Singleton. "Open on error" becomes `Message::OpenTile { kind: logs, placement: Edge(Down), focus: false }`. |
+| `LogsTile` | `filter: LevelFilter` | global log buffer | Singleton. "Open on error" becomes `WorkspaceCommand::OpenTile { kind: logs, placement: Edge(Down), focus: false }`. |
 | `FrameBufferTile` | `FrameBufferSettings` (from `UserState::frame_buffer`) + which variable/array | `waves.cursor` | Replaces the `frame_buffer_content` window. |
 | `AnnotationListTile` | `show_comments: bool` | annotations of the target waveform's list | Singleton. Replaces `show_annotation_list` right panel. |
 | `TransactionDetailsTile` | none | `focused_transaction` of the target waveform tile | Singleton. Today it appears automatically when a transaction is focused; new behaviour: focusing a transaction opens it (once) at `Edge(Right)` if not open. |
+
+Inspector tiles (markers, annotations, transaction details) may follow the
+remembered waveform for display. At render time they capture that waveform/list
+ID alongside row data, and any edit they emit carries those concrete IDs; they
+never re-resolve the inspected list later. This is an explicit inspector binding,
+not a general ambient-command fallback.
 
 Stays outside the tree: menu, toolbar, statusbar, overview strip (draws one
 rect per **waveform tile**, highlighting the target waveform tile), hierarchy
@@ -494,112 +573,121 @@ window) is deliberately not in the first version; see §14.
 
 ### 5.1 Targeting
 
+Separate user intent from executable commands:
+
 ```rust
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum TileTarget { Id(TileId), Focused }
+// Resolved command queue: no ambient targets remain.
+pub enum Message {
+    ToTile(TileId, TileMessage),
+    ToDocument(DocumentCommand),
+    Workspace(WorkspaceCommand),
+    // application commands …
+}
 ```
 
-Resolution in `SystemState`:
+The input dispatcher resolves `Focused` exactly once, before enqueueing a
+command, using the focused tile for generic/kind-specific actions. Waveform
+commands from shared chrome may instead request the most recently focused
+waveform. Make this fallback explicit in the command definition; it is not a
+universal interpretation of `Focused`. A missing or wrong-kind explicit ID is
+an error/no-op and never falls back to another tile.
+
+Tile widgets always emit their own `TileId`. A handler resolves the tile's
+`ItemListId` before list mutation. Every item reference is interpreted with
+that list; cross-list operations carry `(ItemListId, DisplayedItemRef)`.
+Followups retain their original concrete target. A stale target after a close
+is ignored, not redirected. Shared cursor and marker-time commands need no tile.
+
+`target_waveform()` chooses the focused waveform, otherwise the most recently
+focused existing waveform, otherwise the first waveform in layout order. This
+fallback is used only by declared waveform commands and following inspectors.
+An ambient edit of a hidden waveform reveals it; read-only inspectors may follow
+it without changing focus. Command metadata records whether this reveal occurs.
+
+Only commands explicitly defined to create a view, such as adding variables
+from the hierarchy, create a waveform when none exists. Zoom, remove-item and
+other editing commands otherwise disable or report no target. Creation and the
+initial operation form one transaction.
+
+Focus events from a click/tab selection are ordered before ambient input from
+the same interaction. Palette invocation captures its target until execution
+or cancellation, so suggestion IDs and execution refer to the same item list.
+Script batches resolve each statement against the state left by the previous
+statement; they do not pre-resolve the entire batch against one initial focus.
+
+### 5.2 Commands and transactions
+
+Waveform-local commands (scroll, zoom, navigation, item edits, annotations,
+column visibility) live in `WaveformMessage`, without a second tile target.
+Remove `viewport_idx`, `AddViewport`, `RemoveViewport` and `SetActiveViewport`
+from the internal API. Legacy command aliases are decoded at the boundary.
+
+Workspace commands have concrete IDs and validated arguments:
 
 ```rust
-/// The tile that ambient commands act on.
-fn focused_tile(&self) -> Option<TileId>;
-/// The waveform tile that item/zoom/marker commands act on: the focused tile if
-/// it is a waveform, else the most recently focused waveform tile.
-fn target_waveform(&self) -> Option<TileId>;
-fn resolve(&self, t: TileTarget) -> Option<TileId>;
-fn resolve_waveform(&self, t: TileTarget) -> Option<TileId>;   // Focused → target_waveform()
-```
-
-`target_waveform` is the analogue of VSCode's "active editor group": with the
-logs tile focused, `+` still zooms the last-used waveform. When no waveform
-tile exists (all closed, or only non-waveform tiles), commands that need one
-create it: `AddVariables` from the hierarchy inserts a waveform tile at
-`Placement::Root` or `Beside(focused, Right)` and targets it.
-
-Rule for existing messages: a message that does not carry a `TileTarget` acts
-on `target_waveform()`. A message that carried `viewport_idx: usize` now
-carries `tile: TileTarget`. Producers that know the tile (canvas interaction,
-tab menus, drag-and-drop) send `Id`; keyboard, toolbar, menu and palette send
-`Focused`.
-
-### 5.2 Message changes
-
-Replaced (`viewport_idx: usize` → `tile: TileTarget`):
-`CanvasScroll`, `CanvasZoom`, `ZoomToCursor`, `ZoomToRange`, `ZoomToFit`,
-`GoToStart`, `GoToEnd`, `GoToTime(Option<BigInt>, TileTarget)`,
-`GoToMarkerPosition(u8, TileTarget)`, `GoToAnnotationPosition(Id, TileTarget)`,
-`AnnotationClicked(.., Option<TileId>, ..)`, `SetViewportStrategy` (applies to
-all waveform tiles, unchanged semantics).
-
-Removed: `AddViewport`, `RemoveViewport`, `SetActiveViewport`, `SetLogsVisible`,
-`SetCursorWindowVisible`, `ToggleAnnotationlistVisibility`, `OpenMemoryViewer`,
-`SetFrameBufferVisibleVariable` and the `show_*` fields behind them. Their
-commands stay as aliases (§5.3).
-
-New layout messages (top-level, flat, like the rest of `Message`):
-
-```rust
-/// Create a tile. `focus` false is used by "open logs on error".
-AddTile { kind: TileKind, placement: Placement, focus: bool },
-/// Open a singleton kind: focus the existing tile if any, else AddTile.
-OpenTile { kind: TileKind, placement: Placement, focus: bool },
-CloseTile(TileTarget),
-CloseOtherTiles(TileTarget),          // in the same tab group
+CreateTile { kind: KindName, placement: Placement, focus: bool },
+OpenTile { kind: KindName, placement: Placement, focus: bool },
+CloseTile(TileId),
+CloseOtherTiles(TileId),
 FocusTile(TileId),
-FocusTileDirection(Direction),        // spatial neighbour
-FocusTabDelta(isize),                 // next/previous tab in the focused group
-/// Split: `linked` = share the item list (waveform only); otherwise `split_clone()`.
-SplitTile { target: TileTarget, dir: Direction, linked: bool },
+SplitTile { tile: TileId, dir: Direction, mode: SplitMode },
 MoveTile { tile: TileId, to: Placement },
-MoveTileDirection(TileTarget, Direction),   // keyboard move: swap with neighbour or split edge
-RenameTile(TileTarget, Option<String>),
-SetTileColumns { target: TileTarget, names: Option<bool>, values: Option<bool> },
-/// Replace the whole layout; tests and WCP. Tiles referenced must exist.
+RenameTile { tile: TileId, title: Option<String> },
 SetLayout(LayoutNode),
-/// Kind-specific.
-ToTile(TileTarget, TileMessage),
+// Adapter-produced candidate, validated and committed by the same dispatcher.
+ApplyLayoutEdit(LayoutEdit),
 ```
 
-Handling `CloseTile`: take undo snapshot; remove from layout; remove from
-`tiles`; if the tile was a waveform and no other tile references its list,
-remove the list; update `focused` to the next tab in the group, else the
-spatial neighbour, else `None`; `layout.simplify()`; drop runtime caches.
+Creation accepts kind-specific initial settings through a typed creation spec
+when needed (e.g. memory scope/path). It does not accept arbitrary runtime tile
+objects. Factories allocate required resources in the transaction.
+`OpenTile` reuses singleton kinds and honors `focus: false`; ordinary creation
+also enforces singleton policy. Split modes are linked or independent for
+waveforms, clone for kinds supporting it, otherwise disabled.
 
-Handling `SplitTile { linked: true }` on a waveform tile: clone the tile struct
-(same `items`, same `viewport`, same scroll), insert `Beside(target, dir)`,
-focus it. `linked: false`: deep-copy the item list under a new `ItemListId`
-(annotations and graphics included), then as above. For other kinds:
-`split_clone()` or refuse with a log message.
+Each successful command validates invariants, applies all state changes,
+invalidates affected caches and records one undo entry if appropriate. Failure
+leaves the workspace unchanged. Closing removes the tile and its last-owned
+list, updates focus/history and normalizes the tree. Choose the next visible
+tab or spatial neighbor before removal; explicitly focusing a tile reveals it.
+Closing the last tile leaves an empty workspace.
 
-`Message` stays `Deserialize` (needed by `wasm_api::inject_message` and
-`ExecuteBatchCommand`); `TileKind` and `Placement` derive it.
+Linked waveform splits copy view settings and reference the same item list.
+Independent splits clone list content under a new `ItemListId`; item IDs remain
+local to the copied list. All split clones start with empty runtime caches and
+no pending jobs. Both modes allocate a fresh tile ID.
+
+Public injected commands are deserializable input DTOs which pass through the
+same resolver and validator. Internal layout proposals and async completions
+are not exposed as arbitrary serialized messages.
 
 ### 5.3 Commands (palette and `.sucl`)
 
-New commands, all available without a loaded file:
+Layout commands work without loaded data; data-dependent commands are disabled
+until their inputs exist.
 
-| Command | Message |
+| Command | Resolved action |
 |---|---|
-| `tile_new <kind>` | `AddTile { kind, placement: Beside(focused, Right) }` |
-| `tile_split_right`, `tile_split_down` | `SplitTile { Focused, Right/Down, linked: true }` |
-| `tile_split_copy_right`, `tile_split_copy_down` | `SplitTile { …, linked: false }` |
-| `tile_close`, `tile_close_others` | `CloseTile(Focused)` … |
-| `tile_focus <id\|title>` | `FocusTile(id)` (suggestions: `"{id} {title}"`) |
-| `tile_focus_left/right/up/down` | `FocusTileDirection` |
-| `tile_next`, `tile_prev` | `FocusTabDelta(±1)` |
-| `tile_move_left/right/up/down` | `MoveTileDirection` |
-| `tile_rename <name>` | `RenameTile` |
-| `tile_columns names\|values\|both\|none` | `SetTileColumns` |
-| `show_logs`, `show_marker_window`, `show_memory_viewer <array>`, `show_annotation_list` | `OpenTile { … }` (existing names kept) |
-| `viewport_add` | alias of `tile_split_right` (linked) |
-| `viewport_remove` | `CloseTile(Focused)` if the focused tile is a linked waveform tile |
-| `viewport_set_active <n>` | `FocusTile` of the n-th waveform tile in `tile_order()` |
+| `tile_new <kind>` | Factory creation beside focused tile, or root when empty |
+| `tile_split_right`, `tile_split_down` | Linked waveform split, or supported kind clone |
+| `tile_split_copy_right`, `tile_split_copy_down` | Independent waveform split |
+| `tile_close`, `tile_close_others` | Close captured tile / its group siblings |
+| `tile_focus <id\|title>` | Reveal and focus identified tile |
+| `tile_focus_left/right/up/down` | Focus visible spatial neighbor |
+| `tile_next`, `tile_prev` | Activate adjacent tab in captured group |
+| `tile_move_left/right/up/down` | Resolve neighbor/placement, then `MoveTile` |
+| `tile_rename <name>` | Rename generic `TileEntry` |
+| `tile_columns names\|values\|both\|none` | Waveform-local column command |
+| `show_logs`, `show_marker_window`, `show_memory_viewer <array>`, `show_annotation_list` | Open/create through the registry |
+| `viewport_add` | Split the resolved target waveform, linked |
+| `viewport_remove` | Close the resolved target waveform |
+| `viewport_set_active <n>` | Focus n-th waveform in layout order |
 
-`get_parser` (rebuilt on every keystroke) derives its suggestion lists
-(`displayed_items`, `variables_in_active_scope`, markers) from
-`target_waveform()`'s item list instead of `waves`. `goto_time`, `zoom_to`,
-`zoom_in` etc. send `TileTarget::Focused`.
+Existing `.sucl` spellings remain aliases only where their meaning is clear;
+document changed behavior explicitly. Parser suggestions are generated from
+the captured target and carry IDs scoped to its item list. Kind commands are
+registered through `CommandSpec` and use the same target resolver.
 
 ### 5.4 Keyboard
 
@@ -623,17 +711,17 @@ focused, `!egui_wants_keyboard_input`) stays. Tile-local keys: a kind that wants
 keyboard handling reads `ui.input()` inside its `ui` **only when
 `cx.focused`**, and only for keys not consumed by the global table (global
 shortcuts run first, as today). The hard-coded fallbacks in `keys.rs`
-(`J/K/H/L`, digits, arrows) send `TileTarget::Focused`.
+(`J/K/H/L`, digits, arrows) use the input resolver and enqueue concrete targets.
 
-Since `TileTarget::Focused` is resolved at `update` time, nothing in the key
-handling needs to know about tiles.
+The shortcut table declares target policy; individual key bindings need no
+knowledge of tile kinds. Global shortcuts consume handled keys before tile UI.
 
 ### 5.5 Mouse
 
 * Click, right-click or drag start inside a tile → `FocusTile(id)` (detected in
   `render.rs`, not per kind). Hover does **not** move focus.
-* Wheel/pinch over a canvas → `CanvasScroll`/`CanvasZoom` with `TileTarget::Id`
-  of the hovered tile (as `viewport_idx` today). A tile can be zoomed without
+* Wheel/pinch over a canvas → `ToTile(id, WaveformMessage::Scroll/Zoom)`
+  for the hovered tile (as `viewport_idx` today). A tile can be zoomed without
   focusing it.
 * Mouse gestures: `gesture_start_location`/`gesture_start_time` on
   `SystemState` gain `gesture_tile: Option<TileId>`; a release over another tile
@@ -641,12 +729,12 @@ handling needs to know about tiles.
 * Tab drag-and-drop, split resizing, tab reordering: `egui_tiles`.
 * Drag from the hierarchy: the drop target is the tile whose `layout.rect(id)`
   contains the pointer, if it is a waveform tile; else `target_waveform()`.
-  `AddDraggedVariables` gains `tile: TileTarget`. The current
+  `AddDraggedVariables` is sent to that explicit tile ID. The current
   `pointer.x > sidepanel_width` heuristic goes away.
 
 ### 5.6 WCP and wasm
 
-WCP keeps working against the **target waveform tile**: `get_item_list`,
+WCP captures the **target waveform tile** at the start of each request: `get_item_list`,
 `add_variables`, `focus_item`, `set_viewport_to`, `set_viewport_range` operate on
 `target_waveform()`. `zoom_to_fit { viewport_idx }` keeps the field, interpreted
 as the index into `tile_order()` filtered to waveform tiles; omitted → target.
@@ -654,7 +742,8 @@ Later protocol work may add an optional `tile` field; nothing in this design
 blocks it. `DisplayedItemRef` in the protocol remains a per-list ref; clients
 that manage several lists are out of scope.
 
-`wasm_api::get_state`/`inject_message` are unchanged. `draw_text_arrow` targets
+`wasm_api::get_state` returns the versioned state DTO; `inject_message` validates
+and resolves input commands at the boundary. `draw_text_arrow` targets
 the target waveform's list.
 
 ---
@@ -663,91 +752,54 @@ the target waveform's list.
 
 ### 6.1 Frame
 
-`SystemState::draw` keeps its panel order (menu, toolbar, statusbar, overview,
-hierarchy sidebar, command prompt, floating dialogs). The former
-`variable list` / `variable values` / `Transaction Details` / `Annotation list`
-/ `view port N` / `CentralPanel` block is replaced by:
+`SystemState::draw` keeps the existing chrome order and renders the workspace
+inside one central panel. Tile UI borrows document, lists and tile entries
+immutably, and emits commands with explicit targets. Its `TileCtx` exposes
+read-only services plus command/request submission; it must not expose a taken
+or incomplete authoritative layout through `SystemState`.
 
-```rust
-CentralPanel::default().show(ui, |ui| self.draw_layout(ui, &mut msgs));
+The adapter owns a working `egui_tiles` tree reconciled from the authoritative
+`LayoutNode`. During `tree.ui`, the library may mutate this working tree for
+selection, docking, tab reordering or resizing. Record the resulting proposal;
+do not write it directly into persistent workspace state. After the UI pass,
+validate and commit the proposal through the workspace dispatcher, then apply
+pane commands in recorded input order. A layout revision accompanies proposals;
+reject/reconcile stale proposals instead of overwriting newer state.
 
-fn draw_layout(&mut self, ui: &mut Ui, msgs: &mut Vec<Message>) {
-    // Take the runtime tree so that `self` can be borrowed immutably by the panes.
-    let mut tree = std::mem::take(&mut self.user.layout.tree);
-    let titles = self.tile_titles();               // computed before the pass
-    {
-        let mut behavior = SurferBehavior { app: &*self, msgs, titles: &titles };
-        tree.ui(&mut behavior, ui);
-    }
-    self.user.layout.tree = tree;
-    self.user.layout.remember_rects();             // for hit tests next frame
-}
-```
+Docking and tab reordering are structural edits and use the same undo policy as
+keyboard moves. Coalesce a drag gesture into one transaction from drag start
+to release, including frames where the library temporarily reparents nodes.
+Cancelled drags discard the structural proposal. During a gesture, preview
+geometry belongs to the adapter. Split resizing commits geometry changes without
+an undo entry; tab activation/focus likewise uses non-undoable commands. Mixed
+proposals must distinguish these changes, not classify the whole frame by a
+single edit callback.
 
-Only the tree skeleton is taken; `tiles`, `item_lists` and `waves` stay in
-place and readable (the PoC took the content maps too, so code reached from
-`pane_ui` saw empty maps). `Layout` methods that touch `tree` must not be
-called from inside the pass; the render code reads `focused`, `focus_history`
-and `titles` only.
+Adapter-owned pane rectangles are tagged with the current frame/layout revision.
+Use current rendered rectangles for hit tests; hidden tiles have no active hit
+rectangle. Focus navigation may use the last completed valid layout geometry.
 
-The waveform drawing helpers (`draw_items`, `draw_item_list`, `draw_var_values`,
-`generate_draw_commands`) become `&self`; they already keep their caches in
-`RefCell`s (`draw_data`, `last_canvas_rect`, `timing`, `flattened_rows_cache`)
-and the last `&mut` user, `ensure_drawing_infos_cached`, moves into
-`ItemList::layout_cache: RefCell<_>`.
-
-`egui_tiles` mutates the tree directly during `tree.ui` for drag/drop,
-resizing and tab clicks. That is the one accepted exception to "mutation only
-in `update`": layout geometry is UI state, the same way panel widths are today.
-Structural edits initiated by Surfer (`AddTile`, `CloseTile`, `SplitTile`,
-`MoveTile`) go through messages so they are undoable and scriptable. Tab
-selection by click is reported via `Behavior::on_edit(EditAction::TabSelected)`
-and mirrored into `focused` by pushing `FocusTile`.
+Drawing helpers (`draw_items`, `draw_item_list`, `draw_var_values`,
+`generate_draw_commands`) become immutable except for disposable caches in
+`RefCell`s. Document reads and tile rendering never encounter temporarily empty
+content maps or an empty authoritative layout.
 
 ### 6.2 `Behavior` implementation (`tiles/render.rs`)
 
-```rust
-impl egui_tiles::Behavior<TileId> for SurferBehavior<'_> {
-    fn pane_ui(&mut self, ui: &mut Ui, _: egui_tiles::TileId, pane: &mut TileId) -> UiResponse {
-        let id = *pane;
-        let Some(tile) = self.app.user.tiles.get(&id) else { return UiResponse::None };
-        let focused = self.app.user.layout.focused == Some(id);
-        if !focused && ui.rect_contains_pointer(ui.max_rect())
-            && ui.input(|i| i.pointer.any_pressed()) {
-            self.msgs.push(Message::FocusTile(id));
-        }
-        ui.set_clip_rect(ui.clip_rect().intersect(ui.max_rect()));   // see 6.3
-        let mut cx = TileCtx { app: self.app, tile_id: id, focused, msgs: self.msgs };
-        tile.view().ui(ui, &mut cx);
-        if focused { paint_focus_frame(ui, &self.app.user.config.theme); }
-        UiResponse::None
-    }
-    fn tab_title_for_pane(&mut self, pane: &TileId) -> WidgetText { self.titles[pane].clone().into() }
-    fn is_tab_closable(&self, _: &Tiles<TileId>, _: egui_tiles::TileId) -> bool { true }
-    fn on_tab_close(&mut self, tiles: &mut Tiles<TileId>, id: egui_tiles::TileId) -> bool {
-        if let Some(pane) = tiles.get_pane(&id) { self.msgs.push(Message::CloseTile(TileTarget::Id(*pane))); }
-        false   // the message does the removal
-    }
-    fn on_tab_button(&mut self, tiles, id, button: Response) -> Response {
-        button.context_menu(|ui| self.tab_context_menu(ui, tiles, id)); button
-    }
-    fn top_bar_right_ui(&mut self, tiles, ui, tabs_id, _tabs, _scroll) {
-        // "+" menu: new tile kinds, split right/down for the active tab
-    }
-    fn tab_bar_height(&self, style) -> f32 {
-        if self.single_tile && self.app.user.config.layout.hide_single_tab_bar() { 0.0 }
-        else { self.app.user.config.layout.tab_bar_height }
-    }
-    fn simplification_options(&self) -> SimplificationOptions {
-        SimplificationOptions { all_panes_must_have_tabs: true, prune_empty_tabs: true,
-            prune_single_child_tabs: false, prune_empty_containers: true,
-            prune_single_child_containers: true, join_nested_linear_containers: true }
-    }
-    fn on_edit(&mut self, action: EditAction) { /* TabSelected → FocusTile of the new active pane */ }
-    fn is_tile_draggable(&self, ..) -> bool { !self.single_tile }
-    // colours from SurferTheme: tab_bar_color, tab_bg_color, tab_text_color, resize_stroke
-}
-```
+The adapter implements these behaviors (verify exact `egui_tiles` signatures
+against the pinned dependency when building the adapter):
+
+* Render a pane by looking up `TileEntry`, constructing a read-only `TileCtx`
+  and calling `entry.kind.view().ui(...)` under a clipped, salted UI.
+* Detect click/right-click/drag-start and record focus before related commands.
+* Compute titles once per frame; use entry title overrides generically.
+* Intercept close buttons, enqueue `CloseTile(id)` and prevent immediate library
+  removal. Context menus emit the same commands as the palette.
+* Enable linear docking and tabs only. Track complete interaction boundaries
+  and before/after topology rather than assuming an edit callback provides the
+  selected pane or a complete transaction.
+* Preserve one tab group per pane; prune empty groups and redundant splits.
+* Report selection, geometry and structural proposals separately (§6.1).
 
 `all_panes_must_have_tabs: true` means every tile always sits in a tab group,
 so there is **one** rendering path whether there is one tile or ten. The only
@@ -760,13 +812,13 @@ Tab context menu (generic part): Split Right, Split Down, Split Copy Right/Down
 
 ### 6.3 egui ids and clipping
 
-* Every egui id inside a tile derives from the pane `Ui` (`ui.id()`), which
-  `egui_tiles` salts with its `TileId`. Panels inside the waveform tile become
+* Every egui id inside a tile derives from `(workspace_epoch, TileId, salt)`,
+  using an explicitly scoped pane `Ui`; runtime container IDs are not identity. Panels inside the waveform tile become
   `Panel::left(ui.id().with("names"))` and `Panel::left(ui.id().with("values"))`;
   every `ScrollArea` gets `id_salt(cx.id("…"))`. No global string ids inside
   tiles.
 * Widget-focus bookkeeping keyed by string (`text_edit_focused`, `time_widgets`)
-  uses `format!("tile{}/{}", id.0, name)` keys via `cx.id_str(name)`.
+  uses the same workspace/tile namespace via a shared ID helper.
 * Panels created inside a pane `Ui` do not inherit the pane's clip rect
   (documented in the PoC's `WaveClipIssue.md` for `egui_tiles` 0.16). The
   wrapper sets the clip rect once in `pane_ui`; the waveform tile re-applies
@@ -816,7 +868,7 @@ for a tab bar.
 * **View ▸ New Tile ▸** {Waveform, Memory viewer…, Markers, Logs, Annotations,
   Frame buffer}. Inserted `Beside(focused, Right)` and focused.
 * Tab bar **+** button: same list, plus Split Right / Split Down.
-* Item context menu: "Show memory viewer" → `AddTile { Memory, Beside(Right) }`.
+* Item context menu: "Show memory viewer" → typed memory creation beside the originating tile.
 * Palette: `tile_new memory`, `show_logs`, …
 * Toolbar group `viewports` is renamed `tiles`: Split Right, Split Down, Close.
 
@@ -832,8 +884,8 @@ Split from keyboard uses the focused tile; from the tab menu, the clicked tab.
 Drag a tab and drop it: on the centre of another tile → becomes a tab there;
 on an edge → new split on that side; on the tab bar → reorder. Keyboard:
 `tile_move_*` moves the focused tile one step (swap with the neighbour in a
-split, or split the group edge). Every operation is a `MoveTile` with a
-`Placement` so scripts can do it too.
+split, or split the group edge). Mouse and keyboard structural edits use the same transaction and undo policy;
+scripts express moves through `MoveTile` and `Placement`.
 
 ### 7.5 Closing
 
@@ -856,12 +908,12 @@ highlights the target one; clicking a window in the overview focuses that tile.
 
 ### 7.7 Commands and the palette
 
-The palette always acts on `TileTarget::Focused`. Its suggestion lists (items,
-markers, variables in scope) come from the target waveform. Kind-specific
+The palette captures and resolves its target when opened (§5.1). Its suggestion
+lists (items, markers, variables in scope) come from the target waveform. Kind-specific
 commands (`memory_goto <index>`, future `table_sort`) are registered by the
-kind and are only offered when the focused tile is of that kind: `get_parser`
-asks `focused tile → view().commands()` (an optional trait method returning
-`Vec<(&'static str, Parser)>`). This keeps `command_parser.rs` free of
+kind and are only offered when the captured tile is of that kind: `get_parser`
+asks `captured tile → view().commands()` (an optional trait method returning
+`Vec<CommandSpec>`). This keeps `command_parser.rs` free of
 per-kind knowledge.
 
 ### 7.8 State files
@@ -875,225 +927,210 @@ restores the full layout.
 
 ## 8. Serialization
 
-### 8.1 Format
+### 8.1 Format and versioning
 
-RON, same file, same extension. Example (abridged):
+Keep RON and the `.surf.ron` extension, but separate file DTOs from live runtime
+structs. The file contract is explicit:
 
-```ron
-UserState(
-    version: 1,
-    layout: Layout(
-        root: Some(Split(
-            dir: Horizontal,
-            shares: [0.65, 0.35],
-            children: [
-                Tabs(active: 0, children: [Tile(TileId(1)), Tile(TileId(3))]),
-                Split(dir: Vertical, shares: [0.5, 0.5], children: [
-                    Tabs(active: 0, children: [Tile(TileId(2))]),
-                    Tabs(active: 0, children: [Tile(TileId(4))]),
-                ]),
-            ],
-        )),
-        focused: Some(TileId(1)),
-        focus_history: [TileId(1), TileId(4), TileId(2)],
-    ),
-    tiles: {
-        TileId(1): Waveform(WaveformTile(items: ItemListId(1), viewport: Viewport(...), scroll_offset: 0.0, focused_item: None, ...)),
-        TileId(2): Waveform(WaveformTile(items: ItemListId(1), viewport: Viewport(...), show_name_column: false, ...)),
-        TileId(3): Waveform(WaveformTile(items: ItemListId(2), ...)),
-        TileId(4): Memory(MemoryTile(scope: ScopeRef(...), name: "mem", value_format: "Hexadecimal", ...)),
-    },
-    item_lists: {
-        ItemListId(1): ItemList(items_tree: DisplayedItemTree(...), displayed_items: {...}, ref_counter: 12, annotations: [], ...),
-        ItemListId(2): ItemList(...),
-    },
-    waves: Some(WaveData(source: File("cpu.vcd"), format: Vcd, cursor: Some(1200), markers: {0: 800}, ...)),
-    // …existing preference fields unchanged…
-)
+```rust
+struct WorkspaceFile {
+    version: u32,
+    layout: LayoutFile,
+    tiles: BTreeMap<TileId, TileFile>,
+    item_lists: BTreeMap<ItemListId, ItemListFile>,
+    document: Option<DocumentFile>, // source, shared cursor/markers/settings
+    // existing persistent preferences …
+}
+struct TileFile {
+    title: Option<String>,
+    kind: String,                  // stable registry name, e.g. "waveform"
+    kind_version: u32,
+    payload: Box<ron::value::RawValue>,
+}
 ```
 
-Rules:
+Each kind owns typed payload DTOs and migrations. For example, the waveform
+payload holds `items`, viewport, scroll, focus and columns; the memory payload
+holds a stable array path and display settings. Runtime caches, adapter trees,
+allocators, pending jobs and document handles never enter the file. Saving uses
+stable map ordering and validated references. The generic `TileEntry` and
+`TileKind` do not derive the workspace file format.
 
-* `#[serde(default)]` on every struct and on `UserState` (already the case),
-  so a missing field never fails a load.
-* `tiles` and `item_lists` are `BTreeMap`s: stable ordering in the file, small
-  diffs.
-* Tile kinds serialize as externally tagged enum variants (`Memory(...)`).
-  Kind state structs own their format; the layout core does not care.
-* `Layout` serializes as `LayoutNode`, never as `egui_tiles` internals.
-* Runtime fields are `#[serde(skip)]`.
-* `version: u32` is added to `UserState` (`default = 0` for files that predate
-  it). Migrations run in `load_state` in order (`0 → 1`: §8.3). The number is
-  bumped only for changes `#[serde(default)]` cannot express.
+The workspace version selects the container schema; `kind_version` selects a
+kind's payload schema. Missing version means legacy version 0. Unsupported
+workspace versions are rejected clearly before replacing state. Unsupported
+kind versions are preserved as unknown tiles. Defaults apply only to genuinely
+optional fields with specified semantics; required IDs, layout structure and
+payload fields are validated rather than silently defaulted.
 
-### 8.2 Evolution
+### 8.2 Unknown kinds and errors
 
-* Adding a field to a tile kind: give it a default. Nothing else.
-* Adding a kind: new variant. Older Surfer versions reading such a file would
-  fail on the unknown variant; to prevent that, `tiles` is deserialized entry by
-  entry through a helper that first reads a `ron::Value` and tries
-  `TileKind::deserialize`; on failure the entry becomes
-  `TileKind::Unknown(UnknownTile { kind: String, raw: String })`, rendered as a
-  placeholder ("This tile was saved by a newer Surfer") and written back out
-  verbatim on save, so a round trip through an old version does not lose it.
-* Removing a kind: keep the variant name in a `LEGACY_KINDS` list that maps to
-  `Unknown`, or provide a migration.
-* Changing the layout shape: `LayoutNode` is the contract; `egui_tiles` can be
-  swapped for another engine without touching files.
+Dispatch a `TileFile` using `(kind, kind_version)`. For a supported pair, decode
+the raw payload directly into that kind's DTO and validate it. Malformed known
+payloads report a load error; they are not mislabeled as newer kinds. Unknown
+pairs become placeholder tiles retaining the original kind, version, title and
+raw payload. Save their original envelope, not an `Unknown(...)` enum variant.
+
+Do not decode typed RON payloads through `ron::Value`: it does not retain enum
+variants. Raw payload preservation retains unknown syntax; outer formatting
+need not remain byte-identical. Add a fixture containing nested enum variants
+and a future kind version to prove the actual codec round-trips them. See
+[RON Value documentation](https://docs.rs/ron/latest/ron/value/enum.Value.html)
+and [RawValue documentation](https://docs.rs/ron/latest/ron/value/struct.RawValue.html).
+
+A kind payload must not be the sole owner of references into generic workspace
+storage that older builds need to garbage-collect. In version 1 only waveform
+payloads reference `item_lists`; if an unknown kind/version exists, conservatively
+retain all loaded lists, allow unowned retained lists during validation, and
+skip automatic list collection until those unknown entries are removed. Future
+shared resource types require explicit envelope-level dependencies or a new
+workspace version. This prevents a save through an older build from destroying
+resources needed by an unknown tile. Unknown tiles may be moved, renamed or
+explicitly closed, but cannot split-clone or execute kind commands.
 
 ### 8.3 Legacy migration (`version 0` files)
 
-A `version 0` file has `waves.items_tree`, `waves.displayed_items`,
-`waves.viewports`, `waves.cursor`, … and no `layout`. `WaveData` keeps the moved
-fields as `#[serde(default, skip_serializing)] legacy_*` mirrors for one
-release cycle. Migration in `load_state`:
+Decode legacy files with a separate `LegacyUserStateV0` DTO using the original
+field names. Do not keep `legacy_*` mirrors on the live `WaveData`; that mixes
+migration concerns into every runtime operation. Migration is a pure
+`LegacyUserStateV0 -> WorkspaceFileV1` conversion followed by normal validation.
 
-1. If `layout.root.is_none()` and `waves.legacy_items_tree` is non-empty:
-   build `ItemList(1)` from the legacy item fields, annotations and graphics.
-2. For each legacy viewport `i`: `WaveformTile { items: 1, viewport: viewports[i],
-   scroll_offset, focused_item, focused_transaction }` as tile `i+1`, with
-   `show_name_column = show_value_column = (i == 0)` to reproduce the old
-   look. Layout: `Split { Horizontal, equal shares, [Tabs(1), Tabs(2), …] }`.
-   `focused = last_active_viewport_idx + 1`.
-3. `show_cursor_window`, `show_logs`, `show_annotation_list` → `OpenTile` of
-   the corresponding kind at `Edge(Right)`/`Edge(Down)`, unfocused. (These
-   flags were never meant to be persistent UI; migrating them is cheap and
-   surprises nobody.)
-4. Clear the legacy fields, set `version = 1`.
+1. Build one item list from the old item tree, displayed items, annotations and
+   graphics, even if the tree is empty. Translate UI-derived IDs to stable domain
+   IDs where needed; transient menus and selections may reset explicitly.
+2. Build one linked waveform tile for each saved viewport; if a loaded document
+   has no viewports, create one default waveform tile. Preserve saved viewports,
+   focus and scroll where valid. Use horizontal splits and expose columns on
+   the first tile only. The linked-scroll option in §14 is required to preserve
+   row alignment for this legacy shared-column layout.
+3. Translate persisted widget visibility flags into corresponding tile entries.
+   Keep generic preferences and shared cursor/marker times. Invalid historical
+   focus indices fall back to the first waveform; document this repair.
+4. Produce version 1, validate the complete result, then install atomically.
 
-`.sucl` command files need no migration: old command names remain aliases.
+Legacy `.sucl` command aliases are handled by the input parser, not by state-file
+migration. Retain the legacy decoder while legacy files remain supported; its
+lifetime is independent of internal struct evolution.
 
-`UserState::previous_waves` (used by the startup path to carry a state file's
-presentation until the wave finishes loading) is replaced by
-`pending_state: Option<Box<UserState>>` holding the whole loaded state; on
-`WavesLoaded` the reattachment in §11.3 runs against it.
+A pending state file is a validated `PendingWorkspace`, not a recursive boxed
+`UserState`. It carries the file DTO and a load-request token. Only the matching
+wave-load completion may attach its document and install it; an older load
+completion cannot replace a newer user request. Do not partially replace the
+active workspace on decoding, validation or document-load failure.
 
 ---
 
 ## 9. Undo / redo
 
-`CanvasState` grows to a workspace snapshot:
+Undo records describe successful semantic operations. Do not clone the whole
+workspace for every item edit. Persistence and undo have different boundaries:
+zoom, scroll, focus, tab activation, column widths and split resizing persist
+in files but do not get their own undo entries or roll back during unrelated
+undo operations.
 
-```rust
-struct CanvasState {
-    message: String,
-    layout: LayoutNode-or-Layout clone,
-    tiles: BTreeMap<TileId, TileKind>,
-    item_lists: BTreeMap<ItemListId, ItemList>,
-    markers: HashMap<u8, BigInt>,
-}
-```
+Use a small explicit `UndoRecord` enum with before/after data for affected
+content and structural inverses:
 
-`TileKind: Clone` and `ItemList: Clone` drop runtime caches in their `Clone`
-impls, as `AnalogVarState::clone` does today. Snapshots are taken where they are
-taken today (item edits, marker edits, annotation edits) plus `AddTile`,
-`CloseTile`, `SplitTile`, `MoveTile`. Zoom, scroll, focus and split resizing
-stay outside undo, as now. `undo_stack_size` applies unchanged; memory cost is
-dominated by item lists, which were already cloned per snapshot.
+* Item-list edits retain changed list content (whole affected-list snapshots
+  initially are acceptable). Shared lists are captured once. Runtime caches
+  and per-tile view settings are excluded.
+* Kind-setting edits (array selection, filters, formats) retain only changed
+  semantic settings through a kind-owned undo payload; unrelated navigation is
+  preserved. Marker-time edits retain changed shared marker values. Annotation edits
+  retain list content; selection is sanitized after restoration.
+* Create/close/split retain affected tile entries and any owned list content
+  required to recreate them. Reopened tiles restore their saved view settings;
+  surviving tiles retain their current zoom, scroll and other view settings.
+* Move/dock/reorder retain the moved tile and its old/new parent placement,
+  with stable neighboring tile anchors. Generic rename retains old/new title.
+  Mouse and keyboard operations produce the same records.
+
+Structural records store the affected topology and necessary insertion shares,
+not a full view-state snapshot. Preserve current shares for surviving splits;
+restore recorded shares only when reconstructing removed containers. Undoing a
+split necessarily changes geometry, but unrelated resizing is retained. Undo
+restores visibility and repairs focus only if the current focus no longer
+exists; it does not restore historical focus wholesale. Retain enough ancestor
+placement context to recreate a removed group; tests cover moves that collapse
+and recreate nested splits.
+
+Multi-step commands and one completed drag gesture form one history entry.
+Failed/no-op commands create none. Followups remain part of the originating
+transaction. `SetLayout` is an explicit whole-topology replacement with a
+corresponding topology record, preserving surviving tile view settings.
+
+New semantic edits clear redo; ordinary navigation does not. Workspace install,
+document replacement/reload and legacy migration clear undo/redo as an explicit
+boundary, since old records contain references to the previous attachment.
+Async cache completions never enter history. Restoring a tile/list clears its
+runtime caches and pending requests; fresh work receives fresh request tokens.
+Session allocators and generation counters never roll back.
+
+Keep `undo_stack_size`, and measure memory with multiple independent lists
+before optimizing snapshots. Use shared immutable content or more granular
+records only if measurements justify the complexity.
 
 ---
 
 ## 10. Adding a new tile kind
 
-Checklist — everything is in the kind's module except items 4 and 5:
+A new kind requires:
 
-1. `tile_kinds/<kind>.rs`: state struct (`Serialize, Deserialize, Clone,
-   Default`), its `<Kind>Message` enum, `impl TileView`, `fn update(&mut self,
-   <Kind>Message, &mut TileUpdateCtx)`, optional `commands()` for the palette,
-   optional runtime cache in a `#[serde(skip)] RefCell`.
-2. Tests: a snapshot test that builds the layout with `SetLayout`/`AddTile`
-   and a serde round trip of the state struct.
-3. Docs: a section in `docs/` and the kind in the tile list.
-4. `tiles/kind.rs`: one variant in `TileKind`, one in `TileMessage`, one arm in
-   `view`/`view_mut`/`update`, one entry in `CREATABLE`.
-5. `menus.rs`: nothing, if the kind is creatable from the generic **New Tile**
-   menu. Context-menu entry points (e.g. "Show memory viewer" on an item) are
-   added where the entry point lives.
+1. A state struct, typed payload DTO/codec with version, local command enum,
+   optional internal completion enum, and `TileView` implementation in its module.
+   Rendering is immutable except for runtime scratch/cache state.
+2. Registry entries for enum dispatch, codec, factory and capabilities. The
+   factory receives the context needed to create valid state; the common entry
+   owns the title. Kind-specific palette `CommandSpec`s live with the kind.
+3. Round-trip, command/targeting and snapshot tests, plus documented behavior
+   for missing data, reload and stale async completions.
+4. Any desired context-menu entry point, producing a typed creation request.
 
-Nothing in `layout.rs`, `render.rs`, `serde.rs`, `state.rs`, `lib.rs::update`
-or `command_parser.rs` changes.
+No per-kind branches belong in layout/rendering/undo dispatch. A kind with new
+editable content supplies the relevant undo payload through the transaction
+contract; registry dispatch delegates to it. New kinds that need shared resources
+must also define their persistence ownership contract (§8.2).
 
 ### 10.1 Worked example: the memory viewer
 
-Today: `MemoryViewerState` on `SystemState` (`memory_viewer.rs:31`), one
-instance, opened by `Message::OpenMemoryViewer { scope, name }`, drawn as an
-`egui::Window("Memory Viewer")`, cache in `SystemState::memory_viewer_cache`,
-settings changed by mutating the struct inside the window closure.
+`MemoryTile` owns a stable array path, index/value formats, column count, search,
+highlight and filter settings. The generic entry owns its optional title.
+Runtime state holds a cache and request token, never persisted backend handles.
 
-After:
+`MemoryMessage` covers array selection, formats, column count, filters and row
+navigation. `ui` emits `ToTile(its_id, TileMessage::Memory(...))`; it does not
+mutate settings or resolve ambient focus. The context-menu entry point creates
+a memory tile with the selected array path through the registry factory.
 
-```rust
-// tile_kinds/memory.rs
-#[derive(Serialize, Deserialize, Clone, Default)]
-pub struct MemoryTile {
-    pub scope: Option<ScopeRef>,
-    pub name: Option<String>,
-    pub index_format: MemoryViewerFormat,
-    pub value_format: String,
-    pub value_column_count: usize,
-    pub color_values: bool,
-    pub search: ValueQuery, pub highlight: ValueQuery, pub filter: ValueQuery,   // value + match mode + case
-    pub filter_mode: ChangeModes, pub highlight_mode: ChangeModes,
-    #[serde(skip)] scroll_to_row: Cell<Option<usize>>,
-    #[serde(skip)] cache: RefCell<Option<MemoryViewerCache>>,     // keyed by (cursor, generation, array)
-}
+The cache key includes workspace/document generation, array identity, cursor,
+and every setting that affects cached values or rows. Changing these inputs
+invalidates pending work. A missing array/cursor renders an explanatory empty
+state while preserving the tile settings; reload reattaches the stable path.
+Split-clone copies settings and starts with empty runtime state. Selection and
+scroll are view navigation, not edits to the immutable trace.
 
-#[derive(Debug, Deserialize)]
-pub enum MemoryMessage {
-    SetArray { scope: ScopeRef, name: String },
-    SetIndexFormat(MemoryViewerFormat), SetValueFormat(String),
-    SetColumnCount(usize), SetColorValues(bool),
-    SetSearch(ValueQuery), SetHighlight(ValueQuery), SetFilter(ValueQuery),
-    JumpToIndex(usize), SelectValue(Option<usize>),
-}
-
-impl TileView for MemoryTile {
-    fn kind_name(&self) -> &'static str { "memory" }
-    fn title(&self, _: &TileCtx) -> String {
-        match &self.name { Some(n) => format!("Memory: {n}"), None => "Memory".into() }
-    }
-    fn ui(&self, ui: &mut Ui, cx: &mut TileCtx) {
-        let Some(waves) = cx.waves() else { ui.label("No file loaded"); return };
-        let Some(cursor) = &waves.cursor else { ui.label("Place the cursor to inspect values."); return };
-        // toolbar row: array picker, formats, filters — every change → cx.send_self(MemoryMessage::…)
-        // table: egui_extras::TableBuilder with id_salt(cx.id("table")); rows from self.cache (rebuilt if key differs)
-    }
-    fn split_clone(&self) -> Option<TileKind> { Some(TileKind::Memory(self.clone())) }
-    fn on_waves_changed(&mut self, _: WavesChange, cx: &mut TileUpdateCtx) -> bool {
-        self.cache.borrow_mut().take();
-        self.name.as_ref().map_or(true, |n| cx.array_exists(self.scope.as_ref(), n))
-    }
-}
-
-impl MemoryTile {
-    pub fn update(&mut self, m: MemoryMessage, _: &mut TileUpdateCtx) {
-        match m { MemoryMessage::SetArray { scope, name } => { self.scope = Some(scope); self.name = Some(name); self.cache.borrow_mut().take(); }
-                  /* … field assignments … */ }
-    }
-}
-```
-
-Entry point: the item context menu's "Show memory viewer" sends
-`AddTile { kind: TileKind::Memory(MemoryTile { scope, name, ..Default::default() }), placement: Beside(focused, Right), focus: true }`.
-Removed: `MemoryViewerState::open`, `SystemState::memory_viewer`,
-`memory_viewer_cache`, `Message::OpenMemoryViewer`, the window in `view.rs:247`.
-The rendering code moves with minimal edits: direct field writes become
-`cx.send_self(..)`.
+Remove `MemoryViewerState::open`, the singleton `SystemState::memory_viewer`
+state/cache, `Message::OpenMemoryViewer` and the old floating window when this
+kind is migrated. Its existing rendering code moves into the kind module.
 
 ### 10.2 Sketch: a signal change table
 
-A future `SignalTableTile { variables: Vec<VariableRef>, sort: Option<(usize, bool)>, filter: String, columns: Vec<ColumnKey> }`
-whose `ui` renders an `egui_extras` table of value changes. Rows are produced
-by a model built off-thread from `SignalAccessor` snapshots (formatted strings,
-`Send + Sync`), cached in a `#[serde(skip)] RefCell<Option<Arc<TableCache>>>`
-keyed by `(variables, translator, cache_generation)`; build requests go through
-`Message::ToTile(id, SignalTableMessage::CacheBuilt(Arc<..>))` from a
-`tokio`/`rayon` task, following the `BuildAnalogCache`/`AnalogCacheBuilt`
-pattern. Row activation sends `Message::CursorSet(time)` — tables push time to
-the shared cursor, and follow it by highlighting the row at `waves.cursor`.
-`is_ready()` returns false while a build is in flight so snapshot tests can
-wait. This is the PoC's `TableModel`/cache protocol, reduced to what the tile
-contract needs; the table subsystem itself is separate work.
+A future `SignalTableTile` owns stable variable references, sorting, filters
+and column keys. It renders rows from immutable off-thread snapshots, using
+`SignalAccessor` data where appropriate. The request key includes the complete
+set of model inputs, including document generation, translator/config revision,
+variables, sorting and filtering if the model applies them.
+
+Submit build requests through the dispatcher and receive internal
+`TileCompletion::SignalTable` results with the tokens from §4.1. Validate tokens
+and input keys before accepting the result; never inject async results through
+deserializable user commands. Track pending/ready/failed explicitly. Failures
+end readiness waits and render an error with retry; hidden tiles do not start
+unnecessary work, and tests wait only for work their scenario requires.
+
+Row activation sends a shared cursor command. Highlighting follows the shared
+cursor. The table subsystem is separate work; no changes to layout ownership
+or targeting are needed to add it.
 
 ---
 
@@ -1101,78 +1138,99 @@ contract needs; the table subsystem itself is separate work.
 
 Ordered so that each step compiles, passes tests and could ship.
 
-### 11.1 Step 1 — `ItemList` extraction (no UI change)
+### 11.1 Step 1 — Extract content and input boundaries
 
-Move the item-anchored fields out of `WaveData` into `ItemList`; `WaveData`
-holds `item_list: ItemList` temporarily. Change method receivers from
-`&WaveData` to `&ItemList` where they only touch items. Update
-`update_with_items`, undo, tests. Purely mechanical; snapshots unchanged.
+Extract `ItemList` without UI changes; temporarily keep one list on `WaveData`.
+Separate item-list content from view navigation and runtime caches. Introduce
+typed waveform commands and explicit target resolution; adapt the existing
+single-waveform view before adding multiple tile identities. Update affected
+callers and tests together, without retaining a second internal command path.
 
-### 11.2 Step 2 — Layout, `TileId`, waveform tile, `egui_tiles`
+### 11.2 Step 2 — Prove the layout adapter and file contract
 
-* Add `egui_tiles = { version = "0.17", default-features = false }` (targets
-  egui 0.36; its `serde` feature is not needed because `Layout` owns the format).
-* Add `tiles/` and `tile_kinds/waveform.rs`. `UserState` gets `layout`,
-  `tiles`, `item_lists`, `version`. `WaveData` loses `viewports`,
-  `last_active_viewport_idx`, `scroll_offset`, `focused_item`,
-  `focused_transaction`, `item_list`.
-* Move the name/value/canvas panels from `view.rs` into `WaveformTile::ui`;
-  make `draw_items` and friends `&self`; per-tile draw cache.
-* Replace `viewport_idx` in messages with `TileTarget`; delete the viewport
-  messages; add the layout messages; `TileTarget::Focused` resolution.
-* Serialization, legacy migration, `SetLayout`.
-* Snapshot tests: the three viewport tests become linked-split tests; new tests
-  for split/tabs/close/focus and legacy-file loading. Most existing snapshots
-  change only by the tab bar (or not at all with `hide_single_tab_bar`).
+Pin the `egui_tiles` release compatible with the workspace's egui version
+(proposed 0.17 / egui 0.36; verify dependency/API compatibility before coding).
+Build small adapter tests for docking, tab selection, resizing, stable IDs,
+clipping and gesture boundaries. Prove `LayoutNode` conversion/validation,
+unknown raw payload preservation and legacy migration with fixtures. Do not
+build the larger migration on unverified callback or codec assumptions.
 
-### 11.3 Reattachment on load (part of step 2)
+### 11.3 Step 3 — Install the tile-native workspace
 
-`SystemState::on_waves_loaded(new_waves, load_options)`:
+Add `TileEntry`, session allocators/epochs, concrete-target commands, validated
+workspace transactions and undo records. Move waveform rendering into its kind;
+install per-tile draw caches and content-space list layout caches. Convert the
+existing viewport tests to linked-tile tests, including aligned scrolling for
+the legacy shared-column mode. Switch persistence to DTOs and wire pending-load
+tokens and atomic workspace installation.
 
-* `LoadOptions::Clear` (a different file): reset to the default layout — one
-  empty waveform tile, empty item list. Non-waveform tiles are dropped (their
-  targets belong to the old file).
-* `KeepAvailable`/`KeepAll` (reload, switch_file): keep layout and tiles; for
-  every `ItemList` run `update_with_items(keep_unavailable)`; clip every
-  waveform tile's `Viewport` to the new time range; call
-  `on_waves_changed(Reloaded)` on every tile and close those returning false.
-* A pending state file (`pending_state`): apply its layout/tiles/lists, then the
-  same per-list reattachment.
+On document load/reload, preserve the layout and kind settings by default:
 
-### 11.4 Step 3 — Widget migration
+* A fresh workspace with a document gets one empty waveform/list if none exists.
+* A different file clears old item content under `LoadOptions::Clear`, resets
+  document-relative navigation, and marks invalid non-waveform targets
+  unavailable. Keep tile arrangement and presentation preferences. Clear shared
+  cursor/markers that belong to the old document.
+* `KeepAvailable`/`KeepAll` reattaches every list with the corresponding
+  unavailable-item policy, clamps/reset viewports as appropriate, sanitizes tile
+  focus references, and calls every kind's document-change hook.
+* A validated pending state installs its saved layout/settings only when its
+  matching document load succeeds, followed by the same attachment validation.
+* Explicit **Reset Workspace** restores the default layout; it is separate from
+  opening a file. A sibling state file explicitly replaces the layout when applied.
 
-Memory viewer, markers window, logs window, frame buffer window, annotation
-list panel, transaction details panel → tile kinds, one commit each. Each
-commit deletes a `show_*` flag or a `SystemState` field and its window.
+Every document change advances generation, clears pending jobs and undo/redo,
+and invalidates dependent caches. Missing references are visible unavailable
+states rather than silently disappearing tiles.
 
-### 11.5 Step 4 — Polish
+### 11.4 Step 4 — Migrate widgets
 
-Keyboard navigation and move, drag from hierarchy onto a specific tile,
-overview click-to-focus, per-kind palette commands, WCP `viewport_idx`
-semantics, docs (`docs/tiles.md`, updates to `docs/commands`).
+Move memory, markers, logs, frame buffer, annotations and transaction details
+one kind at a time. Delete each replaced singleton field/visibility flag and
+floating window in the same change. Validate that context-menu, keyboard and
+palette entry points use identical targeting and creation semantics.
 
-### 11.6 Step 5 — New kinds
+### 11.5 Step 5 — Interaction and external interfaces
 
-Signal tables, pipeline/event views, on the contract of §10, independently.
+Complete focus navigation, drag from hierarchy, overview targeting, per-kind
+palette commands and WCP compatibility adapters. Document captured targeting
+and the limits of WCP's legacy per-list item references. Add optional explicit
+tile/list addressing only through a coordinated protocol change. Update user
+commands and state-format documentation alongside implementation.
+
+### 11.6 Step 6 — New kinds
+
+Signal tables and pipeline/event views can then use the tested contract in §10.
 
 ---
 
 ## 12. Testing
 
-* **Unit**: `LayoutNode` ↔ tree round trip; `Placement` insertions;
-  `neighbor()` on a fixed layout; `CloseTile` focus fallback; legacy `version 0`
-  fixture files under `libsurfer/src/tests/state_files/` load into the expected
-  layout; unknown-kind round trip.
-* **Snapshot** (`snapshot_ui_with_file_and_msgs!`): layouts built with
-  `Message::SetLayout` + `AddTile` so tests are deterministic; linked vs copied
-  splits; focus frame; hidden columns; every migrated kind in a tile;
-  `tab_bar` on/off. `wait_for_waves_fully_loaded` additionally waits until every
-  tile's `is_ready()` is true.
-* **Interaction** (real input, like `theme_menu_radio_button`): click focuses a
-  tile; tab click; tab close button. Drag-and-drop docking is `egui_tiles`'
-  responsibility and is not snapshot-tested here.
-* **WCP** tests unchanged in intent; `zoom_to_fit { viewport_idx: 1 }` against a
-  two-tile layout.
+* **Layout:** normalization and tree round trips; duplicate/missing tile IDs,
+  missing lists, invalid shares/tab indices, depth limits, focus visibility and
+  singleton enforcement. Failed commands leave state unchanged.
+* **Targeting:** interacting with an unfocused tile edits its own list; palette
+  target stays fixed while focus changes; closed targets never redirect;
+  followups retain targets; script statements resolve sequentially.
+* **Undo:** edit → zoom → undo preserves zoom; close/reopen restores owned
+  resources; shared lists are restored once; dock/reorder and keyboard moves
+  have identical history; unrelated resizing survives undo; collapsed nested
+  groups reconstruct correctly; workspace/document changes clear history.
+* **Persistence:** empty and populated legacy files; legacy files with no
+  viewports; normal workspace round trips; unknown kind/version payloads with
+  nested enums and retained resources; malformed known payload errors;
+  unsupported workspace versions; invalid input never partially installs.
+* **Async:** completions after close, undo restoration, array/filter change,
+  document reload and workspace load with reused numeric IDs are rejected;
+  failure/cancellation ends pending state; overlapping file loads obey tokens.
+* **Snapshot:** linked versus independent lists, legacy row alignment, hidden
+  columns, focus/empty states, every kind and unavailable data, tab bar modes.
+  Wait for required tile work with a bounded timeout and diagnostic failures.
+* **Interaction:** real-input tab focus/close, docking, reorder, split resizing,
+  drag cancellation and cross-tile drops. Test Surfer's command/undo integration
+  even though the third-party library implements the drag mechanics.
+* **External:** legacy command aliases and WCP viewport ordering/target capture;
+  injected malformed commands cannot bypass validation.
 
 ---
 
@@ -1194,46 +1252,26 @@ unclosable waveform pane; bundling the layout with unrelated multi-source work.
 
 ---
 
-## 14. Open questions and trade-offs
+## 14. Decisions and remaining scope
 
-1. **Linked item lists vs. copies only.** Linked lists (`ItemListId`
-   indirection) preserve today's multi-viewport workflow and cost one map and
-   one id. Dropping them would simplify undo and WCP slightly but regress a
-   shipped feature. Recommendation: keep linked lists.
-2. **Cursor per tile?** Some tools (GTKWave, Verdi) have one cursor; some users
-   ask for independent cursors in compare views. This design keeps one shared
-   cursor; a per-tile "secondary cursor" could be added later as tile state
-   without a format change. Recommendation: shared only, revisit with user
-   feedback.
-3. **Zoom sync between waveform tiles.** Useful for side-by-side comparison of
-   different signal sets over the same window. Proposed later addition:
-   `sync_group: Option<u8>` on `WaveformTile`; after messages are applied, tiles
-   in the same group adopt the window of the tile last changed (the PoC's
-   `viewport_sync` arbitration, simplified because all participants share one
-   time base). Not in the first version.
-4. **Tab bar on a single tile.** Always showing it is uniform and discoverable
-   (VSCode); hiding it keeps the current look. Config option, default show.
-   Decide after trying it.
-5. **`Ctrl+W` in the browser.** Cannot be intercepted reliably. Alternatives:
-   no default binding in wasm, or `Ctrl+Shift+W`. Recommendation: bind
-   `Command+W`, document the limitation, rely on the tab ✕.
-6. **Where does the hierarchy sidebar belong?** Left out of the tree (VSCode
-   sidebar model) so that "add variable" has an unambiguous target and the
-   tree never becomes empty of a place to add things. Making it a tile is
-   possible later since it is state-free apart from the filter; nothing in
-   the format prevents it.
-7. **Undo of tile operations.** Included (cheap, consistent with item undo).
-   Layout resizing and tab reordering are not undoable, like panel widths.
-   Alternative: exclude tiles from undo entirely and rely on "Reopen closed
-   tile". Recommendation: include.
-8. **WCP tile addressing.** Keep `viewport_idx` as "n-th waveform tile" for
-   compatibility now; add an optional `tile: u64` field when a client needs
-   it. Protocol change requires coordination with `surfer-wcp` consumers.
-9. **`LoadOptions::Clear` resets the layout.** Simple and predictable, but a
-   user who arranged tiles and opens a different design loses the arrangement.
-   Alternative: keep the layout and empty the lists. Recommendation: reset;
-   sibling state files restore per-design layouts anyway.
-10. **Per-kind palette commands via `commands()`.** Keeps `command_parser.rs`
-    kind-agnostic but means a kind's commands are only reachable when it is
-    focused. Global variants (e.g. `memory_goto` targeting the last-focused
-    memory tile) can be added per kind if needed.
+1. **Keep linked item lists.** They preserve shared signal sets. Add explicit
+   vertical-scroll linking for the legacy shared-column mode: a runtime gesture
+   updates all opted-in waveform views with the same persisted `ItemListId`. Default migrated extra viewports to this mode. Ordinary
+   linked splits may scroll independently; labels/menu text must distinguish
+   shared items from shared scroll. Do not claim parity until alignment is tested.
+2. **One shared cursor initially.** Independent secondary cursors and horizontal
+   zoom-sync groups are future features with explicit ownership and target rules.
+3. **Keep hierarchy and global chrome outside the tree.** Hierarchy additions
+   use the declared waveform fallback policy; kind-local commands target focus.
+4. **Persist navigation, exclude it from unrelated undo.** Structural edits,
+   including mouse docking/reordering, are undoable; resizing and focus are not.
+5. **Preserve arrangement across document changes.** Missing targets render
+   unavailable states. Reset is explicit; applying a saved workspace replaces it.
+6. **WCP compatibility stays at the boundary.** Positional viewport addressing
+   maps to current waveform order. Multi-list client identity needs a future
+   explicit protocol extension, not implicit focus-dependent references.
+7. **Show single-tile tab bars by default.** Keep a hide option. Browser shortcut
+   bindings need platform testing; the palette and close button remain available.
+8. **No plugin system or multi-document abstraction yet.** An enum registry,
+   one document, explicit commands and versioned per-kind DTOs are sufficient.
+   Validate performance and API ergonomics before adding further abstraction.

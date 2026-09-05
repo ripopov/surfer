@@ -1,10 +1,9 @@
 //! Menu handling.
+use crate::tiles::commands::DocumentCommand;
 use egui::containers::menu::{MenuConfig, SubMenuButton};
 use egui::{Button, Panel, PopupCloseBehavior, TextWrapMode, Ui};
 use eyre::WrapErr as _;
-use futures::executor::block_on;
 use itertools::Itertools;
-use std::sync::atomic::Ordering;
 use surfer_translation_types::{TranslationPreference, Translator};
 use tracing::error;
 
@@ -28,21 +27,20 @@ use crate::{
     toolbar::toolbar_group_specs,
     variable_name_type::VariableNameType,
 };
-use surfer_wcp::{WcpEvent, WcpSCMessage};
 
 // Button builder. Short name because we use it a ton
 struct ButtonBuilder {
     text: String,
     shortcut: Option<String>,
-    message: Message,
+    message: Option<Message>,
     enabled: bool,
 }
 
 impl ButtonBuilder {
-    fn new(text: impl Into<String>, message: Message) -> Self {
+    fn new(text: impl Into<String>, message: impl Into<Option<Message>>) -> Self {
         Self {
             text: text.into(),
-            message,
+            message: message.into(),
             shortcut: None,
             enabled: true,
         }
@@ -70,8 +68,12 @@ impl ButtonBuilder {
         } else {
             button
         };
-        if ui.add_enabled(self.enabled, button).clicked() {
-            msgs.push(self.message);
+        if ui
+            .add_enabled(self.enabled && self.message.is_some(), button)
+            .clicked()
+            && let Some(message) = self.message
+        {
+            msgs.push(message);
         }
     }
 }
@@ -85,9 +87,57 @@ impl SystemState {
         });
     }
 
+    fn tile_menu(&self, ui: &mut Ui, messages: &mut Vec<Message>) {
+        use crate::tiles::{
+            commands::WorkspaceCommand,
+            kind::KINDS,
+            layout::Placement,
+            view::{TileCtx, TileReadServices, tab_context_menu},
+        };
+        ui.menu_button("New tile", |ui| {
+            for kind in KINDS {
+                if ui.button(kind.name).clicked() {
+                    let placement = self
+                        .user
+                        .workspace
+                        .layout
+                        .focused()
+                        .map_or(Placement::Root, Placement::TabAfter);
+                    messages.push(Message::Workspace(WorkspaceCommand::OpenTile {
+                        kind: kind.name.into(),
+                        placement,
+                        focus: true,
+                    }));
+                    ui.close();
+                }
+            }
+        });
+        for id in self.user.workspace.layout.tile_order() {
+            let entry = &self.user.workspace.tiles[&id];
+            ui.push_id(self.workspace_runtime.egui_id(id, "tile menu"), |ui| {
+                ui.menu_button(entry.display_title(), |ui| {
+                    let services = TileReadServices {
+                        document: self.user.waves.as_ref(),
+                        item_lists: &self.user.workspace.item_lists,
+                        config: &self.user.config,
+                        translators: &self.translators,
+                        runtime: &self.workspace_runtime,
+                    };
+                    let mut cx = TileCtx::new(
+                        services,
+                        id,
+                        self.user.workspace.layout.focused() == Some(id),
+                        messages,
+                    );
+                    tab_context_menu(entry, ui, &mut cx);
+                });
+            });
+        }
+    }
+
     pub fn menu_contents(&self, ui: &mut Ui, msgs: &mut Vec<Message>) {
         /// Helper function to get a new `ButtonBuilder`.
-        fn b(text: impl Into<String>, message: Message) -> ButtonBuilder {
+        fn b(text: impl Into<String>, message: impl Into<Option<Message>>) -> ButtonBuilder {
             ButtonBuilder::new(text, message)
         }
 
@@ -206,19 +256,19 @@ impl SystemState {
             b("Exit", Message::Exit).add_closing_menu(msgs, ui);
         });
         ui.menu_button("View", |ui: &mut Ui| {
-            let viewport_idx = self
+            ui.menu_button("Tiles", |ui| self.tile_menu(ui, msgs));
+            let tile_id = self
                 .user
-                .waves
-                .as_ref()
-                .map_or(0, |waves| waves.last_active_viewport_idx);
+                .workspace
+                .resolve_waveform(crate::tiles::TileTarget::Focused);
             ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
             b(
                 "Zoom in",
-                Message::CanvasZoom {
+                tile_id.map(|tile_id| Message::CanvasZoom {
                     mouse_ptr: None,
                     delta: 0.5,
-                    viewport_idx,
-                },
+                    tile_id,
+                }),
             )
             .shortcut(
                 self.user
@@ -231,11 +281,11 @@ impl SystemState {
 
             b(
                 "Zoom out",
-                Message::CanvasZoom {
+                tile_id.map(|tile_id| Message::CanvasZoom {
                     mouse_ptr: None,
                     delta: 2.0,
-                    viewport_idx,
-                },
+                    tile_id,
+                }),
             )
             .shortcut(
                 self.user
@@ -246,36 +296,45 @@ impl SystemState {
             .enabled(waves_loaded)
             .add_closing_menu(msgs, ui);
 
-            b("Zoom to fit", Message::ZoomToFit { viewport_idx })
-                .shortcut(
-                    self.user
-                        .config
-                        .shortcuts
-                        .format_shortcut(ShortcutAction::ZoomToFit),
-                )
-                .enabled(waves_loaded)
-                .add_closing_menu(msgs, ui);
+            b(
+                "Zoom to fit",
+                tile_id.map(|tile_id| Message::ZoomToFit { tile_id }),
+            )
+            .shortcut(
+                self.user
+                    .config
+                    .shortcuts
+                    .format_shortcut(ShortcutAction::ZoomToFit),
+            )
+            .enabled(waves_loaded)
+            .add_closing_menu(msgs, ui);
 
             ui.separator();
 
-            b("Go to start", Message::GoToStart { viewport_idx })
-                .shortcut(
-                    self.user
-                        .config
-                        .shortcuts
-                        .format_shortcut(ShortcutAction::GoToStart),
-                )
-                .enabled(waves_loaded)
-                .add_closing_menu(msgs, ui);
-            b("Go to end", Message::GoToEnd { viewport_idx })
-                .shortcut(
-                    self.user
-                        .config
-                        .shortcuts
-                        .format_shortcut(ShortcutAction::GoToEnd),
-                )
-                .enabled(waves_loaded)
-                .add_closing_menu(msgs, ui);
+            b(
+                "Go to start",
+                tile_id.map(|tile_id| Message::GoToStart { tile_id }),
+            )
+            .shortcut(
+                self.user
+                    .config
+                    .shortcuts
+                    .format_shortcut(ShortcutAction::GoToStart),
+            )
+            .enabled(waves_loaded)
+            .add_closing_menu(msgs, ui);
+            b(
+                "Go to end",
+                tile_id.map(|tile_id| Message::GoToEnd { tile_id }),
+            )
+            .shortcut(
+                self.user
+                    .config
+                    .shortcuts
+                    .format_shortcut(ShortcutAction::GoToEnd),
+            )
+            .enabled(waves_loaded)
+            .add_closing_menu(msgs, ui);
             ui.separator();
             b("Add viewport", Message::AddViewport)
                 .enabled(waves_loaded)
@@ -385,8 +444,8 @@ impl SystemState {
             ui.menu_button("Time format", |ui| {
                 timeformat_menu(ui, msgs, &self.get_time_format());
             });
-            if let Some(waves) = &self.user.waves {
-                let variable_name_type = waves.default_variable_name_type;
+            if let Some(waves) = self.user.waveform_read() {
+                let variable_name_type = waves.items.default_variable_name_type;
                 ui.menu_button("Variable names", |ui| {
                     for name_type in enum_iterator::all::<VariableNameType>() {
                         ui.radio(variable_name_type == name_type, name_type.to_string())
@@ -565,7 +624,17 @@ impl SystemState {
             b("Mouse gestures", Message::SetGestureHelpVisible(true)).add_closing_menu(msgs, ui);
 
             ui.separator();
-            b("Show logs", Message::SetLogsVisible(true)).add_closing_menu(msgs, ui);
+            b(
+                "Show logs",
+                Message::Workspace(crate::tiles::commands::WorkspaceCommand::OpenTile {
+                    kind: "logs".into(),
+                    placement: crate::tiles::layout::Placement::Edge(
+                        crate::tiles::layout::Direction::Down,
+                    ),
+                    focus: true,
+                }),
+            )
+            .add_closing_menu(msgs, ui);
 
             ui.separator();
             b("License information", Message::SetLicenseVisible(true)).add_closing_menu(msgs, ui);
@@ -583,276 +652,20 @@ impl SystemState {
                 });
         }
     }
+}
 
-    pub fn item_context_menu(
-        &self,
-        path: Option<&FieldRef>,
-        msgs: &mut Vec<Message>,
-        ui: &mut Ui,
-        vidx: VisibleItemIndex,
-        show_reset_name: bool,
-        group_target: MessageTarget<VisibleItemIndex>,
-    ) {
-        let Some(waves) = &self.user.waves else {
-            return;
-        };
-
-        let (clicked_item_ref, clicked_item) = waves
-            .items_tree
-            .get_visible(vidx)
-            .map(|node| (node.item_ref, &waves.displayed_items[&node.item_ref]))
-            .unwrap();
-
-        if let Some(path) = path {
-            let dfr = DisplayedFieldRef {
-                item: clicked_item_ref,
-                field: path.field.clone(),
-            };
-            self.add_format_menu(&dfr, clicked_item, path, msgs, ui, group_target);
+pub fn generic_context_menu(msgs: &mut Vec<Message>, response: &egui::Response) {
+    response.context_menu(|ui| {
+        if ui.button("Add divider").clicked() {
+            msgs.push(Message::AddDivider(None, None));
         }
-
-        ui.menu_button("Color", |ui| {
-            let selected_color = clicked_item.color();
-            for color_name in self.user.config.theme.colors.keys() {
-                ui.radio(selected_color == Some(color_name), color_name)
-                    .clicked()
-                    .then(|| {
-                        msgs.push(Message::ItemColorChange(
-                            group_target,
-                            Some(color_name.clone()),
-                        ));
-                    });
-            }
-            ui.separator();
-            ui.radio(selected_color.is_none(), "Default")
-                .clicked()
-                .then(|| {
-                    msgs.push(Message::ItemColorChange(group_target, None));
-                });
-        });
-
-        ui.menu_button("Background color", |ui| {
-            let selected_color = clicked_item.background_color();
-            for color_name in self.user.config.theme.colors.keys() {
-                ui.radio(selected_color == Some(color_name), color_name)
-                    .clicked()
-                    .then(|| {
-                        msgs.push(Message::ItemBackgroundColorChange(
-                            group_target,
-                            Some(color_name.clone()),
-                        ));
-                    });
-            }
-            ui.separator();
-            ui.radio(selected_color.is_none(), "Default")
-                .clicked()
-                .then(|| {
-                    msgs.push(Message::ItemBackgroundColorChange(group_target, None));
-                });
-        });
-
-        if let DisplayedItem::Variable(variable) = clicked_item {
-            ui.menu_button("Name", |ui| {
-                let variable_name_type = variable.display_name_type;
-                for name_type in enum_iterator::all::<VariableNameType>() {
-                    ui.radio(variable_name_type == name_type, name_type.to_string())
-                        .clicked()
-                        .then(|| {
-                            msgs.push(Message::ChangeVariableNameType(group_target, name_type));
-                        });
-                }
-            });
-
-            ui.menu_button("Height", |ui| {
-                let selected_size = clicked_item.height_scaling_factor();
-                for size in &self.user.config.layout.waveforms_line_height_multiples {
-                    ui.radio(selected_size == *size, format!("{size}"))
-                        .clicked()
-                        .then(|| {
-                            msgs.push(Message::ItemHeightScalingFactorChange(group_target, *size));
-                        });
-                }
-            });
-
-            if self.wcp_greeted_signal.load(Ordering::Relaxed) {
-                if self.wcp_client_capabilities.goto_declaration
-                    && ui.button("Go to declaration").clicked()
-                {
-                    let variable = variable.variable_ref.full_path_string_no_index();
-                    self.channels.wcp_s2c_sender.as_ref().map(|ch| {
-                        block_on(
-                            ch.send(WcpSCMessage::event(WcpEvent::goto_declaration { variable })),
-                        )
-                    });
-                }
-                if self.wcp_client_capabilities.add_drivers && ui.button("Add drivers").clicked() {
-                    let variable = variable.variable_ref.full_path_string_no_index();
-                    self.channels.wcp_s2c_sender.as_ref().map(|ch| {
-                        block_on(ch.send(WcpSCMessage::event(WcpEvent::add_drivers { variable })))
-                    });
-                }
-                if self.wcp_client_capabilities.add_loads && ui.button("Add loads").clicked() {
-                    let variable = variable.variable_ref.full_path_string_no_index();
-                    self.channels.wcp_s2c_sender.as_ref().map(|ch| {
-                        block_on(ch.send(WcpSCMessage::event(WcpEvent::add_loads { variable })))
-                    });
-                }
-            }
+        if ui.button("Add timeline").clicked() {
+            msgs.push(Message::AddTimeLine(None));
         }
+    });
+}
 
-        if let Some(path) = path {
-            let wave_container = waves.inner.as_waves().unwrap();
-            let meta = wave_container.variable_meta(&path.root).ok();
-            let is_parameter = meta
-                .as_ref()
-                .is_some_and(surfer_translation_types::VariableMeta::is_parameter);
-            if !is_parameter && ui.button("Expand scope").clicked() {
-                let scope_path = path.root.path.clone();
-                let scope_type = ScopeType::WaveScope(scope_path.clone());
-                msgs.push(Message::SetActiveScope(Some(scope_type)));
-                msgs.push(Message::ExpandScope(ScopeExpandType::ExpandSpecific(
-                    scope_path,
-                )));
-            }
-
-            if let DisplayedItem::Variable(variable) = clicked_item
-                && wave_container.supports_analog()
-            {
-                let displayed_field_ref: DisplayedFieldRef = clicked_item_ref.into();
-                let translator = waves.variable_translator(&displayed_field_ref, &self.translators);
-                let type_limits_available = meta
-                    .as_ref()
-                    .is_some_and(|m| translator.numeric_range(m).is_some());
-
-                SubMenuButton::new("Analog")
-                    .config(
-                        MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside),
-                    )
-                    .ui(ui, |ui| {
-                        Self::analog_submenu(
-                            ui,
-                            msgs,
-                            variable,
-                            group_target,
-                            type_limits_available,
-                        );
-                    });
-            }
-        }
-
-        if ui.button("Rename").clicked() {
-            let name = clicked_item.name();
-            msgs.push(Message::FocusItem(vidx));
-            msgs.push(Message::ShowCommandPrompt(
-                "item_rename ".to_owned(),
-                Some(name),
-            ));
-        }
-
-        if show_reset_name && ui.button("Reset Name").clicked() {
-            msgs.push(Message::ItemNameReset(group_target));
-        }
-
-        if ui.button("Remove").clicked() {
-            if waves
-                .items_tree
-                .iter_visible_selected()
-                .map(|node| node.item_ref)
-                .contains(&clicked_item_ref)
-            {
-                msgs.push(Message::UnfocusItem);
-            }
-            msgs.push(Message::RemoveVisibleItems(group_target));
-        }
-        if let Some(path) = path {
-            // Actual signal. Not one of: divider, timeline, marker.
-            if ui.button("Show frame buffer").clicked() {
-                msgs.push(Message::SetFrameBufferVisibleVariable(Some(vidx)));
-            }
-            if let DisplayedItem::Variable(_) = clicked_item
-                && ui.button("Show Memory Viewer").clicked()
-            {
-                msgs.push(Message::OpenMemoryViewer {
-                    scope: path.root.path.clone(),
-                    name: Some(path.root.name.clone()),
-                });
-            }
-            ui.menu_button("Copy", |ui| {
-                if waves.cursor.is_some() && ui.button("Value").clicked() {
-                    msgs.push(Message::VariableValueToClipbord(MessageTarget::Explicit(
-                        vidx,
-                    )));
-                }
-                if ui.button("Name").clicked() {
-                    msgs.push(Message::VariableNameToClipboard(MessageTarget::Explicit(
-                        vidx,
-                    )));
-                }
-                if ui.button("Full name").clicked() {
-                    msgs.push(Message::VariableFullNameToClipboard(
-                        MessageTarget::Explicit(vidx),
-                    ));
-                }
-            });
-        }
-        ui.separator();
-        ui.menu_button("Insert", |ui| {
-            if ui.button("Divider").clicked() {
-                msgs.push(Message::AddDivider(None, Some(vidx)));
-            }
-            if ui.button("Timeline").clicked() {
-                msgs.push(Message::AddTimeLine(Some(vidx)));
-            }
-        });
-
-        ui.menu_button("Group", |ui| {
-            let info = waves
-                .items_tree
-                .iter_visible_extra()
-                .find(|info| info.node.item_ref == clicked_item_ref)
-                .expect("Inconsistent, could not find displayed signal in tree");
-
-            if ui.button("Create").clicked() {
-                msgs.push(Message::GroupNew {
-                    name: None,
-                    before: Some(info.idx),
-                    items: None,
-                });
-            }
-            if matches!(clicked_item, DisplayedItem::Group(_)) {
-                if ui.button("Dissolve").clicked() {
-                    msgs.push(Message::GroupDissolve(Some(clicked_item_ref)));
-                }
-
-                let (text, msg, msg_recursive) = if info.node.unfolded {
-                    (
-                        "Collapse",
-                        Message::GroupFold(Some(clicked_item_ref)),
-                        Message::GroupFoldRecursive(Some(clicked_item_ref)),
-                    )
-                } else {
-                    (
-                        "Expand",
-                        Message::GroupUnfold(Some(clicked_item_ref)),
-                        Message::GroupUnfoldRecursive(Some(clicked_item_ref)),
-                    )
-                };
-                if ui.button(text).clicked() {
-                    msgs.push(msg);
-                }
-                if ui.button(text.to_owned() + " recursive").clicked() {
-                    msgs.push(msg_recursive);
-                }
-            }
-        });
-        if let DisplayedItem::Marker(_) = clicked_item {
-            ui.separator();
-            if ui.button("View markers").clicked() {
-                msgs.push(Message::SetCursorWindowVisible(true));
-            }
-        }
-    }
-
+impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
     fn analog_submenu(
         ui: &mut Ui,
         msgs: &mut Vec<Message>,
@@ -922,8 +735,305 @@ impl SystemState {
         }
     }
 
-    fn add_format_menu(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn item_context_menu(
         &self,
+        waves: &crate::view::ItemListView<'_>,
+        path: Option<&FieldRef>,
+        msgs: &mut Vec<Message>,
+        ui: &mut Ui,
+        vidx: VisibleItemIndex,
+        show_reset_name: bool,
+        group_target: MessageTarget<VisibleItemIndex>,
+    ) {
+        let (clicked_item_ref, clicked_item) = waves
+            .items
+            .items_tree
+            .get_visible(vidx)
+            .map(|node| (node.item_ref, &waves.items.displayed_items[&node.item_ref]))
+            .unwrap();
+
+        if let Some(path) = path {
+            let dfr = DisplayedFieldRef {
+                item: clicked_item_ref,
+                field: path.field.clone(),
+            };
+            self.add_format_menu(
+                waves.document,
+                &dfr,
+                clicked_item,
+                path,
+                msgs,
+                ui,
+                group_target,
+            );
+        }
+
+        ui.menu_button("Color", |ui| {
+            let selected_color = clicked_item.color();
+            for color_name in self.config.theme.colors.keys() {
+                ui.radio(selected_color == Some(color_name), color_name)
+                    .clicked()
+                    .then(|| {
+                        msgs.push(Message::ItemColorChange(
+                            group_target,
+                            Some(color_name.clone()),
+                        ));
+                    });
+            }
+            ui.separator();
+            ui.radio(selected_color.is_none(), "Default")
+                .clicked()
+                .then(|| {
+                    msgs.push(Message::ItemColorChange(group_target, None));
+                });
+        });
+
+        ui.menu_button("Background color", |ui| {
+            let selected_color = clicked_item.background_color();
+            for color_name in self.config.theme.colors.keys() {
+                ui.radio(selected_color == Some(color_name), color_name)
+                    .clicked()
+                    .then(|| {
+                        msgs.push(Message::ItemBackgroundColorChange(
+                            group_target,
+                            Some(color_name.clone()),
+                        ));
+                    });
+            }
+            ui.separator();
+            ui.radio(selected_color.is_none(), "Default")
+                .clicked()
+                .then(|| {
+                    msgs.push(Message::ItemBackgroundColorChange(group_target, None));
+                });
+        });
+
+        if let DisplayedItem::Variable(variable) = clicked_item {
+            ui.menu_button("Name", |ui| {
+                let variable_name_type = variable.display_name_type;
+                for name_type in enum_iterator::all::<VariableNameType>() {
+                    ui.radio(variable_name_type == name_type, name_type.to_string())
+                        .clicked()
+                        .then(|| {
+                            msgs.push(Message::ChangeVariableNameType(group_target, name_type));
+                        });
+                }
+            });
+
+            ui.menu_button("Height", |ui| {
+                let selected_size = clicked_item.height_scaling_factor();
+                for size in &self.config.layout.waveforms_line_height_multiples {
+                    ui.radio(selected_size == *size, format!("{size}"))
+                        .clicked()
+                        .then(|| {
+                            msgs.push(Message::ItemHeightScalingFactorChange(group_target, *size));
+                        });
+                }
+            });
+
+            if let Some(capabilities) = self.wcp_capabilities {
+                use crate::tiles::commands::WcpVariableAction;
+                for (enabled, label, action) in [
+                    (
+                        capabilities.goto_declaration,
+                        "Go to declaration",
+                        WcpVariableAction::GoToDeclaration,
+                    ),
+                    (
+                        capabilities.add_drivers,
+                        "Add drivers",
+                        WcpVariableAction::AddDrivers,
+                    ),
+                    (
+                        capabilities.add_loads,
+                        "Add loads",
+                        WcpVariableAction::AddLoads,
+                    ),
+                ] {
+                    if enabled && ui.button(label).clicked() {
+                        msgs.push(Message::WcpVariableAction {
+                            action,
+                            variable: variable.variable_ref.full_path_string_no_index(),
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some(path) = path {
+            let wave_container = waves.inner.as_waves().unwrap();
+            let meta = wave_container.variable_meta(&path.root).ok();
+            let is_parameter = meta
+                .as_ref()
+                .is_some_and(surfer_translation_types::VariableMeta::is_parameter);
+            if !is_parameter && ui.button("Expand scope").clicked() {
+                let scope_path = path.root.path.clone();
+                let scope_type = ScopeType::WaveScope(scope_path.clone());
+                msgs.push(Message::ToDocument(DocumentCommand::SetActiveScope(Some(
+                    scope_type,
+                ))));
+                msgs.push(Message::ExpandScope(ScopeExpandType::ExpandSpecific(
+                    scope_path,
+                )));
+            }
+
+            if let DisplayedItem::Variable(variable) = clicked_item
+                && wave_container.supports_analog()
+            {
+                let displayed_field_ref: DisplayedFieldRef = clicked_item_ref.into();
+                let translator = waves.items.variable_translator(
+                    waves.document,
+                    &displayed_field_ref,
+                    self.translators,
+                );
+                let type_limits_available = meta
+                    .as_ref()
+                    .is_some_and(|m| translator.numeric_range(m).is_some());
+
+                SubMenuButton::new("Analog")
+                    .config(
+                        MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside),
+                    )
+                    .ui(ui, |ui| {
+                        Self::analog_submenu(
+                            ui,
+                            msgs,
+                            variable,
+                            group_target,
+                            type_limits_available,
+                        );
+                    });
+            }
+        }
+
+        if ui.button("Rename").clicked() {
+            let name = clicked_item.name();
+            msgs.push(Message::FocusItem(vidx));
+            msgs.push(Message::ShowCommandPrompt(
+                "item_rename ".to_owned(),
+                Some(name),
+            ));
+        }
+
+        if show_reset_name && ui.button("Reset Name").clicked() {
+            msgs.push(Message::ItemNameReset(group_target));
+        }
+
+        if ui.button("Remove").clicked() {
+            if waves
+                .items
+                .items_tree
+                .iter_visible_selected()
+                .map(|node| node.item_ref)
+                .contains(&clicked_item_ref)
+            {
+                msgs.push(Message::UnfocusItem);
+            }
+            msgs.push(Message::RemoveVisibleItems(group_target));
+        }
+        if let Some(path) = path {
+            // Actual signal. Not one of: divider, timeline, marker.
+            if ui.button("Show frame buffer").clicked() {
+                msgs.push(Message::SetFrameBufferVisibleVariable(Some(vidx)));
+            }
+            if let DisplayedItem::Variable(_) = clicked_item
+                && ui.button("Show Memory Viewer").clicked()
+            {
+                msgs.push(Message::OpenMemoryViewer {
+                    scope: path.root.path.clone(),
+                    name: Some(path.root.name.clone()),
+                });
+            }
+            ui.menu_button("Copy", |ui| {
+                if waves.cursor.is_some() && ui.button("Value").clicked() {
+                    msgs.push(Message::VariableValueToClipbord(MessageTarget::Explicit(
+                        vidx,
+                    )));
+                }
+                if ui.button("Name").clicked() {
+                    msgs.push(Message::VariableNameToClipboard(MessageTarget::Explicit(
+                        vidx,
+                    )));
+                }
+                if ui.button("Full name").clicked() {
+                    msgs.push(Message::VariableFullNameToClipboard(
+                        MessageTarget::Explicit(vidx),
+                    ));
+                }
+            });
+        }
+        ui.separator();
+        ui.menu_button("Insert", |ui| {
+            if ui.button("Divider").clicked() {
+                msgs.push(Message::AddDivider(None, Some(vidx)));
+            }
+            if ui.button("Timeline").clicked() {
+                msgs.push(Message::AddTimeLine(Some(vidx)));
+            }
+        });
+
+        ui.menu_button("Group", |ui| {
+            let info = waves
+                .items
+                .items_tree
+                .iter_visible_extra()
+                .find(|info| info.node.item_ref == clicked_item_ref)
+                .expect("Inconsistent, could not find displayed signal in tree");
+
+            if ui.button("Create").clicked() {
+                msgs.push(Message::GroupNew {
+                    name: None,
+                    before: Some(info.idx),
+                    items: None,
+                });
+            }
+            if matches!(clicked_item, DisplayedItem::Group(_)) {
+                if ui.button("Dissolve").clicked() {
+                    msgs.push(Message::GroupDissolve(Some(clicked_item_ref)));
+                }
+
+                let (text, msg, msg_recursive) = if info.node.unfolded {
+                    (
+                        "Collapse",
+                        Message::GroupFold(Some(clicked_item_ref)),
+                        Message::GroupFoldRecursive(Some(clicked_item_ref)),
+                    )
+                } else {
+                    (
+                        "Expand",
+                        Message::GroupUnfold(Some(clicked_item_ref)),
+                        Message::GroupUnfoldRecursive(Some(clicked_item_ref)),
+                    )
+                };
+                if ui.button(text).clicked() {
+                    msgs.push(msg);
+                }
+                if ui.button(text.to_owned() + " recursive").clicked() {
+                    msgs.push(msg_recursive);
+                }
+            }
+        });
+        if let DisplayedItem::Marker(_) = clicked_item {
+            ui.separator();
+            if ui.button("View markers").clicked() {
+                msgs.push(Message::Workspace(
+                    crate::tiles::commands::WorkspaceCommand::OpenTile {
+                        kind: "markers".into(),
+                        placement: crate::tiles::layout::Placement::Edge(
+                            crate::tiles::layout::Direction::Right,
+                        ),
+                        focus: true,
+                    },
+                ));
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn add_format_menu(
+        &self,
+        waves: &crate::wave_data::WaveData,
         clicked_field_ref: &DisplayedFieldRef,
         clicked_item: &DisplayedItem,
         path: &FieldRef,
@@ -932,9 +1042,6 @@ impl SystemState {
         group_target: MessageTarget<VisibleItemIndex>,
     ) {
         // Should not call this unless a variable is selected, and, hence, a VCD is loaded
-        let Some(waves) = &self.user.waves else {
-            return;
-        };
 
         let (preferred_translators, bad_translators) = if path.field.is_empty() {
             self.partition_translators_for_var(&path.root, msgs, waves)
@@ -999,7 +1106,6 @@ impl SystemState {
                 let t = self.translators.get_translator(translator_name);
 
                 if self
-                    .user
                     .blacklisted_translators
                     .contains(&(var.clone(), (*translator_name).to_string()))
                 {
@@ -1034,15 +1140,4 @@ impl SystemState {
 
         (preferred_translators, bad_translators)
     }
-}
-
-pub fn generic_context_menu(msgs: &mut Vec<Message>, response: &egui::Response) {
-    response.context_menu(|ui| {
-        if ui.button("Add divider").clicked() {
-            msgs.push(Message::AddDivider(None, None));
-        }
-        if ui.button("Add timeline").clicked() {
-            msgs.push(Message::AddTimeLine(None));
-        }
-    });
 }

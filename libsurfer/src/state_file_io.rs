@@ -6,6 +6,9 @@ use tracing::error;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::async_util::perform_async_work;
 use crate::channels::{checked_send, checked_send_many};
+use crate::file_dialog::FileFilter;
+#[cfg(not(target_os = "macos"))]
+use crate::file_dialog::STATE_FILE_FILTER;
 #[cfg(any(
     target_os = "macos",
     all(target_arch = "wasm32", not(feature = "vscode"))
@@ -13,7 +16,6 @@ use crate::channels::{checked_send, checked_send_many};
 use crate::file_dialog::STATE_FILE_FILTER_MACOS;
 #[cfg(all(target_arch = "wasm32", feature = "vscode"))]
 use crate::file_dialog::vscode_open_dialog_with_filter;
-use crate::file_dialog::{FileFilter, STATE_FILE_FILTER};
 
 use crate::{
     SystemState,
@@ -124,7 +126,7 @@ impl SystemState {
         if path.is_some() {
             return;
         }
-        let message = move |bytes: Vec<u8>| match ron::de::from_bytes(&bytes)
+        let message = move |bytes: Vec<u8>| match crate::tiles::serde::decode_bytes(&bytes)
             .context("Failed loading state file")
         {
             Ok(s) => vec![Message::LoadState(s, path)],
@@ -142,7 +144,7 @@ impl SystemState {
     /// When `path` is `None`, this opens a file picker and loads the selected file.
     pub(crate) fn load_state_file(&mut self, path: Option<Utf8PathBuf>) {
         let messages = move |source: Utf8PathBuf| match std::fs::read(source.as_std_path()) {
-            Ok(bytes) => match ron::de::from_bytes(&bytes)
+            Ok(bytes) => match crate::tiles::serde::decode_bytes(&bytes)
                 .context(format!("Failed loading {}", source.as_str()))
             {
                 Ok(s) => vec![Message::LoadState(s, Some(source))],
@@ -265,7 +267,7 @@ impl SystemState {
 
     /// Decodes RON bytes and enqueues a `LoadState` message on success.
     pub(crate) fn load_state_from_bytes(&mut self, bytes: &[u8]) {
-        match ron::de::from_bytes(bytes).context("Failed loading state from bytes") {
+        match crate::tiles::serde::decode_bytes(bytes).context("Failed loading state from bytes") {
             Ok(s) => {
                 let sender = self.channels.msg_sender.clone();
                 checked_send(&sender, Message::LoadState(s, None));
@@ -282,6 +284,101 @@ mod tests {
     use super::*;
     use crate::StartupParams;
     use crate::wave_source::WaveSource;
+
+    #[test]
+    fn legacy_state_moves_rows_views_and_pending_document_settings_into_workspace() {
+        use crate::{
+            data_container::DataContainer,
+            viewport::Viewport,
+            wave_data::{TimeRange, WaveData, WaveformData},
+            wave_source::WaveFormat,
+        };
+        let mut legacy = WaveformData {
+            document: WaveData {
+                inner: DataContainer::Empty,
+                source: WaveSource::Data,
+                format: WaveFormat::Vcd,
+                active_scope: None,
+                cursor: Some(45.into()),
+                markers: Default::default(),
+                display_variable_indices: false,
+                old_max_timestamp: None,
+                cache_generation: 0,
+                inflight_caches: Default::default(),
+                cached_time_range: TimeRange::default(),
+            },
+            items: Default::default(),
+            viewports: vec![Viewport::new().into(), Viewport::new().into()],
+            annotation_list_visible: true,
+            last_active_viewport_idx: 1,
+        };
+        legacy.add_divider(Some("saved row".into()), None).unwrap();
+        legacy.viewports[1].focused_transaction =
+            Some(crate::transaction_container::TransactionRef {
+                id: ftr_parser::types::TransactionId(12),
+            });
+        legacy.viewports[1].viewport.curr_left = crate::viewport::Relative(0.25);
+        let encoded = format!(
+            "(waves: Some({}), show_logs: true)",
+            ron::to_string(&legacy).unwrap()
+        );
+        let restored: crate::state::UserState = crate::tiles::serde::decode(&encoded).unwrap();
+        assert_eq!(restored.state_version, 1);
+        assert!(
+            restored
+                .workspace
+                .tiles
+                .values()
+                .any(|tile| tile.kind.kind_name() == "logs")
+        );
+        assert!(
+            restored
+                .workspace
+                .tiles
+                .values()
+                .any(|tile| tile.kind.kind_name() == "annotation_list")
+        );
+        let order = restored.workspace.layout.tile_order();
+        assert_eq!(order.len(), 5);
+        assert!(
+            restored
+                .workspace
+                .tiles
+                .values()
+                .any(|tile| tile.kind.kind_name() == "transaction_details")
+        );
+        assert_eq!(restored.workspace.layout.focused(), Some(order[1]));
+        assert_eq!(restored.workspace.item_lists.len(), 1);
+        let (items, view) = restored.workspace.waveform_resources(order[1]).unwrap();
+        assert_eq!(items.items_tree.len(), 1);
+        assert_eq!(
+            items.displayed_items.values().next().unwrap().name(),
+            "saved row"
+        );
+        assert_eq!(view.viewport.curr_left, crate::viewport::Relative(0.25));
+        assert_eq!(restored.waves.as_ref().unwrap().cursor, Some(45.into()));
+        let native = ron::to_string(&restored).unwrap();
+        assert!(native.contains("state_version:1"));
+        let round_trip: crate::state::UserState = crate::tiles::serde::decode(&native).unwrap();
+        assert_eq!(round_trip.workspace.layout.tile_order(), order);
+        let mut state = SystemState::new_default_config().unwrap();
+        state
+            .update(Message::LoadState(Box::new(round_trip), None))
+            .unwrap();
+        assert!(state.user.waves.is_none());
+        assert_eq!(
+            state.user.previous_waves.as_ref().unwrap().cursor,
+            Some(45.into())
+        );
+        assert_eq!(state.user.workspace.layout.tile_order(), order);
+    }
+
+    #[test]
+    fn state_versions_are_checked_before_installing_or_discarding_presentation() {
+        for invalid in ["(state_version: 2)", "(state_version: 1)"] {
+            assert!(crate::tiles::serde::decode::<crate::state::UserState>(invalid).is_err());
+        }
+    }
 
     #[test]
     fn test_encode_state() {
@@ -309,6 +406,119 @@ mod tests {
             Message::LoadState(..) => {}
             _ => panic!("Expected LoadState message, got {:?}", msg),
         }
+    }
+
+    fn create_waveform(state: &mut SystemState) -> crate::tiles::TileId {
+        use crate::tiles::{commands::WorkspaceCommand, layout::Placement};
+        let placement = state
+            .user
+            .workspace
+            .layout
+            .focused()
+            .map_or(Placement::Root, Placement::TabAfter);
+        state
+            .update(Message::Workspace(WorkspaceCommand::CreateTile {
+                kind: "waveform".into(),
+                placement,
+                focus: true,
+            }))
+            .unwrap();
+        state.user.workspace.layout.focused().unwrap()
+    }
+
+    #[test]
+    fn tile_commands_target_the_workspace_without_a_loaded_document() {
+        use crate::{
+            tile_kinds::waveform::WaveformMessage,
+            tiles::{
+                TileId,
+                kind::{TileKind, TileMessage},
+            },
+        };
+        let mut state = SystemState::new_default_config().unwrap();
+        let first = create_waveform(&mut state);
+        let second = create_waveform(&mut state);
+        state
+            .update(Message::ToTile(
+                first,
+                TileMessage::Waveform(WaveformMessage::Columns {
+                    names: false,
+                    values: false,
+                }),
+            ))
+            .unwrap();
+        assert!(
+            state
+                .update(Message::ToTile(
+                    TileId(999),
+                    TileMessage::Waveform(WaveformMessage::Columns {
+                        names: false,
+                        values: false
+                    },)
+                ))
+                .is_none()
+        );
+        assert!(
+            ron::from_str::<Message>(
+                "ToTile(Focused, Waveform(Columns(names: false, values: true)))"
+            )
+            .is_err()
+        );
+        let command = ron::from_str(&format!(
+            "ToTile({}, Waveform(Columns(names: false, values: true)))",
+            ron::to_string(&second).unwrap()
+        ))
+        .unwrap();
+        state.update(command).unwrap();
+        let TileKind::Waveform(first_tile) = &state.user.workspace.tiles[&first].kind else {
+            panic!()
+        };
+        let TileKind::Waveform(second_tile) = &state.user.workspace.tiles[&second].kind else {
+            panic!()
+        };
+        assert!(!first_tile.show_name_column && !first_tile.show_value_column);
+        assert!(!second_tile.show_name_column && second_tile.show_value_column);
+        assert_eq!(state.user.workspace.layout.focused(), Some(second));
+        assert!(state.user.waves.is_none());
+    }
+
+    #[test]
+    fn application_state_round_trip_preserves_tabs_and_advances_session_identity() {
+        use crate::tiles::commands::WorkspaceCommand;
+        let mut state = SystemState::new_default_config().unwrap();
+        let first = create_waveform(&mut state);
+        let second = create_waveform(&mut state);
+        state
+            .update(Message::Workspace(WorkspaceCommand::RenameTile {
+                tile: first,
+                title: Some("Saved waveform".into()),
+            }))
+            .unwrap();
+        let encoded = state.encode_state().unwrap();
+        let saved = ron::to_string(&state.user.workspace).unwrap();
+        let third = create_waveform(&mut state);
+        let pending = state.workspace_runtime.request(first).unwrap();
+        state.load_state_from_bytes(encoded.as_bytes());
+        let message = state.channels.msg_receiver.try_recv().unwrap();
+        state.update(message).unwrap();
+        assert_eq!(ron::to_string(&state.user.workspace).unwrap(), saved);
+        assert_eq!(state.user.workspace.layout.visible_tiles(), vec![second]);
+        assert!(!state.workspace_runtime.accepts(pending, Some(pending)));
+        assert!(create_waveform(&mut state).0 > third.0);
+    }
+
+    #[test]
+    fn invalid_workspace_in_application_state_is_rejected_before_install() {
+        let mut state = SystemState::new_default_config().unwrap();
+        let first = create_waveform(&mut state);
+        let pending = state.workspace_runtime.request(first).unwrap();
+        let encoded = state.encode_state().unwrap();
+        let invalid = encoded.replacen("version: 1", "version: 999", 1);
+        assert_ne!(invalid, encoded);
+        state.load_state_from_bytes(invalid.as_bytes());
+        assert!(state.channels.msg_receiver.try_recv().is_err());
+        assert_eq!(state.encode_state().unwrap(), encoded);
+        assert!(state.workspace_runtime.accepts(pending, Some(pending)));
     }
 
     #[test]

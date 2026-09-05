@@ -3,7 +3,7 @@ use crate::view::{DrawConfig, DrawingContext};
 use crate::viewport::Viewport;
 use crate::{
     SystemState,
-    wave_data::{TimeRange, WaveData},
+    wave_data::{TimeRange, WaveformRead},
 };
 use egui::{Frame, Panel, PointerButton, Sense, Ui};
 use emath::{Align2, Pos2, Rect, RectTransform};
@@ -13,7 +13,7 @@ impl SystemState {
     pub(crate) fn add_overview_panel(
         &self,
         ui: &mut Ui,
-        waves: &WaveData,
+        waves: &WaveformRead<'_>,
         msgs: &mut Vec<Message>,
     ) {
         Panel::bottom("overview")
@@ -26,7 +26,7 @@ impl SystemState {
             });
     }
 
-    fn draw_overview(&self, ui: &mut Ui, waves: &WaveData, msgs: &mut Vec<Message>) {
+    fn draw_overview(&self, ui: &mut Ui, waves: &WaveformRead<'_>, msgs: &mut Vec<Message>) {
         let (response, mut painter) = ui.allocate_painter(ui.available_size(), Sense::drag());
         let frame_size = response.rect.size();
         let cfg = DrawConfig::new(
@@ -49,17 +49,20 @@ impl SystemState {
         let base_fill_color = self.user.config.theme.canvas_colors.foreground;
 
         // Draw rectangles for each viewport
-        waves
-            .viewports
-            .iter()
-            .enumerate()
+        self.user
+            .workspace
+            .layout
+            .visible_tiles()
+            .into_iter()
+            .filter_map(|id| {
+                self.user
+                    .workspace
+                    .waveform_resources(id)
+                    .map(|(_, view)| (id, &view.viewport))
+            })
             .map(|(idx, viewport)| (idx, get_viewport_rect(&ctx, range, &viewport_all, viewport)))
             .for_each(|(idx, rect)| {
-                let gamma = if idx == waves.last_active_viewport_idx {
-                    0.6
-                } else {
-                    0.3
-                };
+                let gamma = if idx == waves.tile_id { 0.6 } else { 0.3 };
                 ctx.painter.rect_filled(
                     rect,
                     CornerRadius::ZERO,
@@ -71,25 +74,36 @@ impl SystemState {
         waves.draw_cursor(&self.user.config.theme, &mut ctx, &viewport_all);
 
         // Draw ticks
-        let mut ticks = self.get_ticks_for_viewport(waves, &viewport_all, &cfg);
+        let mut ticks = self
+            .waveform_services()
+            .get_ticks_for_viewport(waves, &viewport_all, &cfg);
 
         if ticks.len() >= 2 {
             // Remove first and last tick
             ticks.pop();
             ticks.remove(0);
             // Draw ticks
-            waves.draw_ticks(
+            ctx.draw_ticks(
                 self.user.config.theme.foreground,
                 &ticks,
-                &ctx,
                 frame_size.y * 0.5,
                 Align2::CENTER_CENTER,
             );
         }
 
         // Draw markers
-        waves.draw_markers(&self.user.config.theme, &mut ctx, &viewport_all);
-        waves.draw_marker_number_boxes(&mut ctx, &self.user.config.theme, &viewport_all);
+        waves.items.draw_markers(
+            waves.document,
+            &self.user.config.theme,
+            &mut ctx,
+            &viewport_all,
+        );
+        waves.items.draw_marker_number_boxes(
+            waves.document,
+            &mut ctx,
+            &self.user.config.theme,
+            &viewport_all,
+        );
 
         // Handle dragging of the primary viewport
         response.dragged_by(PointerButton::Primary).then(|| {
@@ -97,7 +111,7 @@ impl SystemState {
             let pos = pointer_pos_global.map(|p| to_screen.inverse().transform_pos(p));
             if let Some(pos) = pos {
                 let timestamp = viewport_all.as_time_bigint(pos.x, frame_size.x, range);
-                msgs.push(Message::GoToTime(Some(timestamp), 0));
+                msgs.push(Message::GoToTime(Some(timestamp), waves.tile_id));
             }
         });
     }

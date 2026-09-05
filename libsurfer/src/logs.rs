@@ -6,9 +6,6 @@ use std::{
     },
 };
 
-use ecolor::Color32;
-use egui::{RichText, TextWrapMode};
-use egui_extras::{Column, TableBuilder, TableRow};
 use eyre::Result;
 use tracing::{
     Level,
@@ -16,12 +13,8 @@ use tracing::{
 };
 use tracing_subscriber::Layer;
 
-use crate::{SystemState, message::Message};
-
 static RECORD_MUTEX: Mutex<Vec<LogMessage>> = Mutex::new(vec![]);
 static SHOW_LOGS_ON_ERROR: AtomicBool = AtomicBool::new(false);
-static LOG_FILTER: Mutex<(bool, bool, bool, bool, bool)> =
-    Mutex::new((true, true, true, true, true));
 #[macro_export]
 macro_rules! try_log_error {
     ($expr:expr, $what:expr $(,)?) => {
@@ -83,95 +76,11 @@ pub(crate) fn take_error_notification() -> bool {
     SHOW_LOGS_ON_ERROR.swap(false, Ordering::AcqRel)
 }
 
-impl SystemState {
-    pub fn draw_log_window(&self, ctx: &egui::Context, msgs: &mut Vec<Message>) {
-        let mut open = true;
-        egui::Window::new("Logs")
-            .open(&mut open)
-            .collapsible(true)
-            .resizable(true)
-            .show(ctx, |ui| {
-                {
-                    let mut filters = LOG_FILTER.lock().unwrap();
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut filters.0, "Error");
-                        ui.checkbox(&mut filters.1, "Warn");
-                        ui.checkbox(&mut filters.2, "Info");
-                        ui.checkbox(&mut filters.3, "Debug");
-                        ui.checkbox(&mut filters.4, "Trace");
-                    });
-                }
-
-                ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-
-                egui::ScrollArea::new([true, false]).show(ui, |ui| {
-                    TableBuilder::new(ui)
-                        .column(Column::auto().resizable(true))
-                        .column(Column::auto().resizable(true))
-                        .column(Column::remainder())
-                        .vscroll(true)
-                        .stick_to_bottom(true)
-                        .header(20.0, |mut header| {
-                            header.col(|ui| {
-                                ui.heading("Level");
-                            });
-                            header.col(|ui| {
-                                ui.heading("Source");
-                            });
-                            header.col(|ui| {
-                                ui.heading("Message");
-                            });
-                        })
-                        .body(|body| {
-                            let records = RECORD_MUTEX.lock().unwrap();
-                            let filters = LOG_FILTER.lock().unwrap();
-                            let filtered: Vec<&LogMessage> = records
-                                .iter()
-                                .filter(|record| match record.level {
-                                    Level::ERROR => filters.0,
-                                    Level::WARN => filters.1,
-                                    Level::INFO => filters.2,
-                                    Level::DEBUG => filters.3,
-                                    Level::TRACE => filters.4,
-                                })
-                                .collect();
-
-                            let heights = filtered
-                                .iter()
-                                .map(|record| record.msg.lines().count() as f32 * 15.0)
-                                .collect::<Vec<_>>();
-
-                            body.heterogeneous_rows(heights.into_iter(), |mut row: TableRow| {
-                                let record = filtered[row.index()];
-                                row.col(|ui| {
-                                    let (color, text) = match record.level {
-                                        Level::ERROR => (Color32::RED, "Error"),
-                                        Level::WARN => (Color32::YELLOW, "Warn"),
-                                        Level::INFO => (Color32::GREEN, "Info"),
-                                        Level::DEBUG => (Color32::BLUE, "Debug"),
-                                        Level::TRACE => (Color32::GRAY, "Trace"),
-                                    };
-
-                                    ui.colored_label(color, text);
-                                });
-                                row.col(|ui| {
-                                    ui.label(
-                                        RichText::new(record.name.clone())
-                                            .color(Color32::GRAY)
-                                            .monospace(),
-                                    );
-                                });
-                                row.col(|ui| {
-                                    ui.label(RichText::new(record.msg.clone()).monospace());
-                                });
-                            });
-                        });
-                })
-            });
-        if !open {
-            msgs.push(Message::SetLogsVisible(false));
-        }
-    }
+pub(crate) fn records() -> Vec<LogMessage> {
+    RECORD_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
 }
 
 /// Starts the logging and error handling.

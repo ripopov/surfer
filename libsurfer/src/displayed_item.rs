@@ -22,7 +22,7 @@ use crate::{
 
 const DEFAULT_DIVIDER_NAME: &str = "";
 
-/// Key for the [`crate::wave_data::WaveData::displayed_items`] hash map
+/// Key for the [`crate::item_list::ItemList::displayed_items`] hash map
 #[derive(Serialize, Deserialize, Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct DisplayedItemRef(pub usize);

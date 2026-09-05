@@ -1,17 +1,17 @@
-use egui::{Layout, RichText, TextWrapMode, Ui};
+use crate::tiles::commands::DocumentCommand;
+use egui::{Layout, RichText, Ui};
 use egui_extras::{Column, TableBody, TableBuilder};
 use emath::Align;
 use ftr_parser::types::Transaction;
 use itertools::Itertools;
 use num::BigUint;
 
-use crate::SystemState;
 use crate::displayed_item::DisplayedItem;
 use crate::message::Message;
 use crate::transaction_container::{StreamScopeRef, TransactionContainer};
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
 use crate::wave_data::ScopeType;
-use crate::wave_data::WaveData;
+use crate::wave_data::WaveformData;
 
 // Transactions file extension
 pub const TRANSACTIONS_FILE_EXTENSION: &str = "ftr";
@@ -45,41 +45,7 @@ const ATTR_VALUE_LABEL: &str = "Value";
 // Information label
 const STREAM_NOT_FOUND_LABEL: &str = "Stream not found";
 
-impl SystemState {
-    pub fn draw_transaction_detail_panel(
-        &self,
-        ui: &mut Ui,
-        max_width: f32,
-        msgs: &mut Vec<Message>,
-    ) {
-        let Some(waves) = self.user.waves.as_ref() else {
-            return;
-        };
-        let (Some(transaction_ref), focused_transaction) = &waves.focused_transaction else {
-            return;
-        };
-        let Some(transactions) = waves.inner.as_transactions() else {
-            return;
-        };
-        let Some(focused_transaction) = focused_transaction
-            .as_ref()
-            .or_else(|| transactions.get_transaction(transaction_ref))
-        else {
-            return;
-        };
-
-        egui::Panel::right("Transaction Details")
-            .default_size(330.)
-            .size_range(10.0..=max_width)
-            .show(ui, |ui| {
-                ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
-                self.handle_pointer_in_ui(ui, msgs);
-                draw_focused_transaction_details(ui, transactions, focused_transaction);
-            });
-    }
-}
-
-impl WaveData {
+impl crate::wave_data::WaveformEdit<'_> {
     pub fn add_stream_or_generator_from_name(
         &mut self,
         scope: Option<StreamScopeRef>,
@@ -92,14 +58,16 @@ impl WaveData {
                     .get_stream_from_name(name)
                     .map(|s| (s.id, s.name.clone()))?;
 
-                self.add_stream(TransactionStreamRef::new_stream(stream_id, name));
+                self.add_stream(TransactionStreamRef::new_stream(stream_id, name))
+                    .ok()?;
             }
             Some(StreamScopeRef::Stream(stream)) => {
                 let (stream_id, id, name) = inner
                     .get_generator_from_name(Some(stream.stream_id), name)
                     .map(|g| (g.stream_id, g.id, g.name.clone()))?;
 
-                self.add_generator(TransactionStreamRef::new_gen(stream_id, id, name));
+                self.add_generator(TransactionStreamRef::new_gen(stream_id, id, name))
+                    .ok()?;
             }
             Some(StreamScopeRef::Empty(_)) => {}
             None => {
@@ -107,7 +75,8 @@ impl WaveData {
                     .get_generator_from_name(None, name)
                     .map(|g| (g.stream_id, g.id, g.name.clone()))?;
 
-                self.add_generator(TransactionStreamRef::new_gen(stream_id, id, name));
+                self.add_generator(TransactionStreamRef::new_gen(stream_id, id, name))
+                    .ok()?;
             }
         }
         Some(())
@@ -115,7 +84,7 @@ impl WaveData {
 
     pub fn add_all_from_stream_scope(&mut self, scope_name: String) -> Option<()> {
         if scope_name == "tr" {
-            self.add_all_streams();
+            self.add_all_streams().ok()?;
         } else {
             let inner = self.inner.as_transactions()?;
             let stream = inner.get_stream_from_name(scope_name)?;
@@ -129,67 +98,69 @@ impl WaveData {
                 .collect_vec();
 
             for (stream_id, id, name) in gens {
-                self.add_generator(TransactionStreamRef::new_gen(stream_id, id, name.clone()));
+                self.add_generator(TransactionStreamRef::new_gen(stream_id, id, name.clone()))
+                    .ok()?;
             }
         }
         Some(())
     }
+}
 
-    pub fn move_to_transaction(&mut self, next: bool) -> Option<()> {
-        let inner = self.inner.as_transactions()?;
-        let mut transactions = self
+impl crate::tile_kinds::waveform::WaveformView {
+    pub(crate) fn focus_transaction(&mut self, transaction: Option<TransactionRef>) -> bool {
+        if self.focused_transaction == transaction {
+            return false;
+        }
+        self.focused_transaction = transaction;
+        self.invalidate_draw_cache();
+        true
+    }
+
+    pub(crate) fn move_to_transaction(
+        &mut self,
+        document: Option<&crate::wave_data::WaveData>,
+        items: &crate::item_list::ItemList,
+        next: bool,
+    ) -> bool {
+        let Some(inner) = document.and_then(|document| document.inner.as_transactions()) else {
+            return false;
+        };
+        let mut transactions = items
             .items_tree
             .iter_visible()
-            .flat_map(|node| {
-                let item = &self.displayed_items[&node.item_ref];
-                match item {
-                    DisplayedItem::Stream(s) => {
-                        let stream_ref = &s.transaction_stream_ref;
-                        let stream_id = stream_ref.stream_id;
-                        if let Some(gen_id) = stream_ref.gen_id {
-                            inner.get_transactions_from_generator(gen_id)
-                        } else {
-                            inner.get_transactions_from_stream(stream_id)
-                        }
-                    }
-                    _ => vec![],
-                }
+            .filter_map(|node| match items.displayed_items.get(&node.item_ref) {
+                Some(DisplayedItem::Stream(stream)) => Some(&stream.transaction_stream_ref),
+                _ => None,
+            })
+            .flat_map(|stream| match stream.gen_id {
+                Some(generator) => inner.get_transactions_from_generator(generator),
+                None => inner.get_transactions_from_stream(stream.stream_id),
             })
             .collect_vec();
-        transactions.sort_unstable_by_key(|a| a.0);
-        let tx = if let Some(focused_tx) = &self.focused_transaction.0 {
-            let next_id = transactions
-                .iter()
-                .enumerate()
-                .find(|(_, tx)| **tx == focused_tx.id)
-                .map_or(
-                    if next { transactions.len() - 1 } else { 0 },
-                    |(vec_idx, _)| {
-                        if next {
-                            if vec_idx + 1 < transactions.len() {
-                                vec_idx + 1
-                            } else {
-                                transactions.len() - 1
-                            }
-                        } else {
-                            vec_idx.saturating_sub(1)
-                        }
-                    },
-                );
-            Some(TransactionRef {
-                id: *transactions.get(next_id)?,
-            })
-        } else {
-            transactions
-                .first()
-                .map(|first| TransactionRef { id: *first })
-        };
-        self.focused_transaction = (tx, self.focused_transaction.1.clone());
-        Some(())
+        transactions.sort_unstable_by_key(|id| id.0);
+        transactions.dedup();
+        if transactions.is_empty() {
+            return false;
+        }
+        let index = self.focused_transaction.as_ref().map_or(0, |focused| {
+            transactions.iter().position(|id| *id == focused.id).map_or(
+                if next { transactions.len() - 1 } else { 0 },
+                |index| {
+                    if next {
+                        (index + 1).min(transactions.len() - 1)
+                    } else {
+                        index.saturating_sub(1)
+                    }
+                },
+            )
+        });
+        self.focus_transaction(Some(TransactionRef {
+            id: transactions[index],
+        }))
     }
 }
 
-fn draw_focused_transaction_details(
+pub(crate) fn draw_focused_transaction_details(
     ui: &mut Ui,
     transactions: &TransactionContainer,
     focused_transaction: &Transaction,
@@ -287,7 +258,7 @@ pub fn calculate_rows_of_stream(
 
 pub fn draw_transaction_variable_list(
     msgs: &mut Vec<Message>,
-    streams: &WaveData,
+    streams: &crate::wave_data::WaveData,
     ui: &mut Ui,
     active_stream: &StreamScopeRef,
 ) {
@@ -305,7 +276,11 @@ pub fn draw_transaction_variable_list(
     }
 }
 
-pub fn draw_transaction_root(msgs: &mut Vec<Message>, streams: &WaveData, ui: &mut Ui) {
+pub fn draw_transaction_root(
+    msgs: &mut Vec<Message>,
+    streams: &crate::wave_data::WaveData,
+    ui: &mut Ui,
+) {
     egui::collapsing_header::CollapsingState::load_with_default_open(
         ui.ctx(),
         egui::Id::from("Streams"),
@@ -320,8 +295,8 @@ pub fn draw_transaction_root(msgs: &mut Vec<Message>, streams: &WaveData, ui: &m
                     TRANSACTION_ROOT_NAME,
                 );
                 if response.clicked() {
-                    msgs.push(Message::SetActiveScope(Some(ScopeType::StreamScope(
-                        StreamScopeRef::Root,
+                    msgs.push(Message::ToDocument(DocumentCommand::SetActiveScope(Some(
+                        ScopeType::StreamScope(StreamScopeRef::Root),
                     ))));
                 }
             },
@@ -339,10 +314,9 @@ pub fn draw_transaction_root(msgs: &mut Vec<Message>, streams: &WaveData, ui: &m
                 });
                 let response = ui.selectable_label(selected, &stream.name);
                 if response.clicked() {
-                    msgs.push(Message::SetActiveScope(Some(ScopeType::StreamScope(
-                        StreamScopeRef::Stream(TransactionStreamRef::new_stream(
-                            *id,
-                            stream.name.clone(),
+                    msgs.push(Message::ToDocument(DocumentCommand::SetActiveScope(Some(
+                        ScopeType::StreamScope(StreamScopeRef::Stream(
+                            TransactionStreamRef::new_stream(*id, stream.name.clone()),
                         )),
                     ))));
                 }
@@ -454,4 +428,16 @@ fn subheader(body: &mut TableBody, left: &str, right: &str) {
             ui.label(RichText::new(right).size(SUBHEADER_SIZE));
         });
     });
+}
+impl WaveformData {
+    pub fn add_stream_or_generator_from_name(
+        &mut self,
+        scope: Option<StreamScopeRef>,
+        name: String,
+    ) -> Option<()> {
+        self.edit().add_stream_or_generator_from_name(scope, name)
+    }
+    pub fn add_all_from_stream_scope(&mut self, scope_name: String) -> Option<()> {
+        self.edit().add_all_from_stream_scope(scope_name)
+    }
 }

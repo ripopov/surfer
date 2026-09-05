@@ -3,7 +3,6 @@ use camino::Utf8PathBuf;
 use derive_more::Debug;
 use egui::{DroppedFileHandle, Id, Rect};
 use emath::{Pos2, RectTransform, Vec2};
-use ftr_parser::types::Transaction;
 use num::BigInt;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -26,7 +25,6 @@ use crate::transaction_container::{
 };
 use crate::translation::DynTranslator;
 use crate::viewport::ViewportStrategy;
-use crate::wave_data::ScopeType;
 use crate::{
     MoveDir, VariableNameFilterType, WaveSource,
     clock_highlighting::ClockHighlightType,
@@ -75,8 +73,14 @@ impl<T: Copy> Copy for MessageTarget<T> {}
 #[derive(Debug, Deserialize)]
 /// The design of Surfer relies on sending messages to trigger actions.
 pub enum Message {
-    /// Set active scope, None corresponds to the top-level scope.
-    SetActiveScope(Option<ScopeType>),
+    Workspace(crate::tiles::commands::WorkspaceCommand),
+    ToTile(crate::tiles::TileId, crate::tiles::kind::TileMessage),
+    WcpVariableAction {
+        action: crate::tiles::commands::WcpVariableAction,
+        variable: String,
+    },
+    /// Shared document commands have no waveform target.
+    ToDocument(crate::tiles::commands::DocumentCommand),
     ExpandScope(ScopeExpandType),
     /// Add one or more variables to wave view.
     AddVariables(Vec<VariableRef>),
@@ -107,11 +111,15 @@ pub enum Message {
     UnfocusItem,
     MoveFocus(MoveDir, CommandCount, bool),
     MoveFocusedItem(MoveDir, CommandCount),
-    FocusTransaction(Option<TransactionRef>, Option<Transaction>),
-    VerticalScroll(MoveDir, CommandCount),
-    /// Scroll in vertical direction so that the item at a given location in the list is at the top (or visible).
-    ScrollToItem(usize),
-    SetScrollOffset(f32),
+    FocusTransaction(Option<TransactionRef>, crate::tiles::TileId),
+    #[serde(skip)]
+    ApplyLayoutProposal(crate::tiles::render::LayoutEdit),
+    #[serde(skip)]
+    WaveformBodyMeasured {
+        tile_id: crate::tiles::TileId,
+        height: f32,
+        scroll_offset: Option<f32>,
+    },
     /// Change format (translator) of a variable.
     ///
     /// Passing None as first element means all selected variables.
@@ -147,24 +155,22 @@ pub enum Message {
     ResetVariableFormat(DisplayedFieldRef),
     CanvasScroll {
         delta: Vec2,
-        viewport_idx: usize,
+        tile_id: crate::tiles::TileId,
     },
     CanvasZoom {
         mouse_ptr: Option<BigInt>,
         delta: f32,
-        viewport_idx: usize,
+        tile_id: crate::tiles::TileId,
     },
     ZoomToCursor {
         delta: f32,
-        viewport_idx: usize,
+        tile_id: crate::tiles::TileId,
     },
     ZoomToRange {
         start: BigInt,
         end: BigInt,
-        viewport_idx: usize,
+        tile_id: crate::tiles::TileId,
     },
-    /// Set cursor at time.
-    CursorSet(BigInt),
     #[serde(skip)]
     SetSurverStatus(web_time::Instant, String, SurverStatus),
     /// Load file from file path.
@@ -270,15 +276,15 @@ pub enum Message {
     UpdateOpenSiblingStateFileDialog(OpenSiblingStateFileDialog),
     RemovePlaceholders,
     ZoomToFit {
-        viewport_idx: usize,
+        tile_id: crate::tiles::TileId,
     },
     GoToStart {
-        viewport_idx: usize,
+        tile_id: crate::tiles::TileId,
     },
     GoToEnd {
-        viewport_idx: usize,
+        tile_id: crate::tiles::TileId,
     },
-    GoToTime(Option<BigInt>, usize),
+    GoToTime(Option<BigInt>, crate::tiles::TileId),
     SetMenuVisible(bool),
     ToggleMenu,
     SetToolbarVisible(bool),
@@ -343,19 +349,18 @@ pub enum Message {
         #[debug(skip)] Option<Box<dyn Fn(String) -> Message + Send + 'static>>,
     ),
     SetLicenseVisible(bool),
-    SetLogsVisible(bool),
     SetFrameBufferVariable(VariableRef),
     SetFrameBufferVisibleVariable(Option<VisibleItemIndex>),
     SetFrameBufferArray(ScopeRef),
     SetFrameBufferMode(FrameBufferColorMode, u8, u8, u8),
     SetFrameBufferWidth(usize),
     SetFrameBufferRange(Vec<(i64, i64)>),
-    SetMouseGestureDragStart(Option<Pos2>, Option<BigInt>),
+    SetMouseGestureDragStart(Option<Pos2>, Option<BigInt>, crate::tiles::TileId),
     OpenMemoryViewer {
         scope: ScopeRef,
         name: Option<String>,
     },
-    SetMeasureDragStart(Option<Pos2>),
+    SetMeasureDragStart(Option<Pos2>, crate::tiles::TileId),
     /// Set or clear focus state for a widget identified by id string.
     SetTextEditFocused(String, bool),
     /// Request focus (one-shot) for a widget identified by id string.
@@ -369,7 +374,6 @@ pub enum Message {
     SetUIZoomFactor(f32),
     SetPerformanceVisible(bool),
     SetContinuousRedraw(bool),
-    SetCursorWindowVisible(bool),
     SetDrawVectorUnknownsAsLine(bool),
     SetFocusHighlight(FocusHighlight),
     SetHierarchyStyle(HierarchyStyle),
@@ -411,7 +415,7 @@ pub enum Message {
     MoveMarkerToCursor(u8),
     /// Scroll in horizontal direction so that the cursor is visible.
     GoToCursorIfNotInView,
-    GoToMarkerPosition(u8, usize),
+    GoToMarkerPosition(u8, crate::tiles::TileId),
     MoveCursorToTransition {
         next: bool,
         variable: Option<VisibleItemIndex>,
@@ -427,11 +431,16 @@ pub enum Message {
     AddGraphic(GraphicId, Graphic),
     RemoveGraphic(GraphicId),
 
-    /// Variable dragging messages
-    VariableDragStarted(VisibleItemIndex),
-    VariableDragTargetChanged(crate::displayed_item_tree::TargetPosition),
-    VariableDragFinished,
-    AddDraggedVariables(Vec<VariableRef>),
+    MoveDraggedItems {
+        tile_id: crate::tiles::TileId,
+        items: Vec<DisplayedItemRef>,
+        position: crate::displayed_item_tree::TargetPosition,
+    },
+    AddDraggedVariables {
+        tile_id: crate::tiles::TileId,
+        variables: Vec<VariableRef>,
+        position: crate::displayed_item_tree::TargetPosition,
+    },
     /// Unpauses the simulation if the wave source supports this kind of interactivity.
     ///
     /// Otherwise does nothing
@@ -517,7 +526,7 @@ pub enum Message {
     /// Should only used for tests.
     ExpandParameterSection,
     AsyncDone(AsyncJob),
-    SetMouseGestureAnnotation(Option<AnnotationKind>),
+    SetMouseGestureAnnotation(Option<AnnotationKind>, crate::tiles::TileId),
     RectangleAdded {
         time_at_start: BigInt,
         time_at_end: BigInt,
@@ -533,8 +542,7 @@ pub enum Message {
     RemoveAnnotation(Id),
     ToggleAnnotationVisiblility(Id),
     ToggleAnnotationListShowComments(Id),
-    GoToAnnotationPosition(Id, usize),
-    ToggleAnnotationlistVisibility(),
+    GoToAnnotationPosition(Id, crate::tiles::TileId),
     CreateAnnotationGroup(String),
     DeleteAnnotationGroup(String),
     DeleteAllAnnotationInGroup(String),
@@ -544,11 +552,11 @@ pub enum Message {
     AnnotationClicked(
         Option<Id>,
         Option<Pos2>,
-        Option<usize>,
+        Option<crate::tiles::TileId>,
         Option<RectTransform>,
         Option<f32>,
     ),
-    SetActiveViewport(usize),
+    SetActiveViewport(crate::tiles::TileId),
     ClickHandled(),
     UpdateCommentBox(Vec<(Id, Comment)>),
     AddCommentMessage(Id, String, String),

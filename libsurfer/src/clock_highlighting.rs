@@ -7,7 +7,7 @@ use enum_iterator::Sequence;
 use epaint::{CornerRadius, Shape, Stroke};
 use serde::{Deserialize, Serialize};
 
-use crate::{SystemState, config::SurferConfig, message::Message, view::DrawingContext};
+use crate::{config::SurferConfig, message::Message, view::DrawingContext};
 
 /// Base period, in screen pixels, used to interleave dashed clock-edge lines.
 ///
@@ -215,31 +215,6 @@ pub(crate) fn clock_highlight_type_menu(
     }
 }
 
-impl SystemState {
-    /// Builds cached clock-highlight data for the active highlight mode.
-    ///
-    /// The input uses sparse clock indices so color assignment remains stable relative to
-    /// original clock order, and `active_clock_count` is stored for fast rendering decisions.
-    pub(crate) fn get_clock_hightlight_data(
-        &self,
-        clock_edges_by_clock: Vec<(usize, Vec<f32>)>,
-    ) -> ClockHighlightData {
-        let active_clock_count = clock_edges_by_clock.len();
-
-        match self.clock_highlight_type() {
-            ClockHighlightType::Line => ClockHighlightData::Line {
-                clock_edges: group_clock_edges_by_time(clock_edges_by_clock),
-                active_clock_count,
-            },
-            ClockHighlightType::Cycle => ClockHighlightData::Cycle {
-                clock_edges_by_clock: dense_clock_edges_by_clock(clock_edges_by_clock),
-                active_clock_count,
-            },
-            ClockHighlightType::None => ClockHighlightData::None,
-        }
-    }
-}
-
 /// Groups sparse per-clock edge lists into time-ordered `(time, clock_indices)` tuples.
 ///
 /// This structure is used by `Line` mode to interleave coincident edges at the same time.
@@ -281,6 +256,31 @@ fn dense_clock_edges_by_clock(clock_edges_by_clock: Vec<(usize, Vec<f32>)>) -> V
     }
 
     dense_clock_edges
+}
+
+impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
+    /// Builds cached clock-highlight data for the active highlight mode.
+    ///
+    /// The input uses sparse clock indices so color assignment remains stable relative to
+    /// original clock order, and `active_clock_count` is stored for fast rendering decisions.
+    pub(crate) fn get_clock_hightlight_data(
+        &self,
+        clock_edges_by_clock: Vec<(usize, Vec<f32>)>,
+    ) -> ClockHighlightData {
+        let active_clock_count = clock_edges_by_clock.len();
+
+        match self.clock_highlight_type {
+            ClockHighlightType::Line => ClockHighlightData::Line {
+                clock_edges: group_clock_edges_by_time(clock_edges_by_clock),
+                active_clock_count,
+            },
+            ClockHighlightType::Cycle => ClockHighlightData::Cycle {
+                clock_edges_by_clock: dense_clock_edges_by_clock(clock_edges_by_clock),
+                active_clock_count,
+            },
+            ClockHighlightType::None => ClockHighlightData::None,
+        }
+    }
 }
 
 #[cfg(test)]

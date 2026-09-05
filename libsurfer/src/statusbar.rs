@@ -114,7 +114,7 @@ impl SystemState {
                 }
                 if let Some(undo_op) = &self.undo_stack.last() {
                     ui.separator();
-                    ui.label(format!("Undo: {}", undo_op.message));
+                    ui.label(format!("Undo: {}", undo_op.label()));
                 }
                 if let Some(count) = &self.user.count {
                     ui.separator();

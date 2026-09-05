@@ -6,7 +6,7 @@ use crate::displayed_item::DisplayedItemRef;
 use crate::graphics::GraphicsY;
 use crate::message::Message;
 use crate::time::TimeFormatter;
-use crate::{Viewport, view::DrawingContext, wave_data::WaveData};
+use crate::{Viewport, annotation::AnnotationView, view::DrawingContext};
 
 use chrono::{DateTime, Local};
 use egui::{Id, Pos2, Response, Stroke, Ui, Vec2, Widget};
@@ -85,11 +85,12 @@ fn arrow_geometry(from: Pos2, to: Pos2, width: f32) -> Option<(Pos2, Pos2, Pos2)
     Some((base, left, right))
 }
 /// Returns the vertical center of a displayed waveform item, in the same canvas-local
-/// (offset-free) space as `WaveData::drawing_infos`; convert via `ctx.to_screen` before use.
-fn item_center_y(waves: &WaveData, item_ref: &DisplayedItemRef) -> Option<f32> {
-    match waves.get_displayed_item_index(item_ref) {
+/// (offset-free) space as `ItemList::layout_cache`; convert via `ctx.to_screen` before use.
+fn item_center_y(waves: &AnnotationView<'_>, item_ref: &DisplayedItemRef) -> Option<f32> {
+    match waves.items.get_displayed_item_index(item_ref) {
         Some(vidx) => {
-            let info = waves.drawing_infos.get(vidx.0)?;
+            let layout = waves.items.layout_cache.borrow();
+            let info = layout.infos.get(vidx.0)?;
             Some(info.center())
         }
         None => None,
@@ -195,8 +196,8 @@ impl Annotatable for ArrowAnnotation {
     fn draw(
         &self,
         ui: &mut Ui,
-        waves: &WaveData,
-        viewport_idx: usize,
+        waves: &AnnotationView<'_>,
+        tile_id: crate::tiles::TileId,
         ctx: &mut DrawingContext,
         theme: &SurferTheme,
         msgs: &mut Vec<Message>,
@@ -213,11 +214,11 @@ impl Annotatable for ArrowAnnotation {
         }
 
         let range = waves.time_range();
-        let viewport = waves.viewports[viewport_idx];
+        let viewport = waves.viewport;
         let frame_width = ctx.cfg.canvas_size.x;
 
         arrow_annotation.annotation_data.id =
-            egui::Id::new(("arrow", self.annotation_data.id, viewport_idx));
+            ui.make_persistent_id(("arrow", self.annotation_data.id));
 
         // `item_center_y` returns a canvas-local y-coordinate, so it must be converted
         // through `ctx.to_screen` before use as a final screen position.
@@ -273,11 +274,11 @@ impl Annotatable for ArrowAnnotation {
             // Notify the application that this annotation was clicked and that the
             // current viewport should become active
 
-            msgs.push(Message::SetActiveViewport(viewport_idx));
+            msgs.push(Message::SetActiveViewport(tile_id));
             msgs.push(Message::AnnotationClicked(
                 Some(self.annotation_data.id),
                 pointer_click_pos,
-                Some(viewport_idx),
+                Some(tile_id),
                 Some(to_screen),
                 Some(ctx.cfg.canvas_size.x),
             ));
@@ -291,7 +292,7 @@ impl Annotatable for ArrowAnnotation {
 
             let hover_response = ui.interact(
                 hover_rect,
-                egui::Id::new(("arrow_hover_info", self.annotation_data.id, viewport_idx)),
+                ui.make_persistent_id(("arrow_hover_info", self.annotation_data.id)),
                 egui::Sense::hover(),
             );
 
@@ -299,6 +300,7 @@ impl Annotatable for ArrowAnnotation {
             let hover_end_time = time_formatter.format(&self.to.time.clone());
 
             let group_name = waves
+                .items
                 .annotation_groups
                 .iter()
                 .find(|group| group.annotations.contains(&self.get_id()))
@@ -313,7 +315,7 @@ impl Annotatable for ArrowAnnotation {
         &self,
         viewport: &Viewport,
         ctx: &DrawingContext,
-        waves: &WaveData,
+        waves: &AnnotationView<'_>,
         _offset: f32,
     ) -> Pos2 {
         let range = waves.time_range();
@@ -494,7 +496,7 @@ impl ArrowAnnotation {
     #[must_use]
     pub fn get_pos(
         &self,
-        waves: &WaveData,
+        waves: &AnnotationView<'_>,
         viewport: &Viewport,
         ctx: &DrawingContext,
         offset_y: f32,

@@ -59,6 +59,7 @@ static COMMAND_FILE_FILTER: FileFilter = FileFilter {
     extensions: &["sucl"],
 };
 
+#[cfg(not(target_os = "macos"))]
 pub(crate) static STATE_FILE_FILTER: FileFilter = FileFilter {
     name: "Surfer state files (*.surf.ron)",
     extensions: &["surf.ron"],
@@ -252,7 +253,7 @@ fn create_file_dialog(filter: &'static FileFilter, title: &'static str) -> Async
 fn create_file_dialog(filter: &'static FileFilter, title: &'static str) -> AsyncFileDialog {
     AsyncFileDialog::new()
         .set_title(title)
-        .add_filter(filter.name, &filter.extensions)
+        .add_filter(filter.name, filter.extensions)
 }
 
 /// Serialise a `(name, extensions)` filter pair into the JSON array expected by

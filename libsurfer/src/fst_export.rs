@@ -36,16 +36,19 @@ impl SystemState {
     /// Variables backing the currently displayed variables, in display order and without
     /// duplicates.
     fn displayed_variables(&self) -> Vec<VariableRef> {
-        let Some(waves) = self.user.waves.as_ref() else {
+        let Some(waves) = self.user.waveform_read() else {
             return vec![];
         };
         waves
+            .items
             .items_tree
             .iter()
-            .filter_map(|node| match waves.displayed_items.get(&node.item_ref) {
-                Some(DisplayedItem::Variable(v)) => Some(v.variable_ref.clone()),
-                _ => None,
-            })
+            .filter_map(
+                |node| match waves.items.displayed_items.get(&node.item_ref) {
+                    Some(DisplayedItem::Variable(v)) => Some(v.variable_ref.clone()),
+                    _ => None,
+                },
+            )
             .collect()
     }
 

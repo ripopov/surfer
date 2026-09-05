@@ -1,7 +1,5 @@
 use ahash::AHashMap;
-use egui::{Pos2, Rect};
 use eyre::Result;
-use num::BigInt;
 use std::{
     cell::RefCell,
     collections::VecDeque,
@@ -12,14 +10,10 @@ use surfer_translation_types::translator::VariableNameInfo;
 use tokio::task::JoinHandle;
 
 use crate::{
-    CachedDrawData, CanvasState, Channels, WcpClientCapabilities, command_prompt,
-    displayed_item::DisplayedItemRef,
+    Channels, WcpClientCapabilities, command_prompt,
     file_history::FileHistory,
-    frame_buffer::{FrameBufferArrayCache, FrameBufferContent, FrameBufferPixelCache},
     hierarchy::{AllVariableCacheKey, ScopeExpandType, VariableListRow},
-    memory_viewer::{MemoryViewerCache, MemoryViewerState},
     message::Message,
-    mousegestures::AnnotationKind,
     state::UserState,
     time::TimeInputState,
     translation::{TranslatorList, all_translators},
@@ -27,13 +21,14 @@ use crate::{
     wave_source::{LoadOptions, LoadProgress},
 };
 
-type VariableInfoCache = AHashMap<VariableRef, Option<VariableNameInfo>>;
-type FlattenedRowsCache = AHashMap<DisplayedItemRef, (u64, Rc<Vec<crate::view::VariableFieldRow>>)>;
+pub(crate) type VariableInfoCache = AHashMap<VariableRef, Option<VariableNameInfo>>;
 
 #[cfg(feature = "performance_plot")]
 use crate::benchmark::Timing;
 pub struct SystemState {
     pub user: UserState,
+    pub(crate) layout_adapter: Option<crate::tiles::render::LayoutAdapter>,
+    pub(crate) workspace_runtime: crate::tiles::runtime::WorkspaceRuntime,
     pub(crate) file_history: FileHistory,
     /// Which translator to use for each variable
     pub(crate) translators: TranslatorList,
@@ -68,14 +63,7 @@ pub struct SystemState {
     /// The draw commands for every variable currently selected
     // For performance reasons, these need caching so we have them in a RefCell for interior
     // mutability
-    pub(crate) draw_data: RefCell<Vec<Option<CachedDrawData>>>,
-
     pub(crate) variable_name_info_cache: RefCell<VariableInfoCache>,
-
-    /// Cached flattened compound-field rows per variable, keyed by a signature of that
-    /// variable's fold state (`DisplayedVariable::unfolded_fields`); avoids re-walking the
-    /// (possibly large) field tree every frame when nothing changed.
-    pub(crate) flattened_rows_cache: RefCell<FlattenedRowsCache>,
 
     /// Monotonically increasing counter incremented when translators reload, to invalidate
     /// the `all_variable_rows_cache` when name info changes without a waveform reload.
@@ -84,17 +72,9 @@ pub struct SystemState {
     /// key changes (filter settings, wave data, or translator state).
     pub(crate) all_variable_rows_cache: Option<(AllVariableCacheKey, Rc<Vec<VariableListRow>>)>,
 
-    pub(crate) gesture_start_location: Option<Pos2>,
-    pub(crate) gesture_start_time: Option<BigInt>,
-
-    pub(crate) measure_start_location: Option<Pos2>,
-
-    pub(crate) annotation_kind: Option<AnnotationKind>,
-
     // Egui requires a place to store text field content between frames
     pub(crate) url: RefCell<String>,
     pub(crate) command_prompt_text: RefCell<String>,
-    pub(crate) last_canvas_rect: RefCell<Option<Rect>>,
     pub(crate) surver_selected_file: RefCell<Option<usize>>,
     pub(crate) surver_load_options: RefCell<LoadOptions>,
 
@@ -110,11 +90,6 @@ pub struct SystemState {
     pub(crate) text_edit_focused: AHashMap<String, bool>,
     /// Map of widget id -> one-shot request focus flag.
     pub(crate) text_edit_request_focus: AHashMap<String, bool>,
-    pub(crate) frame_buffer_content: Option<FrameBufferContent>,
-    pub(crate) frame_buffer_array_cache: Option<FrameBufferArrayCache>,
-    pub(crate) frame_buffer_pixel_cache: Option<FrameBufferPixelCache>,
-    pub(crate) memory_viewer: MemoryViewerState,
-    pub(crate) memory_viewer_cache: Option<MemoryViewerCache>,
     // Benchmarking stuff
     /// Invalidate draw commands every frame to make performance comparison easier
     pub(crate) continuous_redraw: bool,
@@ -124,8 +99,8 @@ pub struct SystemState {
     pub(crate) timing: RefCell<Timing>,
 
     // Undo and Redo stacks
-    pub(crate) undo_stack: Vec<CanvasState>,
-    pub(crate) redo_stack: Vec<CanvasState>,
+    pub(crate) undo_stack: Vec<crate::tiles::history::UndoRecord>,
+    pub(crate) redo_stack: Vec<crate::tiles::history::UndoRecord>,
 
     // Toolbar group drag state
     pub(crate) toolbar_dragging_group: Option<String>,
@@ -174,20 +149,15 @@ impl SystemState {
             wcp_running_signal: Arc::new(AtomicBool::new(false)),
             wcp_greeted_signal: Arc::new(AtomicBool::new(false)),
             wcp_client_capabilities: WcpClientCapabilities::new(),
-            gesture_start_location: None,
-            gesture_start_time: None,
-
-            measure_start_location: None,
             batch_messages: VecDeque::new(),
             batch_messages_completed: false,
             url: RefCell::new(String::new()),
             command_prompt_text: RefCell::new(String::new()),
-            draw_data: RefCell::new(vec![None]),
             variable_name_info_cache: RefCell::new(AHashMap::new()),
-            flattened_rows_cache: RefCell::new(AHashMap::new()),
             translator_generation: 0,
+            layout_adapter: None,
+            workspace_runtime: Default::default(),
             all_variable_rows_cache: None,
-            last_canvas_rect: RefCell::new(None),
 
             char_to_add_to_prompt: RefCell::new(None),
             scope_ref_to_expand: RefCell::new(None),
@@ -197,11 +167,6 @@ impl SystemState {
             time_widgets: RefCell::new(AHashMap::new()),
             text_edit_focused: AHashMap::new(),
             text_edit_request_focus: AHashMap::new(),
-            frame_buffer_content: None,
-            frame_buffer_array_cache: None,
-            frame_buffer_pixel_cache: None,
-            memory_viewer: MemoryViewerState::default(),
-            memory_viewer_cache: None,
             url_callback: None,
             continuous_redraw: false,
             #[cfg(feature = "performance_plot")]
@@ -210,7 +175,6 @@ impl SystemState {
             timing: RefCell::new(Timing::new()),
             undo_stack: vec![],
             redo_stack: vec![],
-            annotation_kind: None,
             annotation_id_source: 0,
             click_handled: false,
             toolbar_dragging_group: None,

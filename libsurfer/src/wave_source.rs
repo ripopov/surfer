@@ -111,7 +111,7 @@ impl WaveSource {
 
     /// The file/URL name to show in the window title for this source, if it has one of
     /// its own. `None` for sources with no inherent name (dropped raw data, cxxrtl), which
-    /// fall back to the design's top-level scope name(s); see `WaveData::window_title`.
+    /// fall back to the design's top-level scope name(s); see `WaveformData::window_title`.
     #[must_use]
     pub(crate) fn title_name(&self) -> Option<String> {
         match self {
@@ -131,7 +131,7 @@ impl WaveSource {
 
     /// The window/tab title to show while this source is loaded, e.g. "foo.vcd - Surfer",
     /// based only on the source's own name (see `title_name`). Used where no design
-    /// hierarchy is available yet to fall back on; see `WaveData::window_title` for that.
+    /// hierarchy is available yet to fall back on; see `WaveformData::window_title` for that.
     #[must_use]
     pub fn window_title(&self) -> String {
         format_window_title(self.title_name().as_deref())

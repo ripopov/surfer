@@ -33,6 +33,7 @@ pub mod graphics;
 pub mod help;
 pub mod hierarchy;
 pub mod item_drawing_info;
+pub mod item_list;
 pub mod keyboard_shortcuts;
 pub mod keys;
 pub mod logs;
@@ -52,6 +53,8 @@ pub mod statusbar;
 pub mod system_state;
 #[cfg(test)]
 pub mod tests;
+pub mod tile_kinds;
+pub mod tiles;
 pub mod time;
 pub mod toolbar;
 pub mod tooltips;
@@ -82,6 +85,7 @@ use crate::annotation::Annotation;
 use crate::annotation_list::AnnotationGroup;
 use crate::annotation_list::DEFAULT_GROUP_NAME;
 use crate::arrow::ArrowAnnotation;
+#[cfg(all(not(target_arch = "wasm32"), feature = "wasm_plugins"))]
 use crate::channels::checked_send;
 use crate::comment::CommentMessage;
 use crate::config::AutoLoad;
@@ -89,6 +93,7 @@ use crate::displayed_item_tree::ItemIndex;
 use crate::displayed_item_tree::TargetPosition;
 use crate::rectangle::RectAnnotation;
 use crate::remote::get_time_table_from_server;
+use crate::tiles::commands::DocumentCommand;
 use crate::variable_name_type::VariableNameType;
 
 use std::collections::HashMap;
@@ -104,10 +109,8 @@ use derive_more::Display;
 use displayed_item::DisplayedVariable;
 use displayed_item_tree::DisplayedItemTree;
 use eframe::{App, CreationContext};
-use egui::Id;
 use egui::{FontData, FontDefinitions, FontFamily};
 use eyre::{Result, WrapErr as _};
-use ftr_parser::types::Transaction;
 use futures::executor::block_on;
 use itertools::Itertools;
 use message::MessageTarget;
@@ -132,14 +135,14 @@ use crate::displayed_item::{
 };
 use crate::displayed_item_tree::VisibleItemIndex;
 use crate::drawing_canvas::TxDrawingCommands;
-use crate::frame_buffer::{FrameBufferColorMode, FrameBufferContent, build_frame_buffer_content};
+use crate::frame_buffer::{FrameBufferContent, build_frame_buffer_content};
 use crate::message::Message;
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
 use crate::translation::{AnyTranslator, all_translators};
 use crate::variable_filter::{VariableIOFilterType, VariableNameFilterType};
 use crate::viewport::Viewport;
 use crate::wave_container::{ScopeRefExt, VariableRefExt, WaveContainer};
-use crate::wave_data::WaveData;
+
 use crate::wave_source::{LoadOptions, WaveFormat, WaveSource};
 use crate::wellen::{HeaderResult, convert_format};
 
@@ -292,19 +295,43 @@ impl WcpClientCapabilities {
 /// Stores the current canvas state to enable undo/redo operations
 struct CanvasState {
     message: String,
-    focused_item: Option<VisibleItemIndex>,
-    focused_transaction: (Option<TransactionRef>, Option<Transaction>),
+    list: crate::tiles::ItemListId,
     items_tree: DisplayedItemTree,
     displayed_items: HashMap<DisplayedItemRef, DisplayedItem>,
-    markers: HashMap<u8, BigInt>,
+    markers: Option<HashMap<u8, BigInt>>,
     annotations: Vec<Annotation>,
     annotation_group: Vec<AnnotationGroup>,
-    annotation_list: bool,
-    selected_annotation: Option<Id>,
     annotation_counter: i32,
 }
 
 impl SystemState {
+    pub(crate) fn scroll_rows_message(&self, down: bool, count: usize) -> Option<Message> {
+        let target = self
+            .user
+            .workspace
+            .resolve_waveform(crate::tiles::TileTarget::Focused)?;
+        Some(Message::ToTile(
+            target,
+            crate::tiles::kind::TileMessage::Waveform(
+                crate::tile_kinds::waveform::WaveformMessage::ScrollRows { down, count },
+            ),
+        ))
+    }
+
+    fn navigate_waveform(
+        &mut self,
+        tile_id: crate::tiles::TileId,
+        command: crate::tile_kinds::waveform::WaveformNavigation,
+    ) -> Option<()> {
+        let waves = self.user.waveform_edit_at(tile_id)?;
+        let view = waves.view;
+        if let Err(error) = view.apply_navigation(command, Some(waves.document)) {
+            tracing::warn!(%error, "invalid waveform navigation");
+            return None;
+        }
+        Some(())
+    }
+
     pub fn update(&mut self, message: Message) -> Option<()> {
         if tracing::enabled!(tracing::Level::TRACE)
             && !matches!(message, Message::CommandPromptUpdate { .. })
@@ -312,34 +339,283 @@ impl SystemState {
             tracing::trace!("{message:?}");
         }
         match message {
-            Message::SetActiveScope(scope) => {
-                let waves = self.user.waves.as_mut()?;
-                waves.set_active_scope(scope)?;
+            Message::ApplyLayoutProposal(edit) => {
+                let movement = if edit.structural {
+                    let tile = edit.moved_tile?;
+                    crate::tiles::history::move_record(
+                        tile,
+                        self.user.workspace.layout.root()?,
+                        edit.root.as_ref()?,
+                    )
+                } else {
+                    None
+                };
+                self.user
+                    .workspace
+                    .layout
+                    .apply_proposal(edit.revision, edit.root, edit.focused)
+                    .map_err(|error| warn!("Layout proposal rejected: {error}"))
+                    .ok()?;
+                self.user.workspace.reconcile_waveform_scroll();
+                if let Some(record) = movement {
+                    self.record_edit(record);
+                }
+            }
+            Message::Workspace(command) => {
+                let move_before = match &command {
+                    crate::tiles::commands::WorkspaceCommand::MoveTile { tile, .. } => self
+                        .user
+                        .workspace
+                        .layout
+                        .root()
+                        .cloned()
+                        .map(|root| (*tile, root)),
+                    _ => None,
+                };
+                let resources_before = crate::tiles::history::ResourceEditStart::capture(
+                    &self.user.workspace,
+                    &command,
+                );
+                let layout_before = matches!(
+                    &command,
+                    crate::tiles::commands::WorkspaceCommand::SetLayout(_)
+                )
+                .then(|| self.user.workspace.layout.root().cloned());
+                let title_before = match &command {
+                    crate::tiles::commands::WorkspaceCommand::RenameTile { tile, .. } => self
+                        .user
+                        .workspace
+                        .tiles
+                        .get(tile)
+                        .map(|entry| (*tile, entry.title.clone())),
+                    _ => None,
+                };
+                self.user
+                    .workspace
+                    .apply_command(&mut self.workspace_runtime, command)
+                    .map_err(|error| warn!("Workspace command rejected: {error}"))
+                    .ok()?;
+                if let Some((tile, before)) = move_before
+                    && let Some(after) = self.user.workspace.layout.root()
+                    && let Some(record) = crate::tiles::history::move_record(tile, &before, after)
+                {
+                    self.record_edit(record);
+                }
+                if let Some(record) =
+                    resources_before.and_then(|before| before.finish(&self.user.workspace))
+                {
+                    self.record_edit(record);
+                }
+                if let Some(before) = layout_before {
+                    let after = self.user.workspace.layout.root().cloned();
+                    if !crate::tiles::layout::same_topology(before.as_ref(), after.as_ref()) {
+                        self.record_edit(crate::tiles::history::UndoRecord::SetLayout {
+                            before,
+                            after,
+                        });
+                    }
+                }
+                if let Some((tile, before)) = title_before {
+                    let after = self.user.workspace.tiles[&tile].title.clone();
+                    if before != after {
+                        self.record_edit(crate::tiles::history::UndoRecord::Title {
+                            tile,
+                            before,
+                            after,
+                        });
+                    }
+                }
+            }
+            Message::ToTile(target, message) => {
+                let target = self
+                    .user
+                    .workspace
+                    .validate_message_target(target, &message)?;
+                let inspect_transaction = matches!(
+                    &message,
+                    crate::tiles::kind::TileMessage::Waveform(
+                        crate::tile_kinds::waveform::WaveformMessage::FocusTransaction(Some(_))
+                            | crate::tile_kinds::waveform::WaveformMessage::MoveTransaction { .. }
+                    )
+                );
+                let before = message.item_edit_label().and_then(|label| {
+                    let list = self.user.workspace.tiles[&target].kind.item_list()?;
+                    Some(Self::current_canvas_state(
+                        list,
+                        None,
+                        self.user.workspace.item_lists.get(&list)?,
+                        label.into(),
+                    ))
+                });
+                let settings_before =
+                    message.settings_before(&self.user.workspace.tiles[&target].kind);
+                let changed = self
+                    .user
+                    .workspace
+                    .apply_tile_message(target, message, self.user.waves.as_ref())
+                    .map_err(|error| warn!("Tile command rejected: {error}"))
+                    .ok()?;
+                if changed && let Some(before) = before {
+                    self.record_canvas_edit(before);
+                }
+                if changed && let Some(before) = settings_before {
+                    let after = before
+                        .capture_like(&self.user.workspace.tiles[&target].kind)
+                        .expect("tile update preserves kind");
+                    self.record_edit(crate::tiles::history::UndoRecord::Settings {
+                        tile: target,
+                        before,
+                        after,
+                    });
+                }
+                if inspect_transaction
+                    && self
+                        .user
+                        .workspace
+                        .waveform_resources(target)
+                        .is_some_and(|(_, view)| view.focused_transaction.is_some())
+                {
+                    self.update(Message::Workspace(
+                        crate::tiles::commands::WorkspaceCommand::OpenTile {
+                            kind: "transaction_details".into(),
+                            placement: crate::tiles::layout::Placement::Edge(
+                                crate::tiles::layout::Direction::Right,
+                            ),
+                            focus: false,
+                        },
+                    ))?;
+                }
+            }
+            Message::WcpVariableAction { action, variable } => {
+                use crate::tiles::commands::WcpVariableAction;
+                if !self
+                    .wcp_greeted_signal
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    return None;
+                }
+                let event = match action {
+                    WcpVariableAction::GoToDeclaration
+                        if self.wcp_client_capabilities.goto_declaration =>
+                    {
+                        WcpEvent::goto_declaration { variable }
+                    }
+                    WcpVariableAction::AddDrivers if self.wcp_client_capabilities.add_drivers => {
+                        WcpEvent::add_drivers { variable }
+                    }
+                    WcpVariableAction::AddLoads if self.wcp_client_capabilities.add_loads => {
+                        WcpEvent::add_loads { variable }
+                    }
+                    _ => return None,
+                };
+                if let Some(channel) = &self.channels.wcp_s2c_sender {
+                    let _ = futures::executor::block_on(channel.send(WcpSCMessage::event(event)));
+                }
+            }
+            Message::ToDocument(command) => {
+                self.user.waves.as_mut()?.apply_command(command)?;
             }
 
             Message::ExpandScope(scope_ref) => {
                 *self.scope_ref_to_expand.borrow_mut() = Some(scope_ref);
             }
             Message::AddVariables(vars) => {
-                if !vars.is_empty() {
-                    let undo_msg = if vars.len() == 1 {
-                        format!("Add variable {}", vars[0].name)
-                    } else {
-                        format!("Add {} variables", vars.len())
-                    };
-                    self.save_current_canvas(undo_msg);
-                    if let Some(waves) = self.user.waves.as_mut() {
-                        if let (Some(cmd), _) =
-                            waves.add_variables(&self.translators, vars, None, true, false, None)
-                        {
-                            self.load_variables(cmd);
-                        }
-                        self.invalidate_draw_commands();
-                    } else {
-                        error!("Could not load signals, no waveform loaded");
-                    }
+                if vars.is_empty() {
+                    return Some(());
                 }
+                let undo_msg = if vars.len() == 1 {
+                    format!("Add variable {}", vars[0].name)
+                } else {
+                    format!("Add {} variables", vars.len())
+                };
+                // Reject unavailable paths before changing a list or creating a tile.
+                let container = self.user.waves.as_ref()?.inner.as_waves()?;
+                for variable in &vars {
+                    container.variable_meta(variable).ok()?;
+                }
+                let target = self
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused);
+                let load = if let Some(target) = target {
+                    let list = self.user.workspace.tiles[&target].kind.item_list()?;
+                    let mut waves = self.user.waveform_edit_at(target)?;
+                    let before = Self::current_canvas_state(list, None, waves.items, undo_msg);
+                    let (load, inserted) =
+                        waves.add_variables(&self.translators, vars, None, true, false, None, true);
+                    if !inserted.is_empty() {
+                        self.record_canvas_edit(before);
+                    }
+                    load
+                } else {
+                    use crate::tiles::{
+                        commands::WorkspaceCommand,
+                        kind::{TileEntry, TileKind},
+                        layout::{Direction, Placement},
+                    };
+                    let placement = self
+                        .user
+                        .workspace
+                        .layout
+                        .focused()
+                        .map(|id| Placement::Beside(id, Direction::Right))
+                        .unwrap_or(Placement::Root);
+                    let command = WorkspaceCommand::CreateTile {
+                        kind: "waveform".into(),
+                        placement,
+                        focus: true,
+                    };
+                    let before = crate::tiles::history::ResourceEditStart::capture(
+                        &self.user.workspace,
+                        &command,
+                    )?
+                    .with_label("Add variables");
+                    // Stage only the new resources. Neither the empty tile nor a partial
+                    // insertion becomes visible if initialization fails.
+                    let id = self.workspace_runtime.allocate_tile().ok()?;
+                    let mut layout = self.user.workspace.layout.clone();
+                    layout.insert(id, placement).ok()?;
+                    layout.focus(id).ok()?;
+                    let (mut kind, list) =
+                        TileKind::create("waveform", &mut self.workspace_runtime).ok()?;
+                    let (list_id, mut items) = list?;
+                    items.default_variable_name_type = self.user.config.default_variable_name_type;
+                    let TileKind::Waveform(tile) = &mut kind else {
+                        unreachable!()
+                    };
+                    let mut waves = crate::wave_data::WaveformEdit {
+                        document: self.user.waves.as_mut()?,
+                        items: &mut items,
+                        view: &mut tile.view,
+                        peers: vec![],
+                    };
+                    let count = vars.len();
+                    let (load, inserted) =
+                        waves.add_variables(&self.translators, vars, None, true, false, None, true);
+                    if inserted.len() != count {
+                        if let Some(load) = load {
+                            self.load_variables(load);
+                        }
+                        return None;
+                    }
+                    self.user
+                        .workspace
+                        .tiles
+                        .insert(id, TileEntry { title: None, kind });
+                    self.user.workspace.item_lists.insert(list_id, items);
+                    self.user.workspace.layout = layout;
+                    self.workspace_runtime.mark_workspace_initialized();
+                    if let Some(record) = before.finish(&self.user.workspace) {
+                        self.record_edit(record);
+                    }
+                    load
+                };
+                if let Some(load) = load {
+                    self.load_variables(load);
+                }
+                self.invalidate_draw_commands();
             }
+
             Message::DownloadDefaultConfig => {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
@@ -355,24 +631,37 @@ impl SystemState {
             }
 
             Message::AddDivider(name, vidx) => {
-                self.save_current_canvas("Add divider".into());
-                let waves = self.user.waves.as_mut()?;
-                waves.add_divider(name, vidx);
+                let target = self
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused)?;
+                let list = self.user.workspace.tiles[&target].kind.item_list()?;
+                let mut waves = self.user.waveform_edit_at(target)?;
+                let before =
+                    Self::current_canvas_state(list, None, waves.items, "Add divider".into());
+                waves.add_divider(name, vidx).ok()?;
+                self.record_canvas_edit(before);
             }
             Message::AddTimeLine(vidx) => {
-                self.save_current_canvas("Add timeline".into());
-                let waves = self.user.waves.as_mut()?;
-                waves.add_timeline(vidx);
+                let target = self
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused)?;
+                let list = self.user.workspace.tiles[&target].kind.item_list()?;
+                let mut waves = self.user.waveform_edit_at(target)?;
+                let before =
+                    Self::current_canvas_state(list, None, waves.items, "Add timeline".into());
+                waves.add_timeline(vidx).ok()?;
+                self.record_canvas_edit(before);
             }
             Message::AddScope(scope, recursive) => {
                 self.save_current_canvas(format!("Add scope {}", scope.name()));
 
                 let vars = self.get_scope(&scope, recursive);
-                let waves = self.user.waves.as_mut()?;
+                let mut waves = self.user.waveform_edit()?;
 
-                // TODO add parameter to add_variables, insert to (self.drag_target_idx, self.drag_source_idx)
                 if let (Some(cmd), _) =
-                    waves.add_variables(&self.translators, vars, None, true, false, None)
+                    waves.add_variables(&self.translators, vars, None, true, false, None, true)
                 {
                     self.load_variables(cmd);
                 }
@@ -381,14 +670,20 @@ impl SystemState {
             }
             Message::AddScopeAsGroup(scope, recursive) => {
                 self.save_current_canvas(format!("Add scope {} as group", scope.name()));
-                let waves = self.user.waves.as_mut()?;
-                let passed_or_focused = waves.insert_position(waves.focused_item);
-                let target = passed_or_focused.unwrap_or_else(|| waves.end_insert_position());
+                let waves = self.user.waveform_edit()?;
+                let passed_or_focused = waves
+                    .items
+                    .insert_position(waves.view.focused_index(waves.items));
+                let target = passed_or_focused.unwrap_or_else(|| waves.items.end_insert_position());
 
                 self.add_scope_as_group(&scope, target, recursive, None);
                 self.invalidate_draw_commands();
 
-                self.user.waves.as_mut()?.compute_variable_display_names();
+                let waves = self.user.waveform_edit()?;
+                waves.items.compute_variable_display_names(
+                    &waves.document.inner,
+                    waves.document.display_variable_indices,
+                );
             }
             Message::AddCount(digit) => {
                 if let Some(count) = &mut self.user.count {
@@ -405,23 +700,23 @@ impl SystemState {
                 };
                 self.save_current_canvas(undo_msg);
 
-                let waves = self.user.waves.as_mut()?;
+                let mut waves = self.user.waveform_edit()?;
                 if s.gen_id.is_some() {
-                    waves.add_generator(s);
+                    waves.add_generator(s).ok()?;
                 } else {
-                    waves.add_stream(s);
+                    waves.add_stream(s).ok()?;
                 }
                 self.invalidate_draw_commands();
             }
             Message::AddStreamOrGeneratorFromName(scope, name) => {
                 self.save_current_canvas(format!("Add Stream/Generator from name: {name}"));
-                let waves = self.user.waves.as_mut()?;
+                let mut waves = self.user.waveform_edit()?;
                 waves.add_stream_or_generator_from_name(scope, name)?;
                 self.invalidate_draw_commands();
             }
             Message::AddAllFromStreamScope(scope_name) => {
                 self.save_current_canvas(format!("Add all from scope {}", scope_name.clone()));
-                let waves = self.user.waves.as_mut()?;
+                let mut waves = self.user.waveform_edit()?;
                 waves.add_all_from_stream_scope(scope_name)?;
                 self.invalidate_draw_commands();
             }
@@ -430,224 +725,234 @@ impl SystemState {
                 self.user.align_names_right = Some(align_right);
             }
             Message::FocusItem(idx) => {
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
 
-                let visible_items_len = waves.displayed_items.len();
-                if idx.0 < visible_items_len {
-                    waves.focused_item = Some(idx);
+                if let Some(node) = waves.items.items_tree.get_visible(idx) {
+                    waves.view.focused_item = Some(node.item_ref);
                 } else {
-                    error!(
-                        "Can not focus variable {} because only {visible_items_len} variables are visible.",
-                        idx.0
-                    );
+                    error!("Cannot focus missing visible item {}", idx.0);
                 }
             }
             Message::ItemSelectRange(select_to) => {
-                let waves = self.user.waves.as_mut()?;
-                let select_from = waves.focused_item?;
-                waves
-                    .items_tree
-                    .xselect_visible_range(select_from, select_to, true);
+                let waves = self.user.waveform_edit()?;
+                let from = waves.view.focused_item?;
+                let to = waves.items.items_tree.get_visible(select_to)?.item_ref;
+                if waves
+                    .items
+                    .apply_selection(crate::item_list::ItemSelection::Range {
+                        from,
+                        to,
+                        selected: true,
+                    })
+                    .ok()?
+                {
+                    self.invalidate_draw_commands();
+                }
             }
             Message::ItemSelectAll => {
-                let waves = self.user.waves.as_mut()?;
-                waves.items_tree.xselect_all_visible(true);
+                let waves = self.user.waveform_edit()?;
+                if waves
+                    .items
+                    .apply_selection(crate::item_list::ItemSelection::AllVisible(true))
+                    .ok()?
+                {
+                    self.invalidate_draw_commands();
+                }
             }
             Message::SetItemSelected(vidx, selected) => {
-                let waves = self.user.waves.as_mut()?;
-                waves.items_tree.xselect(vidx, selected);
+                let waves = self.user.waveform_edit()?;
+                let item = waves.items.items_tree.get_visible(vidx)?.item_ref;
+                if waves
+                    .items
+                    .apply_selection(crate::item_list::ItemSelection::Set { item, selected })
+                    .ok()?
+                {
+                    self.invalidate_draw_commands();
+                }
             }
             Message::ToggleItemSelected(vidx) => {
-                let waves = self.user.waves.as_mut()?;
-                let node = vidx
-                    .or(waves.focused_item)
-                    .and_then(|vidx| waves.items_tree.to_displayed(vidx))
-                    .and_then(|item| waves.items_tree.get_mut(item))?;
-                node.selected = !node.selected;
+                let waves = self.user.waveform_edit()?;
+                let item = vidx
+                    .or(waves.view.focused_index(waves.items))
+                    .and_then(|index| waves.items.items_tree.get_visible(index))?
+                    .item_ref;
+                if waves
+                    .items
+                    .apply_selection(crate::item_list::ItemSelection::Toggle(item))
+                    .ok()?
+                {
+                    self.invalidate_draw_commands();
+                }
             }
             Message::SetDefaultTimeline(v) => {
                 self.user.show_default_timeline = Some(v);
             }
             Message::UnfocusItem => {
-                let waves = self.user.waves.as_mut()?;
-                waves.focused_item = None;
+                let waves = self.user.waveform_edit()?;
+                waves.view.focused_item = None;
             }
             Message::MoveFocus(direction, count, select) => {
-                let waves = self.user.waves.as_mut()?;
-                let visible_item_cnt = waves.items_tree.iter_visible().count();
+                let waves = self.user.waveform_edit()?;
+                let visible_item_cnt = waves.items.items_tree.iter_visible().count();
                 if visible_item_cnt == 0 {
                     return None;
                 }
 
                 let new_focus_vidx = VisibleItemIndex(match direction {
                     MoveDir::Up => waves
-                        .focused_item
+                        .view
+                        .focused_index(waves.items)
                         .map_or(visible_item_cnt, |vidx| vidx.0)
                         .saturating_sub(count),
                     MoveDir::Down => waves
-                        .focused_item
+                        .view
+                        .focused_index(waves.items)
                         .map_or(usize::MAX, |vidx| vidx.0)
                         .wrapping_add(count)
                         .clamp(0, visible_item_cnt - 1),
                 });
 
                 if select {
-                    if let Some(vidx) = waves.focused_item {
-                        waves.items_tree.xselect(vidx, true);
+                    if let Some(vidx) = waves.view.focused_index(waves.items) {
+                        waves.items.items_tree.xselect(vidx, true);
                     }
-                    waves.items_tree.xselect(new_focus_vidx, true);
+                    waves.items.items_tree.xselect(new_focus_vidx, true);
                 }
-                waves.focused_item = Some(new_focus_vidx);
+                waves.view.focused_item = waves
+                    .items
+                    .items_tree
+                    .get_visible(new_focus_vidx)
+                    .map(|node| node.item_ref);
             }
-            Message::FocusTransaction(tx_ref, tx) => {
-                if let Some(tx_ref) = tx_ref.as_ref()
-                    && tx.is_none()
-                {
-                    self.save_current_canvas(format!("Focus Transaction id: {}", tx_ref.id));
-                }
-                let waves = self.user.waves.as_mut()?;
-                let invalidate = tx.is_none();
-                waves.focused_transaction =
-                    (tx_ref, tx.or_else(|| waves.focused_transaction.1.clone()));
-                if invalidate {
-                    self.invalidate_draw_commands();
-                }
+            Message::FocusTransaction(tx_ref, tile_id) => {
+                self.update(Message::ToTile(
+                    tile_id,
+                    crate::tiles::kind::TileMessage::Waveform(
+                        crate::tile_kinds::waveform::WaveformMessage::FocusTransaction(tx_ref),
+                    ),
+                ))?;
             }
-            Message::ScrollToItem(position) => {
-                let waves = self.user.waves.as_mut()?;
-                waves.scroll_to_item(position);
+            Message::WaveformBodyMeasured {
+                tile_id,
+                height,
+                scroll_offset,
+            } => {
+                self.user
+                    .workspace
+                    .measure_waveform(tile_id, height, scroll_offset)
+                    .ok()?;
             }
-            Message::SetScrollOffset(offset) => {
-                let waves = self.user.waves.as_mut()?;
-                waves.scroll_offset = offset;
-            }
-            Message::SetLogsVisible(visibility) => self.user.show_logs = visibility,
-            Message::SetFrameBufferVariable(variable_ref) => {
-                let waves = self.user.waves.as_mut()?;
-                if let Some(cmd) = waves
-                    .inner
-                    .as_waves_mut()?
-                    .load_variables(std::iter::once(&variable_ref))
-                    .map_err(|e| error!("{e:#?}"))
-                    .ok()
-                    .flatten()
-                {
-                    self.load_variables(cmd);
-                }
-                self.frame_buffer_content = Some(FrameBufferContent::Variable(variable_ref));
+            Message::SetFrameBufferVariable(variable) => {
+                let variable = variable.map_ids(|_| Default::default(), |_| Default::default());
+                self.open_framebuffer(Some(FrameBufferContent::Variable(variable)))?;
             }
             Message::SetFrameBufferVisibleVariable(None) => {
-                self.frame_buffer_content = None;
+                if let Some(tile) = self.framebuffer_target() {
+                    self.update(Message::Workspace(
+                        crate::tiles::commands::WorkspaceCommand::CloseTile(tile),
+                    ))?;
+                }
             }
             Message::SetFrameBufferVisibleVariable(Some(vidx)) => {
-                let waves = self.user.waves.as_ref()?;
-                self.frame_buffer_content = waves
+                let waves = self.user.waveform_read()?;
+                let variable = waves
+                    .items
                     .items_tree
                     .get_visible(vidx)
-                    .and_then(|node| waves.displayed_items.get(&node.item_ref))
+                    .and_then(|node| waves.items.displayed_items.get(&node.item_ref))
                     .and_then(|item| match item {
-                        DisplayedItem::Variable(variable) => {
-                            Some(FrameBufferContent::Variable(variable.variable_ref.clone()))
-                        }
+                        DisplayedItem::Variable(variable) => Some(variable.variable_ref.clone()),
                         _ => None,
-                    });
+                    })?;
+                self.update(Message::SetFrameBufferVariable(variable))?;
             }
             Message::SetFrameBufferArray(scope_ref) => {
-                let waves = self.user.waves.as_mut()?;
-                let (levels, all_leaf_vars) = {
-                    let wave_container = waves.inner.as_waves()?;
-                    build_frame_buffer_content(wave_container, &scope_ref)?
+                let scope_ref = crate::wave_container::ScopeRef {
+                    strs: scope_ref.strs,
+                    id: Default::default(),
                 };
-                if let Some(cmd) = waves
-                    .inner
-                    .as_waves_mut()?
-                    .load_variables(all_leaf_vars.iter())
-                    .map_err(|e| error!("{e:#?}"))
-                    .ok()
-                    .flatten()
-                {
-                    self.load_variables(cmd);
-                }
-                self.frame_buffer_content = Some(FrameBufferContent::Array { scope_ref, levels });
+                let levels = self
+                    .user
+                    .waves
+                    .as_ref()
+                    .and_then(|waves| waves.inner.as_waves())
+                    .and_then(|container| build_frame_buffer_content(container, &scope_ref))
+                    .map_or_else(Vec::new, |(levels, _)| levels);
+                self.open_framebuffer(Some(FrameBufferContent::Array { scope_ref, levels }))?;
             }
-
-            Message::SetFrameBufferMode(mode, bits1, bits2, bits3) => {
-                let settings = &mut self.user.frame_buffer.color_settings;
-                settings.color_mode = mode;
-                match mode {
-                    FrameBufferColorMode::Grayscale => {
-                        settings.grayscale_bits = bits1.clamp(1, 8);
-                    }
-                    FrameBufferColorMode::Rgb => {
-                        settings.r_bits = bits1.min(8);
-                        settings.g_bits = bits2.min(8);
-                        settings.b_bits = bits3.min(8);
-                    }
-                    FrameBufferColorMode::YCbCr => {
-                        settings.y_bits = bits1.min(8);
-                        settings.cb_bits = bits2.min(8);
-                        settings.cr_bits = bits3.min(8);
-                    }
-                }
-                self.frame_buffer_pixel_cache = None;
+            Message::SetFrameBufferMode(mode, a, b, c) => {
+                self.update_framebuffer(
+                    crate::tile_kinds::frame_buffer::FrameBufferMessage::Mode(mode, a, b, c),
+                )?;
             }
             Message::SetFrameBufferWidth(width) => {
-                self.user.frame_buffer.pixels_per_row = width.max(1);
+                self.update_framebuffer(
+                    crate::tile_kinds::frame_buffer::FrameBufferMessage::Width(width),
+                )?;
             }
             Message::SetFrameBufferRange(ranges) => {
-                let Some(FrameBufferContent::Array { levels, .. }) =
-                    self.frame_buffer_content.as_mut()
-                else {
-                    return None;
-                };
-
-                for (level, (first, last)) in levels.iter_mut().zip(ranges) {
-                    let mut clamped_first = first.clamp(level.min_index, level.max_index);
-                    let mut clamped_last = last.clamp(level.min_index, level.max_index);
-                    if clamped_first > clamped_last {
-                        std::mem::swap(&mut clamped_first, &mut clamped_last);
-                    }
-                    level.first_index = clamped_first;
-                    level.last_index = clamped_last;
-                }
+                self.update_framebuffer(
+                    crate::tile_kinds::frame_buffer::FrameBufferMessage::Range(ranges),
+                )?;
             }
             Message::OpenMemoryViewer { scope, name } => {
-                let waves = self.user.waves.as_mut()?;
-                let wave_container = waves.inner.as_waves()?;
-
-                let sibling_variables = wave_container.variables_in_scope(&scope);
-
-                if let Some(cmd) = waves
-                    .inner
-                    .as_waves_mut()?
-                    .load_variables(sibling_variables.iter())
-                    .map_err(|e| error!("{e:#?}"))
-                    .ok()
-                    .flatten()
+                use crate::tiles::{
+                    commands::WorkspaceCommand,
+                    kind::{TileKind, TileMessage},
+                    layout::{Direction, Placement},
+                };
+                let command = WorkspaceCommand::CreateTile {
+                    kind: "memory".into(),
+                    placement: Placement::Edge(Direction::Right),
+                    focus: true,
+                };
+                let before = crate::tiles::history::ResourceEditStart::capture(
+                    &self.user.workspace,
+                    &command,
+                );
+                self.user
+                    .workspace
+                    .apply_command(&mut self.workspace_runtime, command)
+                    .ok()?;
+                let id = self.user.workspace.layout.focused()?;
+                let scope = crate::wave_container::ScopeRef {
+                    strs: scope.strs,
+                    id: Default::default(),
+                };
+                let TileKind::Memory(tile) = &self.user.workspace.tiles[&id].kind else {
+                    unreachable!()
+                };
+                let mut settings = tile.settings.clone();
+                settings.scope = Some(scope.clone());
+                settings.name = name;
+                self.user
+                    .workspace
+                    .apply_tile_message(
+                        id,
+                        TileMessage::Memory(crate::tile_kinds::memory::MemoryMessage::Settings(
+                            Box::new(settings),
+                        )),
+                        self.user.waves.as_ref(),
+                    )
+                    .ok()?;
+                if let Some(record) = before.and_then(|before| before.finish(&self.user.workspace))
                 {
-                    self.load_variables(cmd);
+                    self.record_edit(record);
                 }
-
-                self.memory_viewer.open = true;
-                self.memory_viewer.scope = Some(scope);
-                self.memory_viewer.name = name;
-            }
-            Message::SetCursorWindowVisible(visibility) => {
-                self.user.show_cursor_window = visibility;
-            }
-            Message::VerticalScroll(direction, count) => {
-                let waves = self.user.waves.as_mut()?;
-                let current_item = waves.get_top_item();
-                match direction {
-                    MoveDir::Down => {
-                        waves.scroll_to_item(current_item + count);
-                    }
-                    MoveDir::Up => {
-                        if current_item > count {
-                            waves.scroll_to_item(current_item - count);
-                        } else {
-                            waves.scroll_to_item(0);
-                        }
+                if let Some(container) = self
+                    .user
+                    .waves
+                    .as_mut()
+                    .and_then(|waves| waves.inner.as_waves_mut())
+                {
+                    let variables = container.variables_in_scope(&scope);
+                    if let Some(cmd) = container
+                        .load_variables(variables.iter())
+                        .map_err(|e| error!("{e:#?}"))
+                        .ok()
+                        .flatten()
+                    {
+                        self.load_variables(cmd);
                     }
                 }
             }
@@ -679,13 +984,13 @@ impl SystemState {
             }
             Message::RemoveVisibleItems(target) => match target {
                 MessageTarget::Explicit(vidx) => {
-                    let waves = self.user.waves.as_ref();
+                    let waves = self.user.waveform_read();
                     let item_ref = waves
-                        .and_then(|waves| waves.items_tree.get_visible(vidx))
+                        .and_then(|waves| waves.items.items_tree.get_visible(vidx))
                         .map(|node| node.item_ref);
                     let undo_msg = item_ref
                         .and_then(|item_ref| {
-                            waves.and_then(|waves| waves.displayed_items.get(&item_ref))
+                            waves.and_then(|waves| waves.items.displayed_items.get(&item_ref))
                         })
                         .map(displayed_item::DisplayedItem::name)
                         .map_or("Remove one item".to_string(), |name| {
@@ -693,43 +998,56 @@ impl SystemState {
                         });
                     self.save_current_canvas(undo_msg);
 
-                    if let Some(waves) = self.user.waves.as_mut()
+                    if let Some(mut waves) = self.user.waveform_edit()
                         && let Some(item_ref) = item_ref
                     {
-                        waves.remove_displayed_item(item_ref);
-                        waves.compute_variable_display_names();
+                        waves.remove_displayed_items(&[item_ref]);
+                        waves.items.compute_variable_display_names(
+                            &waves.document.inner,
+                            waves.document.display_variable_indices,
+                        );
                     }
                 }
                 MessageTarget::CurrentSelection => {
                     self.save_current_canvas("Remove selected items".to_owned());
-                    let waves = self.user.waves.as_mut()?;
+                    let mut waves = self.user.waveform_edit()?;
 
                     let mut remove_ids: Vec<_> = waves
+                        .items
                         .items_tree
                         .iter_visible_selected()
                         .map(|node| node.item_ref)
                         .collect();
                     if let Some(node) = waves
-                        .focused_item
-                        .and_then(|focus| waves.items_tree.get_visible(focus))
+                        .view
+                        .focused_index(waves.items)
+                        .and_then(|focus| waves.items.items_tree.get_visible(focus))
                     {
                         remove_ids.push(node.item_ref);
                     }
-                    for &item_ref in &remove_ids {
-                        waves.remove_displayed_item(item_ref);
-                    }
-                    waves.compute_variable_display_names();
+                    waves.remove_displayed_items(&remove_ids);
+                    waves.items.compute_variable_display_names(
+                        &waves.document.inner,
+                        waves.document.display_variable_indices,
+                    );
                 }
             },
             Message::RemoveItems(items) => {
+                if !items.iter().any(|id| {
+                    self.user
+                        .waveform_read()
+                        .is_some_and(|waves| waves.items.displayed_items.contains_key(id))
+                }) {
+                    return None;
+                }
                 let undo_msg = self
                     .user
-                    .waves
-                    .as_ref()
+                    .waveform_read()
                     .and_then(|waves| {
                         if items.len() == 1 {
                             items.first().and_then(|item_ref| {
                                 waves
+                                    .items
                                     .displayed_items
                                     .get(item_ref)
                                     .map(|item| format!("Remove item {}", item.name()))
@@ -741,102 +1059,79 @@ impl SystemState {
                     .unwrap_or_default();
                 self.save_current_canvas(undo_msg);
 
-                let waves = self.user.waves.as_mut()?;
-                for id in items.iter().sorted_unstable_by(|a, b| Ord::cmp(b, a)) {
-                    waves.remove_displayed_item(*id);
-                }
+                let mut waves = self.user.waveform_edit()?;
+                waves.remove_displayed_items(&items);
             }
             Message::MoveFocusedItem(direction, count) => {
                 self.save_current_canvas(format!("Move item {direction}, {count}"));
                 self.invalidate_draw_commands();
-                let waves = self.user.waves.as_mut()?;
-                let mut vidx = waves.focused_item?;
+                let waves = self.user.waveform_edit()?;
+                let mut vidx = waves.view.focused_index(waves.items)?;
                 for _ in 0..count {
                     vidx = waves
+                        .items
                         .items_tree
                         .move_item(vidx, direction, |node| {
                             matches!(
-                                waves.displayed_items.get(&node.item_ref),
+                                waves.items.displayed_items.get(&node.item_ref),
                                 Some(DisplayedItem::Group(..))
                             )
                         })
                         .expect("move failed for unknown reason");
                 }
-                waves.focused_item = waves.focused_item.and(Some(vidx));
             }
-            Message::CanvasScroll {
-                delta,
-                viewport_idx,
-            } => {
-                let waves = self.user.waves.as_mut()?;
-                waves.viewports[viewport_idx]
-                    .handle_canvas_scroll(f64::from(delta.y) + f64::from(delta.x));
-                self.invalidate_draw_commands();
+            Message::CanvasScroll { delta, tile_id } => {
+                self.navigate_waveform(
+                    tile_id,
+                    crate::tile_kinds::waveform::WaveformNavigation::Pan(
+                        f64::from(delta.y) + f64::from(delta.x),
+                    ),
+                )?;
             }
             Message::CanvasZoom {
                 delta,
                 mouse_ptr,
-                viewport_idx,
+                tile_id,
             } => {
-                let waves = self.user.waves.as_mut()?;
-                if waves.max_timestamp().is_some() {
-                    let range = waves.time_range().clone();
-                    waves.viewports[viewport_idx].handle_canvas_zoom(
-                        mouse_ptr,
-                        f64::from(delta),
-                        &range,
-                    );
-                    self.invalidate_draw_commands();
-                } else {
-                    warn!(
-                        "Canvas zoom: No timestamps count, even though waveforms should be loaded"
-                    );
-                }
+                self.navigate_waveform(
+                    tile_id,
+                    crate::tile_kinds::waveform::WaveformNavigation::Zoom {
+                        factor: f64::from(delta),
+                        anchor: mouse_ptr,
+                    },
+                )?;
             }
-            Message::ZoomToCursor {
-                delta,
-                viewport_idx,
-            } => {
-                let waves = self.user.waves.as_mut()?;
-                if waves.max_timestamp().is_some() {
-                    let cursor = waves.cursor.clone()?;
-                    let range = waves.time_range().clone();
-                    waves.viewports[viewport_idx].zoom_to_time(&cursor, f64::from(delta), &range);
-                    self.invalidate_draw_commands();
-                } else {
-                    warn!(
-                        "Zoom to cursor: No timestamps count, even though waveforms should be loaded"
-                    );
-                }
+            Message::ZoomToCursor { delta, tile_id } => {
+                self.navigate_waveform(
+                    tile_id,
+                    crate::tile_kinds::waveform::WaveformNavigation::ZoomToCursor {
+                        factor: f64::from(delta),
+                    },
+                )?;
             }
-            Message::ZoomToFit { viewport_idx } => {
-                let waves = self.user.waves.as_mut()?;
-                waves.viewports[viewport_idx].zoom_to_fit();
-                self.invalidate_draw_commands();
+            Message::ZoomToFit { tile_id } => {
+                self.navigate_waveform(
+                    tile_id,
+                    crate::tile_kinds::waveform::WaveformNavigation::ZoomToFit,
+                )?;
             }
-            Message::GoToEnd { viewport_idx } => {
-                let waves = self.user.waves.as_mut()?;
-                waves.viewports[viewport_idx].go_to_end();
-                self.invalidate_draw_commands();
+            Message::GoToEnd { tile_id } => {
+                self.navigate_waveform(
+                    tile_id,
+                    crate::tile_kinds::waveform::WaveformNavigation::GoToEnd,
+                )?;
             }
-            Message::GoToStart { viewport_idx } => {
-                let waves = self.user.waves.as_mut()?;
-                waves.viewports[viewport_idx].go_to_start();
-                self.invalidate_draw_commands();
+            Message::GoToStart { tile_id } => {
+                self.navigate_waveform(
+                    tile_id,
+                    crate::tile_kinds::waveform::WaveformNavigation::GoToStart,
+                )?;
             }
-            Message::GoToTime(time, viewport_idx) => {
-                let waves = self.user.waves.as_mut()?;
-                // If there are no timestamps, the file is not fully loaded
-                if waves.max_timestamp().is_some() {
-                    let time = time?;
-                    let range = waves.time_range().clone();
-                    waves.viewports[viewport_idx].go_to_time(&time.clone(), &range);
-                    self.invalidate_draw_commands();
-                } else {
-                    warn!(
-                        "Go to time: No timestamps count, even though waveforms should be loaded"
-                    );
-                }
+            Message::GoToTime(time, tile_id) => {
+                self.navigate_waveform(
+                    tile_id,
+                    crate::tile_kinds::waveform::WaveformNavigation::GoToTime(time?),
+                )?;
             }
             Message::SetTimeUnit(timeunit) => {
                 self.user.wanted_timeunit = timeunit;
@@ -849,22 +1144,15 @@ impl SystemState {
             Message::ZoomToRange {
                 start,
                 end,
-                viewport_idx,
+                tile_id,
             } => {
-                let waves = self.user.waves.as_mut()?;
-                // If there are no timestamps, the file is not fully loaded
-                if waves.max_timestamp().is_some() {
-                    let range = waves.time_range().clone();
-                    waves.viewports[viewport_idx].zoom_to_range(&start, &end, &range);
-                    self.invalidate_draw_commands();
-                } else {
-                    warn!(
-                        "Zoom to range: No timestamps count, even though waveforms should be loaded"
-                    );
-                }
+                self.navigate_waveform(
+                    tile_id,
+                    crate::tile_kinds::waveform::WaveformNavigation::ZoomToRange { start, end },
+                )?;
             }
             Message::VariableFormatChange(displayed_field_ref, format) => {
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
                 if !self
                     .translators
                     .all_translator_names()
@@ -878,6 +1166,7 @@ impl SystemState {
                     |variable: &mut DisplayedVariable, field_ref: DisplayedFieldRef| {
                         if field_ref.field.is_empty() {
                             let Ok(meta) = waves
+                                .document
                                 .inner
                                 .as_waves()
                                 .unwrap()
@@ -908,8 +1197,9 @@ impl SystemState {
 
                 // convert focused item index to item ref
                 let focused = waves
-                    .focused_item
-                    .and_then(|vidx| waves.items_tree.get_visible(vidx))
+                    .view
+                    .focused_index(waves.items)
+                    .and_then(|vidx| waves.items.items_tree.get_visible(vidx))
                     .map(|node| node.item_ref);
 
                 let mut redraw = false;
@@ -917,7 +1207,7 @@ impl SystemState {
                 match displayed_field_ref {
                     MessageTarget::Explicit(field_ref) => {
                         if let Some(DisplayedItem::Variable(displayed_variable)) =
-                            waves.displayed_items.get_mut(&field_ref.item)
+                            waves.items.displayed_items.get_mut(&field_ref.item)
                         {
                             update_format(displayed_variable, field_ref);
                             redraw = true;
@@ -927,12 +1217,13 @@ impl SystemState {
                         //If an item is focused, update its format too
                         if let Some(focused) = focused
                             && let Some(DisplayedItem::Variable(displayed_variable)) =
-                                waves.displayed_items.get_mut(&focused)
+                                waves.items.displayed_items.get_mut(&focused)
                         {
                             update_format(displayed_variable, DisplayedFieldRef::from(focused));
                             redraw = true;
                         }
                         for item in waves
+                            .items
                             .items_tree
                             .iter_visible_selected()
                             .map(|node| node.item_ref)
@@ -940,7 +1231,7 @@ impl SystemState {
                             //Update format for all selected
                             let field_ref = DisplayedFieldRef::from(item);
                             if let Some(DisplayedItem::Variable(variable)) =
-                                waves.displayed_items.get_mut(&item)
+                                waves.items.displayed_items.get_mut(&item)
                             {
                                 update_format(variable, field_ref);
                             }
@@ -954,8 +1245,14 @@ impl SystemState {
                 }
             }
             Message::ItemSelectionClear => {
-                let waves = self.user.waves.as_mut()?;
-                waves.items_tree.xselect_all_visible(false);
+                let waves = self.user.waveform_edit()?;
+                if waves
+                    .items
+                    .apply_selection(crate::item_list::ItemSelection::AllVisible(false))
+                    .ok()?
+                {
+                    self.invalidate_draw_commands();
+                }
             }
             Message::ItemColorChange(vidx, color_name) => {
                 self.save_current_canvas(format!(
@@ -963,27 +1260,30 @@ impl SystemState {
                     color_name.clone().unwrap_or("default".into())
                 ));
                 self.invalidate_draw_commands();
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
 
                 match vidx {
                     MessageTarget::Explicit(vidx) => {
-                        let node = waves.items_tree.get_visible(vidx)?;
+                        let node = waves.items.items_tree.get_visible(vidx)?;
                         waves
+                            .items
                             .displayed_items
                             .entry(node.item_ref)
                             .and_modify(|item| item.set_color(&color_name));
                     }
                     MessageTarget::CurrentSelection => {
-                        if let Some(focused) = waves.focused_item {
-                            let node = waves.items_tree.get_visible(focused)?;
+                        if let Some(focused) = waves.view.focused_index(waves.items) {
+                            let node = waves.items.items_tree.get_visible(focused)?;
                             waves
+                                .items
                                 .displayed_items
                                 .entry(node.item_ref)
                                 .and_modify(|item| item.set_color(&color_name));
                         }
 
-                        for node in waves.items_tree.iter_visible_selected() {
+                        for node in waves.items.items_tree.iter_visible_selected() {
                             waves
+                                .items
                                 .displayed_items
                                 .entry(node.item_ref)
                                 .and_modify(|item| item.set_color(&color_name));
@@ -996,28 +1296,31 @@ impl SystemState {
                     "Change item name to {}",
                     name.clone().unwrap_or("default".into())
                 ));
-                let waves = self.user.waves.as_mut()?;
-                let vidx = vidx.or(waves.focused_item)?;
-                let node = waves.items_tree.get_visible(vidx)?;
+                let waves = self.user.waveform_edit()?;
+                let vidx = vidx.or(waves.view.focused_index(waves.items))?;
+                let node = waves.items.items_tree.get_visible(vidx)?;
                 waves
+                    .items
                     .displayed_items
                     .entry(node.item_ref)
                     .and_modify(|item| item.set_name(name));
             }
             Message::ItemNameReset(target) => {
                 self.save_current_canvas("Resetting item name(s)".to_owned());
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
                 match target {
                     MessageTarget::Explicit(vidx) => {
-                        let node = waves.items_tree.get_visible(vidx)?;
+                        let node = waves.items.items_tree.get_visible(vidx)?;
                         waves
+                            .items
                             .displayed_items
                             .entry(node.item_ref)
                             .and_modify(|item| item.set_name(None));
                     }
                     MessageTarget::CurrentSelection => {
-                        for node in waves.items_tree.iter_visible_selected() {
+                        for node in waves.items.items_tree.iter_visible_selected() {
                             waves
+                                .items
                                 .displayed_items
                                 .entry(node.item_ref)
                                 .and_modify(|item| item.set_name(None));
@@ -1030,27 +1333,30 @@ impl SystemState {
                     "Change item background color to {}",
                     color_name.clone().unwrap_or("default".into())
                 ));
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
 
                 match vidx {
                     MessageTarget::Explicit(vidx) => {
-                        let node = waves.items_tree.get_visible(vidx)?;
+                        let node = waves.items.items_tree.get_visible(vidx)?;
                         waves
+                            .items
                             .displayed_items
                             .entry(node.item_ref)
                             .and_modify(|item| item.set_background_color(&color_name));
                     }
                     MessageTarget::CurrentSelection => {
-                        if let Some(focused) = waves.focused_item {
-                            let node = waves.items_tree.get_visible(focused)?;
+                        if let Some(focused) = waves.view.focused_index(waves.items) {
+                            let node = waves.items.items_tree.get_visible(focused)?;
                             waves
+                                .items
                                 .displayed_items
                                 .entry(node.item_ref)
                                 .and_modify(|item| item.set_background_color(&color_name));
                         }
 
-                        for node in waves.items_tree.iter_visible_selected() {
+                        for node in waves.items.items_tree.iter_visible_selected() {
                             waves
+                                .items
                                 .displayed_items
                                 .entry(node.item_ref)
                                 .and_modify(|item| item.set_background_color(&color_name));
@@ -1060,27 +1366,30 @@ impl SystemState {
             }
             Message::ItemHeightScalingFactorChange(vidx, scale) => {
                 self.save_current_canvas(format!("Change item height scaling factor to {scale}"));
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
 
                 match vidx {
                     MessageTarget::Explicit(vidx) => {
-                        let node = waves.items_tree.get_visible(vidx)?;
+                        let node = waves.items.items_tree.get_visible(vidx)?;
                         waves
+                            .items
                             .displayed_items
                             .entry(node.item_ref)
                             .and_modify(|item| item.set_height_scaling_factor(scale));
                     }
                     MessageTarget::CurrentSelection => {
-                        if let Some(focused) = waves.focused_item {
-                            let node = waves.items_tree.get_visible(focused)?;
+                        if let Some(focused) = waves.view.focused_index(waves.items) {
+                            let node = waves.items.items_tree.get_visible(focused)?;
                             waves
+                                .items
                                 .displayed_items
                                 .entry(node.item_ref)
                                 .and_modify(|item| item.set_height_scaling_factor(scale));
                         }
 
-                        for node in waves.items_tree.iter_visible_selected() {
+                        for node in waves.items.items_tree.iter_visible_selected() {
                             waves
+                                .items
                                 .displayed_items
                                 .entry(node.item_ref)
                                 .and_modify(|item| item.set_height_scaling_factor(scale));
@@ -1092,7 +1401,7 @@ impl SystemState {
                 self.save_current_canvas("Set analog state".into());
                 self.invalidate_draw_commands();
                 let analog_waveform_multiplier = self.user.config.layout.analog_waveform_multiplier;
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
 
                 // Update settings while preserving existing cache
                 let update = |item: &mut DisplayedItem| {
@@ -1110,22 +1419,25 @@ impl SystemState {
 
                 match vidx {
                     MessageTarget::Explicit(vidx) => {
-                        let node = waves.items_tree.get_visible(vidx)?;
+                        let node = waves.items.items_tree.get_visible(vidx)?;
                         waves
+                            .items
                             .displayed_items
                             .entry(node.item_ref)
                             .and_modify(update);
                     }
                     MessageTarget::CurrentSelection => {
-                        if let Some(focused) = waves.focused_item {
-                            let node = waves.items_tree.get_visible(focused)?;
+                        if let Some(focused) = waves.view.focused_index(waves.items) {
+                            let node = waves.items.items_tree.get_visible(focused)?;
                             waves
+                                .items
                                 .displayed_items
                                 .entry(node.item_ref)
                                 .and_modify(update);
                         }
-                        for node in waves.items_tree.iter_visible_selected() {
+                        for node in waves.items.items_tree.iter_visible_selected() {
                             waves
+                                .items
                                 .displayed_items
                                 .entry(node.item_ref)
                                 .and_modify(update);
@@ -1138,23 +1450,32 @@ impl SystemState {
                 variable,
                 skip_zero,
             } => {
-                let waves = self.user.waves.as_mut()?;
+                let mut waves = self.user.waveform_edit()?;
                 // If there are no timestamps, the file is not fully loaded
                 if waves.max_timestamp().is_some() {
                     // if no cursor is set, move it to
                     // start of visible area transition for next transition
                     // end of visible area for previous transition
-                    if waves.cursor.is_none()
-                        && waves.focused_item.is_some()
-                        && let Some(vp) = waves.viewports.first()
+                    let cursor = waves.document.cursor.clone().or_else(|| {
+                        waves
+                            .view
+                            .focused_index(waves.items)
+                            .map(|_| &waves.view.viewport)
+                            .map(|vp| {
+                                if next {
+                                    vp.left_edge_time(waves.time_range())
+                                } else {
+                                    vp.right_edge_time(waves.time_range())
+                                }
+                            })
+                    });
+                    if let Some(time) =
+                        waves.cursor_at_transition(cursor.as_ref(), next, variable, skip_zero)
                     {
-                        waves.cursor = if next {
-                            Some(vp.left_edge_time(waves.time_range()))
-                        } else {
-                            Some(vp.right_edge_time(waves.time_range()))
-                        };
+                        waves
+                            .document
+                            .apply_command(DocumentCommand::CursorSet(time))?;
                     }
-                    waves.set_cursor_at_transition(next, variable, skip_zero);
                     let moved = waves.go_to_cursor_if_not_in_view();
                     if moved {
                         self.invalidate_draw_commands();
@@ -1166,20 +1487,23 @@ impl SystemState {
                 }
             }
             Message::MoveTransaction { next } => {
-                let undo_msg = if next {
-                    "Move to next transaction"
-                } else {
-                    "Move to previous transaction"
-                };
-                self.save_current_canvas(undo_msg.to_string());
-                let waves = self.user.waves.as_mut()?;
-                waves.move_to_transaction(next)?;
-                self.invalidate_draw_commands();
+                let tile = self
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused)?;
+                self.update(Message::ToTile(
+                    tile,
+                    crate::tiles::kind::TileMessage::Waveform(
+                        crate::tile_kinds::waveform::WaveformMessage::MoveTransaction { next },
+                    ),
+                ))?;
             }
             Message::ResetVariableFormat(displayed_field_ref) => {
-                let waves = self.user.waves.as_mut()?;
-                if let Some(DisplayedItem::Variable(displayed_variable)) =
-                    waves.displayed_items.get_mut(&displayed_field_ref.item)
+                let waves = self.user.waveform_edit()?;
+                if let Some(DisplayedItem::Variable(displayed_variable)) = waves
+                    .items
+                    .displayed_items
+                    .get_mut(&displayed_field_ref.item)
                 {
                     if displayed_field_ref.field.is_empty() {
                         displayed_variable.format = None;
@@ -1190,10 +1514,6 @@ impl SystemState {
                     }
                     self.invalidate_draw_commands();
                 }
-            }
-            Message::CursorSet(time) => {
-                let waves = self.user.waves.as_mut()?;
-                waves.cursor = Some(time);
             }
             Message::ExpandParameterSection => {
                 self.expand_parameter_section = true;
@@ -1319,8 +1639,7 @@ impl SystemState {
                     HeaderResult::LocalFile(header) => {
                         // register waveform as loaded (but with no variable info yet!)
                         let shared_hierarchy = Arc::new(header.hierarchy);
-                        let new_waves =
-                            Box::new(WaveContainer::new_waveform(shared_hierarchy.clone()));
+                        let new_waves = WaveContainer::new_waveform(shared_hierarchy.clone());
                         self.on_waves_loaded(
                             source.clone(),
                             convert_format(header.file_format),
@@ -1333,8 +1652,7 @@ impl SystemState {
                     HeaderResult::LocalBytes(header) => {
                         // register waveform as loaded (but with no variable info yet!)
                         let shared_hierarchy = Arc::new(header.hierarchy);
-                        let new_waves =
-                            Box::new(WaveContainer::new_waveform(shared_hierarchy.clone()));
+                        let new_waves = WaveContainer::new_waveform(shared_hierarchy.clone());
                         self.on_waves_loaded(
                             source.clone(),
                             convert_format(header.file_format),
@@ -1346,11 +1664,11 @@ impl SystemState {
                     }
                     HeaderResult::Remote(hierarchy, file_format, server, file_index) => {
                         // register waveform as loaded (but with no variable info yet!)
-                        let new_waves = Box::new(WaveContainer::new_remote_waveform(
+                        let new_waves = WaveContainer::new_remote_waveform(
                             &server,
                             hierarchy.clone(),
                             file_index,
-                        ));
+                        );
                         self.on_waves_loaded(
                             source.clone(),
                             convert_format(file_format),
@@ -1415,7 +1733,7 @@ impl SystemState {
                 // Refresh time offset before updating viewports
                 waves.refresh_time_range(enable_time_offset);
                 // update viewports, now that we have the time table
-                waves.update_viewports();
+                self.user.workspace.update_viewports(waves);
                 // make sure we redraw
                 self.invalidate_draw_commands();
                 // start loading parameters
@@ -1444,7 +1762,7 @@ impl SystemState {
                 self.invalidate_draw_commands();
             }
             Message::WavesLoaded(filename, format, new_waves, load_options) => {
-                self.on_waves_loaded(filename, format, new_waves, load_options);
+                self.on_waves_loaded(filename, format, *new_waves, load_options);
                 // here, the body and thus the number of timestamps is already loaded!
                 let enable_time_offset = self.enable_time_offset();
                 let waves = self
@@ -1453,7 +1771,7 @@ impl SystemState {
                     .as_mut()
                     .expect("Waves should be loaded at this point!");
                 waves.refresh_time_range(enable_time_offset);
-                waves.update_viewports();
+                self.user.workspace.update_viewports(waves);
                 self.progress_tracker = None;
             }
             Message::TransactionStreamsLoaded(filename, format, new_ftr, loaded_options) => {
@@ -1465,7 +1783,7 @@ impl SystemState {
                     .as_mut()
                     .expect("Waves should be loaded at this point!");
                 waves.refresh_time_range(enable_time_offset);
-                waves.update_viewports();
+                self.user.workspace.update_viewports(waves);
             }
             Message::BlacklistTranslator(idx, translator) => {
                 self.user.blacklisted_translators.insert((idx, translator));
@@ -1516,9 +1834,12 @@ impl SystemState {
             Message::SetShowIndices(v) => {
                 let new = v;
                 self.user.show_variable_indices = Some(new);
-                let waves = self.user.waves.as_mut()?;
-                waves.display_variable_indices = new;
-                waves.compute_variable_display_names();
+                let waves = self.user.waveform_edit()?;
+                waves.document.display_variable_indices = new;
+                waves.items.compute_variable_display_names(
+                    &waves.document.inner,
+                    waves.document.display_variable_indices,
+                );
             }
             Message::HideCommandPrompt => {
                 *self.command_prompt_text.borrow_mut() = String::new();
@@ -1572,13 +1893,13 @@ impl SystemState {
                 ctx.set_visuals(self.get_visuals());
             }
             Message::ReloadWaveform(keep_unavailable) => {
-                let waves = self.user.waves.as_ref()?;
+                let waves = self.user.waveform_read()?;
                 let options = if keep_unavailable {
                     LoadOptions::KeepAll
                 } else {
                     LoadOptions::KeepAvailable
                 };
-                match &waves.source {
+                match &waves.document.source {
                     WaveSource::File(filename) => {
                         self.load_from_file(filename.clone(), options).ok();
                     }
@@ -1605,8 +1926,13 @@ impl SystemState {
                 self.variable_name_info_cache.borrow_mut().clear();
                 self.translator_generation += 1;
 
-                if let Some(waves) = self.user.waves.as_mut() {
-                    waves.compute_variable_display_names();
+                if let Some(document) = self.user.waves.as_ref() {
+                    for items in self.user.workspace.item_lists.values_mut() {
+                        items.compute_variable_display_names(
+                            &document.inner,
+                            document.display_variable_indices,
+                        );
+                    }
                 }
             }
             Message::SuggestReloadWaveform => match self.autoreload_files() {
@@ -1637,8 +1963,8 @@ impl SystemState {
                 if !open {
                     return None;
                 }
-                let waves = self.user.waves.as_ref()?;
-                let state_file_path = waves.source.sibling_state_file()?;
+                let waves = self.user.waveform_read()?;
+                let state_file_path = waves.document.source.sibling_state_file()?;
                 self.load_state_file(Some(state_file_path.clone()));
             }
             Message::SuggestOpenSiblingStateFile => match self.autoload_sibling_state_files() {
@@ -1667,7 +1993,7 @@ impl SystemState {
                 self.user.show_open_sibling_state_file_suggestion = Some(dialog);
             }
             Message::RemovePlaceholders => {
-                let waves = self.user.waves.as_mut()?;
+                let mut waves = self.user.waveform_edit()?;
                 waves.remove_placeholders();
             }
             Message::SetClockHighlightType(new_type) => {
@@ -1680,7 +2006,7 @@ impl SystemState {
                 self.invalidate_draw_commands();
             }
             Message::ResolveMarkerSet { name, time } => {
-                let marker_id = self.user.waves.as_ref()?.resolve_marker_name(&name);
+                let marker_id = self.user.waveform_read()?.items.resolve_marker_name(&name);
                 let msg = match marker_id {
                     Some(id) => Message::SetMarker { id, time },
                     None => Message::AddMarker {
@@ -1701,41 +2027,51 @@ impl SystemState {
                 } else {
                     self.save_current_canvas(format!("Add marker at {time}"));
                 }
-                let waves = self.user.waves.as_mut()?;
+                let mut waves = self.user.waveform_edit()?;
                 waves.add_marker(&time, name, move_focus);
             }
             Message::SetMarker { id, time } => {
                 self.save_current_canvas(format!("Set marker {id} to {time}"));
-                let waves = self.user.waves.as_mut()?;
-                waves.set_marker_position(id, &time);
+                let mut waves = self.user.waveform_edit()?;
+                waves.set_marker_position(id, &time).ok()?;
             }
             Message::ResolveMarkerRemove(name) => {
-                if let Some(id) = self.user.waves.as_ref()?.resolve_marker_name(&name) {
+                if let Some(id) = self.user.waveform_read()?.items.resolve_marker_name(&name) {
                     self.update(Message::RemoveMarker(id));
                 }
             }
             Message::RemoveMarker(id) => {
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_read()?;
+                if !waves.document.markers.contains_key(&id)
+                    && !waves.items.displayed_items.values().any(
+                        |item| matches!(item, DisplayedItem::Marker(marker) if marker.idx == id),
+                    )
+                {
+                    return None;
+                }
+                self.save_current_canvas(format!("Remove marker {id}"));
+                self.invalidate_draw_commands();
+                let mut waves = self.user.waveform_edit()?;
                 waves.remove_marker(id);
             }
             Message::MoveMarkerToCursor(idx) => {
                 self.save_current_canvas("Move marker".into());
-                let waves = self.user.waves.as_mut()?;
-                waves.move_marker_to_cursor(idx);
+                let mut waves = self.user.waveform_edit()?;
+                waves.move_marker_to_cursor(idx).ok()?;
             }
             Message::GoToCursorIfNotInView => {
-                let waves = self.user.waves.as_mut()?;
+                let mut waves = self.user.waveform_edit()?;
                 if waves.go_to_cursor_if_not_in_view() {
                     self.invalidate_draw_commands();
                 }
             }
-            Message::GoToMarkerPosition(idx, viewport_idx) => {
-                let waves = self.user.waves.as_mut()?;
+            Message::GoToMarkerPosition(idx, tile_id) => {
+                let waves = self.user.waveform_edit_at(tile_id)?;
                 // If there are no timestamps, the file is not fully loaded
                 if waves.max_timestamp().is_some() {
-                    let cursor = waves.markers.get(&idx)?.clone();
+                    let cursor = waves.document.markers.get(&idx)?.clone();
                     let range = waves.time_range().clone();
-                    waves.viewports[viewport_idx].go_to_time(&cursor, &range);
+                    waves.view.viewport.go_to_time(&cursor, &range);
                     self.invalidate_draw_commands();
                 } else {
                     warn!(
@@ -1744,16 +2080,27 @@ impl SystemState {
                 }
             }
             Message::ChangeVariableNameType(target, name_type) => {
-                let waves = self.user.waves.as_mut()?;
-                let recompute_names = waves.change_variable_name_type(target, name_type);
+                let waves = self.user.waveform_edit()?;
+                let recompute_names = waves.items.change_variable_name_type(
+                    target,
+                    name_type,
+                    waves.view.focused_index(waves.items),
+                );
 
                 if recompute_names {
-                    waves.compute_variable_display_names();
+                    waves.items.compute_variable_display_names(
+                        &waves.document.inner,
+                        waves.document.display_variable_indices,
+                    );
                 }
             }
             Message::ForceVariableNameTypes(name_type) => {
-                let waves = self.user.waves.as_mut()?;
-                waves.force_variable_name_type(name_type);
+                let waves = self.user.waveform_edit()?;
+                waves.items.force_variable_name_type(
+                    name_type,
+                    &waves.document.inner,
+                    waves.document.display_variable_indices,
+                );
             }
             Message::CommandPromptClear => {
                 *self.command_prompt_text.borrow_mut() = String::new();
@@ -1837,11 +2184,18 @@ impl SystemState {
                 self.user.show_performance = s;
             }
             Message::SetContinuousRedraw(s) => self.continuous_redraw = s,
-            Message::SetMouseGestureDragStart(pos, time) => {
-                self.gesture_start_location = pos;
-                self.gesture_start_time = time;
+            Message::SetMouseGestureDragStart(pos, time, tile_id) => {
+                let interaction = &mut self.user.waveform_edit_at(tile_id)?.view.interaction;
+                interaction.gesture_start_location = pos;
+                interaction.gesture_start_time = time;
             }
-            Message::SetMeasureDragStart(pos) => self.measure_start_location = pos,
+            Message::SetMeasureDragStart(pos, tile_id) => {
+                self.user
+                    .waveform_edit_at(tile_id)?
+                    .view
+                    .interaction
+                    .measure_start_location = pos;
+            }
             Message::SetTextEditFocused(id, s) => {
                 self.text_edit_focused.insert(id, s);
             }
@@ -1902,99 +2256,107 @@ impl SystemState {
                 let enable_time_offset = self.enable_time_offset();
                 if let Some(waves) = &mut self.user.waves {
                     waves.refresh_time_range(enable_time_offset);
-                    waves.update_viewports();
+                    self.user.workspace.update_viewports(waves);
                 }
                 self.invalidate_draw_commands();
             }
             Message::InvalidateDrawCommands => self.invalidate_draw_commands(),
             Message::UnpauseSimulation => {
-                let waves = self.user.waves.as_ref()?;
-                waves.inner.as_waves()?.unpause_simulation();
+                self.user
+                    .waves
+                    .as_ref()?
+                    .inner
+                    .as_waves()?
+                    .unpause_simulation();
             }
             Message::PauseSimulation => {
-                let waves = self.user.waves.as_ref()?;
-                waves.inner.as_waves()?.pause_simulation();
+                self.user
+                    .waves
+                    .as_ref()?
+                    .inner
+                    .as_waves()?
+                    .pause_simulation();
             }
             Message::Batch(messages) => {
                 for message in messages {
                     self.update(message);
                 }
             }
-            Message::AddDraggedVariables(variables) => {
-                let waves = self.user.waves.as_mut()?;
-
-                waves.focused_item = None;
-                self.user.drag_source_idx = None;
-                let target = self.user.drag_target_idx.take();
-
-                if let (Some(cmd), _) =
-                    waves.add_variables(&self.translators, variables, target, true, false, None)
-                {
+            Message::AddDraggedVariables {
+                tile_id,
+                variables,
+                position,
+            } => {
+                let waves = self.user.waveform_read_at(tile_id)?;
+                if variables.is_empty() || waves.inner.as_waves().is_none() {
+                    return None;
+                }
+                // Validate insertion before loading signals or recording history.
+                let mut candidate = waves.items.items_tree.clone();
+                candidate
+                    .insert_item(
+                        crate::displayed_item::DisplayedItemRef(usize::MAX),
+                        position,
+                    )
+                    .ok()?;
+                self.save_current_canvas("Add dragged variables".into());
+                let mut waves = self.user.waveform_edit_at(tile_id)?;
+                if let (Some(cmd), _) = waves.add_variables(
+                    &self.translators,
+                    variables,
+                    Some(position),
+                    true,
+                    false,
+                    None,
+                    false,
+                ) {
                     self.load_variables(cmd);
                 }
                 self.invalidate_draw_commands();
             }
-            Message::VariableDragStarted(vidx) => {
-                self.user.drag_started = true;
-                self.user.drag_source_idx = Some(vidx);
-                self.user.drag_target_idx = None;
-            }
-            Message::VariableDragTargetChanged(position) => {
-                self.user.drag_target_idx = Some(position);
-            }
-            Message::VariableDragFinished => {
-                self.user.drag_started = false;
-
-                let source_vidx = self.user.drag_source_idx.take()?;
-                let target_position = self.user.drag_target_idx.take()?;
-
-                // reordering
-                self.save_current_canvas("Drag item".to_string());
-                self.invalidate_draw_commands();
-                let waves = self.user.waves.as_mut()?;
-
-                let focused_index = waves
-                    .focused_item
-                    .and_then(|vidx| waves.items_tree.to_displayed(vidx));
-                let focused_item_ref = focused_index
-                    .and_then(|idx| waves.items_tree.get(idx))
-                    .map(|node| node.item_ref);
-
-                let mut to_move = waves
-                    .items_tree
-                    .iter_visible_extra()
-                    .filter_map(|info| info.node.selected.then_some(info.idx))
-                    .collect::<Vec<_>>();
-                if let Some(idx) = focused_index {
-                    to_move.push(idx);
+            Message::MoveDraggedItems {
+                tile_id,
+                items,
+                position,
+            } => {
+                let waves = self.user.waveform_read_at(tile_id)?;
+                if items.is_empty() {
+                    return None;
                 }
-                if let Some(vidx) = waves.items_tree.to_displayed(source_vidx) {
-                    to_move.push(vidx);
-                }
-
-                let _ = waves.items_tree.move_items(to_move, target_position);
-
-                waves.focused_item = focused_item_ref
-                    .and_then(|item_ref| {
+                let to_move = items
+                    .iter()
+                    .map(|id| {
                         waves
+                            .items
                             .items_tree
-                            .iter_visible()
-                            .position(|node| node.item_ref == item_ref)
+                            .iter()
+                            .position(|node| node.item_ref == *id)
+                            .map(ItemIndex)
                     })
-                    .map(VisibleItemIndex);
+                    .collect::<Option<Vec<_>>>()?;
+                let mut candidate = waves.items.items_tree.clone();
+                candidate.move_items(to_move, position).ok()?;
+                if candidate.iter().eq(waves.items.items_tree.iter()) {
+                    return None;
+                }
+                self.save_current_canvas("Drag item".into());
+                self.user.waveform_edit_at(tile_id)?.items.items_tree = candidate;
+                self.invalidate_draw_commands();
             }
             Message::VariableValueToClipbord(vidx) => {
                 self.handle_variable_clipboard_operation(
                     vidx,
                     |waves, item_ref: DisplayedItemRef| {
                         if let Some(DisplayedItem::Variable(_)) =
-                            waves.displayed_items.get(&item_ref)
+                            waves.items.displayed_items.get(&item_ref)
                         {
                             let field_ref = item_ref.into();
-                            self.get_variable_value(
-                                waves,
+                            self.waveform_services().get_variable_value(
+                                waves.document,
+                                waves.items,
                                 &field_ref,
                                 waves
+                                    .document
                                     .cursor
                                     .as_ref()
                                     .and_then(num::BigInt::to_biguint)
@@ -2011,7 +2373,7 @@ impl SystemState {
                     vidx,
                     |waves, item_ref: DisplayedItemRef| {
                         if let Some(DisplayedItem::Variable(variable)) =
-                            waves.displayed_items.get(&item_ref)
+                            waves.items.displayed_items.get(&item_ref)
                         {
                             Some(variable.variable_ref.name.clone())
                         } else {
@@ -2025,7 +2387,7 @@ impl SystemState {
                     vidx,
                     |waves, item_ref: DisplayedItemRef| {
                         if let Some(DisplayedItem::Variable(variable)) =
-                            waves.displayed_items.get(&item_ref)
+                            waves.items.displayed_items.get(&item_ref)
                         {
                             Some(variable.variable_ref.full_path_string())
                         } else {
@@ -2034,60 +2396,41 @@ impl SystemState {
                     },
                 );
             }
-            Message::SetViewportStrategy(s) => {
-                if let Some(waves) = &mut self.user.waves {
-                    for vp in &mut waves.viewports {
-                        vp.move_strategy = s;
-                    }
-                }
+            Message::SetViewportStrategy(strategy) => {
+                self.user.workspace.set_viewport_strategy(strategy);
             }
+
             Message::Undo(count) => {
-                let waves = self.user.waves.as_mut()?;
                 for _ in 0..count {
-                    if let Some(prev_state) = self.undo_stack.pop() {
-                        self.redo_stack
-                            .push(SystemState::current_canvas_state(waves, prev_state.message));
-                        waves.focused_item = prev_state.focused_item;
-                        waves.focused_transaction = prev_state.focused_transaction;
-                        waves.items_tree = prev_state.items_tree;
-                        waves.displayed_items = prev_state.displayed_items;
-                        waves.markers = prev_state.markers;
-                        waves.annotations = prev_state.annotations;
-                        waves.annotation_groups = prev_state.annotation_group;
-                        waves.annotation_list_visible = prev_state.annotation_list;
-                        waves.selected_annotation = prev_state.selected_annotation;
-                        waves.annotation_counter = prev_state.annotation_counter;
-                    } else {
+                    let Some(previous) = self.undo_stack.pop() else {
                         break;
+                    };
+                    match self.restore_history(previous, false) {
+                        Ok(inverse) => self.redo_stack.push(inverse),
+                        Err(previous) => {
+                            self.undo_stack.push(previous);
+                            break;
+                        }
                     }
                 }
-                self.invalidate_draw_commands();
             }
             Message::Redo(count) => {
-                let waves = self.user.waves.as_mut()?;
                 for _ in 0..count {
-                    if let Some(prev_state) = self.redo_stack.pop() {
-                        self.undo_stack
-                            .push(SystemState::current_canvas_state(waves, prev_state.message));
-                        waves.focused_item = prev_state.focused_item;
-                        waves.focused_transaction = prev_state.focused_transaction;
-                        waves.items_tree = prev_state.items_tree;
-                        waves.displayed_items = prev_state.displayed_items;
-                        waves.markers = prev_state.markers;
-                        waves.annotations = prev_state.annotations;
-                        waves.annotation_groups = prev_state.annotation_group;
-                        waves.annotation_list_visible = prev_state.annotation_list;
-                        waves.selected_annotation = prev_state.selected_annotation;
-                        waves.annotation_counter = prev_state.annotation_counter;
-                    } else {
+                    let Some(previous) = self.redo_stack.pop() else {
                         break;
+                    };
+                    match self.restore_history(previous, true) {
+                        Ok(inverse) => self.undo_stack.push(inverse),
+                        Err(previous) => {
+                            self.redo_stack.push(previous);
+                            break;
+                        }
                     }
                 }
-                self.invalidate_draw_commands();
             }
             Message::DumpTree => {
-                let waves = self.user.waves.as_ref()?;
-                dump_tree(waves);
+                let waves = self.user.waveform_read()?;
+                dump_tree(waves.items);
             }
             Message::GroupNew {
                 name,
@@ -2099,21 +2442,28 @@ impl SystemState {
                     name.clone().unwrap_or(String::new())
                 ));
                 self.invalidate_draw_commands();
-                let waves = self.user.waves.as_mut()?;
+                let mut waves = self.user.waveform_edit()?;
 
                 let passed_or_focused = before
                     .and_then(|before| {
                         waves
+                            .items
                             .items_tree
                             .get(before)
                             .map(|node| node.level)
                             .map(|level| TargetPosition { before, level })
                     })
-                    .or_else(|| waves.insert_position(waves.focused_item));
-                let final_target = passed_or_focused.unwrap_or_else(|| waves.end_insert_position());
+                    .or_else(|| {
+                        waves
+                            .items
+                            .insert_position(waves.view.focused_index(waves.items))
+                    });
+                let final_target =
+                    passed_or_focused.unwrap_or_else(|| waves.items.end_insert_position());
 
                 let mut item_refs = items.unwrap_or_else(|| {
                     waves
+                        .items
                         .items_tree
                         .iter_visible_selected()
                         .map(|node| node.item_ref)
@@ -2123,11 +2473,18 @@ impl SystemState {
                 // if we are using the focus as the insert anchor, then move that as well
                 let item_refs = if before.is_none() & passed_or_focused.is_some() {
                     let focus_index = waves
+                        .items
                         .items_tree
-                        .to_displayed(waves.focused_item.expect("Inconsistent state"))
+                        .to_displayed(
+                            waves
+                                .view
+                                .focused_index(waves.items)
+                                .expect("Inconsistent state"),
+                        )
                         .expect("Inconsistent state");
                     item_refs.push(
                         waves
+                            .items
                             .items_tree
                             .get(focus_index)
                             .expect("Inconsistent state")
@@ -2142,10 +2499,12 @@ impl SystemState {
                     return None;
                 }
 
-                let group_ref =
-                    waves.add_group(name.unwrap_or("Group".to_owned()), Some(final_target));
+                let group_ref = waves
+                    .add_group(name.unwrap_or("Group".to_owned()), Some(final_target))
+                    .ok()?;
 
                 let item_idxs = waves
+                    .items
                     .items_tree
                     .iter()
                     .enumerate()
@@ -2156,30 +2515,27 @@ impl SystemState {
                     })
                     .collect::<Vec<_>>();
 
-                if let Err(e) = waves.items_tree.move_items(
+                if let Err(e) = waves.items.items_tree.move_items(
                     item_idxs,
                     crate::displayed_item_tree::TargetPosition {
                         before: ItemIndex(final_target.before.0 + 1),
                         level: final_target.level.saturating_add(1),
                     },
                 ) {
-                    dump_tree(waves);
+                    dump_tree(waves.items);
                     error!("failed to move items into group: {e:?}");
                 }
-                waves.items_tree.xselect_all_visible(false);
-                waves.focused_item = waves
-                    .items_tree
-                    .iter_visible_extra()
-                    .find_map(|info| (info.node.item_ref == group_ref).then_some(info.vidx));
+                waves.items.items_tree.xselect_all_visible(false);
+                waves.view.focused_item = Some(group_ref);
             }
             Message::GroupDissolve(item_ref) => {
                 self.save_current_canvas("Dissolve group".to_owned());
                 self.invalidate_draw_commands();
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
                 let item_index = waves.index_for_ref_or_focus(item_ref)?;
 
-                let removed = waves.items_tree.remove_dissolve(item_index);
-                waves.displayed_items.remove(&removed);
+                let removed = waves.items.items_tree.remove_dissolve(item_index);
+                waves.items.displayed_items.remove(&removed);
             }
             Message::GroupFold(item_ref)
             | Message::GroupUnfold(item_ref)
@@ -2207,22 +2563,23 @@ impl SystemState {
                 self.save_current_canvas(undo_msg);
                 self.invalidate_draw_commands();
 
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
                 let item = waves.index_for_ref_or_focus(item_ref)?;
 
-                if let Some(focused_item) = waves.focused_item {
+                if let Some(focused_item) = waves.view.focused_index(waves.items) {
                     let info = waves
+                        .items
                         .items_tree
                         .get_visible_extra(focused_item)
                         .expect("Inconsistent state");
-                    if waves.items_tree.subtree_contains(item, info.idx) {
-                        waves.focused_item = None;
+                    if waves.items.items_tree.subtree_contains(item, info.idx) {
+                        waves.view.focused_item = None;
                     }
                 }
                 if recursive {
-                    waves.items_tree.xfold_recursive(item, unfold);
+                    waves.items.items_tree.xfold_recursive(item, unfold);
                 } else {
-                    waves.items_tree.xfold(item, unfold);
+                    waves.items.items_tree.xfold(item, unfold);
                 }
             }
             Message::GroupFoldAll | Message::GroupUnfoldAll => {
@@ -2235,21 +2592,22 @@ impl SystemState {
                 self.save_current_canvas(undo_msg);
                 self.invalidate_draw_commands();
 
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
 
                 // remove focus if focused item is folded away -> prevent future waveform
                 // adds being invisibly inserted
-                if let Some(focused_item) = waves.focused_item {
+                if let Some(focused_item) = waves.view.focused_index(waves.items) {
                     let focused_level = waves
+                        .items
                         .items_tree
                         .get_visible(focused_item)
                         .expect("Inconsistent state")
                         .level;
                     if !unfold && (focused_level > 0) {
-                        waves.focused_item = None;
+                        waves.view.focused_item = None;
                     }
                 }
-                waves.items_tree.xfold_all(unfold);
+                waves.items.items_tree.xfold_all(unfold);
             }
             #[cfg(target_arch = "wasm32")]
             Message::StartWcpServer { .. } => {
@@ -2282,11 +2640,11 @@ impl SystemState {
                 display_id,
                 cache_key,
             } => {
-                let waves = self.user.waves.as_mut()?;
-                let generation = waves.cache_generation;
+                let waves = self.user.waveform_edit()?;
+                let generation = waves.document.cache_generation;
 
                 // Check if already have valid entry (building or ready)
-                let item = waves.displayed_items.get(&display_id)?;
+                let item = waves.items.displayed_items.get(&display_id)?;
                 let DisplayedItem::Variable(var) = item else {
                     return None;
                 };
@@ -2301,11 +2659,11 @@ impl SystemState {
                 }
 
                 // Try to share from in-flight builds first (handles removed-but-still-building case)
-                if let Some(entry) = waves.inflight_caches.get(&cache_key)
+                if let Some(entry) = waves.document.inflight_caches.get(&cache_key)
                     && entry.generation == generation
                 {
                     if let DisplayedItem::Variable(var) =
-                        waves.displayed_items.get_mut(&display_id)?
+                        waves.items.displayed_items.get_mut(&display_id)?
                     {
                         var.analog.as_mut()?.cache = Some(entry.clone());
                     }
@@ -2314,6 +2672,7 @@ impl SystemState {
 
                 // Try to share from another displayed variable (O(n) scan - only during cache build)
                 let existing = waves
+                    .items
                     .displayed_items
                     .values()
                     .filter_map(|item| match item {
@@ -2325,7 +2684,7 @@ impl SystemState {
 
                 if let Some(entry) = existing {
                     if let DisplayedItem::Variable(var) =
-                        waves.displayed_items.get_mut(&display_id)?
+                        waves.items.displayed_items.get_mut(&display_id)?
                     {
                         var.analog.as_mut()?.cache = Some(entry);
                     }
@@ -2333,7 +2692,7 @@ impl SystemState {
                 }
 
                 // Clone variable_ref only when we need to spawn builder
-                let variable_ref = match waves.displayed_items.get(&display_id)? {
+                let variable_ref = match waves.items.displayed_items.get(&display_id)? {
                     DisplayedItem::Variable(v) => v.variable_ref.clone(),
                     _ => return None,
                 };
@@ -2344,7 +2703,9 @@ impl SystemState {
                     generation,
                 ));
 
-                if let DisplayedItem::Variable(var) = waves.displayed_items.get_mut(&display_id)? {
+                if let DisplayedItem::Variable(var) =
+                    waves.items.displayed_items.get_mut(&display_id)?
+                {
                     var.analog.as_mut()?.cache = Some(entry.clone());
                 }
 
@@ -2352,6 +2713,7 @@ impl SystemState {
 
                 // Track in-flight build for sharing with other variables
                 waves
+                    .document
                     .inflight_caches
                     .insert(cache_key.clone(), entry.clone());
 
@@ -2380,20 +2742,26 @@ impl SystemState {
             }
             Message::Exit | Message::ToggleFullscreen => {} // Handled in eframe::update
             Message::AddViewport => {
-                let waves = self.user.waves.as_mut()?;
-                let viewport = Viewport::new();
-                waves.viewports.push(viewport);
-                self.draw_data.borrow_mut().push(None);
+                let tile = self
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused)?;
+                self.update(Message::Workspace(
+                    crate::tiles::commands::WorkspaceCommand::SplitTile {
+                        tile,
+                        dir: crate::tiles::layout::Direction::Right,
+                        mode: crate::tiles::commands::SplitMode::Linked,
+                    },
+                ))?;
             }
             Message::RemoveViewport => {
-                let waves = self.user.waves.as_mut()?;
-                if waves.viewports.len() > 1 {
-                    waves.viewports.pop();
-                    self.draw_data.borrow_mut().pop();
-                    waves.last_active_viewport_idx = waves
-                        .last_active_viewport_idx
-                        .min(waves.viewports.len() - 1);
-                }
+                let tile = self
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused)?;
+                self.update(Message::Workspace(
+                    crate::tiles::commands::WorkspaceCommand::CloseTile(tile),
+                ))?;
             }
             Message::SelectTheme(theme_name) => {
                 let theme = SurferTheme::new(theme_name)
@@ -2419,29 +2787,37 @@ impl SystemState {
             }
             Message::AsyncDone(_) => (),
             Message::AddGraphic(id, g) => {
-                let waves = self.user.waves.as_mut()?;
-                waves.graphics.insert(id, g);
+                let waves = self.user.waveform_edit()?;
+                waves.items.graphics.insert(id, g);
             }
             Message::RemoveGraphic(id) => {
-                let waves = self.user.waves.as_mut()?;
-                waves.graphics.retain(|k, _| k != &id);
+                let waves = self.user.waveform_edit()?;
+                waves.items.graphics.retain(|k, _| k != &id);
             }
             Message::ExpandDrawnItem { item, levels } => {
                 self.invalidate_draw_commands();
-                let waves = self.user.waves.as_mut()?;
-                if let Some(DisplayedItem::Variable(var)) = waves.displayed_items.get_mut(&item) {
+                let waves = self.user.waveform_edit()?;
+                if let Some(DisplayedItem::Variable(var)) =
+                    waves.items.displayed_items.get_mut(&item)
+                {
                     var.unfolded_fields = Self::expand_levels_to_unfolded_fields(&var.info, levels);
                 }
             }
             Message::ToggleVariableFieldFold(item, field) => {
                 self.invalidate_draw_commands();
-                let waves = self.user.waves.as_mut()?;
-                if let Some(DisplayedItem::Variable(var)) = waves.displayed_items.get_mut(&item) {
+                let waves = self.user.waveform_edit()?;
+                if let Some(DisplayedItem::Variable(var)) =
+                    waves.items.displayed_items.get_mut(&item)
+                {
                     var.toggle_field_fold(field);
                 }
             }
-            Message::SetMouseGestureAnnotation(annotation_kind) => {
-                self.annotation_kind = annotation_kind;
+            Message::SetMouseGestureAnnotation(annotation_kind, tile_id) => {
+                self.user
+                    .waveform_edit_at(tile_id)?
+                    .view
+                    .interaction
+                    .annotation_kind = annotation_kind;
             }
             Message::RectangleAdded {
                 time_at_start,
@@ -2452,8 +2828,8 @@ impl SystemState {
             } => {
                 let id = self.annotation_id();
                 self.save_current_canvas(format!("Add rectangle {id:?}"));
-                let waves = self.user.waves.as_mut()?;
-                waves.annotation_counter += 1;
+                let waves = self.user.waveform_edit()?;
+                waves.items.annotation_counter += 1;
 
                 let new_rect = Annotation::Rect(RectAnnotation::new(
                     id,
@@ -2462,12 +2838,14 @@ impl SystemState {
                     wave_from,
                     wave_to,
                     rect,
-                    waves.annotation_counter,
+                    waves.items.annotation_counter,
                 ));
                 let new_id = new_rect.get_id();
-                waves.annotations.push(new_rect);
+                waves.items.annotations.push(new_rect);
 
-                waves.add_annotation_to_group(DEFAULT_GROUP_NAME, new_id);
+                waves
+                    .items
+                    .add_annotation_to_group(DEFAULT_GROUP_NAME, new_id);
             }
             Message::ArrowAdded {
                 wave_point_from,
@@ -2476,93 +2854,106 @@ impl SystemState {
             } => {
                 let id = self.annotation_id();
                 self.save_current_canvas(format!("Add arrow {id:?}"));
-                let waves = self.user.waves.as_mut()?;
-                waves.annotation_counter += 1;
+                let waves = self.user.waveform_edit()?;
+                waves.items.annotation_counter += 1;
                 let new_arrow = Annotation::Arrow(ArrowAnnotation::new(
                     id,
                     wave_point_from,
                     wave_point_to,
                     head_mode,
-                    waves.annotation_counter,
+                    waves.items.annotation_counter,
                 ));
                 let new_id = new_arrow.get_id();
-                waves.annotations.push(new_arrow);
+                waves.items.annotations.push(new_arrow);
 
-                waves.add_annotation_to_group(DEFAULT_GROUP_NAME, new_id);
+                waves
+                    .items
+                    .add_annotation_to_group(DEFAULT_GROUP_NAME, new_id);
             }
 
             Message::RemoveAnnotation(anno_id) => {
                 self.save_current_canvas(format!("Removed annotation {anno_id:?}"));
-                let waves = self.user.waves.as_mut()?;
-                waves.delete_annotation(anno_id);
-                waves.remove_annotation_from_group(anno_id);
+                let mut waves = self.user.waveform_edit()?;
+                waves.items.delete_annotation(anno_id);
+                for view in std::iter::once(&mut *waves.view)
+                    .chain(waves.peers.iter_mut().map(|view| &mut **view))
+                {
+                    if view.selected_annotation == Some(anno_id) {
+                        view.selected_annotation = None;
+                        view.annotation_menu = None;
+                    }
+                }
+                waves.items.remove_annotation_from_group(anno_id);
             }
 
             Message::ToggleAnnotationVisiblility(anno_id) => {
                 self.save_current_canvas(format!("Changed visibility on {anno_id:?}"));
-                let waves = self.user.waves.as_mut()?;
-                if let Some(target) = waves.annotations.iter_mut().find(|a| a.get_id() == anno_id) {
+                let waves = self.user.waveform_edit()?;
+                if let Some(target) = waves
+                    .items
+                    .annotations
+                    .iter_mut()
+                    .find(|a| a.get_id() == anno_id)
+                {
                     target.set_visibility(!target.is_visible());
                 }
             }
 
             Message::ToggleAnnotationListShowComments(anno_id) => {
-                let waves = self.user.waves.as_mut()?;
-                if let Some(target) = waves.annotations.iter_mut().find(|a| a.get_id() == anno_id) {
+                let waves = self.user.waveform_edit()?;
+                if let Some(target) = waves
+                    .items
+                    .annotations
+                    .iter_mut()
+                    .find(|a| a.get_id() == anno_id)
+                {
                     target.set_show_comments(!target.show_comments());
                 }
             }
 
-            Message::GoToAnnotationPosition(anno_id, viewport_idx) => {
-                self.go_to_annotation_position(anno_id, viewport_idx);
-            }
-
-            Message::ToggleAnnotationlistVisibility() => {
-                let waves = self.user.waves.as_mut()?;
-                waves.annotation_list_visible = !waves.annotation_list_visible;
-                self.user.show_annotation_list = waves.annotation_list_visible;
+            Message::GoToAnnotationPosition(anno_id, tile_id) => {
+                self.go_to_annotation_position(anno_id, tile_id);
             }
 
             Message::CreateAnnotationGroup(name) => {
                 self.save_current_canvas(format!("Added annotation group {name}"));
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
 
                 let new_group = AnnotationGroup {
                     name: name.clone(),
-                    cycle_counter: 0,
                     annotations: Vec::new(),
                 };
 
-                waves.annotation_groups.push(new_group);
+                waves.items.annotation_groups.push(new_group);
             }
 
             Message::DeleteAnnotationGroup(name) => {
                 self.save_current_canvas(format!("Removed annotation group {name}"));
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
 
-                waves.delete_group(&name);
+                waves.items.delete_group(&name);
             }
 
             Message::DeleteAllAnnotationInGroup(name) => {
                 self.save_current_canvas(format!(
                     "Removed annotation group {name} and all it's annotations"
                 ));
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
 
-                waves.remove_all_annotations_from_group(&name);
+                waves.items.remove_all_annotations_from_group(&name);
             }
 
             Message::AddCharToPrompt(c) => *self.char_to_add_to_prompt.borrow_mut() = Some(c),
 
             Message::UpdateAnnotationGroup(anno_id, name) => {
                 self.save_current_canvas(format!("Added {anno_id:?} to {name:?}"));
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
 
-                let target = waves.remove_annotation_from_group(anno_id);
+                let target = waves.items.remove_annotation_from_group(anno_id);
 
                 match target {
                     Some(id) => {
-                        waves.add_annotation_to_group(name.as_ref()?, id);
+                        waves.items.add_annotation_to_group(name.as_ref()?, id);
                     }
                     None => {
                         warn!("Error: Just removed non existent id!");
@@ -2572,17 +2963,22 @@ impl SystemState {
 
             Message::UpdateAnnotationName(anno_id, name) => {
                 self.save_current_canvas(format!("Changed {anno_id:?} name to {name}"));
-                let waves = self.user.waves.as_mut()?;
-                if let Some(target) = waves.annotations.iter_mut().find(|a| a.get_id() == anno_id) {
+                let waves = self.user.waveform_edit()?;
+                if let Some(target) = waves
+                    .items
+                    .annotations
+                    .iter_mut()
+                    .find(|a| a.get_id() == anno_id)
+                {
                     target.set_name(&name);
                 }
             }
 
             Message::SetGroupVisibility(group, visible) => {
                 self.save_current_canvas(format!("Changed group {:?} visibility", group.name));
-                if let Some(waves) = self.user.waves.as_mut() {
+                if let Some(waves) = self.user.waveform_edit() {
                     for annotation_id in group.annotations {
-                        for annotation in &mut waves.annotations {
+                        for annotation in &mut waves.items.annotations {
                             if annotation_id == annotation.get_id() {
                                 annotation.set_visibility(visible);
                             }
@@ -2591,37 +2987,38 @@ impl SystemState {
                 }
             }
 
-            Message::AnnotationClicked(id, menu_pos, viewport_idx, to_screen, frame_width) => {
-                if let Some(waves) = self.user.waves.as_mut() {
-                    waves.select_annotation(id);
-
-                    let range = waves.time_range();
-
-                    let menu_pos_local = to_screen?.inverse().transform_pos(menu_pos?);
-
-                    let menu_pos_time: BigInt = waves.viewports[viewport_idx?].as_time_bigint(
-                        menu_pos_local.x,
-                        frame_width?,
-                        range,
-                    );
-
-                    waves.annotation_menu_time = Some(menu_pos_time);
-
-                    waves.annotation_menu_pos = if id.is_some() { menu_pos } else { None };
-                }
+            Message::AnnotationClicked(id, menu_pos, tile_id, to_screen, frame_width) => {
+                let target = tile_id.or_else(|| {
+                    self.user
+                        .workspace
+                        .resolve_waveform(crate::tiles::TileTarget::Focused)
+                })?;
+                let waves = self.user.waveform_edit_at(target)?;
+                let view = &*waves.view;
+                let menu = id.and_then(|_| {
+                    let position = menu_pos?;
+                    let local = to_screen?.inverse().transform_pos(position);
+                    let time =
+                        view.viewport
+                            .as_time_bigint(local.x, frame_width?, waves.time_range());
+                    Some((position, time))
+                });
+                let view = waves.view;
+                view.selected_annotation = id;
+                view.annotation_menu = menu;
             }
 
-            Message::SetActiveViewport(idx) => {
-                if let Some(waves) = self.user.waves.as_mut() {
-                    let last_idx = waves.viewports.len().checked_sub(1)?;
-                    waves.last_active_viewport_idx = idx.min(last_idx);
-                }
+            Message::SetActiveViewport(id) => {
+                self.update(Message::Workspace(
+                    crate::tiles::commands::WorkspaceCommand::FocusTile(id),
+                ))?;
             }
 
             Message::RemoveCommentMessage(annotation_id, message_id) => {
                 //self.save_current_canvas(format!("Removed message"));
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
                 if let Some(target) = waves
+                    .items
                     .annotations
                     .iter_mut()
                     .find(|a| a.get_id() == annotation_id)
@@ -2637,9 +3034,10 @@ impl SystemState {
                 self.click_handled = true;
             }
             Message::UpdateCommentBox(changes) => {
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
                 for (annotation_id, comment) in changes {
                     if let Some(target) = waves
+                        .items
                         .annotations
                         .iter_mut()
                         .find(|a| a.get_id() == annotation_id)
@@ -2650,8 +3048,9 @@ impl SystemState {
             }
             Message::AddCommentMessage(annotation_id, message, user) => {
                 //self.save_current_canvas(format!("Added message"));
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
                 if let Some(target) = waves
+                    .items
                     .annotations
                     .iter_mut()
                     .find(|a| a.get_id() == annotation_id)
@@ -2666,8 +3065,9 @@ impl SystemState {
                 }
             }
             Message::ToggleCommentVisibility(annotation_id) => {
-                let waves = self.user.waves.as_mut()?;
+                let waves = self.user.waveform_edit()?;
                 if let Some(target) = waves
+                    .items
                     .annotations
                     .iter_mut()
                     .find(|a| a.get_id() == annotation_id)
@@ -2687,10 +3087,10 @@ impl SystemState {
         recursive: bool,
         variable_name_type: Option<VariableNameType>,
     ) -> TargetPosition {
-        let Some(waves) = self.user.waves.as_mut() else {
+        let Some(mut waves) = self.user.waveform_edit() else {
             return pos;
         };
-        let Some(container) = waves.inner.as_waves() else {
+        let Some(container) = waves.document.inner.as_waves() else {
             return pos;
         };
 
@@ -2707,7 +3107,10 @@ impl SystemState {
                 .then_some(VariableNameType::Local)
         });
 
-        waves.add_group(scope.name(), Some(pos));
+        if let Err(error) = waves.add_group(scope.name(), Some(pos)) {
+            error!(%error, "scope insertion rejected");
+            return pos;
+        }
         let into_group_pos = TargetPosition {
             before: ItemIndex(pos.before.0 + 1),
             level: pos.level + 1,
@@ -2720,6 +3123,7 @@ impl SystemState {
             false,
             false,
             variable_name_type,
+            true,
         );
         let mut into_group_pos = TargetPosition {
             before: ItemIndex(into_group_pos.before.0 + variable_refs.len()),
@@ -2745,23 +3149,28 @@ impl SystemState {
         vidx: MessageTarget<VisibleItemIndex>,
         get_text: F,
     ) where
-        F: FnOnce(&WaveData, DisplayedItemRef) -> Option<String>,
+        F: FnOnce(&crate::wave_data::WaveformRead<'_>, DisplayedItemRef) -> Option<String>,
     {
-        let Some(waves) = &self.user.waves else {
+        let Some(waves) = self.user.waveform_read() else {
             return;
         };
         let vidx = if let MessageTarget::Explicit(vidx) = vidx {
             vidx
-        } else if let Some(focused) = waves.focused_item {
+        } else if let Some(focused) = waves.view.focused_index(waves.items) {
             focused
         } else {
             return;
         };
-        let Some(item_ref) = waves.items_tree.get_visible(vidx).map(|node| node.item_ref) else {
+        let Some(item_ref) = waves
+            .items
+            .items_tree
+            .get_visible(vidx)
+            .map(|node| node.item_ref)
+        else {
             return;
         };
 
-        if let Some(text) = get_text(waves, item_ref)
+        if let Some(text) = get_text(&waves, item_ref)
             && let Some(ctx) = &self.context
         {
             ctx.copy_text(text);
@@ -2769,22 +3178,22 @@ impl SystemState {
     }
 }
 
-fn dump_tree(waves: &WaveData) {
+fn dump_tree(items: &crate::item_list::ItemList) {
     let mut result = String::new();
-    for (idx, node) in waves.items_tree.iter().enumerate() {
+    for (idx, node) in items.items_tree.iter().enumerate() {
         for _ in 0..node.level.saturating_sub(1) {
             result.push(' ');
         }
 
         if node.level > 0 {
-            match waves.items_tree.get(ItemIndex(idx + 1)) {
+            match items.items_tree.get(ItemIndex(idx + 1)) {
                 Some(next) if next.level < node.level => result.push_str("╰╴"),
                 _ => result.push_str("├╴"),
             }
         }
 
         result.push_str(
-            &waves
+            &items
                 .displayed_items
                 .get(&node.item_ref)
                 .map_or("?".to_owned(), displayed_item::DisplayedItem::name),

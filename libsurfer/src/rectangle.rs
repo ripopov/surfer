@@ -1,4 +1,5 @@
 use crate::{
+    annotation::AnnotationView,
     annotation::{Annotatable, AnnotationData},
     annotation_list::DEFAULT_GROUP_NAME,
     comment::Comment,
@@ -9,7 +10,6 @@ use crate::{
     time::TimeFormatter,
     view::DrawingContext,
     viewport::Viewport,
-    wave_data::WaveData,
 };
 use egui::{Id, Pos2, Rect, Response, Sense, Stroke, Ui, Widget};
 use emath::RectTransform;
@@ -67,7 +67,7 @@ impl RectAnnotation {
     #[must_use]
     pub fn get_pos(
         &self,
-        waves: &WaveData,
+        waves: &AnnotationView<'_>,
         viewport: &Viewport,
         ctx: &DrawingContext,
         y_offset: f32,
@@ -76,8 +76,16 @@ impl RectAnnotation {
 
         let x = viewport.pixel_from_time(&self.from.time, ctx.cfg.canvas_size.x, range);
 
-        let from_y = self.from.wave.as_ref().and_then(|f| waves.get_item_y(f))?;
-        let to_y = self.to.wave.as_ref().and_then(|to| waves.get_item_y(to))?;
+        let from_y = self
+            .from
+            .wave
+            .as_ref()
+            .and_then(|f| waves.items.get_item_y(f))?;
+        let to_y = self
+            .to
+            .wave
+            .as_ref()
+            .and_then(|to| waves.items.get_item_y(to))?;
 
         let min_y = (from_y + y_offset).min(to_y + y_offset);
 
@@ -86,7 +94,7 @@ impl RectAnnotation {
 
     //Find the correct y_positions for the rectangle. If the "p" value is none, it means we have a snapped value
     //and make sure to anchor them correctly.
-    fn resolve_y_positions(&mut self, waves: &WaveData) -> (Option<f32>, Option<f32>) {
+    fn resolve_y_positions(&mut self, waves: &AnnotationView<'_>) -> (Option<f32>, Option<f32>) {
         let mut from_y = calculate_y(self.from.wave.as_ref(), waves);
         let mut to_y = calculate_y(self.to.wave.as_ref(), waves);
 
@@ -114,13 +122,12 @@ impl RectAnnotation {
         &mut self,
         from_y: f32,
         to_y: f32,
-        waves: &WaveData,
+        waves: &AnnotationView<'_>,
         ctx: &DrawingContext,
-        viewport_idx: usize,
         theme: &SurferTheme,
         y_offset: f32,
     ) {
-        let viewport = waves.viewports[viewport_idx];
+        let viewport = waves.viewport;
         let range = waves.time_range();
 
         //Update size and coloring from theme and whether it selected or not
@@ -142,8 +149,8 @@ impl RectAnnotation {
     }
 }
 
-pub(crate) fn calculate_y(wave: Option<&GraphicsY>, waves: &WaveData) -> Option<f32> {
-    wave.and_then(|from| waves.get_item_y(from))
+pub(crate) fn calculate_y(wave: Option<&GraphicsY>, waves: &AnnotationView<'_>) -> Option<f32> {
+    wave.and_then(|from| waves.items.get_item_y(from))
 }
 
 impl Annotatable for RectAnnotation {
@@ -238,8 +245,8 @@ impl Annotatable for RectAnnotation {
     fn draw(
         &self,
         ui: &mut Ui,
-        waves: &WaveData,
-        viewport_idx: usize,
+        waves: &AnnotationView<'_>,
+        tile_id: crate::tiles::TileId,
         ctx: &mut DrawingContext,
         theme: &SurferTheme,
         msgs: &mut Vec<Message>,
@@ -250,18 +257,10 @@ impl Annotatable for RectAnnotation {
         let mut rectangle_annotation = self.clone();
 
         rectangle_annotation.annotation_data.id =
-            egui::Id::new(("rectangle", self.annotation_data.id, viewport_idx));
+            ui.make_persistent_id(("rectangle", self.annotation_data.id));
 
         if let (Some(from_y), Some(to_y)) = rectangle_annotation.resolve_y_positions(waves) {
-            rectangle_annotation.compute_rect(
-                from_y,
-                to_y,
-                waves,
-                ctx,
-                viewport_idx,
-                theme,
-                y_offset,
-            );
+            rectangle_annotation.compute_rect(from_y, to_y, waves, ctx, theme, y_offset);
 
             if waves.selected_annotation == Some(self.get_id()) {
                 rectangle_annotation.is_selected();
@@ -271,6 +270,7 @@ impl Annotatable for RectAnnotation {
             let hover_end_time = time_formatter.format(&self.to.time);
 
             let group_name = waves
+                .items
                 .annotation_groups
                 .iter()
                 .find(|group| group.annotations.contains(&self.get_id()))
@@ -280,11 +280,11 @@ impl Annotatable for RectAnnotation {
             });
 
             if res.clicked_by(egui::PointerButton::Primary) {
-                msgs.push(Message::SetActiveViewport(viewport_idx));
+                msgs.push(Message::SetActiveViewport(tile_id));
                 msgs.push(Message::AnnotationClicked(
                     Some(self.annotation_data.id),
                     res.interact_pointer_pos(),
-                    Some(viewport_idx),
+                    Some(tile_id),
                     Some(to_screen),
                     Some(ctx.cfg.canvas_size.x),
                 ));
@@ -297,7 +297,7 @@ impl Annotatable for RectAnnotation {
         &self,
         viewport: &Viewport,
         ctx: &DrawingContext,
-        waves: &WaveData,
+        waves: &AnnotationView<'_>,
         offset: f32,
     ) -> Pos2 {
         let range = waves.time_range();

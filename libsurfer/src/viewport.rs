@@ -105,7 +105,7 @@ fn default_min_width() -> Absolute {
     Absolute(0.5)
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct Viewport {
     pub curr_left: Relative,
     pub curr_right: Relative,
@@ -144,6 +144,28 @@ impl Default for Viewport {
 }
 
 impl Viewport {
+    /// Validate persisted time windows before installing a workspace.
+    pub(crate) fn valid_navigation(&self) -> bool {
+        [
+            (self.curr_left, self.curr_right),
+            (self.target_left, self.target_right),
+            (self.move_start_left, self.move_start_right),
+        ]
+        .into_iter()
+        .all(|(left, right)| {
+            left.0.is_finite()
+                && right.0.is_finite()
+                && right.0 > left.0
+                && (right.0 - left.0).is_finite()
+        }) && self
+            .move_duration
+            .is_none_or(|duration| duration.is_finite() && duration >= 0.0)
+            && match self.move_strategy {
+                ViewportStrategy::Instant => true,
+                ViewportStrategy::EaseInOut { duration } => duration.is_finite() && duration >= 0.0,
+            }
+    }
+
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -503,7 +525,7 @@ fn ease_in_out_size(r: RangeInclusive<f64>, t: f64) -> f64 {
     r.start() + ((r.end() - r.start()) * -((std::f64::consts::PI * t).cos() - 1.) * 0.5)
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum ViewportStrategy {
     Instant,
     EaseInOut { duration: f32 },

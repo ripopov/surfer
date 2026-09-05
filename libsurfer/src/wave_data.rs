@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use egui::{Id, Pos2};
 use eyre::{Result, WrapErr as _};
 use num::bigint::ToBigInt as _;
 use num::{BigInt, BigUint, One, ToPrimitive, Zero};
@@ -8,17 +7,13 @@ use serde::{Deserialize, Serialize};
 use surfer_translation_types::{TranslationPreference, Translator, VariableValue};
 use tracing::{error, info, warn};
 
-use crate::annotation::{Annotatable, Annotation};
-use crate::annotation_list::AnnotationGroup;
 use crate::data_container::DataContainer;
 use crate::displayed_item::{
     DisplayedDivider, DisplayedFieldRef, DisplayedGroup, DisplayedItem, DisplayedItemRef,
     DisplayedStream, DisplayedTimeLine, DisplayedVariable,
 };
 use crate::displayed_item_tree::{DisplayedItemTree, ItemIndex, TargetPosition, VisibleItemIndex};
-use crate::graphics::{Graphic, GraphicId};
-use crate::item_drawing_info::ItemDrawingInfo;
-use crate::transaction_container::{StreamScopeRef, TransactionRef, TransactionStreamRef};
+use crate::transaction_container::{StreamScopeRef, TransactionStreamRef};
 use crate::transactions::calculate_rows_of_stream;
 use crate::translation::{DynTranslator, TranslatorList, VariableInfoExt};
 use crate::variable_name_type::VariableNameType;
@@ -29,7 +24,7 @@ use crate::wave_container::{
 };
 use crate::wave_source::{WaveFormat, WaveSource};
 use crate::wellen::LoadSignalsCmd;
-use ftr_parser::types::{StreamId, Transaction};
+use ftr_parser::types::StreamId;
 use itertools::Itertools;
 use std::fmt::Formatter;
 use std::ops::Not;
@@ -52,6 +47,7 @@ impl std::fmt::Display for ScopeType {
     }
 }
 
+/// The shared loaded document. This has no item list, view navigation or UI cache.
 #[derive(Serialize, Deserialize)]
 pub struct WaveData {
     #[serde(skip, default = "DataContainer::__new_empty")]
@@ -59,56 +55,96 @@ pub struct WaveData {
     pub source: WaveSource,
     pub format: WaveFormat,
     pub active_scope: Option<ScopeType>,
-    /// Root items (variables, dividers, ...) to display
-    pub items_tree: DisplayedItemTree,
-    pub displayed_items: HashMap<DisplayedItemRef, DisplayedItem>,
-    /// Tracks the consecutive displayed item refs
-    pub display_item_ref_counter: usize,
-    pub viewports: Vec<Viewport>,
     pub cursor: Option<BigInt>,
     pub markers: HashMap<u8, BigInt>,
-    #[serde(default)]
-    pub selected_annotation: Option<Id>,
-
-    #[serde(default)]
-    pub annotations: Vec<Annotation>,
-    pub annotation_groups: Vec<AnnotationGroup>, // List of unique group names
-    pub annotation_list_visible: bool,
-    #[serde(default)]
-    pub annotation_counter: i32,
-    pub last_active_viewport_idx: usize,
-    #[serde(skip, default)]
-    pub(crate) annotation_menu_pos: Option<Pos2>,
-    #[serde(skip, default)]
-    pub annotation_menu_time: Option<BigInt>,
-
-    pub focused_item: Option<VisibleItemIndex>,
-    pub focused_transaction: (Option<TransactionRef>, Option<Transaction>),
-    pub default_variable_name_type: VariableNameType,
-    pub scroll_offset: f32,
     pub display_variable_indices: bool,
-    pub graphics: HashMap<GraphicId, Graphic>,
-    /// These are just stored during operation, so no need to serialize
-    #[serde(skip)]
-    pub drawing_infos: Vec<ItemDrawingInfo>,
-    /// Cache signature for `drawing_infos`.
-    #[serde(skip)]
-    pub(crate) drawing_infos_signature: Option<u64>,
-    #[serde(skip)]
-    pub total_height: f32,
     #[serde(skip)]
     pub old_max_timestamp: Option<BigInt>,
-    /// Generation counter for analog cache invalidation on waveform reload.
     #[serde(skip)]
     pub cache_generation: u64,
-    /// Registry of in-flight analog cache builds for sharing.
-    /// Cleared on waveform reload when generation changes.
     #[serde(skip)]
     pub inflight_caches:
         HashMap<AnalogCacheKey, std::sync::Arc<crate::analog_signal_cache::AnalogCacheEntry>>,
-    /// Cached effective time offset, updated on waveform load and config change
-    #[serde(skip, default)]
-    pub(crate) cached_time_range: TimeRange,
+    #[serde(skip)]
+    pub cached_time_range: TimeRange,
+}
+
+/// Transitional owner of the document and waveform presentation while callers
+/// are migrated to the tile workspace. Shared fields have one owner, `document`.
+pub struct WaveformData {
+    pub document: WaveData,
+    pub items: crate::item_list::ItemList,
+    pub viewports: Vec<crate::tile_kinds::waveform::WaveformView>,
+    pub annotation_list_visible: bool,
+    pub last_active_viewport_idx: usize,
+}
+
+/// Immutable inputs for the resolved waveform tile.
+#[derive(Clone, Copy)]
+pub(crate) struct WaveformRead<'a> {
+    pub document: &'a WaveData,
+    pub items: &'a crate::item_list::ItemList,
+    pub view: &'a crate::tile_kinds::waveform::WaveformView,
+    pub tile_id: crate::tiles::TileId,
+}
+impl std::ops::Deref for WaveformRead<'_> {
+    type Target = WaveData;
+    fn deref(&self) -> &Self::Target {
+        self.document
+    }
+}
+
+/// Checked editing access to one waveform and its shared list. Resources stay
+/// in their owners throughout the operation; peers borrow the same list.
+pub(crate) struct WaveformEdit<'a> {
+    pub document: &'a mut WaveData,
+    pub items: &'a mut crate::item_list::ItemList,
+    pub view: &'a mut crate::tile_kinds::waveform::WaveformView,
+    pub peers: Vec<&'a mut crate::tile_kinds::waveform::WaveformView>,
+}
+
+impl std::ops::Deref for WaveformEdit<'_> {
+    type Target = WaveData;
+    fn deref(&self) -> &Self::Target {
+        self.document
+    }
+}
+impl std::ops::DerefMut for WaveformEdit<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.document
+    }
+}
+
+impl WaveformData {
+    pub(crate) fn edit_at(&mut self, index: usize) -> Option<WaveformEdit<'_>> {
+        if index >= self.viewports.len() {
+            return None;
+        }
+        let (before, rest) = self.viewports.split_at_mut(index);
+        let (view, after) = rest.split_first_mut()?;
+        Some(WaveformEdit {
+            document: &mut self.document,
+            items: &mut self.items,
+            view,
+            peers: before.iter_mut().chain(after.iter_mut()).collect(),
+        })
+    }
+    pub(crate) fn edit(&mut self) -> WaveformEdit<'_> {
+        self.edit_at(self.last_active_viewport_idx)
+            .expect("active waveform view exists")
+    }
+}
+
+impl std::ops::Deref for WaveformData {
+    type Target = WaveData;
+    fn deref(&self) -> &Self::Target {
+        &self.document
+    }
+}
+impl std::ops::DerefMut for WaveformData {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.document
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -210,7 +246,7 @@ where
     (translators.get_translator(&translator_name)) as _
 }
 
-impl WaveData {
+impl WaveformData {
     #[must_use]
     pub fn update_with_waves(
         mut self,
@@ -219,8 +255,8 @@ impl WaveData {
         format: WaveFormat,
         translators: &TranslatorList,
         keep_unavailable: bool,
-    ) -> (WaveData, Option<LoadSignalsCmd>) {
-        let active_scope = self.active_scope.take().filter(|m| {
+    ) -> (WaveformData, Option<LoadSignalsCmd>) {
+        let active_scope = self.document.active_scope.take().filter(|m| {
             if let ScopeType::WaveScope(w) = m {
                 new_waves.scope_exists(w)
             } else {
@@ -229,45 +265,49 @@ impl WaveData {
         });
         let display_items = Self::update_displayed_items(
             &new_waves,
-            &self.displayed_items,
+            &self.items.displayed_items,
             keep_unavailable,
             translators,
-            &mut self.items_tree,
+            &mut self.items.items_tree,
         );
 
         let old_max_timestamp = self.max_timestamp();
-        let mut new_wavedata = WaveData {
-            inner: DataContainer::Waves(*new_waves),
-            source,
-            format,
-            active_scope,
-            items_tree: self.items_tree,
-            displayed_items: display_items,
-            display_item_ref_counter: self.display_item_ref_counter,
-            viewports: self.viewports,
-            cursor: self.cursor.clone(),
-            markers: self.markers.clone(),
-            annotations: self.annotations.clone(),
-            selected_annotation: None,
-            annotation_groups: Vec::new(), // List of unique group names
+        let mut new_wavedata = WaveformData {
+            document: crate::wave_data::WaveData {
+                inner: DataContainer::Waves(*new_waves),
+                source,
+                format,
+                active_scope,
+                cursor: self.document.cursor.clone(),
+                markers: self.document.markers.clone(),
+                display_variable_indices: self.document.display_variable_indices,
+                old_max_timestamp,
+                cache_generation: self.document.cache_generation + 1, // Invalidate all existing caches
+                inflight_caches: HashMap::new(),
+                cached_time_range: TimeRange::default(),
+            },
+            items: crate::item_list::ItemList {
+                items_tree: self.items.items_tree,
+                displayed_items: display_items,
+                display_item_ref_counter: self.items.display_item_ref_counter,
+                default_variable_name_type: self.items.default_variable_name_type,
+                annotations: self.items.annotations.clone(),
+                annotation_groups: Vec::new(), // List of unique group names
+                annotation_counter: self.items.annotation_counter,
+                graphics: HashMap::new(),
+                layout_cache: Default::default(),
+                flattened_rows_cache: Default::default(),
+            },
+            viewports: self
+                .viewports
+                .into_iter()
+                .map(|mut view| {
+                    view.reset_runtime();
+                    view
+                })
+                .collect(),
             annotation_list_visible: false,
-            annotation_counter: self.annotation_counter,
             last_active_viewport_idx: 0,
-            annotation_menu_pos: None,
-            annotation_menu_time: None,
-            focused_item: self.focused_item,
-            focused_transaction: self.focused_transaction,
-            default_variable_name_type: self.default_variable_name_type,
-            display_variable_indices: self.display_variable_indices,
-            scroll_offset: self.scroll_offset,
-            drawing_infos: vec![],
-            drawing_infos_signature: None,
-            graphics: HashMap::new(),
-            total_height: 0.,
-            old_max_timestamp,
-            cache_generation: self.cache_generation + 1, // Invalidate all existing caches
-            inflight_caches: HashMap::new(),
-            cached_time_range: TimeRange::default(),
         };
 
         new_wavedata.update_metadata(translators);
@@ -281,16 +321,17 @@ impl WaveData {
         mut items_tree: DisplayedItemTree,
         translators: &TranslatorList,
     ) -> Option<LoadSignalsCmd> {
-        self.displayed_items = Self::update_displayed_items(
-            self.inner.as_waves().unwrap(),
+        self.items.displayed_items = Self::update_displayed_items(
+            self.document.inner.as_waves().unwrap(),
             new_items,
             true,
             translators,
             &mut items_tree,
         );
-        self.items_tree = items_tree;
+        self.items.items_tree = items_tree;
 
-        self.display_item_ref_counter = self
+        self.items.display_item_ref_counter = self
+            .items
             .displayed_items
             .keys()
             .map(|dir| dir.0)
@@ -305,56 +346,24 @@ impl WaveData {
     ///
     /// Used after loading new waves, signals or switching a bunch of translators
     fn update_metadata(&mut self, translators: &TranslatorList) {
-        for di in self.displayed_items.values_mut() {
-            let DisplayedItem::Variable(displayed_variable) = di else {
-                continue;
-            };
-
-            let meta = self
-                .inner
-                .as_waves()
-                .unwrap()
-                .variable_meta(&displayed_variable.variable_ref.clone())
-                .unwrap();
-            let translator =
-                variable_translator(displayed_variable.get_format(&[]), &[], translators, || {
-                    Ok(meta.clone())
-                });
-            let info = translator.variable_info(&meta).ok();
-
-            match info {
-                Some(info) => displayed_variable
-                    .field_formats
-                    .retain(|ff| info.has_subpath(&ff.field)),
-                _ => displayed_variable.field_formats.clear(),
-            }
-
-            displayed_variable.downgrade_type_limits_if_unsupported(translator, &meta);
-        }
+        self.edit().update_metadata(translators)
     }
 
     /// Get the underlying wave container to load all signals that are being displayed
     ///
     /// This is needed for wave containers that lazy-load signals.
     fn load_waves(&mut self) -> Option<LoadSignalsCmd> {
-        let variables = self.displayed_items.values().filter_map(|item| match item {
-            DisplayedItem::Variable(r) => Some(&r.variable_ref),
-            _ => None,
-        });
-        self.inner
-            .as_waves_mut()
-            .unwrap()
-            .load_variables(variables)
-            .expect("internal error: failed to load variables")
+        self.edit().load_waves()
     }
 
     /// Needs to be called after `update_with`, once the new number of timestamps is available in
     /// the inner `WaveContainer`.
     pub fn update_viewports(&mut self) {
-        if let Some(old_max_timestamp) = std::mem::take(&mut self.old_max_timestamp) {
+        if let Some(old_max_timestamp) = std::mem::take(&mut self.document.old_max_timestamp) {
             // FIXME: I'm not sure if Defaulting to 1 time step is the right thing to do if we
             // have none, but it does avoid some potentially nasty division by zero problems
             let new_max_timestamp = self
+                .document
                 .inner
                 .max_timestamp()
                 .unwrap_or_else(BigUint::one)
@@ -362,18 +371,18 @@ impl WaveData {
                 .unwrap();
             if new_max_timestamp != old_max_timestamp {
                 let old_range = TimeRange {
-                    start: self.cached_time_range.start.clone(),
+                    start: self.document.cached_time_range.start.clone(),
                     end: old_max_timestamp,
                 };
                 for viewport in &mut self.viewports {
-                    *viewport = viewport.clip_to(&old_range, &new_max_timestamp);
+                    viewport.viewport = viewport.clip_to(&old_range, &new_max_timestamp);
                 }
             }
-            self.cached_time_range.end = new_max_timestamp;
+            self.document.cached_time_range.end = new_max_timestamp;
         }
     }
 
-    fn update_displayed_items(
+    pub(crate) fn update_displayed_items(
         waves: &WaveContainer,
         items: &HashMap<DisplayedItemRef, DisplayedItem>,
         keep_unavailable: bool,
@@ -452,52 +461,7 @@ impl WaveData {
         select_preferred_translator(var, translators)
     }
 
-    #[must_use]
-    pub fn variable_translator<'a>(
-        &'a self,
-        field: &DisplayedFieldRef,
-        translators: &'a TranslatorList,
-    ) -> &'a DynTranslator {
-        let Some(DisplayedItem::Variable(displayed_variable)) =
-            self.displayed_items.get(&field.item)
-        else {
-            panic!("asking for translator for a non DisplayItem::Variable item")
-        };
-
-        variable_translator(
-            displayed_variable.get_format(&field.field),
-            &field.field,
-            translators,
-            || {
-                self.inner
-                    .as_waves()
-                    .unwrap()
-                    .variable_meta(&displayed_variable.variable_ref)
-            },
-        )
-    }
-
-    #[must_use]
-    pub fn variable_translator_with_meta<'a>(
-        &'a self,
-        field: &DisplayedFieldRef,
-        translators: &'a TranslatorList,
-        meta: &VariableMeta,
-    ) -> &'a DynTranslator {
-        let Some(DisplayedItem::Variable(displayed_variable)) =
-            self.displayed_items.get(&field.item)
-        else {
-            panic!("asking for translator for a non DisplayItem::Variable item")
-        };
-
-        variable_translator(
-            displayed_variable.get_format(&field.field),
-            &field.field,
-            translators,
-            || Ok(meta.clone()),
-        )
-    }
-
+    #[allow(clippy::too_many_arguments)]
     pub fn add_variables(
         &mut self,
         translators: &TranslatorList,
@@ -506,10 +470,195 @@ impl WaveData {
         update_display_names: bool,
         ignore_failures: bool,
         variable_name_type: Option<VariableNameType>,
+        focus_view: Option<usize>,
+    ) -> (Option<LoadSignalsCmd>, Vec<DisplayedItemRef>) {
+        let index = focus_view.filter(|index| *index < self.viewports.len());
+        let active = index.unwrap_or(self.last_active_viewport_idx);
+        self.edit_at(active)
+            .expect("active waveform view exists")
+            .add_variables(
+                translators,
+                variables,
+                target_position,
+                update_display_names,
+                ignore_failures,
+                variable_name_type,
+                index.is_some(),
+            )
+    }
+
+    /// Remove a single item, it's legal to call this function with an invalid ID
+    pub fn remove_displayed_item(&mut self, id: DisplayedItemRef) {
+        self.remove_displayed_items(&[id]);
+    }
+
+    pub fn remove_displayed_items(&mut self, ids: &[DisplayedItemRef]) {
+        self.edit().remove_displayed_items(ids)
+    }
+
+    pub fn add_divider(
+        &mut self,
+        name: Option<String>,
+        vidx: Option<VisibleItemIndex>,
+    ) -> Result<DisplayedItemRef, crate::item_list::ItemEditError> {
+        self.edit().add_divider(name, vidx)
+    }
+
+    pub fn add_timeline(
+        &mut self,
+        vidx: Option<VisibleItemIndex>,
+    ) -> Result<DisplayedItemRef, crate::item_list::ItemEditError> {
+        self.edit().add_timeline(vidx)
+    }
+
+    pub fn add_group(
+        &mut self,
+        name: String,
+        target_position: Option<TargetPosition>,
+    ) -> Result<DisplayedItemRef, crate::item_list::ItemEditError> {
+        self.edit().add_group(name, target_position)
+    }
+
+    pub fn add_generator(
+        &mut self,
+        gen_ref: TransactionStreamRef,
+    ) -> Result<(), crate::item_list::ItemEditError> {
+        self.edit().add_generator(gen_ref)
+    }
+
+    pub fn add_stream(
+        &mut self,
+        stream_ref: TransactionStreamRef,
+    ) -> Result<(), crate::item_list::ItemEditError> {
+        self.edit().add_stream(stream_ref)
+    }
+
+    pub fn add_all_streams(&mut self) -> Result<(), crate::item_list::ItemEditError> {
+        self.edit().add_all_streams()
+    }
+
+    #[must_use]
+    pub fn index_for_ref_or_focus(&self, item_ref: Option<DisplayedItemRef>) -> Option<ItemIndex> {
+        self.viewports[self.last_active_viewport_idx].index_for_ref_or_focus(&self.items, item_ref)
+    }
+
+    pub fn go_to_cursor_if_not_in_view(&mut self) -> bool {
+        self.edit().go_to_cursor_if_not_in_view()
+    }
+
+    pub fn remove_placeholders(&mut self) {
+        self.edit().remove_placeholders()
+    }
+
+    /// Find the cursor position at the next (or previous, if `next` is false) transition of `variable`.
+    ///
+    /// If `skip_zero` is true, use the next transition to a non-zero value.
+    pub fn cursor_at_transition(
+        &self,
+        cursor: Option<&BigInt>,
+        next: bool,
+        variable: Option<VisibleItemIndex>,
+        skip_zero: bool,
+    ) -> Option<BigInt> {
+        self.viewports[self.last_active_viewport_idx].cursor_at_transition(
+            &self.document,
+            &self.items,
+            cursor,
+            next,
+            variable,
+            skip_zero,
+        )
+    }
+}
+
+impl WaveformEdit<'_> {
+    pub(crate) fn update_metadata(&mut self, translators: &TranslatorList) {
+        for di in self.items.displayed_items.values_mut() {
+            let DisplayedItem::Variable(displayed_variable) = di else {
+                continue;
+            };
+
+            let meta = self
+                .document
+                .inner
+                .as_waves()
+                .unwrap()
+                .variable_meta(&displayed_variable.variable_ref.clone())
+                .unwrap();
+            let translator =
+                variable_translator(displayed_variable.get_format(&[]), &[], translators, || {
+                    Ok(meta.clone())
+                });
+            let info = translator.variable_info(&meta).ok();
+
+            match info {
+                Some(info) => displayed_variable
+                    .field_formats
+                    .retain(|ff| info.has_subpath(&ff.field)),
+                _ => displayed_variable.field_formats.clear(),
+            }
+
+            displayed_variable.downgrade_type_limits_if_unsupported(translator, &meta);
+        }
+    }
+    pub(crate) fn load_waves(&mut self) -> Option<LoadSignalsCmd> {
+        let variables = self
+            .items
+            .displayed_items
+            .values()
+            .filter_map(|item| match item {
+                DisplayedItem::Variable(r) => Some(&r.variable_ref),
+                _ => None,
+            });
+        self.document
+            .inner
+            .as_waves_mut()
+            .unwrap()
+            .load_variables(variables)
+            .expect("internal error: failed to load variables")
+    }
+    pub(crate) fn reattach(
+        &mut self,
+        translators: &TranslatorList,
+        keep_unavailable: bool,
+    ) -> Option<LoadSignalsCmd> {
+        let container = self.document.inner.as_waves()?;
+        let focus = self.view.focus_snapshot(self.items);
+        let peer_focus = self
+            .peers
+            .iter()
+            .map(|view| view.focus_snapshot(self.items))
+            .collect::<Vec<_>>();
+        self.items.displayed_items = WaveformData::update_displayed_items(
+            container,
+            &self.items.displayed_items,
+            keep_unavailable,
+            translators,
+            &mut self.items.items_tree,
+        );
+        self.view.reconcile_item_focus(self.items, focus);
+        for (view, focus) in self.peers.iter_mut().zip(peer_focus) {
+            view.reconcile_item_focus(self.items, focus);
+        }
+        self.update_metadata(translators);
+        self.load_waves()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_variables(
+        &mut self,
+        translators: &TranslatorList,
+        variables: Vec<VariableRef>,
+        target_position: Option<TargetPosition>,
+        update_display_names: bool,
+        ignore_failures: bool,
+        variable_name_type: Option<VariableNameType>,
+        move_focus: bool,
     ) -> (Option<LoadSignalsCmd>, Vec<DisplayedItemRef>) {
         let mut indices = vec![];
         // load variables from waveform
         let res = match self
+            .document
             .inner
             .as_waves_mut()
             .unwrap()
@@ -524,10 +673,14 @@ impl WaveData {
 
         // initialize translator and add display item
         let mut target_position = target_position
-            .or_else(|| self.insert_position(self.focused_item))
-            .unwrap_or(self.end_insert_position());
+            .or_else(|| {
+                self.items
+                    .insert_position(self.view.focused_index(self.items))
+            })
+            .unwrap_or(self.items.end_insert_position());
         for variable in variables {
             let Ok(meta) = self
+                .document
                 .inner
                 .as_waves()
                 .unwrap()
@@ -550,7 +703,8 @@ impl WaveData {
                 color: None,
                 background_color: None,
                 display_name: variable.name.clone(),
-                display_name_type: variable_name_type.unwrap_or(self.default_variable_name_type),
+                display_name_type: variable_name_type
+                    .unwrap_or(self.items.default_variable_name_type),
                 manual_name: None,
                 format: None,
                 field_formats: vec![],
@@ -559,7 +713,17 @@ impl WaveData {
                 unfolded_fields: ahash::AHashSet::new(),
             });
 
-            indices.push(self.insert_item(new_variable, Some(target_position), true));
+            let id = match self.insert_item(new_variable, Some(target_position), false) {
+                Ok(id) => id,
+                Err(error) => {
+                    error!(%error, "variable insertion rejected");
+                    return (res, indices);
+                }
+            };
+            if move_focus && self.view.focused_item.is_some() {
+                self.view.focused_item = Some(id);
+            }
+            indices.push(id);
             target_position = TargetPosition {
                 before: ItemIndex(target_position.before.0 + 1),
                 level: target_position.level,
@@ -567,91 +731,84 @@ impl WaveData {
         }
 
         if update_display_names {
-            self.compute_variable_display_names();
+            self.items.compute_variable_display_names(
+                &self.document.inner,
+                self.document.display_variable_indices,
+            );
         }
         (res, indices)
     }
 
-    /// Remove a single item, it's legal to call this function with an invalid ID
-    pub fn remove_displayed_item(&mut self, id: DisplayedItemRef) {
-        let Some(idx) = self
-            .items_tree
+    pub fn remove_displayed_items(&mut self, ids: &[DisplayedItemRef]) {
+        let focused = self.view.focus_snapshot(self.items);
+        let peers = self
+            .peers
             .iter()
-            .enumerate()
-            .find(|(_, node)| node.item_ref == id)
-            .map(|(idx, _)| ItemIndex(idx))
-        else {
+            .map(|view| view.focus_snapshot(self.items))
+            .collect::<Vec<_>>();
+        if !self.items.remove_items(ids) {
             return;
-        };
-
-        let focused_item_ref = self
-            .focused_item
-            .and_then(|vidx| self.items_tree.get_visible(vidx))
-            .map(|node| node.item_ref);
-
-        for removed_ref in self.items_tree.remove_recursive(idx) {
-            if let Some(DisplayedItem::Marker(m)) = self.displayed_items.remove(&removed_ref) {
-                self.markers.remove(&m.idx);
-            }
-
-            self.annotations
-                .retain(|annotation| !annotation.is_attached(&removed_ref));
         }
-
-        self.focused_item = focused_item_ref.and_then(|focused_item_ref| {
-            match self
-                .items_tree
-                .iter_visible()
-                .find_position(|node| node.item_ref == focused_item_ref)
-                .map(|(vidx, _)| VisibleItemIndex(vidx))
-            {
-                Some(vidx) => Some(vidx),
-                None if self
-                    .focused_item
-                    .and_then(|focused_vidx| self.items_tree.to_displayed(focused_vidx))
-                    .is_some() =>
-                {
-                    Some(self.focused_item.unwrap())
-                }
-                None => self
-                    .items_tree
-                    .iter_visible()
-                    .count()
-                    .checked_sub(1)
-                    .map(VisibleItemIndex),
-            }
-        });
+        self.view.reconcile_item_focus(self.items, focused);
+        self.view.reconcile_annotations(self.items);
+        self.view.invalidate_draw_cache();
+        for (view, previous) in self.peers.iter_mut().zip(peers) {
+            view.reconcile_item_focus(self.items, previous);
+            view.reconcile_annotations(self.items);
+            view.invalidate_draw_cache();
+        }
     }
 
-    pub fn add_divider(&mut self, name: Option<String>, vidx: Option<VisibleItemIndex>) {
+    pub fn add_divider(
+        &mut self,
+        name: Option<String>,
+        vidx: Option<VisibleItemIndex>,
+    ) -> Result<DisplayedItemRef, crate::item_list::ItemEditError> {
+        let position = vidx
+            .map(|index| {
+                self.items
+                    .insert_position(Some(index))
+                    .ok_or(crate::item_list::ItemEditError::Placement)
+            })
+            .transpose()?;
         self.insert_item(
             DisplayedItem::Divider(DisplayedDivider {
                 color: None,
                 background_color: None,
                 name,
             }),
-            self.insert_position(vidx),
+            position,
             true,
-        );
+        )
     }
 
-    pub fn add_timeline(&mut self, vidx: Option<VisibleItemIndex>) {
+    pub fn add_timeline(
+        &mut self,
+        vidx: Option<VisibleItemIndex>,
+    ) -> Result<DisplayedItemRef, crate::item_list::ItemEditError> {
+        let position = vidx
+            .map(|index| {
+                self.items
+                    .insert_position(Some(index))
+                    .ok_or(crate::item_list::ItemEditError::Placement)
+            })
+            .transpose()?;
         self.insert_item(
             DisplayedItem::TimeLine(DisplayedTimeLine {
                 color: None,
                 background_color: None,
                 name: None,
             }),
-            self.insert_position(vidx),
+            position,
             true,
-        );
+        )
     }
 
     pub fn add_group(
         &mut self,
         name: String,
         target_position: Option<TargetPosition>,
-    ) -> DisplayedItemRef {
+    ) -> Result<DisplayedItemRef, crate::item_list::ItemEditError> {
         self.insert_item(
             DisplayedItem::Group(DisplayedGroup {
                 name,
@@ -665,18 +822,19 @@ impl WaveData {
         )
     }
 
-    pub fn select_annotation(&mut self, id: Option<Id>) {
-        self.selected_annotation = id;
-    }
-
-    pub fn add_generator(&mut self, gen_ref: TransactionStreamRef) {
-        let Some(gen_id) = gen_ref.gen_id else { return };
-        let Some(transactions) = self.inner.as_transactions_mut() else {
-            return;
+    pub fn add_generator(
+        &mut self,
+        gen_ref: TransactionStreamRef,
+    ) -> Result<(), crate::item_list::ItemEditError> {
+        let Some(gen_id) = gen_ref.gen_id else {
+            return Ok(());
+        };
+        let Some(transactions) = self.document.inner.as_transactions_mut() else {
+            return Ok(());
         };
         let is_empty = {
             let Some(generator) = transactions.get_generator(gen_id) else {
-                return;
+                return Ok(());
             };
             generator.transactions.is_empty()
         };
@@ -687,13 +845,13 @@ impl WaveData {
                 .load_stream_into_memory(gen_ref.stream_id)
             {
                 Ok(()) => info!("(Generator {gen_id}) Finished loading transactions!"),
-                Err(_) => return,
+                Err(_) => return Ok(()),
             }
         }
 
         let mut last_times_on_row = vec![(BigUint::ZERO, BigUint::ZERO)];
         let Some(generator) = transactions.get_generator(gen_id) else {
-            return;
+            return Ok(());
         };
         calculate_rows_of_stream(&generator.transactions, &mut last_times_on_row);
 
@@ -706,11 +864,16 @@ impl WaveData {
             rows: last_times_on_row.len(),
         });
 
-        self.insert_item(new_gen, None, true);
+        self.insert_item(new_gen, None, true)?;
+        Ok(())
     }
 
-    pub fn add_stream(&mut self, stream_ref: TransactionStreamRef) {
+    pub fn add_stream(
+        &mut self,
+        stream_ref: TransactionStreamRef,
+    ) -> Result<(), crate::item_list::ItemEditError> {
         if self
+            .document
             .inner
             .as_transactions_mut()
             .unwrap()
@@ -721,6 +884,7 @@ impl WaveData {
         {
             info!("(Stream) Loading transactions into memory!");
             match self
+                .document
                 .inner
                 .as_transactions_mut()
                 .unwrap()
@@ -731,11 +895,12 @@ impl WaveData {
                     "(Stream {}) Finished loading transactions!",
                     stream_ref.stream_id
                 ),
-                Err(_) => return,
+                Err(_) => return Ok(()),
             }
         }
 
         let stream = self
+            .document
             .inner
             .as_transactions()
             .unwrap()
@@ -745,6 +910,7 @@ impl WaveData {
 
         for gen_id in &stream.generators {
             let generator = self
+                .document
                 .inner
                 .as_transactions()
                 .unwrap()
@@ -762,12 +928,13 @@ impl WaveData {
             rows: last_times_on_row.len(),
         });
 
-        self.insert_item(new_stream, None, true);
+        self.insert_item(new_stream, None, true)?;
+        Ok(())
     }
 
-    pub fn add_all_streams(&mut self) {
+    pub fn add_all_streams(&mut self) -> Result<(), crate::item_list::ItemEditError> {
         let mut streams: Vec<(StreamId, String)> = vec![];
-        for stream in self.inner.as_transactions().unwrap().get_streams() {
+        for stream in self.document.inner.as_transactions().unwrap().get_streams() {
             streams.push((stream.id, stream.name.clone()));
         }
 
@@ -775,333 +942,51 @@ impl WaveData {
             .into_iter()
             .sorted_by(|a, b| numeric_sort::cmp(&a.1, &b.1))
         {
-            self.add_stream(TransactionStreamRef::new_stream(id, name));
+            self.add_stream(TransactionStreamRef::new_stream(id, name))?;
         }
+        Ok(())
     }
 
-    /// Return an insert position based on item
-    ///
-    /// If an item is passed, and it is
-    /// - an unfolded group, insert index is to the first element of the group
-    /// - a folded group, insert index is to before the next sibling (if exists)
-    /// - otherwise insert index is past it on the same level
-    #[must_use]
-    pub fn insert_position(&self, vidx: Option<VisibleItemIndex>) -> Option<TargetPosition> {
-        let vidx = vidx?;
-        let item_index = self.items_tree.to_displayed(vidx)?;
-        let node = self.items_tree.get(item_index)?;
-        let item = self.displayed_items.get(&node.item_ref)?;
-
-        // TODO add get_next_sibling to tree?
-        let (before, level) = match item {
-            DisplayedItem::Group(..) if node.unfolded => (item_index.0 + 1, node.level + 1),
-            DisplayedItem::Group(..) => {
-                let next_idx = self.items_tree.to_displayed(VisibleItemIndex(vidx.0 + 1));
-                match next_idx {
-                    Some(idx) => (idx.0, node.level),
-                    None => (self.items_tree.len(), node.level),
-                }
-            }
-            _ => (item_index.0 + 1, node.level),
-        };
-        Some(TargetPosition {
-            before: ItemIndex(before),
-            level,
-        })
-    }
-
-    /// Return insert position as last item
-    #[must_use]
-    pub fn end_insert_position(&self) -> TargetPosition {
-        TargetPosition {
-            before: ItemIndex(self.items_tree.len()),
-            level: 0,
-        }
-    }
-
-    #[must_use]
-    pub fn index_for_ref_or_focus(&self, item_ref: Option<DisplayedItemRef>) -> Option<ItemIndex> {
-        if let Some(item_ref) = item_ref {
-            self.items_tree
-                .iter()
-                .enumerate()
-                .find_map(|(idx, node)| (node.item_ref == item_ref).then_some(ItemIndex(idx)))
-        } else if let Some(focused_item) = self.focused_item {
-            self.items_tree
-                .get_visible_extra(focused_item)
-                .map(|info| info.idx)
-        } else {
-            None
-        }
-    }
-
-    /// Insert item after item vidx if Some(vidx).
-    /// If None, insert in relation to focused item (see [`Self::insert_position()`]).
-    /// If nothing is selected, fall back to appending.
-    /// Focus on the inserted item if there was a focused item.
     pub(crate) fn insert_item(
         &mut self,
         new_item: DisplayedItem,
         target_position: Option<TargetPosition>,
         move_focus: bool,
-    ) -> DisplayedItemRef {
+    ) -> Result<DisplayedItemRef, crate::item_list::ItemEditError> {
         let target_position = target_position
-            .or_else(|| self.insert_position(self.focused_item))
-            .unwrap_or_else(|| self.end_insert_position());
+            .or_else(|| {
+                self.items
+                    .insert_position(self.view.focused_index(self.items))
+            })
+            .unwrap_or_else(|| self.items.end_insert_position());
 
-        let item_ref = self.next_displayed_item_ref();
-        let insert_index = self
-            .items_tree
-            .insert_item(item_ref, target_position)
-            .unwrap();
-        self.displayed_items.insert(item_ref, new_item);
-        if move_focus {
-            self.focused_item = self.focused_item.and_then(|_| {
-                self.items_tree
-                    .iter_visible_extra()
-                    .find_map(|info| (info.idx == insert_index).then_some(info.vidx))
-            });
+        let item_ref = self.items.insert_item(new_item, target_position)?;
+
+        if move_focus && self.view.focused_item.is_some() {
+            self.view.focused_item = Some(item_ref);
         }
-        self.items_tree.xselect_all_visible(false);
-        item_ref
-    }
-
-    pub fn go_to_cursor_if_not_in_view(&mut self) -> bool {
-        if let Some(cursor) = self.cursor.clone() {
-            let range = self.time_range().clone();
-            self.viewports[0].go_to_cursor_if_not_in_view(&cursor, &range)
-        } else {
-            false
+        self.items.items_tree.xselect_all_visible(false);
+        self.view.invalidate_draw_cache();
+        for peer in &self.peers {
+            peer.invalidate_draw_cache();
         }
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn numbered_marker_location(&self, idx: u8, viewport: &Viewport, view_width: f32) -> f32 {
-        let range = self.time_range();
-        viewport.pixel_from_time(self.numbered_marker_time(idx), view_width, range)
-    }
-
-    #[inline]
-    #[must_use]
-    pub fn numbered_marker_time(&self, idx: u8) -> &BigInt {
-        self.markers.get(&idx).unwrap()
-    }
-
-    #[must_use]
-    pub fn viewport_all(&self) -> Viewport {
-        Viewport::new()
+        Ok(item_ref)
     }
 
     pub fn remove_placeholders(&mut self) {
-        let removed_refs = self.items_tree.drain_recursive_if(|node| {
+        let removed_refs = self.items.items_tree.drain_recursive_if(|node| {
             matches!(
-                self.displayed_items.get(&node.item_ref),
+                self.items.displayed_items.get(&node.item_ref),
                 Some(DisplayedItem::Placeholder(_))
             )
         });
         for removed_ref in removed_refs {
-            self.displayed_items.remove(&removed_ref);
+            self.items.displayed_items.remove(&removed_ref);
         }
     }
+}
 
-    #[inline]
-    #[must_use]
-    pub fn any_displayed(&self) -> bool {
-        !self.displayed_items.is_empty()
-    }
-
-    pub(crate) fn drawing_bottom(&self) -> Option<f32> {
-        self.drawing_infos.last().map(ItemDrawingInfo::bottom)
-    }
-
-    pub(crate) fn drawing_bottom_at(&self, offset: f32) -> Option<f32> {
-        self.drawing_infos.last().map(|info| info.bottom_at(offset))
-    }
-
-    /// Return drawing infos overlapping the visible range.
-    ///
-    /// `drawing_infos` is sorted by both `top()` and `bottom()`, so use binary search to determine the start and end.
-    pub(crate) fn visible_drawing_infos(
-        &self,
-        visible_top: f32,
-        visible_bottom: f32,
-    ) -> std::slice::Iter<'_, ItemDrawingInfo> {
-        let start = self
-            .drawing_infos
-            .partition_point(|drawing_info| drawing_info.bottom() < visible_top);
-        let end = self.drawing_infos[start..]
-            .partition_point(|drawing_info| drawing_info.top() <= visible_bottom)
-            + start;
-
-        self.drawing_infos[start..end].iter()
-    }
-
-    /// Find the top-most of the currently visible items.
-    ///
-    /// Returns the index of the item currently at the top of the visible area.
-    #[must_use]
-    pub fn get_top_item(&self) -> usize {
-        if self.drawing_infos.is_empty() {
-            return 0;
-        }
-        // `drawing_infos` is offset-free (canonical): the first row is always at y = 0, so
-        // the visible top is simply the scroll offset.
-        let visible_top = self.scroll_offset;
-
-        // Sorted by `top()`, so binary search for the first row at or past `visible_top`.
-        self.drawing_infos
-            .partition_point(|di| di.top() < visible_top - 1.) // 1px margin for floating-point errors
-            .min(self.drawing_infos.len() - 1)
-    }
-
-    /// Find the drawing info of the row at a given (canvas-local) y-location.
-    #[must_use]
-    pub(crate) fn drawing_info_at_y(&self, y: f32) -> Option<&ItemDrawingInfo> {
-        if self.drawing_bottom()? <= y {
-            return None;
-        }
-        // Sorted by `top()`, so binary search for the last row at or before `y`.
-        let idx = self.drawing_infos.partition_point(|di| di.top() <= y);
-        idx.checked_sub(1).map(|i| &self.drawing_infos[i])
-    }
-
-    /// Find the item at a given (canvas-local) y-location.
-    #[must_use]
-    pub(crate) fn get_item_at_y(&self, y: f32) -> Option<VisibleItemIndex> {
-        self.drawing_info_at_y(y).map(ItemDrawingInfo::vidx)
-    }
-
-    /// Returns the displayed item reference located at the given canvas y-coordinate.
-    #[must_use]
-    pub(crate) fn item_ref_at_canvas_y(&self, y: f32) -> Option<DisplayedItemRef> {
-        let vidx = self.get_item_at_y(y)?;
-        let node = self.items_tree.get_visible(vidx)?;
-        Some(node.item_ref)
-    }
-
-    /// Returns the displayed item reference and drawing info of the row at the given canvas
-    /// y-coordinate, in a single lookup.
-    #[must_use]
-    pub(crate) fn item_and_drawing_info_at_y(
-        &self,
-        y: f32,
-    ) -> Option<(DisplayedItemRef, &ItemDrawingInfo)> {
-        let info = self.drawing_info_at_y(y)?;
-        let node = self.items_tree.get_visible(info.vidx())?;
-        Some((node.item_ref, info))
-    }
-
-    pub fn scroll_to_item(&mut self, idx: usize) {
-        if self.drawing_infos.is_empty() {
-            return;
-        }
-        // `drawing_infos` is offset-free (canonical): the first row is always at y = 0, so
-        // the last row's bottom is the total content height.
-        let content_height = self.drawing_bottom().unwrap();
-
-        // Don't scroll if all content fits in viewport
-        let max_scroll = content_height - self.total_height;
-        if max_scroll <= 0.0 {
-            return;
-        }
-
-        let item_y = self
-            .drawing_infos
-            .get(idx)
-            .unwrap_or_else(|| self.drawing_infos.last().unwrap())
-            .top();
-
-        // Clamp scroll to valid range: [0, max_scroll]
-        self.scroll_offset = item_y.clamp(0.0, max_scroll);
-    }
-
-    /// Set cursor at next (or previous, if `next` is false) transition of `variable`.
-    ///
-    /// If `skip_zero` is true, use the next transition to a non-zero value.
-    pub fn set_cursor_at_transition(
-        &mut self,
-        next: bool,
-        variable: Option<VisibleItemIndex>,
-        skip_zero: bool,
-    ) {
-        if let Some(vidx) = variable.or(self.focused_item)
-            && let Some(cursor) = &self.cursor
-            && let Some(DisplayedItem::Variable(variable)) = &self
-                .items_tree
-                .get_visible(vidx)
-                .and_then(|node| self.displayed_items.get(&node.item_ref))
-            && let Some(wave_container) = self.inner.as_waves()
-            && let Ok(Some(res)) = wave_container.query_variable(
-                &variable.variable_ref,
-                &cursor.to_biguint().unwrap_or_default(),
-            )
-        {
-            if next {
-                if let Some(ref time) = res.next {
-                    let stime = time.to_bigint();
-                    if stime.is_some() {
-                        self.cursor.clone_from(&stime);
-                    }
-                } else {
-                    // No next transition, go to end
-                    if let Some(end_time) = self.max_timestamp() {
-                        self.cursor = Some(end_time);
-                    } else {
-                        warn!(
-                            "Set cursor at transition: No timestamp count even though waveforms should be loaded"
-                        );
-                    }
-                }
-            } else if let Some(stime) = res.current.unwrap().0.to_bigint() {
-                let bigone = BigInt::from(1);
-                // Check if we are on a transition
-                if stime == *cursor && *cursor >= bigone {
-                    // If so, subtract cursor position by one
-                    if let Ok(Some(newres)) = self.inner.as_waves().unwrap().query_variable(
-                        &variable.variable_ref,
-                        &(cursor - bigone).to_biguint().unwrap_or_default(),
-                    ) && let Some(current) = newres.current
-                    {
-                        let newstime = current.0.to_bigint();
-                        if newstime.is_some() {
-                            self.cursor.clone_from(&newstime);
-                        }
-                    }
-                } else {
-                    self.cursor = Some(stime);
-                }
-            }
-
-            // if zero edges should be skipped
-            if skip_zero {
-                // check if the next transition is 0, if so and requested, go to
-                // next positive transition
-                if let Some(time) = &self.cursor {
-                    let next_value = self.inner.as_waves().unwrap().query_variable(
-                        &variable.variable_ref,
-                        &time.to_biguint().unwrap_or_default(),
-                    );
-                    if next_value.is_ok_and(|r| {
-                        r.is_some_and(|r| {
-                            r.current.is_some_and(|v| match v.1 {
-                                VariableValue::BigUint(v) => v.is_zero(),
-                                VariableValue::String(_) => false,
-                            })
-                        })
-                    }) {
-                        self.set_cursor_at_transition(next, Some(vidx), false);
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn next_displayed_item_ref(&mut self) -> DisplayedItemRef {
-        self.display_item_ref_counter += 1;
-        self.display_item_ref_counter.into()
-    }
-
+impl WaveData {
     /// Returns the maximum timestamp in the current waves.
     ///
     /// For now, this adjusts the maximum timestamp as returned by wave
@@ -1142,24 +1027,6 @@ impl WaveData {
             start,
             end: self.safe_max_timestamp(),
         };
-    }
-
-    #[must_use]
-    pub fn get_displayed_item_index(
-        &self,
-        item_ref: &DisplayedItemRef,
-    ) -> Option<VisibleItemIndex> {
-        // TODO check where this is called since it could now fail...
-        self.items_tree
-            .iter_visible()
-            .enumerate()
-            .find_map(|(vidx, node)| {
-                if node.item_ref == *item_ref {
-                    Some(VisibleItemIndex(vidx))
-                } else {
-                    None
-                }
-            })
     }
 
     /// Spawn async worker to build analog cache.
@@ -1246,6 +1113,212 @@ impl WaveData {
         });
         crate::wave_source::format_window_title(name.as_deref())
     }
+
+    #[inline]
+    #[must_use]
+    pub fn numbered_marker_time(&self, idx: u8) -> &BigInt {
+        self.markers.get(&idx).unwrap()
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn numbered_marker_location(&self, idx: u8, viewport: &Viewport, view_width: f32) -> f32 {
+        let range = self.time_range();
+        viewport.pixel_from_time(self.numbered_marker_time(idx), view_width, range)
+    }
+
+    #[must_use]
+    pub fn viewport_all(&self) -> Viewport {
+        Viewport::new()
+    }
+}
+
+impl crate::item_list::ItemList {
+    #[must_use]
+    pub fn variable_translator<'a>(
+        &self,
+        document: &WaveData,
+        field: &DisplayedFieldRef,
+        translators: &'a TranslatorList,
+    ) -> &'a DynTranslator {
+        let Some(DisplayedItem::Variable(displayed_variable)) =
+            self.displayed_items.get(&field.item)
+        else {
+            panic!("asking for translator for a non DisplayItem::Variable item")
+        };
+
+        variable_translator(
+            displayed_variable.get_format(&field.field),
+            &field.field,
+            translators,
+            || {
+                document
+                    .inner
+                    .as_waves()
+                    .unwrap()
+                    .variable_meta(&displayed_variable.variable_ref)
+            },
+        )
+    }
+
+    #[must_use]
+    pub fn variable_translator_with_meta<'a>(
+        &self,
+        field: &DisplayedFieldRef,
+        translators: &'a TranslatorList,
+        meta: &VariableMeta,
+    ) -> &'a DynTranslator {
+        let Some(DisplayedItem::Variable(displayed_variable)) =
+            self.displayed_items.get(&field.item)
+        else {
+            panic!("asking for translator for a non DisplayItem::Variable item")
+        };
+
+        variable_translator(
+            displayed_variable.get_format(&field.field),
+            &field.field,
+            translators,
+            || Ok(meta.clone()),
+        )
+    }
+}
+
+impl crate::tile_kinds::waveform::WaveformView {
+    pub fn index_for_ref_or_focus(
+        &self,
+        items: &crate::item_list::ItemList,
+        item_ref: Option<DisplayedItemRef>,
+    ) -> Option<ItemIndex> {
+        if let Some(item_ref) = item_ref {
+            items
+                .items_tree
+                .iter()
+                .enumerate()
+                .find_map(|(idx, node)| (node.item_ref == item_ref).then_some(ItemIndex(idx)))
+        } else if let Some(focused_item) = self.focused_index(items) {
+            items
+                .items_tree
+                .get_visible_extra(focused_item)
+                .map(|info| info.idx)
+        } else {
+            None
+        }
+    }
+    pub fn cursor_at_transition(
+        &self,
+        document: &WaveData,
+        items: &crate::item_list::ItemList,
+        cursor: Option<&BigInt>,
+        next: bool,
+        variable: Option<VisibleItemIndex>,
+        skip_zero: bool,
+    ) -> Option<BigInt> {
+        let mut position = cursor.cloned();
+        if let Some(vidx) = variable.or(self.focused_index(items))
+            && let Some(cursor) = &position
+            && let Some(DisplayedItem::Variable(variable)) = &items
+                .items_tree
+                .get_visible(vidx)
+                .and_then(|node| items.displayed_items.get(&node.item_ref))
+            && let Some(wave_container) = document.inner.as_waves()
+            && let Ok(Some(res)) = wave_container.query_variable(
+                &variable.variable_ref,
+                &cursor.to_biguint().unwrap_or_default(),
+            )
+        {
+            if next {
+                if let Some(ref time) = res.next {
+                    let stime = time.to_bigint();
+                    if stime.is_some() {
+                        position.clone_from(&stime);
+                    }
+                } else {
+                    // No next transition, go to end
+                    if let Some(end_time) = document.max_timestamp() {
+                        position = Some(end_time);
+                    } else {
+                        warn!(
+                            "Set cursor at transition: No timestamp count even though waveforms should be loaded"
+                        );
+                    }
+                }
+            } else if let Some(stime) = res.current.unwrap().0.to_bigint() {
+                let bigone = BigInt::from(1);
+                // Check if we are on a transition
+                if stime == *cursor && *cursor >= bigone {
+                    // If so, subtract cursor position by one
+                    if let Ok(Some(newres)) = document.inner.as_waves().unwrap().query_variable(
+                        &variable.variable_ref,
+                        &(cursor - bigone).to_biguint().unwrap_or_default(),
+                    ) && let Some(current) = newres.current
+                    {
+                        let newstime = current.0.to_bigint();
+                        if newstime.is_some() {
+                            position.clone_from(&newstime);
+                        }
+                    }
+                } else {
+                    position = Some(stime);
+                }
+            }
+
+            // if zero edges should be skipped
+            if skip_zero {
+                // check if the next transition is 0, if so and requested, go to
+                // next positive transition
+                if let Some(time) = &position {
+                    let next_value = document.inner.as_waves().unwrap().query_variable(
+                        &variable.variable_ref,
+                        &time.to_biguint().unwrap_or_default(),
+                    );
+                    if next_value.is_ok_and(|r| {
+                        r.is_some_and(|r| {
+                            r.current.is_some_and(|v| match v.1 {
+                                VariableValue::BigUint(v) => v.is_zero(),
+                                VariableValue::String(_) => false,
+                            })
+                        })
+                    }) {
+                        position = self.cursor_at_transition(
+                            document,
+                            items,
+                            position.as_ref(),
+                            next,
+                            Some(vidx),
+                            false,
+                        );
+                    }
+                }
+            }
+        }
+        position
+    }
+}
+
+impl WaveformEdit<'_> {
+    pub fn index_for_ref_or_focus(&self, item_ref: Option<DisplayedItemRef>) -> Option<ItemIndex> {
+        self.view.index_for_ref_or_focus(self.items, item_ref)
+    }
+    pub fn cursor_at_transition(
+        &self,
+        cursor: Option<&BigInt>,
+        next: bool,
+        variable: Option<VisibleItemIndex>,
+        skip_zero: bool,
+    ) -> Option<BigInt> {
+        self.view
+            .cursor_at_transition(self.document, self.items, cursor, next, variable, skip_zero)
+    }
+    pub fn go_to_cursor_if_not_in_view(&mut self) -> bool {
+        if let Some(cursor) = self.document.cursor.clone() {
+            let range = self.time_range().clone();
+            self.view
+                .viewport
+                .go_to_cursor_if_not_in_view(&cursor, &range)
+        } else {
+            false
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1257,53 +1330,57 @@ mod tests {
     use crate::viewport::Viewport;
     use crate::wave_source::{WaveFormat, WaveSource};
 
-    fn wave_data_with_rows() -> WaveData {
-        WaveData {
-            inner: DataContainer::Empty,
-            source: WaveSource::Data,
-            format: WaveFormat::Vcd,
-            active_scope: None,
-            items_tree: DisplayedItemTree::new(),
-            displayed_items: HashMap::new(),
-            display_item_ref_counter: 0,
-            viewports: vec![Viewport::new()],
-            cursor: None,
-            markers: HashMap::new(),
-            selected_annotation: None,
-            annotations: Vec::new(),
-            annotation_groups: Vec::new(),
-            annotation_list_visible: false,
-            annotation_counter: 0,
-            last_active_viewport_idx: 0,
-            annotation_menu_pos: None,
-            annotation_menu_time: None,
-            focused_item: None,
-            focused_transaction: (None, None),
-            default_variable_name_type: VariableNameType::Local,
-            scroll_offset: 80.0,
-            display_variable_indices: false,
-            graphics: HashMap::new(),
-            drawing_infos: vec![
-                ItemDrawingInfo::Divider(DividerDrawingInfo {
-                    vidx: VisibleItemIndex(0),
-                    top: 120.0,
-                    bottom: 140.0,
-                }),
-                ItemDrawingInfo::Divider(DividerDrawingInfo {
-                    vidx: VisibleItemIndex(1),
-                    top: 140.0,
-                    bottom: 160.0,
-                }),
-            ],
-            drawing_infos_signature: None,
-            total_height: 40.0,
-            old_max_timestamp: None,
-            cache_generation: 0,
-            inflight_caches: HashMap::new(),
-            cached_time_range: TimeRange {
-                start: BigInt::from(0),
-                end: BigInt::from(0),
+    fn wave_data_with_rows() -> WaveformData {
+        WaveformData {
+            document: crate::wave_data::WaveData {
+                inner: DataContainer::Empty,
+                source: WaveSource::Data,
+                format: WaveFormat::Vcd,
+                active_scope: None,
+                cursor: None,
+                markers: HashMap::new(),
+                display_variable_indices: false,
+                old_max_timestamp: None,
+                cache_generation: 0,
+                inflight_caches: HashMap::new(),
+                cached_time_range: TimeRange {
+                    start: BigInt::from(0),
+                    end: BigInt::from(0),
+                },
             },
+            items: crate::item_list::ItemList {
+                items_tree: DisplayedItemTree::new(),
+                displayed_items: HashMap::new(),
+                display_item_ref_counter: 0,
+                default_variable_name_type: VariableNameType::Local,
+                annotations: Vec::new(),
+                annotation_groups: Vec::new(),
+                annotation_counter: 0,
+                graphics: HashMap::new(),
+                flattened_rows_cache: Default::default(),
+                layout_cache: std::cell::RefCell::new(crate::item_list::ItemLayoutCache {
+                    infos: vec![
+                        ItemDrawingInfo::Divider(DividerDrawingInfo {
+                            vidx: VisibleItemIndex(0),
+                            top: 120.0,
+                            bottom: 140.0,
+                        }),
+                        ItemDrawingInfo::Divider(DividerDrawingInfo {
+                            vidx: VisibleItemIndex(1),
+                            top: 140.0,
+                            bottom: 160.0,
+                        }),
+                    ],
+                    signature: None,
+                    total_height: 40.0,
+                }),
+            },
+            viewports: vec![crate::tile_kinds::waveform::WaveformView {
+                scroll_offset: 80.0,
+                ..Viewport::new().into()
+            }],
+            annotation_list_visible: false,
+            last_active_viewport_idx: 0,
         }
     }
 
@@ -1311,17 +1388,17 @@ mod tests {
     fn get_item_at_y_finds_correct_item() {
         let waves = wave_data_with_rows();
 
-        assert_eq!(waves.get_item_at_y(125.0), Some(VisibleItemIndex(0)));
-        assert_eq!(waves.get_item_at_y(145.0), Some(VisibleItemIndex(1)));
-        assert_eq!(waves.get_item_at_y(165.0), None);
+        assert_eq!(waves.items.get_item_at_y(125.0), Some(VisibleItemIndex(0)));
+        assert_eq!(waves.items.get_item_at_y(145.0), Some(VisibleItemIndex(1)));
+        assert_eq!(waves.items.get_item_at_y(165.0), None);
     }
 
     #[test]
     fn get_item_at_y_is_not_shifted_by_scroll_offset() {
         let waves = wave_data_with_rows();
 
-        assert_eq!(waves.get_item_at_y(125.0), Some(VisibleItemIndex(0)));
-        assert_eq!(waves.get_item_at_y(145.0), Some(VisibleItemIndex(1)));
+        assert_eq!(waves.items.get_item_at_y(125.0), Some(VisibleItemIndex(0)));
+        assert_eq!(waves.items.get_item_at_y(145.0), Some(VisibleItemIndex(1)));
     }
 
     #[test]
@@ -1329,7 +1406,9 @@ mod tests {
         let waves = wave_data_with_rows();
 
         let visible = waves
+            .items
             .visible_drawing_infos(140.0, 150.0)
+            .iter()
             .map(ItemDrawingInfo::vidx)
             .collect::<Vec<_>>();
 
@@ -1341,7 +1420,9 @@ mod tests {
         let waves = wave_data_with_rows();
 
         let visible = waves
+            .items
             .visible_drawing_infos(140.0, 140.0)
+            .iter()
             .map(ItemDrawingInfo::vidx)
             .collect::<Vec<_>>();
 

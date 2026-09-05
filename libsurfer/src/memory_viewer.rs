@@ -1,6 +1,4 @@
 use crate::{
-    Message,
-    system_state::SystemState,
     translation::{TranslationResultExt, ValueKindExt},
     wave_container::{ScopeRef, ScopeRefExt},
 };
@@ -10,9 +8,9 @@ use egui_extras::{Column, TableBuilder};
 use egui_remixicon::icons;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use regex::RegexBuilder;
-use std::rc::Rc;
+use std::sync::Arc;
 use surfer_translation_types::{TranslationPreference, Translator, ValueKind};
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum MemoryViewerFormat {
     Decimal,
     Hexadecimal,
@@ -28,11 +26,12 @@ impl MemoryViewerFormat {
         }
     }
 }
-pub(crate) struct MemoryViewerState {
-    pub(crate) open: bool,
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryViewerSettings {
+    #[serde(with = "scope_path")]
     pub(crate) scope: Option<ScopeRef>,
     pub(crate) name: Option<String>,
-    jump_to_index: String,
     search_value: String,
     highlight_value: String,
     search_match_mode: ValueMatchMode,
@@ -44,20 +43,30 @@ pub(crate) struct MemoryViewerState {
     filter_case_insensitive: bool,
     index_format: MemoryViewerFormat,
     value_format: String,
-    scroll_to_row: Option<usize>,
     color_values: bool,
     filter_mode: ChangeModes,
     highlight_mode: ChangeModes,
+    #[serde(deserialize_with = "deserialize_column_count")]
     value_column_count: usize,
-    selected_value_position: Option<usize>,
 }
-impl Default for MemoryViewerState {
+fn deserialize_column_count<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<usize, D::Error> {
+    let count = <usize as serde::Deserialize>::deserialize(deserializer)?;
+    if (1..=32).contains(&count) {
+        Ok(count)
+    } else {
+        Err(serde::de::Error::custom(
+            "memory column count must be between 1 and 32",
+        ))
+    }
+}
+
+impl Default for MemoryViewerSettings {
     fn default() -> Self {
         Self {
-            open: false,
             scope: None,
             name: None,
-            jump_to_index: String::new(),
             search_value: String::new(),
             search_match_mode: ValueMatchMode::Contains,
             search_case_insensitive: true,
@@ -69,16 +78,46 @@ impl Default for MemoryViewerState {
             filter_case_insensitive: true,
             index_format: MemoryViewerFormat::Decimal,
             value_format: "Hexadecimal".to_string(),
-            scroll_to_row: None,
             color_values: false,
-            selected_value_position: None,
             value_column_count: 1,
             filter_mode: ChangeModes::AllValues,
             highlight_mode: ChangeModes::AllValues,
         }
     }
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
+pub(crate) struct MemoryViewerNavigation {
+    jump_to_index: String,
+    scroll_to_row: Option<usize>,
+    selected_value_position: Option<usize>,
+}
+
+/// Persist array identity by path; backend indexes are attachment hints only.
+mod scope_path {
+    use super::ScopeRef;
+    use serde::{Deserialize, Serialize};
+    pub fn serialize<S: serde::Serializer>(
+        scope: &Option<ScopeRef>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        scope
+            .as_ref()
+            .map(|scope| &scope.strs)
+            .serialize(serializer)
+    }
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<ScopeRef>, D::Error> {
+        Ok(
+            Option::<Vec<String>>::deserialize(deserializer)?.map(|strs| ScopeRef {
+                strs,
+                id: Default::default(),
+            }),
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ChangeModes {
     AllValues,
     ChangedAtCursor,
@@ -100,8 +139,11 @@ pub(crate) struct MemoryViewerCacheKey {
     pub value_format: String,
     pub filter_mode: ChangeModes,
     pub highlight_mode: ChangeModes,
+    pub document_generation: u64,
+    pub filter_range: Option<(num::BigUint, num::BigUint)>,
+    pub highlight_range: Option<(num::BigUint, num::BigUint)>,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum ValueMatchMode {
     Contains,
     StartsWith,
@@ -122,7 +164,7 @@ impl ValueMatchMode {
 #[derive(Clone)]
 pub(crate) struct MemoryViewerCache {
     pub key: MemoryViewerCacheKey,
-    pub rows: std::rc::Rc<Vec<MemoryRow>>,
+    pub rows: std::sync::Arc<Vec<MemoryRow>>,
 }
 fn format_index(index: i64, format: MemoryViewerFormat, max_index: i64) -> String {
     match format {
@@ -421,628 +463,642 @@ fn filter_dropdown(
         });
     });
 }
-impl SystemState {
-    pub fn draw_memory_viewer_window(&mut self, ctx: &egui::Context, _msgs: &mut Vec<Message>) {
-        if !self.memory_viewer.open {
-            return;
-        }
+pub(crate) fn draw_memory_viewer(
+    ui: &mut egui::Ui,
+    settings: &mut MemoryViewerSettings,
+    navigation: &mut MemoryViewerNavigation,
+    cache: &mut Option<MemoryViewerCache>,
+    document: Option<&crate::wave_data::WaveData>,
+    translators: &crate::translation::TranslatorList,
+    theme: &crate::config::SurferTheme,
+) {
+    let translator_name = settings.value_format.clone();
+    let translator = translators.get_translator(&translator_name);
+    ui.heading("Memory Viewer");
 
-        let mut open = self.memory_viewer.open;
-        let translator_name = self.memory_viewer.value_format.clone();
-        let translator = self.translators.get_translator(&translator_name);
-        egui::Window::new("Memory Viewer")
-            .open(&mut open)
-            .resizable(true)
-            .default_size([520.0, 500.0])
-            .show(ctx, |ui| {
-                ui.heading("Memory Viewer");
+    let Some(scope) = settings.scope.clone() else {
+        ui.label("No variable selected");
+        return;
+    };
 
-                let Some(scope) = self.memory_viewer.scope.clone() else {
-                    ui.label("No variable selected");
-                    return;
-                };
+    let display_name = settings.name.clone().unwrap_or_else(|| scope.name());
 
-                let display_name = self
-                    .memory_viewer
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| scope.name());
+    ui.label(format!("Variable: {display_name}"));
 
-                ui.label(format!("Variable: {display_name}"));
+    let Some(waves) = document else {
+        ui.label("No waveform loaded");
+        return;
+    };
 
-                let Some(waves) = &self.user.waves else {
-                    ui.label("No waveform loaded");
-                    return;
-                };
+    let Some(cursor) = waves.cursor.as_ref().and_then(num::BigInt::to_biguint) else {
+        ui.label("Place the cursor to inspect values.");
+        return;
+    };
 
-                let Some(cursor) = waves.cursor.as_ref().and_then(num::BigInt::to_biguint) else {
-                    ui.label("Place the cursor to inspect values.");
-                    return;
-                };
+    ui.label(format!("Time: {cursor}"));
 
-                ui.label(format!("Time: {cursor}"));
+    let Some(wave_container) = waves.inner.as_waves() else {
+        ui.label("No wave container available");
+        return;
+    };
 
-                let Some(wave_container) = waves.inner.as_waves() else {
-                    ui.label("No wave container available");
-                    return;
-                };
+    if !wave_container.scope_exists(&scope) {
+        ui.label("Selected array is unavailable in this waveform.");
+        return;
+    }
+    let filter_change_range = change_range(settings.filter_mode, &cursor, &waves.markers);
+    let highlight_change_range = change_range(settings.highlight_mode, &cursor, &waves.markers);
+    let mut rows = Vec::new();
+    let cache_key = MemoryViewerCacheKey {
+        scope: scope.clone(),
+        cursor: cursor.clone(),
+        value_format: translator_name.clone(),
+        filter_mode: settings.filter_mode,
+        highlight_mode: settings.highlight_mode,
+        document_generation: waves.cache_generation,
+        filter_range: filter_change_range.clone(),
+        highlight_range: highlight_change_range.clone(),
+    };
+    let cache_hit = cache
+        .as_ref()
+        .filter(|cache| cache.key == cache_key)
+        .map(|cache| Arc::clone(&cache.rows));
 
-                let mut rows = Vec::new();
-                let cache_key = MemoryViewerCacheKey {
-                    scope: scope.clone(),
-                    cursor: cursor.clone(),
-                    value_format: translator_name.clone(),
-                    filter_mode: self.memory_viewer.filter_mode,
-                    highlight_mode: self.memory_viewer.highlight_mode,
-                };
-                let cache_hit = self
-                    .memory_viewer_cache
-                    .as_ref()
-                    .filter(|cache| cache.key == cache_key)
-                    .map(|cache| Rc::clone(&cache.rows));
+    if let Some(cached_rows) = cache_hit {
+        rows = cached_rows.as_ref().clone();
+    }
 
-                if let Some(cached_rows) = cache_hit {
-                    rows = cached_rows.as_ref().clone();
-                }
+    let mut variables = wave_container.variables_in_scope(&scope);
+    variables.sort_by_key(|v| v.index.unwrap_or(i64::MAX));
+    if rows.is_empty() {
+        for var_ref in &variables {
+            let Some(index) = var_ref
+                .index
+                .or_else(|| parse_index_from_name(&var_ref.name))
+            else {
+                continue;
+            };
 
-                let mut variables = wave_container.variables_in_scope(&scope);
-                variables.sort_by_key(|v| v.index.unwrap_or(i64::MAX));
-                let filter_change_range =
-                    change_range(self.memory_viewer.filter_mode, &cursor, &waves.markers);
+            let Some((change_time, raw_value)) = wave_container
+                .query_variable(var_ref, &cursor)
+                .ok()
+                .flatten()
+                .and_then(|query_result| query_result.current)
+            else {
+                continue;
+            };
 
-                let highlight_change_range =
-                    change_range(self.memory_viewer.highlight_mode, &cursor, &waves.markers);
-                if rows.is_empty() {
-                    for var_ref in &variables {
-                        let Some(index) = var_ref
-                            .index
-                            .or_else(|| parse_index_from_name(&var_ref.name))
-                        else {
-                            continue;
-                        };
-
-                        let Some((change_time, raw_value)) = wave_container
-                            .query_variable(var_ref, &cursor)
+            let changed_at_cursor = change_time == cursor;
+            let changed_in_range = |range: Option<&(num::BigUint, num::BigUint)>| -> bool {
+                range
+                    .and_then(|(start_time, end_time)| {
+                        wave_container
+                            .query_variable(var_ref, start_time)
                             .ok()
                             .flatten()
-                            .and_then(|query_result| query_result.current)
-                        else {
-                            continue;
-                        };
-
-                        let changed_at_cursor = change_time == cursor;
-                        let changed_in_range =
-                            |range: Option<&(num::BigUint, num::BigUint)>| -> bool {
-                                range
-                                    .and_then(|(start_time, end_time)| {
-                                        wave_container
-                                            .query_variable(var_ref, start_time)
-                                            .ok()
-                                            .flatten()
-                                            .and_then(|query_result| query_result.next)
-                                            .map(|next_change| {
-                                                next_change > *start_time && next_change < *end_time
-                                            })
-                                    })
-                                    .unwrap_or(false)
-                            };
-
-                        let changed_for_filter = changed_in_range(filter_change_range.as_ref());
-
-                        let changed_for_highlight = if filter_change_range == highlight_change_range
-                        {
-                            changed_for_filter
-                        } else {
-                            changed_in_range(highlight_change_range.as_ref())
-                        };
-                        let display_value = wave_container
-                            .variable_meta(var_ref)
-                            .ok()
-                            .and_then(|meta| {
-                                translator
-                                    .translate(&meta, &raw_value)
-                                    .ok()
-                                    .and_then(|result| {
-                                        result
-                                            .format_flat(
-                                                &Some(translator_name.clone()),
-                                                &[],
-                                                &self.translators,
-                                            )
-                                            .into_iter()
-                                            .next()
-                                            .and_then(|formatted| {
-                                                formatted
-                                                    .value
-                                                    .map(|value| (value.value, value.kind))
-                                            })
-                                    })
-                            })
-                            .unwrap_or_else(|| (raw_value.to_string(), ValueKind::Normal));
-
-                        let (value, kind) = display_value;
-
-                        rows.push(MemoryRow {
-                            index,
-                            value,
-                            kind,
-                            changed_at_cursor,
-                            changed_for_filter,
-                            changed_for_highlight,
-                        });
-                    }
-
-                    self.memory_viewer_cache = Some(MemoryViewerCache {
-                        key: cache_key,
-                        rows: Rc::new(rows.clone()),
-                    });
-                }
-                ui.label(format!("Structured entries: {}", rows.len()));
-
-                ui.separator();
-
-                ui.horizontal_top(|ui| {
-                    if self.memory_viewer.value_column_count == 1 {
-                        filter_dropdown(
-                            ui,
-                            &mut self.memory_viewer.filter_mode,
-                            &mut self.memory_viewer.filter_value,
-                            &mut self.memory_viewer.filter_match_mode,
-                            &mut self.memory_viewer.filter_case_insensitive,
-                        );
-                    }
-                    highlight_dropdown(
-                        ui,
-                        &mut self.memory_viewer.highlight_mode,
-                        &mut self.memory_viewer.highlight_value,
-                        &mut self.memory_viewer.highlight_match_mode,
-                        &mut self.memory_viewer.highlight_case_insensitive,
-                    );
-
-                    ui.checkbox(&mut self.memory_viewer.color_values, "Color values");
-                });
-                let search_matcher = build_value_matcher(
-                    &self.memory_viewer.search_value,
-                    self.memory_viewer.search_match_mode,
-                    self.memory_viewer.search_case_insensitive,
-                );
-                let highlight_matcher = build_value_matcher(
-                    &self.memory_viewer.highlight_value,
-                    self.memory_viewer.highlight_match_mode,
-                    self.memory_viewer.highlight_case_insensitive,
-                );
-                let filter_matcher = build_value_matcher(
-                    &self.memory_viewer.filter_value,
-                    self.memory_viewer.filter_match_mode,
-                    self.memory_viewer.filter_case_insensitive,
-                );
-                let visible_rows: Vec<_> = rows
-                    .iter()
-                    .filter(|row| {
-                        let matches_change_filter = match self.memory_viewer.filter_mode {
-                            ChangeModes::AllValues => true,
-                            ChangeModes::ChangedAtCursor => row.changed_at_cursor,
-                            ChangeModes::ChangedBtwCursorAndMarker(_) => row.changed_for_filter,
-                        };
-
-                        let matches_text_filter = filter_matcher
-                            .as_ref()
-                            .is_none_or(|matcher| matcher(&row.value));
-
-                        matches_change_filter && matches_text_filter
+                            .and_then(|query_result| query_result.next)
+                            .map(|next_change| next_change > *start_time && next_change < *end_time)
                     })
-                    .collect();
-                let matching_positions: Vec<usize> = search_matcher
-                    .as_ref()
-                    .map(|matcher| {
-                        visible_rows
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(position, row)| matcher(&row.value).then_some(position))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let current_match = self
-                    .memory_viewer
-                    .selected_value_position
-                    .and_then(|selected| {
-                        matching_positions
-                            .iter()
-                            .position(|&position| position == selected)
-                    })
-                    .map_or(0, |index| index + 1);
-                let total_matches = matching_positions.len();
-                let mut find_previous_requested = false;
-                let mut find_next_requested = false;
-                ui.horizontal(|ui| {
-                    ui.label("Find:");
-                    matching_text_edit(
-                        ui,
-                        &mut self.memory_viewer.search_value,
-                        "Find",
-                        160.0,
-                        &mut self.memory_viewer.search_match_mode,
-                        &mut self.memory_viewer.search_case_insensitive,
-                    );
+                    .unwrap_or(false)
+            };
 
-                    if ui
-                        .add(egui::Button::new(icons::ARROW_UP_LINE).frame(false))
-                        .on_hover_text("Previous match")
-                        .clicked()
-                    {
-                        find_previous_requested = true;
-                    }
+            let changed_for_filter = changed_in_range(filter_change_range.as_ref());
 
-                    if ui
-                        .add(egui::Button::new(icons::ARROW_DOWN_LINE).frame(false))
-                        .on_hover_text("Next match")
-                        .clicked()
-                    {
-                        find_next_requested = true;
-                    }
-                    if !self.memory_viewer.search_value.is_empty() {
-                        if total_matches == 0 {
-                            ui.label("No results");
-                        } else {
-                            ui.label(format!("{current_match} of {total_matches}"));
-                        }
-                    }
-                });
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label("Index format:");
-                    egui::ComboBox::from_id_salt("memory_viewer_index_format")
-                        .selected_text(self.memory_viewer.index_format.label())
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut self.memory_viewer.index_format,
-                                MemoryViewerFormat::Decimal,
-                                "Decimal",
-                            );
-                            ui.selectable_value(
-                                &mut self.memory_viewer.index_format,
-                                MemoryViewerFormat::Hexadecimal,
-                                "Hexadecimal",
-                            );
-                            ui.selectable_value(
-                                &mut self.memory_viewer.index_format,
-                                MemoryViewerFormat::Binary,
-                                "Binary",
-                            );
-                        });
-
-                    ui.label("Value format:");
-
-                    let (mut preferred_translators, mut bad_translators): (Vec<_>, Vec<_>) =
-                        variables
-                            .first()
-                            .and_then(|first_var_ref| {
-                                wave_container.variable_meta(first_var_ref).ok()
-                            })
-                            .map_or_else(
-                                || (vec![], self.translators.all_translator_names()),
-                                |meta| {
-                                    self.translators
-                                        .all_translator_names()
-                                        .into_iter()
-                                        .partition(|translator_name| {
-                                            let translator =
-                                                self.translators.get_translator(translator_name);
-
-                                            match translator.translates(&meta) {
-                                                Ok(TranslationPreference::Yes) => true,
-                                                Ok(TranslationPreference::Prefer) => true,
-                                                Ok(TranslationPreference::No) => false,
-                                                Err(_) => false,
-                                            }
-                                        })
-                                },
-                            );
-
-                    preferred_translators.sort_by(|a, b| numeric_sort::cmp(a, b));
-                    bad_translators.sort_by(|a, b| numeric_sort::cmp(a, b));
-
-                    egui::ComboBox::from_id_salt("memory_viewer_value_format")
-                        .selected_text(self.memory_viewer.value_format.clone())
-                        .show_ui(ui, |ui| {
-                            for name in preferred_translators {
-                                ui.selectable_value(
-                                    &mut self.memory_viewer.value_format,
-                                    name.to_string(),
-                                    name,
-                                );
-                            }
-
-                            if !bad_translators.is_empty() {
-                                ui.separator();
-                                ui.label("Not recommended");
-
-                                for name in bad_translators {
-                                    ui.selectable_value(
-                                        &mut self.memory_viewer.value_format,
-                                        name.to_string(),
-                                        name,
-                                    );
-                                }
-                            }
-                        });
-                });
-
-                let mut jump_requested = false;
-                let mut shrink_columns_requested = false;
-
-                ui.horizontal(|ui| {
-                    ui.label("Jump to index:");
-                    let response = ui.add_sized(
-                        [60.0, 20.0],
-                        egui::TextEdit::singleline(&mut self.memory_viewer.jump_to_index),
-                    );
-
-                    if ui.button("Jump").clicked()
-                        || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                    {
-                        jump_requested = true;
-                    }
-                    ui.label("Columns:");
-
-                    ui.add(
-                        DragValue::new(&mut self.memory_viewer.value_column_count).range(1..=32),
-                    );
-                    if ui
-                        .add(Button::new(icons::ASPECT_RATIO_FILL).frame(false))
-                        .on_hover_text("Auto-size")
-                        .clicked()
-                    {
-                        shrink_columns_requested = true;
-                    }
-                    if self.memory_viewer.value_column_count > 1 {
-                        self.memory_viewer.filter_mode = ChangeModes::AllValues;
-                        self.memory_viewer.filter_value.clear();
-                    }
-
-                    ui.separator();
-                    ui.separator();
-                });
-
-                ui.separator();
-
-                let max_index = rows.iter().map(|row| row.index).max().unwrap_or(0);
-                let text_height = egui::TextStyle::Body
-                    .resolve(ui.style())
-                    .size
-                    .max(ui.spacing().interact_size.y);
-
-                // let available_height = ui.available_height().max(250.0);
-                let value_column_count = self
-                    .memory_viewer
-                    .value_column_count
-                    .clamp(1, visible_rows.len().max(1));
-                self.memory_viewer.value_column_count = value_column_count;
-                let table_rows = visible_rows.len().div_ceil(value_column_count);
-
-                let mut navigation_target = None;
-                // jump to the closest memory index
-                if jump_requested
-                    && let Some(target_index) =
-                        parse_jump_to_index(&self.memory_viewer.jump_to_index)
-                    && let Some(value_position) = closest_row_index(&visible_rows, target_index)
-                {
-                    navigation_target = Some(value_position);
-                }
-                // Move to the next matching value, wrapping to the first match.
-                if find_next_requested {
-                    navigation_target = self
-                        .memory_viewer
-                        .selected_value_position
-                        .and_then(|selected_position| {
-                            matching_positions
-                                .iter()
-                                .copied()
-                                .find(|position| *position > selected_position)
+            let changed_for_highlight = if filter_change_range == highlight_change_range {
+                changed_for_filter
+            } else {
+                changed_in_range(highlight_change_range.as_ref())
+            };
+            let display_value = wave_container
+                .variable_meta(var_ref)
+                .ok()
+                .and_then(|meta| {
+                    translator
+                        .translate(&meta, &raw_value)
+                        .ok()
+                        .and_then(|result| {
+                            result
+                                .format_flat(&Some(translator_name.clone()), &[], translators)
+                                .into_iter()
+                                .next()
+                                .and_then(|formatted| {
+                                    formatted.value.map(|value| (value.value, value.kind))
+                                })
                         })
-                        .or_else(|| matching_positions.first().copied());
-                }
-                // Move to the previous matching value, wrapping to the last match.
-                if find_previous_requested {
-                    navigation_target = self
-                        .memory_viewer
-                        .selected_value_position
-                        .and_then(|selected_position| {
-                            matching_positions
-                                .iter()
-                                .rev()
-                                .copied()
-                                .find(|position| *position < selected_position)
-                        })
-                        .or_else(|| matching_positions.last().copied());
-                }
-                if let Some(value_position) = navigation_target {
-                    self.memory_viewer.selected_value_position = Some(value_position);
+                })
+                .unwrap_or_else(|| (raw_value.to_string(), ValueKind::Normal));
 
-                    self.memory_viewer.scroll_to_row = Some(value_position / value_column_count);
-                }
+            let (value, kind) = display_value;
 
-                let table_width = ui.available_width();
-                let table_height = ui.available_height();
+            rows.push(MemoryRow {
+                index,
+                value,
+                kind,
+                changed_at_cursor,
+                changed_for_filter,
+                changed_for_highlight,
+            });
+        }
 
-                let horizontal_navigation_target = navigation_target;
-                ui.allocate_ui_with_layout(
-                    egui::vec2(table_width, table_height),
-                    egui::Layout::top_down(egui::Align::LEFT),
-                    |ui| {
-                        egui::ScrollArea::horizontal()
-                            .auto_shrink([false, true])
-                            .show(ui, |ui| {
-                                let mut table = TableBuilder::new(ui)
-                                    .striped(true)
-                                    .resizable(true)
-                                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                                    .column(Column::auto());
+        *cache = Some(MemoryViewerCache {
+            key: cache_key,
+            rows: Arc::new(rows.clone()),
+        });
+    }
+    ui.label(format!("Structured entries: {}", rows.len()));
 
-                                for _ in 0..value_column_count {
-                                    table = table.column(Column::auto());
-                                }
-                                if shrink_columns_requested {
-                                    table.reset();
-                                }
-                                if let Some(row_index) = self.memory_viewer.scroll_to_row.take() {
-                                    table =
-                                        table.scroll_to_row(row_index, Some(egui::Align::Center));
-                                }
-                                table
-                                    .header(24.0, |mut header| {
-                                        header.col(|ui| {
-                                            ui.monospace("Index");
-                                        });
+    ui.separator();
 
-                                        for column_index in 0..value_column_count {
-                                            header.col(|ui| {
-                                                if column_index == 0 {
-                                                    ui.monospace("Value");
-                                                } else {
-                                                    ui.monospace(format!("+{column_index}"));
-                                                }
-                                            });
-                                        }
-                                    })
-                                    .body(|body| {
-                                        body.rows(text_height, table_rows, |mut row| {
-                                            let table_row_index = row.index();
-                                            let row_start = table_row_index * value_column_count;
+    ui.horizontal_top(|ui| {
+        if settings.value_column_count == 1 {
+            filter_dropdown(
+                ui,
+                &mut settings.filter_mode,
+                &mut settings.filter_value,
+                &mut settings.filter_match_mode,
+                &mut settings.filter_case_insensitive,
+            );
+        }
+        highlight_dropdown(
+            ui,
+            &mut settings.highlight_mode,
+            &mut settings.highlight_value,
+            &mut settings.highlight_match_mode,
+            &mut settings.highlight_case_insensitive,
+        );
 
-                                            let Some(first_row_data) = visible_rows.get(row_start)
-                                            else {
-                                                return;
-                                            };
+        ui.checkbox(&mut settings.color_values, "Color values");
+    });
+    let search_matcher = build_value_matcher(
+        &settings.search_value,
+        settings.search_match_mode,
+        settings.search_case_insensitive,
+    );
+    let highlight_matcher = build_value_matcher(
+        &settings.highlight_value,
+        settings.highlight_match_mode,
+        settings.highlight_case_insensitive,
+    );
+    let filter_matcher = build_value_matcher(
+        &settings.filter_value,
+        settings.filter_match_mode,
+        settings.filter_case_insensitive,
+    );
+    let visible_rows: Vec<_> = rows
+        .iter()
+        .filter(|row| {
+            let matches_change_filter = match settings.filter_mode {
+                ChangeModes::AllValues => true,
+                ChangeModes::ChangedAtCursor => row.changed_at_cursor,
+                ChangeModes::ChangedBtwCursorAndMarker(_) => row.changed_for_filter,
+            };
 
-                                            row.col(|ui| {
-                                                ui.monospace(format_index(
-                                                    first_row_data.index,
-                                                    self.memory_viewer.index_format,
-                                                    max_index,
-                                                ));
-                                            });
+            let matches_text_filter = filter_matcher
+                .as_ref()
+                .is_none_or(|matcher| matcher(&row.value));
 
-                                            for column_index in 0..value_column_count {
-                                                row.col(|ui| {
-                                                    let value_index = row_start + column_index;
+            matches_change_filter && matches_text_filter
+        })
+        .collect();
+    let matching_positions: Vec<usize> = search_matcher
+        .as_ref()
+        .map(|matcher| {
+            visible_rows
+                .iter()
+                .enumerate()
+                .filter_map(|(position, row)| matcher(&row.value).then_some(position))
+                .collect()
+        })
+        .unwrap_or_default();
+    let current_match = navigation
+        .selected_value_position
+        .and_then(|selected| {
+            matching_positions
+                .iter()
+                .position(|&position| position == selected)
+        })
+        .map_or(0, |index| index + 1);
+    let total_matches = matching_positions.len();
+    let mut find_previous_requested = false;
+    let mut find_next_requested = false;
+    ui.horizontal(|ui| {
+        ui.label("Find:");
+        matching_text_edit(
+            ui,
+            &mut settings.search_value,
+            "Find",
+            160.0,
+            &mut settings.search_match_mode,
+            &mut settings.search_case_insensitive,
+        );
 
-                                                    let Some(row_data) =
-                                                        visible_rows.get(value_index)
-                                                    else {
-                                                        return;
-                                                    };
+        if ui
+            .add(egui::Button::new(icons::ARROW_UP_LINE).frame(false))
+            .on_hover_text("Previous match")
+            .clicked()
+        {
+            find_previous_requested = true;
+        }
 
-                                                    let is_selected =
-                                                        self.memory_viewer.selected_value_position
-                                                            == Some(value_index);
-                                                    let highlighted_by_change = match self
-                                                        .memory_viewer
-                                                        .highlight_mode
-                                                    {
-                                                        ChangeModes::AllValues => false,
-
-                                                        ChangeModes::ChangedAtCursor => {
-                                                            row_data.changed_at_cursor
-                                                        }
-
-                                                        ChangeModes::ChangedBtwCursorAndMarker(
-                                                            _,
-                                                        ) => row_data.changed_for_highlight,
-                                                    };
-
-                                                    let highlighted_by_value =
-                                                        highlight_matcher.as_ref().is_some_and(
-                                                            |matcher| matcher(&row_data.value),
-                                                        );
-
-                                                    let is_highlighted = highlighted_by_change
-                                                        || highlighted_by_value;
-                                                    let frame = if is_selected {
-                                                        egui::Frame::NONE
-                                                            .fill(
-                                                                self.user
-                                                                    .config
-                                                                    .theme
-                                                                    .accent_info
-                                                                    .background,
-                                                            )
-                                                            .inner_margin(egui::Margin::symmetric(
-                                                                4, 1,
-                                                            ))
-                                                    } else if is_highlighted {
-                                                        egui::Frame::NONE
-                                                            .fill(
-                                                                self.user
-                                                                    .config
-                                                                    .theme
-                                                                    .selected_elements_colors
-                                                                    .background,
-                                                            )
-                                                            .inner_margin(egui::Margin::symmetric(
-                                                                4, 1,
-                                                            ))
-                                                    } else {
-                                                        egui::Frame::NONE.inner_margin(
-                                                            egui::Margin::symmetric(4, 1),
-                                                        )
-                                                    };
-
-                                                    let frame_response = frame.show(ui, |ui| {
-                                                        if is_selected {
-                                                            ui.visuals_mut().override_text_color =
-                                                                Some(
-                                                                    self.user
-                                                                        .config
-                                                                        .theme
-                                                                        .accent_info
-                                                                        .foreground,
-                                                                );
-                                                        } else if is_highlighted {
-                                                            ui.visuals_mut().override_text_color =
-                                                                Some(
-                                                                    self.user
-                                                                        .config
-                                                                        .theme
-                                                                        .selected_elements_colors
-                                                                        .foreground,
-                                                                );
-                                                        }
-
-                                                        if self.memory_viewer.color_values {
-                                                            let color = row_data.kind.color(
-                                                                self.user
-                                                                    .config
-                                                                    .theme
-                                                                    .variable_default,
-                                                                &self.user.config.theme,
-                                                            );
-
-                                                            ui.horizontal(|ui| {
-                                                                ui.colored_label(color, "■");
-                                                                ui.monospace(&row_data.value);
-                                                            });
-                                                        } else {
-                                                            ui.monospace(&row_data.value);
-                                                        }
-                                                    });
-                                                    if horizontal_navigation_target
-                                                        == Some(value_index)
-                                                    {
-                                                        ui.scroll_to_rect(
-                                                            frame_response.response.rect,
-                                                            Some(egui::Align::Center),
-                                                        );
-                                                    }
-                                                });
-                                            }
-                                        });
-                                    });
-                            });
-                    },
+        if ui
+            .add(egui::Button::new(icons::ARROW_DOWN_LINE).frame(false))
+            .on_hover_text("Next match")
+            .clicked()
+        {
+            find_next_requested = true;
+        }
+        if !settings.search_value.is_empty() {
+            if total_matches == 0 {
+                ui.label("No results");
+            } else {
+                ui.label(format!("{current_match} of {total_matches}"));
+            }
+        }
+    });
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.label("Index format:");
+        egui::ComboBox::from_id_salt("memory_viewer_index_format")
+            .selected_text(settings.index_format.label())
+            .show_ui(ui, |ui| {
+                ui.selectable_value(
+                    &mut settings.index_format,
+                    MemoryViewerFormat::Decimal,
+                    "Decimal",
+                );
+                ui.selectable_value(
+                    &mut settings.index_format,
+                    MemoryViewerFormat::Hexadecimal,
+                    "Hexadecimal",
+                );
+                ui.selectable_value(
+                    &mut settings.index_format,
+                    MemoryViewerFormat::Binary,
+                    "Binary",
                 );
             });
 
-        self.memory_viewer.open = open;
+        ui.label("Value format:");
+
+        let (mut preferred_translators, mut bad_translators): (Vec<_>, Vec<_>) = variables
+            .first()
+            .and_then(|first_var_ref| wave_container.variable_meta(first_var_ref).ok())
+            .map_or_else(
+                || (vec![], translators.all_translator_names()),
+                |meta| {
+                    translators
+                        .all_translator_names()
+                        .into_iter()
+                        .partition(|translator_name| {
+                            let translator = translators.get_translator(translator_name);
+
+                            match translator.translates(&meta) {
+                                Ok(TranslationPreference::Yes) => true,
+                                Ok(TranslationPreference::Prefer) => true,
+                                Ok(TranslationPreference::No) => false,
+                                Err(_) => false,
+                            }
+                        })
+                },
+            );
+
+        preferred_translators.sort_by(|a, b| numeric_sort::cmp(a, b));
+        bad_translators.sort_by(|a, b| numeric_sort::cmp(a, b));
+
+        egui::ComboBox::from_id_salt("memory_viewer_value_format")
+            .selected_text(settings.value_format.clone())
+            .show_ui(ui, |ui| {
+                for name in preferred_translators {
+                    ui.selectable_value(&mut settings.value_format, name.to_string(), name);
+                }
+
+                if !bad_translators.is_empty() {
+                    ui.separator();
+                    ui.label("Not recommended");
+
+                    for name in bad_translators {
+                        ui.selectable_value(&mut settings.value_format, name.to_string(), name);
+                    }
+                }
+            });
+    });
+
+    let mut jump_requested = false;
+    let mut shrink_columns_requested = false;
+
+    ui.horizontal(|ui| {
+        ui.label("Jump to index:");
+        let response = ui.add_sized(
+            [60.0, 20.0],
+            egui::TextEdit::singleline(&mut navigation.jump_to_index),
+        );
+
+        if ui.button("Jump").clicked()
+            || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+        {
+            jump_requested = true;
+        }
+        ui.label("Columns:");
+
+        ui.add(DragValue::new(&mut settings.value_column_count).range(1..=32));
+        if ui
+            .add(Button::new(icons::ASPECT_RATIO_FILL).frame(false))
+            .on_hover_text("Auto-size")
+            .clicked()
+        {
+            shrink_columns_requested = true;
+        }
+        if settings.value_column_count > 1 {
+            settings.filter_mode = ChangeModes::AllValues;
+            settings.filter_value.clear();
+        }
+
+        ui.separator();
+        ui.separator();
+    });
+
+    ui.separator();
+
+    let max_index = rows.iter().map(|row| row.index).max().unwrap_or(0);
+    let text_height = egui::TextStyle::Body
+        .resolve(ui.style())
+        .size
+        .max(ui.spacing().interact_size.y);
+
+    // let available_height = ui.available_height().max(250.0);
+    let value_column_count = settings
+        .value_column_count
+        .clamp(1, visible_rows.len().max(1));
+    let table_rows = visible_rows.len().div_ceil(value_column_count);
+
+    let mut navigation_target = None;
+    // jump to the closest memory index
+    if jump_requested
+        && let Some(target_index) = parse_jump_to_index(&navigation.jump_to_index)
+        && let Some(value_position) = closest_row_index(&visible_rows, target_index)
+    {
+        navigation_target = Some(value_position);
+    }
+    // Move to the next matching value, wrapping to the first match.
+    if find_next_requested {
+        navigation_target = navigation
+            .selected_value_position
+            .and_then(|selected_position| {
+                matching_positions
+                    .iter()
+                    .copied()
+                    .find(|position| *position > selected_position)
+            })
+            .or_else(|| matching_positions.first().copied());
+    }
+    // Move to the previous matching value, wrapping to the last match.
+    if find_previous_requested {
+        navigation_target = navigation
+            .selected_value_position
+            .and_then(|selected_position| {
+                matching_positions
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|position| *position < selected_position)
+            })
+            .or_else(|| matching_positions.last().copied());
+    }
+    if let Some(value_position) = navigation_target {
+        navigation.selected_value_position = Some(value_position);
+
+        navigation.scroll_to_row = Some(value_position / value_column_count);
+    }
+
+    let table_width = ui.available_width();
+    let table_height = ui.available_height();
+
+    let horizontal_navigation_target = navigation_target;
+    ui.allocate_ui_with_layout(
+        egui::vec2(table_width, table_height),
+        egui::Layout::top_down(egui::Align::LEFT),
+        |ui| {
+            egui::ScrollArea::horizontal()
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    let mut table = TableBuilder::new(ui)
+                        .striped(true)
+                        .resizable(true)
+                        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                        .column(Column::auto());
+
+                    for _ in 0..value_column_count {
+                        table = table.column(Column::auto());
+                    }
+                    if shrink_columns_requested {
+                        table.reset();
+                    }
+                    if let Some(row_index) = navigation.scroll_to_row.take() {
+                        table = table.scroll_to_row(row_index, Some(egui::Align::Center));
+                    }
+                    table
+                        .header(24.0, |mut header| {
+                            header.col(|ui| {
+                                ui.monospace("Index");
+                            });
+
+                            for column_index in 0..value_column_count {
+                                header.col(|ui| {
+                                    if column_index == 0 {
+                                        ui.monospace("Value");
+                                    } else {
+                                        ui.monospace(format!("+{column_index}"));
+                                    }
+                                });
+                            }
+                        })
+                        .body(|body| {
+                            body.rows(text_height, table_rows, |mut row| {
+                                let table_row_index = row.index();
+                                let row_start = table_row_index * value_column_count;
+
+                                let Some(first_row_data) = visible_rows.get(row_start) else {
+                                    return;
+                                };
+
+                                row.col(|ui| {
+                                    ui.monospace(format_index(
+                                        first_row_data.index,
+                                        settings.index_format,
+                                        max_index,
+                                    ));
+                                });
+
+                                for column_index in 0..value_column_count {
+                                    row.col(|ui| {
+                                        let value_index = row_start + column_index;
+
+                                        let Some(row_data) = visible_rows.get(value_index) else {
+                                            return;
+                                        };
+
+                                        let is_selected =
+                                            navigation.selected_value_position == Some(value_index);
+                                        let highlighted_by_change = match settings.highlight_mode {
+                                            ChangeModes::AllValues => false,
+
+                                            ChangeModes::ChangedAtCursor => {
+                                                row_data.changed_at_cursor
+                                            }
+
+                                            ChangeModes::ChangedBtwCursorAndMarker(_) => {
+                                                row_data.changed_for_highlight
+                                            }
+                                        };
+
+                                        let highlighted_by_value = highlight_matcher
+                                            .as_ref()
+                                            .is_some_and(|matcher| matcher(&row_data.value));
+
+                                        let is_highlighted =
+                                            highlighted_by_change || highlighted_by_value;
+                                        let frame = if is_selected {
+                                            egui::Frame::NONE
+                                                .fill(theme.accent_info.background)
+                                                .inner_margin(egui::Margin::symmetric(4, 1))
+                                        } else if is_highlighted {
+                                            egui::Frame::NONE
+                                                .fill(theme.selected_elements_colors.background)
+                                                .inner_margin(egui::Margin::symmetric(4, 1))
+                                        } else {
+                                            egui::Frame::NONE
+                                                .inner_margin(egui::Margin::symmetric(4, 1))
+                                        };
+
+                                        let frame_response = frame.show(ui, |ui| {
+                                            if is_selected {
+                                                ui.visuals_mut().override_text_color =
+                                                    Some(theme.accent_info.foreground);
+                                            } else if is_highlighted {
+                                                ui.visuals_mut().override_text_color =
+                                                    Some(theme.selected_elements_colors.foreground);
+                                            }
+
+                                            if settings.color_values {
+                                                let color = row_data
+                                                    .kind
+                                                    .color(theme.variable_default, theme);
+
+                                                ui.horizontal(|ui| {
+                                                    ui.colored_label(color, "■");
+                                                    ui.monospace(&row_data.value);
+                                                });
+                                            } else {
+                                                ui.monospace(&row_data.value);
+                                            }
+                                        });
+                                        if horizontal_navigation_target == Some(value_index) {
+                                            ui.scroll_to_rect(
+                                                frame_response.response.rect,
+                                                Some(egui::Align::Center),
+                                            );
+                                        }
+                                    });
+                                }
+                            });
+                        });
+                });
+        },
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SystemState;
+
+    #[test]
+    fn memory_settings_round_trip_all_preferences_but_not_backend_or_navigation_state() {
+        let settings = MemoryViewerSettings {
+            scope: Some(ScopeRef {
+                strs: vec!["dut".into(), "memory".into()],
+                id: Default::default(),
+            }),
+            name: Some("Instruction memory".into()),
+            search_value: "ff".into(),
+            highlight_value: "dead".into(),
+            search_match_mode: ValueMatchMode::Regex,
+            highlight_match_mode: ValueMatchMode::Fuzzy,
+            search_case_insensitive: false,
+            highlight_case_insensitive: false,
+            filter_value: "00".into(),
+            filter_match_mode: ValueMatchMode::Regex,
+            filter_case_insensitive: false,
+            index_format: MemoryViewerFormat::Hexadecimal,
+            value_format: "Binary".into(),
+            color_values: true,
+            filter_mode: ChangeModes::ChangedBtwCursorAndMarker(3),
+            highlight_mode: ChangeModes::ChangedAtCursor,
+            value_column_count: 4,
+        };
+        let serialized = ron::to_string(&settings).unwrap();
+        let restored: MemoryViewerSettings = ron::from_str(&serialized).unwrap();
+        assert_eq!(restored, settings);
+        assert_eq!(
+            restored.scope.unwrap().id,
+            crate::wave_container::ScopeId::None
+        );
+        for runtime_field in [
+            "scroll_to_row",
+            "selected_value_position",
+            "jump_to_index",
+            "open:",
+            "id:",
+        ] {
+            assert!(
+                !serialized.contains(runtime_field),
+                "unexpected runtime field {runtime_field}"
+            );
+        }
+        assert!(serialized.contains("dut"));
+        assert!(serialized.contains("memory"));
+    }
+
+    #[test]
+    fn memory_renderer_handles_a_detached_document_without_changing_saved_settings() {
+        let state = SystemState::new_default_config().unwrap();
+        let mut settings = MemoryViewerSettings {
+            scope: Some(ScopeRef {
+                strs: vec!["dut".into(), "memory".into()],
+                id: Default::default(),
+            }),
+            ..Default::default()
+        };
+        let before = settings.clone();
+        let mut navigation = MemoryViewerNavigation::default();
+        let mut cache = None;
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            draw_memory_viewer(
+                ui,
+                &mut settings,
+                &mut navigation,
+                &mut cache,
+                None,
+                &state.translators,
+                &state.user.config.theme,
+            );
+        });
+        output.textures_delta.clear();
+        assert_eq!(settings, before);
+        assert!(cache.is_none());
+        fn contains(shape: &egui::Shape, text: &str) -> bool {
+            match shape {
+                egui::Shape::Text(value) => value.galley.text() == text,
+                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| contains(shape, text)),
+                _ => false,
+            }
+        }
+        assert!(
+            output
+                .shapes
+                .iter()
+                .any(|shape| contains(&shape.shape, "No waveform loaded"))
+        );
     }
 }

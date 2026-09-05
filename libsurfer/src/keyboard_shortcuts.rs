@@ -356,34 +356,50 @@ impl SurferShortcuts {
                 msgs.push(Message::SetToolbarVisible(!state.show_toolbar()));
             }
             ShortcutAction::GoToEnd => {
-                msgs.push(Message::GoToEnd {
-                    viewport_idx: state
-                        .user
-                        .waves
-                        .as_ref()
-                        .map_or(0, |waves| waves.last_active_viewport_idx),
-                });
+                if let Some(tile_id) = state
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused)
+                {
+                    msgs.push(Message::GoToEnd { tile_id });
+                }
             }
             ShortcutAction::GoToStart => {
-                msgs.push(Message::GoToStart {
-                    viewport_idx: state
-                        .user
-                        .waves
-                        .as_ref()
-                        .map_or(0, |waves| waves.last_active_viewport_idx),
-                });
+                if let Some(tile_id) = state
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused)
+                {
+                    msgs.push(Message::GoToStart { tile_id });
+                }
             }
             ShortcutAction::SaveStateFile => {
                 msgs.push(Message::SaveStateFile(state.user.state_file.clone()));
             }
             ShortcutAction::GoToTop => {
-                msgs.push(Message::ScrollToItem(0));
+                if let Some(target) = state
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused)
+                {
+                    msgs.push(Message::ToTile(
+                        target,
+                        crate::tiles::kind::TileMessage::Waveform(
+                            crate::tile_kinds::waveform::WaveformMessage::ScrollEdge { end: false },
+                        ),
+                    ));
+                }
             }
             ShortcutAction::GoToBottom => {
-                if let Some(waves) = &state.user.waves
-                    && waves.displayed_items.len() > 1
+                if let Some(waves) = state.user.waveform_read()
+                    && waves.items.displayed_items.len() > 1
                 {
-                    msgs.push(Message::ScrollToItem(waves.displayed_items.len() - 1));
+                    msgs.push(Message::ToTile(
+                        waves.tile_id,
+                        crate::tiles::kind::TileMessage::Waveform(
+                            crate::tile_kinds::waveform::WaveformMessage::ScrollEdge { end: true },
+                        ),
+                    ));
                 }
             }
             ShortcutAction::GroupNew => {
@@ -409,26 +425,30 @@ impl SurferShortcuts {
                 ));
             }
             ShortcutAction::ZoomIn => {
-                msgs.push(Message::CanvasZoom {
-                    mouse_ptr: None,
-                    delta: 0.5,
-                    viewport_idx: state
-                        .user
-                        .waves
-                        .as_ref()
-                        .map_or(0, |waves| waves.last_active_viewport_idx),
-                });
+                if let Some(tile_id) = state
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused)
+                {
+                    msgs.push(Message::CanvasZoom {
+                        mouse_ptr: None,
+                        delta: 0.5,
+                        tile_id,
+                    });
+                }
             }
             ShortcutAction::ZoomOut => {
-                msgs.push(Message::CanvasZoom {
-                    mouse_ptr: None,
-                    delta: 2.0,
-                    viewport_idx: state
-                        .user
-                        .waves
-                        .as_ref()
-                        .map_or(0, |waves| waves.last_active_viewport_idx),
-                });
+                if let Some(tile_id) = state
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused)
+                {
+                    msgs.push(Message::CanvasZoom {
+                        mouse_ptr: None,
+                        delta: 2.0,
+                        tile_id,
+                    });
+                }
             }
             ShortcutAction::UiZoomIn => {
                 let mut next_factor = f32::INFINITY;
@@ -453,22 +473,34 @@ impl SurferShortcuts {
                 }
             }
             ShortcutAction::ScrollUp => {
-                msgs.push(Message::CanvasScroll {
-                    delta: Vec2 {
-                        x: 0.,
-                        y: -PER_SCROLL_EVENT * SCROLL_EVENTS_PER_PAGE,
-                    },
-                    viewport_idx: 0,
-                });
+                if let Some(tile_id) = state
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused)
+                {
+                    msgs.push(Message::CanvasScroll {
+                        delta: Vec2 {
+                            x: 0.,
+                            y: -PER_SCROLL_EVENT * SCROLL_EVENTS_PER_PAGE,
+                        },
+                        tile_id,
+                    });
+                }
             }
             ShortcutAction::ScrollDown => {
-                msgs.push(Message::CanvasScroll {
-                    delta: Vec2 {
-                        x: 0.,
-                        y: PER_SCROLL_EVENT * SCROLL_EVENTS_PER_PAGE,
-                    },
-                    viewport_idx: 0,
-                });
+                if let Some(tile_id) = state
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused)
+                {
+                    msgs.push(Message::CanvasScroll {
+                        delta: Vec2 {
+                            x: 0.,
+                            y: PER_SCROLL_EVENT * SCROLL_EVENTS_PER_PAGE,
+                        },
+                        tile_id,
+                    });
+                }
             }
             ShortcutAction::DeleteSelected => {
                 msgs.push(Message::RemoveVisibleItems(MessageTarget::CurrentSelection));
@@ -498,8 +530,8 @@ impl SurferShortcuts {
                 msgs.push(Message::ShowCommandPrompt(String::new(), None));
             }
             ShortcutAction::RenameItem => {
-                if let Some(waves) = &state.user.waves
-                    && waves.focused_item.is_some()
+                if let Some(waves) = state.user.waveform_read()
+                    && waves.view.focused_index(waves.items).is_some()
                 {
                     msgs.push(Message::ShowCommandPrompt("item_rename ".to_owned(), None));
                 }
@@ -508,19 +540,25 @@ impl SurferShortcuts {
                 msgs.push(Message::AddDivider(None, None));
             }
             ShortcutAction::ZoomToFit => {
-                msgs.push(Message::ZoomToFit {
-                    viewport_idx: state
-                        .user
-                        .waves
-                        .as_ref()
-                        .map_or(0, |waves| waves.last_active_viewport_idx),
-                });
+                if let Some(tile_id) = state
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused)
+                {
+                    msgs.push(Message::ZoomToFit { tile_id });
+                }
             }
             ShortcutAction::ZoomToCursor => {
-                msgs.push(Message::ZoomToCursor {
-                    delta: 0.5,
-                    viewport_idx: 0,
-                });
+                if let Some(tile_id) = state
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused)
+                {
+                    msgs.push(Message::ZoomToCursor {
+                        delta: 0.5,
+                        tile_id,
+                    });
+                }
             }
             ShortcutAction::GoToTime => {
                 msgs.push(Message::SetRequestTextEditFocus(

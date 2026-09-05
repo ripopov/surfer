@@ -3,7 +3,6 @@ use crate::wave_container::MetaData;
 use ftr_parser::types::{
     FTR, GeneratorId, StreamId, Transaction, TransactionId, TxGenerator, TxStream,
 };
-use itertools::Itertools;
 use num::BigUint;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
@@ -60,27 +59,20 @@ impl TransactionContainer {
     #[must_use]
     pub fn get_transactions_from_generator(&self, gen_id: GeneratorId) -> Vec<TransactionId> {
         self.get_generator(gen_id)
-            .unwrap()
-            .transactions
-            .iter()
-            .map(ftr_parser::types::Transaction::get_tx_id)
-            .collect_vec()
+            .into_iter()
+            .flat_map(|generator| &generator.transactions)
+            .map(Transaction::get_tx_id)
+            .collect()
     }
 
     #[must_use]
     pub fn get_transactions_from_stream(&self, stream_id: StreamId) -> Vec<TransactionId> {
         self.get_stream(stream_id)
-            .unwrap()
-            .generators
-            .iter()
-            .flat_map(|g| {
-                self.get_generator(*g)
-                    .unwrap()
-                    .transactions
-                    .iter()
-                    .map(ftr_parser::types::Transaction::get_tx_id)
-                    .collect_vec()
-            })
+            .into_iter()
+            .flat_map(|stream| &stream.generators)
+            .filter_map(|id| self.get_generator(*id))
+            .flat_map(|generator| &generator.transactions)
+            .map(Transaction::get_tx_id)
             .collect()
     }
     #[must_use]

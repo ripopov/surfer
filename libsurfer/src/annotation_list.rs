@@ -1,34 +1,41 @@
-use crate::{Message, annotation::Annotatable, time::TimeFormatter, wave_data::WaveData};
+use crate::tile_kinds::annotation_list::AnnotationCommand;
+use crate::{Message, annotation::Annotatable, item_list::ItemList, time::TimeFormatter};
 use egui::{Align, Color32, Key, Layout, Ui};
 use egui_remixicon::icons;
 use tracing::warn;
-
-#[derive(Clone, Default)]
-pub struct AnnotationList {}
 
 pub(crate) const DEFAULT_GROUP_NAME: &str = "Ungrouped";
 const TIME_FONT_SIZE: f32 = 11.;
 const DEFAULT_SPACE: f32 = 4.;
 const WIDTH_CONSTRAINT: f32 = 30.;
 
-impl AnnotationList {}
-
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct AnnotationGroup {
     pub name: String,
-    pub cycle_counter: usize,
     pub annotations: Vec<egui::Id>,
 }
 
-impl AnnotationList {}
+impl AnnotationGroup {
+    fn cycle_in_view(&self, ui: &Ui) -> Option<egui::Id> {
+        if self.annotations.is_empty() {
+            return None;
+        }
+        let key = ui.make_persistent_id(("annotation_cycle", &self.name, &self.annotations));
+        let index =
+            ui.data(|data| data.get_temp::<usize>(key).unwrap_or(0)) % self.annotations.len();
+        ui.data_mut(|data| data.insert_temp(key, (index + 1) % self.annotations.len()));
+        Some(self.annotations[index])
+    }
+}
 
-impl WaveData {
+impl ItemList {
     pub fn draw_annotation_list(
         &self,
         ui: &mut Ui,
         msgs: &mut Vec<Message>,
         time_formatter: &TimeFormatter,
-        annotation_groups: &mut [AnnotationGroup],
+        tile_id: crate::tiles::TileId,
+        show_comments: bool,
     ) {
         ui.style_mut()
             .visuals
@@ -36,13 +43,6 @@ impl WaveData {
             .noninteractive
             .bg_stroke
             .width = 0.5;
-
-        ui.horizontal(|ui| {
-            ui.allocate_space(egui::vec2(ui.available_width() - WIDTH_CONSTRAINT, 0.0));
-            if ui.button(icons::CLOSE_LARGE_LINE).clicked() {
-                msgs.push(Message::ToggleAnnotationlistVisibility());
-            }
-        });
 
         ui.vertical_centered(|ui| {
             ui.heading("Annotation List");
@@ -70,27 +70,24 @@ impl WaveData {
                     .desired_width(ui.available_width() - 160.0),
             );
 
-            // Handle focusing of the text area when user clicks elsewhere, enables shortcuts.
-            let focus_id = ui.make_persistent_id("group_input_focus_init");
-            let has_focused = ui.data_mut(|d| d.get_temp::<bool>(focus_id).unwrap_or(false));
-
-            if !has_focused {
-                text_edit_res.request_focus();
-                ui.data_mut(|d| d.insert_temp(focus_id, true));
-            }
-
             ui.data_mut(|d| d.insert_temp(input_id, buffer.clone()));
 
             // create group when user press enter
             let trimmed_buffer = buffer.trim();
-            if text_edit_res.ctx.input(|i| i.key_pressed(Key::Enter)) && !trimmed_buffer.is_empty()
+            if text_edit_res.has_focus()
+                && text_edit_res.ctx.input(|i| i.key_pressed(Key::Enter))
+                && !trimmed_buffer.is_empty()
             {
-                let flag = annotation_groups
+                let flag = self
+                    .annotation_groups
                     .iter()
                     .any(|group| group.name == trimmed_buffer);
 
                 if !flag {
-                    msgs.push(Message::CreateAnnotationGroup(trimmed_buffer.to_string()));
+                    msgs.push(annotation_edit(
+                        tile_id,
+                        AnnotationCommand::CreateGroup(trimmed_buffer.to_string()),
+                    ));
                     ui.data_mut(|d| d.insert_temp(input_id, String::new()));
                 }
                 // Keep focus here so users can type the next group immediately
@@ -103,7 +100,10 @@ impl WaveData {
                 .clicked()
                 && !trimmed_buffer.is_empty()
             {
-                msgs.push(Message::CreateAnnotationGroup(trimmed_buffer.to_string()));
+                msgs.push(annotation_edit(
+                    tile_id,
+                    AnnotationCommand::CreateGroup(trimmed_buffer.to_string()),
+                ));
                 ui.data_mut(|d| d.insert_temp(input_id, String::new()));
             }
 
@@ -114,7 +114,10 @@ impl WaveData {
                 .clicked()
                 && !trimmed_buffer.is_empty()
             {
-                msgs.push(Message::DeleteAnnotationGroup(trimmed_buffer.to_string()));
+                msgs.push(annotation_edit(
+                    tile_id,
+                    AnnotationCommand::DeleteGroup(trimmed_buffer.to_string()),
+                ));
                 ui.data_mut(|d| d.insert_temp(input_id, String::new()));
             }
         });
@@ -127,8 +130,15 @@ impl WaveData {
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 // this is so ungrouped annotations are listed last
-                for group in annotation_groups.iter_mut().rev() {
-                    self.render_group_section(ui, group, msgs, time_formatter);
+                for group in self.annotation_groups.iter().rev() {
+                    self.render_group_section(
+                        ui,
+                        group,
+                        msgs,
+                        time_formatter,
+                        tile_id,
+                        show_comments,
+                    );
                 }
             });
     }
@@ -136,9 +146,11 @@ impl WaveData {
     fn render_group_section(
         &self,
         ui: &mut Ui,
-        group: &mut AnnotationGroup,
+        group: &AnnotationGroup,
         msgs: &mut Vec<Message>,
         time_formatter: &TimeFormatter,
+        tile_id: crate::tiles::TileId,
+        show_comments: bool,
     ) {
         // Determine if the group is "mostly visible" or "mostly hidden" to pick the icon
         let any_visible = group.annotations.iter().any(|id| {
@@ -167,12 +179,18 @@ impl WaveData {
                 let (delete_tooltip, delete_message) = if group.annotations.is_empty() {
                     (
                         "Delete this group",
-                        Message::DeleteAnnotationGroup(group.name.clone()),
+                        annotation_edit(
+                            tile_id,
+                            AnnotationCommand::DeleteGroup(group.name.clone()),
+                        ),
                     )
                 } else {
                     (
                         "Delete all annotations in this group",
-                        Message::DeleteAllAnnotationInGroup(group.name.clone()),
+                        annotation_edit(
+                            tile_id,
+                            AnnotationCommand::DeleteGroupAnnotations(group.name.clone()),
+                        ),
                     )
                 };
                 // Push everything else to the right
@@ -190,7 +208,13 @@ impl WaveData {
                         .on_hover_text("Toggle visibility for all in this group")
                         .clicked()
                     {
-                        msgs.push(Message::SetGroupVisibility(group.clone(), !any_visible));
+                        msgs.push(annotation_edit(
+                            tile_id,
+                            AnnotationCommand::GroupVisibility {
+                                group: group.name.clone(),
+                                visible: !any_visible,
+                            },
+                        ));
                     }
                     // No need to allow user to cycle unless there are more than one annotations in group
                     if group.annotations.len() > 1
@@ -198,16 +222,9 @@ impl WaveData {
                             .button(icons::SKIP_FORWARD_LINE)
                             .on_hover_text("Cycle through group")
                             .clicked()
+                        && let Some(id) = group.cycle_in_view(ui)
                     {
-                        msgs.push(Message::GoToAnnotationPosition(
-                            group.annotations[group.cycle_counter],
-                            self.last_active_viewport_idx,
-                        ));
-                        group.cycle_counter += 1;
-
-                        if group.cycle_counter >= group.annotations.len() {
-                            group.cycle_counter = 0;
-                        }
+                        msgs.push(Message::GoToAnnotationPosition(id, tile_id));
                     }
                 });
             })
@@ -218,12 +235,14 @@ impl WaveData {
 
                 for id in &group.annotations {
                     if let Some(annotation) = self.get_annotation_by_id(id) {
+                        let comments_key =
+                            ui.make_persistent_id(("annotation_comments", tile_id, id));
                         ui.horizontal(|ui| {
                             ui.add_space(6.0);
 
                             // Editable Name Logic
                             let editing_id =
-                                ui.make_persistent_id(("editing_name", annotation.get_name()));
+                                ui.make_persistent_id(("editing_name", annotation.get_id()));
                             let is_editing =
                                 ui.data(|d| d.get_temp::<bool>(editing_id).unwrap_or(false));
 
@@ -247,9 +266,12 @@ impl WaveData {
                                 if res.lost_focus()
                                     || (res.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)))
                                 {
-                                    msgs.push(Message::UpdateAnnotationName(
-                                        *id,
-                                        buffer.trim().to_string(),
+                                    msgs.push(annotation_edit(
+                                        tile_id,
+                                        AnnotationCommand::Rename {
+                                            annotation: *id,
+                                            name: buffer.trim().to_string(),
+                                        },
                                     ));
                                     ui.data_mut(|d| d.insert_temp(editing_id, false));
                                 }
@@ -287,7 +309,10 @@ impl WaveData {
                                 response.on_hover_text("Click to rename");
                             }
 
-                            let show_comment_icon = if annotation.show_comments() {
+                            let comments_open = ui
+                                .data(|data| data.get_temp::<bool>(comments_key))
+                                .unwrap_or(show_comments);
+                            let show_comment_icon = if comments_open {
                                 icons::ARROW_DOWN_S_LINE
                             } else {
                                 icons::ARROW_RIGHT_S_LINE
@@ -298,7 +323,7 @@ impl WaveData {
                                 .on_hover_text("Show comments")
                                 .clicked()
                             {
-                                msgs.push(Message::ToggleAnnotationListShowComments(*id));
+                                ui.data_mut(|data| data.insert_temp(comments_key, !comments_open));
                             }
 
                             //This is only here because selectable_value needs a string, we dont want it to match any group we have.
@@ -314,9 +339,12 @@ impl WaveData {
                                         )
                                         .clicked()
                                     {
-                                        msgs.push(Message::UpdateAnnotationGroup(
-                                            *id,
-                                            Some(group.name.clone()),
+                                        msgs.push(annotation_edit(
+                                            tile_id,
+                                            AnnotationCommand::MoveToGroup {
+                                                annotation: *id,
+                                                group: Some(group.name.clone()),
+                                            },
                                         ));
                                         ui.close();
                                     }
@@ -332,7 +360,10 @@ impl WaveData {
                                     .on_hover_text("Delete annotation")
                                     .clicked()
                                 {
-                                    msgs.push(Message::RemoveAnnotation(*id));
+                                    msgs.push(annotation_edit(
+                                        tile_id,
+                                        AnnotationCommand::Remove(*id),
+                                    ));
                                 }
 
                                 let vis_icon = if annotation.is_visible() {
@@ -345,7 +376,10 @@ impl WaveData {
                                     .on_hover_text("Toggle visibility")
                                     .clicked()
                                 {
-                                    msgs.push(Message::ToggleAnnotationVisiblility(*id));
+                                    msgs.push(annotation_edit(
+                                        tile_id,
+                                        AnnotationCommand::ToggleVisibility(*id),
+                                    ));
                                 }
 
                                 let comment = annotation.get_comment_box();
@@ -362,7 +396,10 @@ impl WaveData {
                                         .on_hover_text("Toggle comment visibility")
                                         .clicked()
                                     {
-                                        msgs.push(Message::ToggleCommentVisibility(*id));
+                                        msgs.push(annotation_edit(
+                                            tile_id,
+                                            AnnotationCommand::ToggleCommentBox(*id),
+                                        ));
                                     }
                                 }
                                 if ui
@@ -370,10 +407,7 @@ impl WaveData {
                                     .on_hover_text("Go to annotation")
                                     .clicked()
                                 {
-                                    msgs.push(Message::GoToAnnotationPosition(
-                                        *id,
-                                        self.last_active_viewport_idx,
-                                    ));
+                                    msgs.push(Message::GoToAnnotationPosition(*id, tile_id));
                                 }
                             });
                         });
@@ -388,7 +422,10 @@ impl WaveData {
                         });
 
                         // Show comments for this annotation
-                        if annotation.show_comments() {
+                        if ui
+                            .data(|data| data.get_temp::<bool>(comments_key))
+                            .unwrap_or(show_comments)
+                        {
                             let messages = annotation.get_messages();
                             for c in messages {
                                 let mut line_left = ui.cursor().left_top();
@@ -414,9 +451,12 @@ impl WaveData {
                                         );
 
                                         if response.on_hover_text("Delete message").clicked() {
-                                            msgs.push(Message::RemoveCommentMessage(
-                                                annotation.get_id(),
-                                                c.id,
+                                            msgs.push(annotation_edit(
+                                                tile_id,
+                                                AnnotationCommand::RemoveComment {
+                                                    annotation: annotation.get_id(),
+                                                    comment: c.id,
+                                                },
                                             ));
                                         }
                                     });
@@ -433,7 +473,6 @@ impl WaveData {
     pub fn remove_annotation_from_group(&mut self, id_to_remove: egui::Id) -> Option<egui::Id> {
         for group in &mut self.annotation_groups {
             if let Some(idx) = group.annotations.iter().position(|&id| id == id_to_remove) {
-                group.cycle_counter = 0;
                 return Some(group.annotations.remove(idx));
             }
         }
@@ -446,7 +485,6 @@ impl WaveData {
             if group.name == name {
                 self.annotations
                     .retain(|annotation| !group.annotations.contains(&annotation.get_id()));
-                group.cycle_counter = 0;
                 group.annotations = Vec::new();
             }
         }
@@ -496,5 +534,50 @@ impl WaveData {
             .iter_mut()
             .find(|group| group.name == group_name)
             .map(|g| g as _)
+    }
+}
+
+fn annotation_edit(tile_id: crate::tiles::TileId, command: AnnotationCommand) -> Message {
+    Message::ToTile(
+        tile_id,
+        crate::tiles::kind::TileMessage::Waveform(
+            crate::tile_kinds::waveform::WaveformMessage::Annotation(command),
+        ),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn group_cycling_is_view_local_and_does_not_change_content() {
+        let mut group = AnnotationGroup {
+            name: "group".into(),
+            annotations: vec![egui::Id::new("a"), egui::Id::new("b")],
+        };
+        let before = ron::to_string(&group).unwrap();
+        let ctx = egui::Context::default();
+        let cycle = |group: &AnnotationGroup, views: &[usize]| {
+            let mut result = Vec::new();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                for view in views {
+                    let pane =
+                        ui.new_child(egui::UiBuilder::new().id(egui::Id::new(("view", *view))));
+                    result.push(group.cycle_in_view(&pane));
+                }
+            });
+            output.textures_delta.clear();
+            result
+        };
+        let [a, b] = [group.annotations[0], group.annotations[1]];
+        assert_eq!(cycle(&group, &[0, 0, 1]), [Some(a), Some(b), Some(a)]);
+        assert_eq!(cycle(&group, &[1, 0]), [Some(b), Some(a)]);
+        assert_eq!(ron::to_string(&group).unwrap(), before);
+        let inserted = egui::Id::new("new");
+        group.annotations.insert(0, inserted);
+        assert_eq!(cycle(&group, &[0, 1]), [Some(inserted), Some(inserted)]);
+        group.annotations.clear();
+        assert_eq!(cycle(&group, &[0]), [None]);
     }
 }

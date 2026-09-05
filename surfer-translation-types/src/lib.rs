@@ -157,6 +157,7 @@ pub fn kind_for_binary_representation(s: &str) -> ValueKind {
 /// - '0' and '1' extend with '0'
 /// - 'x' extends with 'x'
 /// - 'z' extends with 'z'
+/// - VHDL std_logic 'u', 'w', 'l', 'h' and '-' extend with the same character
 /// - other leading characters result in no extension
 #[must_use]
 pub fn extend_string(val: &str, num_bits: u32) -> String {
@@ -257,7 +258,7 @@ pub enum TranslationPreference {
 /// Static information about the structure of a variable.
 #[cfg_attr(feature = "wasm_plugins", derive(FromBytes, ToBytes))]
 #[cfg_attr(feature = "wasm_plugins", encoding(Json))]
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, Hash)]
 pub enum VariableInfo {
     /// A compound variable with subfields.
     Compound {
@@ -505,11 +506,21 @@ mod tests {
     #[test]
     fn extend_string_weird_char_and_empty_input() {
         // Unknown leading char results in no extension (empty), even if num_bits is larger
-        assert_eq!(extend_string("h101", 6), "");
+        assert_eq!(extend_string("q101", 6), "");
         assert_eq!(extend_string("?", 10), "");
 
         // Empty input yields empty extension as there is no leading char to guide
         assert_eq!(extend_string("", 5), "");
+    }
+
+    #[test]
+    fn extend_string_vhdl_logic_states() {
+        for state in ['u', 'w', 'l', 'h', '-'] {
+            assert_eq!(
+                extend_string(&format!("{state}101"), 6),
+                state.to_string().repeat(2)
+            );
+        }
     }
 
     // ---------------- parse_numeric_string tests ----------------

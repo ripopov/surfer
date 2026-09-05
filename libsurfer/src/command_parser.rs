@@ -1,4 +1,5 @@
 //! Command prompt handling.
+use crate::tiles::commands::DocumentCommand;
 use regex::Regex;
 use std::sync::LazyLock;
 use std::{fs, str::FromStr};
@@ -112,8 +113,9 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                 .map(|info| info.filename.clone())
                 .collect()
         });
-    let displayed_items = match &state.user.waves {
+    let displayed_items = match state.user.waveform_read() {
         Some(v) => v
+            .items
             .items_tree
             .iter_visible()
             .enumerate()
@@ -125,16 +127,16 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                     },
                 )| {
                     let idx = VisibleItemIndex(vidx);
-                    let item = &v.displayed_items[item_id];
+                    let item = &v.items.displayed_items[item_id];
                     match item {
                         DisplayedItem::Variable(var) => format!(
                             "{}_{}",
-                            uint_idx_to_alpha_idx(idx, v.displayed_items.len()),
+                            uint_idx_to_alpha_idx(idx, v.items.displayed_items.len()),
                             var.variable_ref.full_path_string()
                         ),
                         _ => format!(
                             "{}_{}",
-                            uint_idx_to_alpha_idx(idx, v.displayed_items.len()),
+                            uint_idx_to_alpha_idx(idx, v.items.displayed_items.len()),
                             item.name()
                         ),
                     }
@@ -210,22 +212,28 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
         .as_ref()
         .map(|w| w.inner.metadata().timescale.clone());
 
-    let viewport_idx = state
+    let tile_id = state
         .user
-        .waves
-        .as_ref()
-        .map_or(0, |waves| waves.last_active_viewport_idx);
-    let viewport_indices = state.user.waves.as_ref().map_or(vec![], |waves| {
-        (0..waves.viewports.len())
-            .map(|idx| idx.to_string())
-            .collect()
-    });
+        .workspace
+        .resolve_waveform(crate::tiles::TileTarget::Focused);
+    let waveform_ids = state
+        .user
+        .workspace
+        .layout
+        .tile_order()
+        .into_iter()
+        .filter(|id| state.user.workspace.waveform_resources(*id).is_some())
+        .collect::<Vec<_>>();
+    let viewport_indices = (0..waveform_ids.len())
+        .map(|idx| idx.to_string())
+        .collect::<Vec<_>>();
 
-    let markers = if let Some(waves) = &state.user.waves {
+    let markers = if let Some(waves) = state.user.waveform_read() {
         waves
+            .items
             .items_tree
             .iter()
-            .map(|Node { item_ref, .. }| waves.displayed_items.get(item_ref))
+            .map(|Node { item_ref, .. }| waves.items.displayed_items.get(item_ref))
             .filter_map(|item| match item {
                 Some(DisplayedItem::Marker(marker)) => Some((marker.name.clone(), marker.idx)),
                 _ => None,
@@ -315,6 +323,7 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
             "show_mouse_gestures",
             "show_quick_start",
             "show_logs",
+            "show_annotation_list",
             #[cfg(feature = "performance_plot")]
             "show_performance",
             "scroll_to_start",
@@ -369,6 +378,7 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
             "frame_buffer_set_width",
             "frame_buffer_set_range",
             "memory_viewer_open",
+            "show_memory_viewer",
             "pause_simulation",
             "unpause_simulation",
             "undo",
@@ -400,6 +410,7 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
             "show_mouse_gestures",
             "show_quick_start",
             "show_logs",
+            "show_annotation_list",
             #[cfg(not(target_arch = "wasm32"))]
             "create_default_config",
             #[cfg(feature = "performance_plot")]
@@ -484,22 +495,22 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                     }),
                 ),
                 "scroll_to_start" | "goto_start" => {
-                    Some(Command::Terminal(Message::GoToStart { viewport_idx }))
+                    Some(Command::Terminal(Message::GoToStart { tile_id: tile_id? }))
                 }
                 "scroll_to_end" | "goto_end" => {
-                    Some(Command::Terminal(Message::GoToEnd { viewport_idx }))
+                    Some(Command::Terminal(Message::GoToEnd { tile_id: tile_id? }))
                 }
                 "zoom_in" => Some(Command::Terminal(Message::CanvasZoom {
                     mouse_ptr: None,
                     delta: 0.5,
-                    viewport_idx,
+                    tile_id: tile_id?,
                 })),
                 "zoom_out" => Some(Command::Terminal(Message::CanvasZoom {
                     mouse_ptr: None,
                     delta: 2.0,
-                    viewport_idx,
+                    tile_id: tile_id?,
                 })),
-                "zoom_fit" => Some(Command::Terminal(Message::ZoomToFit { viewport_idx })),
+                "zoom_fit" => Some(Command::Terminal(Message::ZoomToFit { tile_id: tile_id? })),
                 "zoom_to" => {
                     let timescale_for_zoom = timescale.clone();
                     Some(Command::NonTerminal(
@@ -559,7 +570,7 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                             Some(Command::Terminal(Message::ZoomToRange {
                                 start: start_time,
                                 end: end_time,
-                                viewport_idx,
+                                tile_id: tile_id?,
                             }))
                         }),
                     ))
@@ -678,23 +689,27 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                                 } else {
                                     ScopeType::StreamScope(StreamScopeRef::Empty(word.to_string()))
                                 };
-                                Some(Command::Terminal(Message::SetActiveScope(Some(scope))))
+                                Some(Command::Terminal(Message::ToDocument(
+                                    DocumentCommand::SetActiveScope(Some(scope)),
+                                )))
                             }),
                         )
                     } else {
                         single_word(
                             scopes.clone(),
                             Box::new(|word| {
-                                Some(Command::Terminal(Message::SetActiveScope(Some(
-                                    ScopeType::WaveScope(ScopeRef::from_hierarchy_string(word)),
-                                ))))
+                                Some(Command::Terminal(Message::ToDocument(
+                                    DocumentCommand::SetActiveScope(Some(ScopeType::WaveScope(
+                                        ScopeRef::from_hierarchy_string(word),
+                                    ))),
+                                )))
                             }),
                         )
                     }
                 }
-                "scope_select_root" | "stream_select_root" => {
-                    Some(Command::Terminal(Message::SetActiveScope(None)))
-                }
+                "scope_select_root" | "stream_select_root" => Some(Command::Terminal(
+                    Message::ToDocument(DocumentCommand::SetActiveScope(None)),
+                )),
                 "reload" => Some(Command::Terminal(Message::ReloadWaveform(
                     keep_during_reload,
                 ))),
@@ -965,8 +980,9 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                 "goto_marker" => single_word(
                     marker_suggestions(&markers),
                     Box::new(move |name| {
+                        let target = tile_id?;
                         parse_marker(name, &markers)
-                            .map(|idx| Command::Terminal(Message::GoToMarkerPosition(idx, 0)))
+                            .map(|idx| Command::Terminal(Message::GoToMarkerPosition(idx, target)))
                     }),
                 ),
                 "frame_buffer_set_array" => single_word(
@@ -1064,7 +1080,7 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                         Some(Command::Terminal(Message::SetFrameBufferRange(pairs)))
                     }),
                 ),
-                "memory_viewer_open" => single_word(
+                "memory_viewer_open" | "show_memory_viewer" => single_word(
                     arrays.clone(),
                     Box::new(|word| {
                         Some(Command::Terminal(Message::OpenMemoryViewer {
@@ -1124,7 +1140,7 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                                 time_str.parse().ok()?
                             };
                             Some(Command::Terminal(Message::Batch(vec![
-                                Message::CursorSet(time),
+                                Message::ToDocument(DocumentCommand::CursorSet(time)),
                                 Message::GoToCursorIfNotInView,
                             ])))
                         }),
@@ -1140,7 +1156,7 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                             } else {
                                 time_str.parse().ok()?
                             };
-                            Some(Command::Terminal(Message::GoToTime(Some(time), 0)))
+                            Some(Command::Terminal(Message::GoToTime(Some(time), tile_id?)))
                         }),
                     )
                 }
@@ -1222,10 +1238,33 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                         )))
                     }),
                 )),
-                "show_marker_window" => {
-                    Some(Command::Terminal(Message::SetCursorWindowVisible(true)))
-                }
-                "show_logs" => Some(Command::Terminal(Message::SetLogsVisible(true))),
+                "show_marker_window" => Some(Command::Terminal(Message::Workspace(
+                    crate::tiles::commands::WorkspaceCommand::OpenTile {
+                        kind: "markers".into(),
+                        placement: crate::tiles::layout::Placement::Edge(
+                            crate::tiles::layout::Direction::Right,
+                        ),
+                        focus: true,
+                    },
+                ))),
+                "show_annotation_list" => Some(Command::Terminal(Message::Workspace(
+                    crate::tiles::commands::WorkspaceCommand::OpenTile {
+                        kind: "annotation_list".into(),
+                        placement: crate::tiles::layout::Placement::Edge(
+                            crate::tiles::layout::Direction::Right,
+                        ),
+                        focus: true,
+                    },
+                ))),
+                "show_logs" => Some(Command::Terminal(Message::Workspace(
+                    crate::tiles::commands::WorkspaceCommand::OpenTile {
+                        kind: "logs".into(),
+                        placement: crate::tiles::layout::Placement::Edge(
+                            crate::tiles::layout::Direction::Down,
+                        ),
+                        focus: true,
+                    },
+                ))),
                 "save_state" => Some(Command::Terminal(Message::SaveStateFile(
                     state_file.clone(),
                 ))),
@@ -1247,13 +1286,18 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                 ),
                 "viewport_add" => Some(Command::Terminal(Message::AddViewport)),
                 "viewport_remove" => Some(Command::Terminal(Message::RemoveViewport)),
-                "viewport_set_active" => single_word(
-                    viewport_indices.clone(),
-                    Box::new(|word| {
-                        let idx = word.parse::<usize>().ok()?;
-                        Some(Command::Terminal(Message::SetActiveViewport(idx)))
-                    }),
-                ),
+                "viewport_set_active" => {
+                    let ids = waveform_ids.clone();
+                    single_word(
+                        viewport_indices.clone(),
+                        Box::new(move |word| {
+                            let idx = word.parse::<usize>().ok()?;
+                            Some(Command::Terminal(Message::SetActiveViewport(
+                                *ids.get(idx)?,
+                            )))
+                        }),
+                    )
+                }
                 "pause_simulation" => Some(Command::Terminal(Message::PauseSimulation)),
                 "unpause_simulation" => Some(Command::Terminal(Message::UnpauseSimulation)),
                 "undo" => Some(Command::Terminal(Message::Undo(1))),

@@ -5,11 +5,11 @@ use num::BigInt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    config::SurferTheme, displayed_item::DisplayedItemRef, view::DrawingContext,
-    viewport::Viewport, wave_data::WaveData,
+    config::SurferTheme, displayed_item::DisplayedItemRef, item_list::ItemList,
+    view::DrawingContext, viewport::Viewport, wave_data::TimeRange,
 };
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Direction {
     North,
     East,
@@ -51,10 +51,10 @@ pub struct GrPoint {
     pub y: GraphicsY,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, PartialOrd, Eq, Ord, Hash, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, PartialOrd, Eq, Ord, Hash, Debug, Clone)]
 pub struct GraphicId(pub usize);
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Graphic {
     TextArrow {
         from: (GrPoint, Direction),
@@ -71,14 +71,14 @@ pub enum Graphic {
     },
 }
 
-impl WaveData {
+impl ItemList {
     // FIXME: This function should probably not be here, we should instead update ItemDrawingInfo to
     // have this info
     #[must_use]
     pub fn get_item_y(&self, y: &GraphicsY) -> Option<f32> {
         self.items_tree
             .iter_visible()
-            .zip(&self.drawing_infos)
+            .zip(&self.layout_cache.borrow().infos)
             .find(|(node, _info)| node.item_ref == y.item)
             .map(|(_, info)| info.get_y_from_anchor(&y.anchor))
     }
@@ -87,10 +87,10 @@ impl WaveData {
         &self,
         ctx: &mut DrawingContext,
         viewport: &Viewport,
+        range: &TimeRange,
         theme: &SurferTheme,
     ) {
         let color = theme.variable_dontcare;
-        let range = self.time_range();
         for g in self.graphics.values() {
             match g {
                 Graphic::TextArrow {

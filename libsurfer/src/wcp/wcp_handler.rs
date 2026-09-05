@@ -1,9 +1,10 @@
+use crate::tiles::commands::DocumentCommand;
 use crate::{
     SystemState, WcpClientCapabilities,
     displayed_item::{DisplayedItem, DisplayedItemRef},
     message::{Message, MessageTarget},
     wave_container::{ScopeRefExt, VariableRef, VariableRefExt},
-    wave_data::WaveData,
+    wave_data::WaveformRead,
     wave_source::{LoadOptions, WaveSource, string_to_wavesource},
 };
 
@@ -51,9 +52,9 @@ impl SystemState {
             WcpCSMessage::command(command) => {
                 match command {
                     WcpCommand::get_item_list => {
-                        if let Some(waves) = &self.user.waves {
+                        if let Some(waves) = self.user.waveform_read() {
                             let ids: Vec<surfer_wcp::DisplayedItemRef> = self
-                                .get_displayed_items(waves)
+                                .get_displayed_items(&waves)
                                 .iter()
                                 .map(std::convert::Into::into)
                                 .collect_vec();
@@ -63,13 +64,13 @@ impl SystemState {
                         }
                     }
                     WcpCommand::get_item_info { ids } => {
-                        let Some(waves) = &self.user.waves else {
+                        let Some(waves) = self.user.waveform_read() else {
                             self.send_error("remove_items", vec![], "No waveform loaded");
                             return;
                         };
                         let mut items: Vec<ItemInfo> = Vec::new();
                         for id in ids {
-                            if let Some(item) = waves.displayed_items.get(&id.into()) {
+                            if let Some(item) = waves.items.displayed_items.get(&id.into()) {
                                 let (name, item_type) = match item {
                                     DisplayedItem::Variable(var) => (
                                         var.manual_name.clone().unwrap_or(var.display_name.clone()),
@@ -123,7 +124,7 @@ impl SystemState {
                         if self.user.waves.is_some() {
                             self.save_current_canvas(format!("Add {} variables", variables.len()));
                         }
-                        if let Some(waves) = self.user.waves.as_mut() {
+                        if let Some(mut waves) = self.user.waveform_edit() {
                             let variable_refs = variables
                                 .iter()
                                 .map(|n| VariableRef::from_hierarchy_string(n))
@@ -135,6 +136,7 @@ impl SystemState {
                                 true,
                                 false,
                                 None,
+                                true,
                             );
                             if let Some(cmd) = cmd {
                                 self.load_variables(cmd);
@@ -157,7 +159,7 @@ impl SystemState {
                         }
                         let scope = ScopeRef::from_hierarchy_string(scope);
                         let variables = self.get_scope(&scope, *recursive);
-                        if let Some(waves) = self.user.waves.as_mut() {
+                        if let Some(mut waves) = self.user.waveform_edit() {
                             let (cmd, ids) = waves.add_variables(
                                 &self.translators,
                                 variables,
@@ -165,6 +167,7 @@ impl SystemState {
                                 true,
                                 false,
                                 None,
+                                true,
                             );
                             if let Some(cmd) = cmd {
                                 self.load_variables(cmd);
@@ -191,7 +194,7 @@ impl SystemState {
                             variables.extend(scope_variables);
                         }
 
-                        if let Some(waves) = self.user.waves.as_mut() {
+                        if let Some(mut waves) = self.user.waveform_edit() {
                             let (cmd, ids) = waves.add_variables(
                                 &self.translators,
                                 variables,
@@ -199,6 +202,7 @@ impl SystemState {
                                 true,
                                 true,
                                 None,
+                                true,
                             );
                             if let Some(cmd) = cmd {
                                 self.load_variables(cmd);
@@ -219,7 +223,7 @@ impl SystemState {
                         if self.user.waves.is_some() {
                             self.save_current_canvas(format!("Add {} markers", markers.len()));
                         }
-                        if let Some(waves) = self.user.waves.as_mut() {
+                        if let Some(mut waves) = self.user.waveform_edit() {
                             let mut ids = vec![];
                             for marker in markers {
                                 let MarkerInfo {
@@ -245,24 +249,55 @@ impl SystemState {
                         self.send_response(WcpResponse::ack);
                     }
                     WcpCommand::set_viewport_to { timestamp } => {
-                        self.update(Message::GoToTime(Some(timestamp.clone()), 0));
+                        let Some(target) = self
+                            .user
+                            .workspace
+                            .resolve_waveform(crate::tiles::TileTarget::Focused)
+                        else {
+                            self.send_error("set_viewport_to", vec![], "No waveform tile");
+                            return;
+                        };
+                        self.update(Message::ToTile(
+                            target,
+                            crate::tiles::kind::TileMessage::Waveform(
+                                crate::tile_kinds::waveform::WaveformMessage::Navigate(
+                                    crate::tile_kinds::waveform::WaveformNavigation::GoToTime(
+                                        timestamp.clone(),
+                                    ),
+                                ),
+                            ),
+                        ));
                         self.send_response(WcpResponse::ack);
                     }
                     WcpCommand::set_viewport_range { start, end } => {
-                        self.update(Message::ZoomToRange {
-                            start: start.clone(),
-                            end: end.clone(),
-                            viewport_idx: 0,
-                        });
+                        let Some(target) = self
+                            .user
+                            .workspace
+                            .resolve_waveform(crate::tiles::TileTarget::Focused)
+                        else {
+                            self.send_error("set_viewport_range", vec![], "No waveform tile");
+                            return;
+                        };
+                        self.update(Message::ToTile(
+                            target,
+                            crate::tiles::kind::TileMessage::Waveform(
+                                crate::tile_kinds::waveform::WaveformMessage::Navigate(
+                                    crate::tile_kinds::waveform::WaveformNavigation::ZoomToRange {
+                                        start: start.clone(),
+                                        end: end.clone(),
+                                    },
+                                ),
+                            ),
+                        ));
                         self.send_response(WcpResponse::ack);
                     }
                     WcpCommand::set_item_color { id, color } => {
-                        let Some(waves) = &self.user.waves else {
+                        let Some(waves) = self.user.waveform_read() else {
                             self.send_error("set_item_color", vec![], "No waveform loaded");
                             return;
                         };
 
-                        if let Some(idx) = waves.get_displayed_item_index(&id.into()) {
+                        if let Some(idx) = waves.items.get_displayed_item_index(&id.into()) {
                             self.update(Message::ItemColorChange(
                                 MessageTarget::Explicit(idx),
                                 Some(color.clone()),
@@ -289,13 +324,13 @@ impl SystemState {
                         self.send_response(WcpResponse::ack);
                     }
                     WcpCommand::focus_item { id } => {
-                        let Some(waves) = &self.user.waves else {
+                        let Some(waves) = self.user.waveform_read() else {
                             self.send_error("remove_items", vec![], "No waveform loaded");
                             return;
                         };
                         // TODO: Create a `.into` function here instead of unwrapping and wrapping
                         // it to prevent future type errors
-                        if let Some(vidx) = waves.get_displayed_item_index(&id.into()) {
+                        if let Some(vidx) = waves.items.get_displayed_item_index(&id.into()) {
                             self.update(Message::FocusItem(vidx));
 
                             self.send_response(WcpResponse::ack);
@@ -308,8 +343,8 @@ impl SystemState {
                         }
                     }
                     WcpCommand::clear => {
-                        if let Some(wave) = &self.user.waves {
-                            self.update(Message::RemoveItems(self.get_displayed_items(wave)));
+                        if let Some(wave) = self.user.waveform_read() {
+                            self.update(Message::RemoveItems(self.get_displayed_items(&wave)));
                         }
 
                         self.send_response(WcpResponse::ack);
@@ -339,13 +374,25 @@ impl SystemState {
                         }
                     }
                     WcpCommand::zoom_to_fit { viewport_idx } => {
-                        self.update(Message::ZoomToFit {
-                            viewport_idx: *viewport_idx,
-                        });
+                        let target = self
+                            .user
+                            .workspace
+                            .layout
+                            .tile_order()
+                            .into_iter()
+                            .filter(|id| self.user.workspace.waveform_resources(*id).is_some())
+                            .nth(*viewport_idx);
+                        let Some(tile_id) = target else {
+                            self.send_error("zoom_to_fit", vec![], "No such waveform view");
+                            return;
+                        };
+                        self.update(Message::ZoomToFit { tile_id });
                         self.send_response(WcpResponse::ack);
                     }
                     WcpCommand::set_cursor { timestamp } => {
-                        self.update(Message::CursorSet(timestamp.to_owned()));
+                        self.update(Message::ToDocument(DocumentCommand::CursorSet(
+                            timestamp.to_owned(),
+                        )));
                         self.send_response(WcpResponse::ack);
                     }
                     WcpCommand::shutdown => {
@@ -430,9 +477,10 @@ impl SystemState {
         });
     }
 
-    fn get_displayed_items(&self, waves: &WaveData) -> Vec<DisplayedItemRef> {
+    fn get_displayed_items(&self, waves: &WaveformRead<'_>) -> Vec<DisplayedItemRef> {
         // TODO check call sites since visible items may now differ from loaded items
         waves
+            .items
             .items_tree
             .iter_visible()
             .map(|node| node.item_ref)

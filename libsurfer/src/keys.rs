@@ -44,7 +44,14 @@ impl SystemState {
                         ) =>
                     {
                         if let Some(d) = key_to_digit(k) {
-                            handle_digit(d, modifiers, msgs);
+                            handle_digit(
+                                d,
+                                modifiers,
+                                self.user
+                                    .workspace
+                                    .resolve_waveform(crate::tiles::TileTarget::Focused),
+                                msgs,
+                            );
                         }
                     }
                     (Key::Escape, true, true, false) => msgs.push(Message::HideCommandPrompt),
@@ -73,7 +80,7 @@ impl SystemState {
                         } else if modifiers.command {
                             msgs.push(Message::MoveFocusedItem(MoveDir::Down, self.get_count()));
                         } else {
-                            msgs.push(Message::VerticalScroll(MoveDir::Down, self.get_count()));
+                            msgs.extend(self.scroll_rows_message(true, self.get_count()));
                         }
                         msgs.push(Message::InvalidateCount);
                     }
@@ -87,7 +94,7 @@ impl SystemState {
                         } else if modifiers.command {
                             msgs.push(Message::MoveFocusedItem(MoveDir::Up, self.get_count()));
                         } else {
-                            msgs.push(Message::VerticalScroll(MoveDir::Up, self.get_count()));
+                            msgs.extend(self.scroll_rows_message(false, self.get_count()));
                         }
                         msgs.push(Message::InvalidateCount);
                     }
@@ -104,35 +111,43 @@ impl SystemState {
                     }
                     (Key::F11, true, false, _) => msgs.push(Message::ToggleFullscreen),
                     (Key::ArrowRight, true, false, false) => {
-                        msgs.push(match self.user.config.behavior.arrow_key_bindings() {
-                            ArrowKeyBindings::Edge => Message::MoveCursorToTransition {
+                        msgs.extend(match self.user.config.behavior.arrow_key_bindings() {
+                            ArrowKeyBindings::Edge => Some(Message::MoveCursorToTransition {
                                 next: true,
                                 variable: None,
                                 skip_zero: modifiers.shift,
-                            },
-                            ArrowKeyBindings::Scroll => Message::CanvasScroll {
-                                delta: Vec2 {
-                                    x: 0.,
-                                    y: -PER_SCROLL_EVENT,
-                                },
-                                viewport_idx: 0,
-                            },
+                            }),
+                            ArrowKeyBindings::Scroll => self
+                                .user
+                                .workspace
+                                .resolve_waveform(crate::tiles::TileTarget::Focused)
+                                .map(|tile_id| Message::CanvasScroll {
+                                    delta: Vec2 {
+                                        x: 0.,
+                                        y: -PER_SCROLL_EVENT,
+                                    },
+                                    tile_id,
+                                }),
                         });
                     }
                     (Key::ArrowLeft, true, false, false) => {
-                        msgs.push(match self.user.config.behavior.arrow_key_bindings() {
-                            ArrowKeyBindings::Edge => Message::MoveCursorToTransition {
+                        msgs.extend(match self.user.config.behavior.arrow_key_bindings() {
+                            ArrowKeyBindings::Edge => Some(Message::MoveCursorToTransition {
                                 next: false,
                                 variable: None,
                                 skip_zero: modifiers.shift,
-                            },
-                            ArrowKeyBindings::Scroll => Message::CanvasScroll {
-                                delta: Vec2 {
-                                    x: 0.,
-                                    y: PER_SCROLL_EVENT,
-                                },
-                                viewport_idx: 0,
-                            },
+                            }),
+                            ArrowKeyBindings::Scroll => self
+                                .user
+                                .workspace
+                                .resolve_waveform(crate::tiles::TileTarget::Focused)
+                                .map(|tile_id| Message::CanvasScroll {
+                                    delta: Vec2 {
+                                        x: 0.,
+                                        y: PER_SCROLL_EVENT,
+                                    },
+                                    tile_id,
+                                }),
                         });
                     }
                     (Key::ArrowDown, true, true, false) => msgs.push(Message::SelectNextCommand),
@@ -146,7 +161,7 @@ impl SystemState {
                         } else if modifiers.command {
                             msgs.push(Message::MoveFocusedItem(MoveDir::Down, self.get_count()));
                         } else {
-                            msgs.push(Message::VerticalScroll(MoveDir::Down, self.get_count()));
+                            msgs.extend(self.scroll_rows_message(true, self.get_count()));
                         }
                         msgs.push(Message::InvalidateCount);
                     }
@@ -161,7 +176,7 @@ impl SystemState {
                         } else if modifiers.command {
                             msgs.push(Message::MoveFocusedItem(MoveDir::Up, self.get_count()));
                         } else {
-                            msgs.push(Message::VerticalScroll(MoveDir::Up, self.get_count()));
+                            msgs.extend(self.scroll_rows_message(false, self.get_count()));
                         }
                         msgs.push(Message::InvalidateCount);
                     }
@@ -185,7 +200,12 @@ impl SystemState {
     }
 }
 
-fn handle_digit(digit: u8, modifiers: &Modifiers, msgs: &mut Vec<Message>) {
+fn handle_digit(
+    digit: u8,
+    modifiers: &Modifiers,
+    tile_id: Option<crate::tiles::TileId>,
+    msgs: &mut Vec<Message>,
+) {
     if modifiers.alt {
         // Convert 0..9 to '0'..'9' safely and clearly
         if let Some(c) = std::char::from_digit(u32::from(digit), 10) {
@@ -193,8 +213,8 @@ fn handle_digit(digit: u8, modifiers: &Modifiers, msgs: &mut Vec<Message>) {
         }
     } else if modifiers.command {
         msgs.push(Message::MoveMarkerToCursor(digit));
-    } else {
-        msgs.push(Message::GoToMarkerPosition(digit, 0));
+    } else if let Some(tile_id) = tile_id {
+        msgs.push(Message::GoToMarkerPosition(digit, tile_id));
     }
 }
 

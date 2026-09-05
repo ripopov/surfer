@@ -19,6 +19,24 @@ use crate::{
     wave_data::WaveData,
 };
 
+/// Borrowed annotation inputs for one waveform view. Annotation content belongs
+/// to the item list; selection and menu placement belong to this view.
+pub struct AnnotationView<'a> {
+    pub document: &'a WaveData,
+    pub items: &'a crate::item_list::ItemList,
+    pub viewport: &'a Viewport,
+    pub selected_annotation: Option<Id>,
+    pub menu_position: Option<Pos2>,
+    pub menu_time: Option<&'a BigInt>,
+}
+
+impl std::ops::Deref for AnnotationView<'_> {
+    type Target = WaveData;
+    fn deref(&self) -> &Self::Target {
+        self.document
+    }
+}
+
 const DEFAULT_HIDE_RADIUS: f32 = 5.0;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -181,8 +199,8 @@ impl Annotatable for Annotation {
     fn draw(
         &self,
         ui: &mut Ui,
-        waves: &WaveData,
-        viewport_idx: usize,
+        waves: &AnnotationView<'_>,
+        tile_id: crate::tiles::TileId,
         ctx: &mut DrawingContext,
         theme: &SurferTheme,
         msgs: &mut Vec<Message>,
@@ -194,7 +212,7 @@ impl Annotatable for Annotation {
             Annotation::Arrow(a) => a.draw(
                 ui,
                 waves,
-                viewport_idx,
+                tile_id,
                 ctx,
                 theme,
                 msgs,
@@ -205,7 +223,7 @@ impl Annotatable for Annotation {
             Annotation::Rect(r) => r.draw(
                 ui,
                 waves,
-                viewport_idx,
+                tile_id,
                 ctx,
                 theme,
                 msgs,
@@ -220,7 +238,7 @@ impl Annotatable for Annotation {
         &self,
         viewport: &Viewport,
         ctx: &DrawingContext,
-        waves: &WaveData,
+        waves: &AnnotationView<'_>,
         offset: f32,
     ) -> Pos2 {
         match self {
@@ -270,8 +288,8 @@ pub trait Annotatable {
     fn draw(
         &self,
         ui: &mut Ui,
-        waves: &WaveData,
-        viewport_idx: usize,
+        waves: &AnnotationView<'_>,
+        tile_id: crate::tiles::TileId,
         ctx: &mut DrawingContext,
         theme: &SurferTheme,
         msgs: &mut Vec<Message>,
@@ -283,7 +301,7 @@ pub trait Annotatable {
         &self,
         ui: &mut egui::Ui,
         msgs: &mut Vec<Message>,
-        waves: &WaveData,
+        tile_id: crate::tiles::TileId,
         viewport_rect: egui::Rect,
         position: Pos2,
     ) {
@@ -295,7 +313,7 @@ pub trait Annotatable {
             return;
         }
 
-        egui::Area::new(egui::Id::new(("annotation_quick_menu", id)))
+        egui::Area::new(ui.make_persistent_id(("annotation_quick_menu", id)))
             .order(egui::Order::Foreground)
             .fixed_pos(position)
             .show(ui.ctx(), |ui| {
@@ -317,10 +335,7 @@ pub trait Annotatable {
                                 .on_hover_text("Go to annotation")
                                 .clicked()
                             {
-                                msgs.push(Message::GoToAnnotationPosition(
-                                    id,
-                                    waves.last_active_viewport_idx,
-                                ));
+                                msgs.push(Message::GoToAnnotationPosition(id, tile_id));
                             }
 
                             let vis_icon = if self.is_visible() {
@@ -397,19 +412,18 @@ pub trait Annotatable {
         &self,
         viewport: &Viewport,
         ctx: &DrawingContext,
-        waves: &WaveData,
+        waves: &AnnotationView<'_>,
         offset: f32,
     ) -> Pos2;
 
     fn draw_comment_box(
         &self,
         ui: &mut egui::Ui,
-        viewport_idx: usize,
         msgs: &mut Vec<Message>,
         comment_position: Pos2,
     ) -> (Id, Comment) {
         let mut comment = self.get_comment_box();
-        comment.id = Id::new((comment.id, viewport_idx));
+        comment.id = ui.make_persistent_id(comment.id);
 
         comment.name = self.get_name();
 
@@ -446,7 +460,7 @@ pub trait Annotatable {
     }
 }
 
-impl WaveData {
+impl crate::item_list::ItemList {
     pub fn delete_annotation(&mut self, id: egui::Id) {
         self.annotations
             .retain(|annotation| annotation.get_id() != id);
@@ -456,13 +470,14 @@ impl WaveData {
     pub fn get_annotation_by_id(&self, id: &egui::Id) -> Option<&Annotation> {
         self.annotations.iter().find(|anno| anno.get_id() == *id)
     }
+}
 
+impl AnnotationView<'_> {
     #[allow(clippy::too_many_arguments)]
     pub fn draw_annotations(
         &self,
         ui: &mut egui::Ui,
-        viewport: &Viewport,
-        viewport_idx: usize,
+        tile_id: crate::tiles::TileId,
         ctx: &mut DrawingContext,
         theme: &SurferTheme,
         msgs: &mut Vec<Message>,
@@ -473,11 +488,11 @@ impl WaveData {
     ) {
         let mut comment_changes = Vec::new();
 
-        for annotation in &self.annotations {
+        for annotation in &self.items.annotations {
             annotation.draw(
                 ui,
                 self,
-                viewport_idx,
+                tile_id,
                 ctx,
                 theme,
                 msgs,
@@ -487,26 +502,26 @@ impl WaveData {
             );
 
             if self.selected_annotation == Some(annotation.get_id())
-                && viewport_idx == self.last_active_viewport_idx
+                && let (Some(mut menu_position), Some(menu_time)) =
+                    (self.menu_position, self.menu_time)
             {
-                let mut menu_position = self.annotation_menu_pos.unwrap();
-                let menu_time = self.annotation_menu_time.clone().unwrap();
-
-                menu_position.x =
-                    viewport.pixel_from_time(&menu_time, ctx.cfg.canvas_size.x, self.time_range());
+                menu_position.x = self.viewport.pixel_from_time(
+                    menu_time,
+                    ctx.cfg.canvas_size.x,
+                    self.time_range(),
+                );
                 let temp_y = menu_position.y;
                 menu_position = (ctx.to_screen)(menu_position.x, menu_position.y);
                 menu_position.y = temp_y;
 
-                annotation.draw_quick_menu(ui, msgs, self, viewport_rect, menu_position);
+                annotation.draw_quick_menu(ui, msgs, tile_id, viewport_rect, menu_position);
             }
         }
-        for annotation in &self.annotations {
+        for annotation in &self.items.annotations {
             if annotation.show_comment_box() && annotation.is_visible() {
                 let comment_position =
-                    annotation.get_comment_position(viewport, ctx, self, y_offset);
-                let (id, comment) =
-                    annotation.draw_comment_box(ui, viewport_idx, msgs, comment_position);
+                    annotation.get_comment_position(self.viewport, ctx, self, y_offset);
+                let (id, comment) = annotation.draw_comment_box(ui, msgs, comment_position);
                 // Only update comment if change has been made or something is being written
                 if comment.change || annotation.get_comment_box().new_text != comment.new_text {
                     comment_changes.push((id, comment));
@@ -520,10 +535,10 @@ impl WaveData {
 }
 
 impl SystemState {
-    pub(crate) fn go_to_annotation_position(&mut self, anno_id: Id, viewport_idx: usize) {
-        if let Some(waves) = self.user.waves.as_mut() {
+    pub(crate) fn go_to_annotation_position(&mut self, anno_id: Id, tile_id: crate::tiles::TileId) {
+        if let Some(waves) = self.user.waveform_edit_at(tile_id) {
             if waves.max_timestamp().is_some() {
-                if let Some(target) = waves.get_annotation_by_id(&anno_id) {
+                if let Some(target) = waves.items.get_annotation_by_id(&anno_id) {
                     let mut left = target.get_start_time();
                     let mut right = target.get_end_time();
                     let from_wave = target.get_from_wave();
@@ -533,18 +548,18 @@ impl SystemState {
                     left -= &difference;
                     right += difference;
                     let range = waves.time_range().clone();
-                    waves.viewports[viewport_idx].zoom_to_range(&left, &right, &range);
+                    waves.view.viewport.zoom_to_range(&left, &right, &range);
 
                     if let Some(from_wave) = from_wave
                         && let Some(to_wave) = to_wave
                     {
-                        if let Some(y_1) = waves.get_item_y(&from_wave)
-                            && let Some(y_2) = waves.get_item_y(&to_wave)
+                        if let Some(y_1) = waves.items.get_item_y(&from_wave)
+                            && let Some(y_2) = waves.items.get_item_y(&to_wave)
                         {
                             // let y_diff = (y_2 - y_1) * 0.5;
                             // let center = y_1 + y_diff;
-                            if let Some(item) = waves.get_item_at_y(y_1.min(y_2)) {
-                                waves.scroll_to_item(item.0);
+                            if let Some(item) = waves.items.get_item_at_y(y_1.min(y_2)) {
+                                waves.view.scroll_to_item(waves.items, item.0);
                             }
                         } else {
                             warn!("GoToAnnotationPosition: got None from get_item_y");
@@ -567,5 +582,43 @@ impl SystemState {
         let id = egui::Id::new(("annotation", self.annotation_id_source));
         self.annotation_id_source += 1;
         id
+    }
+}
+
+#[cfg(test)]
+mod view_tests {
+    use super::*;
+
+    #[test]
+    fn linked_annotation_comments_have_stable_distinct_view_ids() {
+        let annotation = RectAnnotation::new(
+            Id::new("shared annotation"),
+            BigInt::from(0),
+            BigInt::from(10),
+            None,
+            None,
+            Rect::ZERO,
+            1,
+        );
+        let original_id = annotation.annotation_data.comment_box.id;
+        let ctx = egui::Context::default();
+        let render = |order: [usize; 2]| {
+            let mut ids = [Id::NULL; 2];
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                for tile in order {
+                    let mut pane = ui.new_child(egui::UiBuilder::new().id(Id::new(("tile", tile))));
+                    let (annotation_id, comment) =
+                        annotation.draw_comment_box(&mut pane, &mut Vec::new(), Pos2::ZERO);
+                    assert_eq!(annotation_id, annotation.get_id());
+                    ids[tile] = comment.id;
+                }
+            });
+            output.textures_delta.clear();
+            ids
+        };
+        let first = render([0, 1]);
+        assert_ne!(first[0], first[1]);
+        assert_eq!(first, render([1, 0]));
+        assert_eq!(annotation.annotation_data.comment_box.id, original_id);
     }
 }

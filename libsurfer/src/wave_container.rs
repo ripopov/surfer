@@ -328,7 +328,7 @@ impl WaveContainer {
     /// Creates a new empty wave container.
     ///
     /// Should only be used as a default for serde. If no wave container is present,
-    /// the `WaveData` should be None, rather than this being Empty
+    /// the `WaveformData` should be None, rather than this being Empty
     #[must_use]
     pub fn __new_empty() -> Self {
         WaveContainer::Empty

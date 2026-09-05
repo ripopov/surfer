@@ -1,7 +1,6 @@
 //! Utility functions, typically inlined, for more readable code
 
 use ecolor::Color32;
-use egui::Modifiers;
 
 use crate::{
     SystemState,
@@ -13,13 +12,6 @@ use crate::{
 };
 
 impl SystemState {
-    #[inline]
-    pub fn get_item_text_color(&self, item: &DisplayedItem) -> Color32 {
-        item.color()
-            .and_then(|color| self.user.config.theme.get_color(color))
-            .unwrap_or(self.user.config.theme.primary_ui_color.foreground)
-    }
-
     #[inline]
     pub fn show_statusbar(&self) -> bool {
         self.user.show_statusbar.unwrap_or_else(|| {
@@ -153,15 +145,6 @@ impl SystemState {
     }
 
     #[inline]
-    /// Return true if the combination of `primary_button_drag_behavior` and
-    /// `modifiers` results in a measure, false otherwise.
-    pub fn do_measure(&self, modifiers: &Modifiers) -> bool {
-        let drag_behavior = self.primary_button_drag_behavior();
-        (drag_behavior == PrimaryMouseDrag::Measure && !modifiers.shift)
-            || (drag_behavior == PrimaryMouseDrag::Cursor && modifiers.shift)
-    }
-
-    #[inline]
     pub fn arrow_key_bindings(&self) -> ArrowKeyBindings {
         self.user
             .arrow_key_bindings
@@ -241,5 +224,14 @@ impl SystemState {
         self.user
             .enable_time_offset
             .unwrap_or_else(|| self.user.config.layout.enable_time_offset())
+    }
+}
+
+impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
+    #[inline]
+    pub fn get_item_text_color(&self, item: &DisplayedItem) -> Color32 {
+        item.color()
+            .and_then(|color| self.config.theme.get_color(color))
+            .unwrap_or(self.config.theme.primary_ui_color.foreground)
     }
 }

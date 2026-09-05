@@ -1,3 +1,4 @@
+use crate::tiles::commands::DocumentCommand;
 use ecolor::Color32;
 use egui::{FontId, PointerButton, Response, Sense, Ui};
 use emath::{Align2, Pos2, Rect, RectTransform, Vec2};
@@ -26,6 +27,7 @@ use crate::displayed_item::{
     AnalogSettings, DisplayedFieldRef, DisplayedItemRef, DisplayedVariable,
 };
 use crate::item_drawing_info::ItemDrawingInfo;
+use crate::item_list::ItemList;
 use crate::time::TimeFormatter;
 use crate::tooltips::handle_transaction_tooltip;
 use crate::trace_style::{TraceStyle, TraceValue};
@@ -39,6 +41,61 @@ use crate::{
     CachedDrawData, CachedTransactionDrawData, CachedWaveDrawData, Message, SystemState,
     displayed_item::DisplayedItem,
 };
+
+/// Immutable inputs for one canvas. The item list may be shared by other views,
+/// while the viewport and transaction focus belong to the requesting view.
+pub(crate) struct CanvasSource<'a> {
+    pub tile_id: crate::tiles::TileId,
+    pub interaction: &'a crate::tile_kinds::waveform::WaveformInteraction,
+    pub document: &'a WaveData,
+    pub items: &'a ItemList,
+    pub viewport: &'a Viewport,
+    pub focused_item: Option<crate::displayed_item_tree::VisibleItemIndex>,
+    pub focused_transaction: &'a Option<TransactionRef>,
+}
+
+impl std::ops::Deref for CanvasSource<'_> {
+    type Target = WaveData;
+    fn deref(&self) -> &Self::Target {
+        self.document
+    }
+}
+
+/// Presentation inputs for a complete canvas pass. Persistent state is borrowed;
+/// the caller supplies the disposable draw cache separately.
+pub(crate) struct CanvasView<'a> {
+    pub source: CanvasSource<'a>,
+    pub scroll_offset: f32,
+    pub selected_annotation: Option<egui::Id>,
+    pub annotation_menu: Option<(Pos2, &'a BigInt)>,
+}
+
+impl<'a> CanvasView<'a> {
+    pub(crate) fn new(
+        document: &'a WaveData,
+        items: &'a ItemList,
+        view: &'a crate::tile_kinds::waveform::WaveformView,
+        tile_id: crate::tiles::TileId,
+    ) -> Self {
+        Self {
+            source: CanvasSource {
+                tile_id,
+                interaction: &view.interaction,
+                document,
+                items,
+                viewport: &view.viewport,
+                focused_item: view.focused_index(items),
+                focused_transaction: &view.focused_transaction,
+            },
+            scroll_offset: view.scroll_offset,
+            selected_annotation: view.selected_annotation,
+            annotation_menu: view
+                .annotation_menu
+                .as_ref()
+                .map(|(position, time)| (*position, time)),
+        }
+    }
+}
 
 pub struct DrawnRegion {
     pub inner: Option<TranslatedValue>,
@@ -131,6 +188,14 @@ pub(crate) struct VariableDrawCommands {
     pub(crate) local_msgs: Vec<Message>,
 }
 
+/// Immutable inputs needed by parallel waveform generation. No UI or list caches.
+pub(crate) struct WaveRenderData<'a> {
+    pub container: &'a crate::wave_container::WaveContainer,
+    pub viewport: &'a crate::viewport::Viewport,
+    pub range: &'a crate::wave_data::TimeRange,
+    pub generation: u64,
+}
+
 /// Common setup for variable draw commands: extracts metadata and determines rendering mode.
 /// Routes to either analog or digital command generation.
 #[allow(clippy::too_many_arguments)]
@@ -138,13 +203,12 @@ fn variable_draw_commands(
     displayed_variable: &DisplayedVariable,
     display_id: DisplayedItemRef,
     timestamps: &[(f32, num::BigUint)],
-    waves: &WaveData,
+    source: &WaveRenderData<'_>,
     translators: &TranslatorList,
     view_width: f32,
-    viewport_idx: usize,
     trace_style: TraceStyle,
 ) -> Option<VariableDrawCommands> {
-    let wave_container = waves.inner.as_waves()?;
+    let wave_container = source.container;
 
     let signal_id = wave_container
         .signal_id(&displayed_variable.variable_ref)
@@ -164,8 +228,12 @@ fn variable_draw_commands(
         }
     };
 
-    let displayed_field_ref: DisplayedFieldRef = display_id.into();
-    let translator = waves.variable_translator_with_meta(&displayed_field_ref, translators, &meta);
+    let translator = crate::wave_data::variable_translator(
+        displayed_variable.get_format(&[]),
+        &[],
+        translators,
+        || Ok(meta.clone()),
+    );
     let info = translator.variable_info(&meta).unwrap();
 
     let is_analog_mode = displayed_variable.analog.is_some();
@@ -178,24 +246,22 @@ fn variable_draw_commands(
         variable_analog_draw_commands(
             displayed_variable,
             display_id,
-            waves,
-            translators,
+            source,
+            translator,
             view_width,
-            viewport_idx,
         )
     } else {
         variable_digital_draw_commands(
             displayed_variable,
             display_id,
             timestamps,
-            waves,
+            source,
             translators,
             wave_container,
             &meta,
             translator,
             &info,
             view_width,
-            viewport_idx,
             trace_style,
         )
     }
@@ -207,17 +273,16 @@ fn variable_digital_draw_commands(
     displayed_variable: &DisplayedVariable,
     display_id: DisplayedItemRef,
     timestamps: &[(f32, num::BigUint)],
-    waves: &WaveData,
+    source: &WaveRenderData<'_>,
     translators: &TranslatorList,
     wave_container: &crate::wave_container::WaveContainer,
     meta: &crate::wave_container::VariableMeta,
     translator: &crate::translation::DynTranslator,
     info: &VariableInfo,
     view_width: f32,
-    viewport_idx: usize,
     trace_style: TraceStyle,
 ) -> Option<VariableDrawCommands> {
-    let range = waves.time_range();
+    let range = source.range;
     let mut clock_edges = vec![];
     let mut local_msgs = vec![];
     let displayed_field_ref: DisplayedFieldRef = display_id.into();
@@ -248,11 +313,11 @@ fn variable_digital_draw_commands(
             Ok(Some(QueryResult {
                 next: Some(timestamp),
                 ..
-            })) => waves.viewports[viewport_idx].pixel_from_time(
-                &timestamp.to_bigint().unwrap(),
-                view_width,
-                range,
-            ),
+            })) => {
+                source
+                    .viewport
+                    .pixel_from_time(&timestamp.to_bigint().unwrap(), view_width, range)
+            }
             // If we don't have a next timestamp, we don't need to recheck until the last time
             // step
             Ok(_) => timestamps.last().map(|t| t.0).unwrap_or_default(),
@@ -364,52 +429,204 @@ fn variable_digital_draw_commands(
     })
 }
 
+/// One view's disposable commands and the geometry they were generated for.
+#[derive(Default)]
+pub(crate) struct WaveDrawCache {
+    commands: Option<CachedDrawData>,
+    rect: Option<Rect>,
+    #[cfg(test)]
+    pub(crate) builds: usize,
+}
+
 impl SystemState {
-    pub fn invalidate_draw_commands(&mut self) {
-        if let Some(waves) = &self.user.waves {
-            for viewport in 0..waves.viewports.len() {
-                self.draw_data.borrow_mut()[viewport] = None;
-            }
-        }
+    pub fn invalidate_draw_commands(&self) {
+        self.user.workspace.invalidate_all();
     }
 
-    pub fn generate_draw_commands(
+    pub fn draw_items(&self, ui: &mut Ui, msgs: &mut Vec<Message>, tile_id: crate::tiles::TileId) {
+        let Some(waves) = self.user.waveform_read_at(tile_id) else {
+            return;
+        };
+        let view = CanvasView::new(waves.document, waves.items, waves.view, tile_id);
+        self.waveform_services().draw_canvas(
+            &view,
+            &mut waves.view.draw_cache.borrow_mut(),
+            ui,
+            msgs,
+            tile_id,
+        );
+    }
+    pub(crate) fn draw_waveform_body(
         &self,
+        ui: &mut Ui,
+        msgs: &mut Vec<Message>,
+        tile_id: crate::tiles::TileId,
+        columns: crate::tile_kinds::waveform_body::WaveformColumns,
+    ) {
+        let Some(waves) = self.user.waveform_read_at(tile_id) else {
+            ui.centered_and_justified(|ui| {
+                ui.label("Open a waveform file to display signals.");
+            });
+            return;
+        };
+        let view = CanvasView::new(waves.document, waves.items, waves.view, tile_id);
+        let response = self.waveform_services().draw_waveform_body(
+            &view,
+            &mut waves.view.draw_cache.borrow_mut(),
+            columns,
+            ui,
+            msgs,
+        );
+        if (response.name_width.is_some() || response.value_width.is_some())
+            && let Some(entry) = self.user.workspace.tiles.get(&tile_id)
+            && let crate::tiles::kind::TileKind::Waveform(tile) = &entry.kind
+        {
+            msgs.push(Message::ToTile(
+                tile_id,
+                crate::tiles::kind::TileMessage::Waveform(
+                    crate::tile_kinds::waveform::WaveformMessage::ColumnWidths {
+                        names: response.name_width.unwrap_or(tile.name_column_width),
+                        values: response.value_width.unwrap_or(tile.value_column_width),
+                    },
+                ),
+            ));
+        }
+        if waves.view.viewport_height != response.height || response.scroll_offset.is_some() {
+            msgs.push(Message::WaveformBodyMeasured {
+                tile_id,
+                height: response.height,
+                scroll_offset: response.scroll_offset,
+            });
+        }
+    }
+}
+
+/// Draw a vertical line at the given time with the specified stroke.
+#[inline]
+pub(crate) fn draw_vertical_line_at_time(
+    time: &BigInt,
+    ctx: &mut DrawingContext,
+    stroke: impl Into<Stroke>,
+    viewport: &Viewport,
+    range: &TimeRange,
+) {
+    let x = viewport.pixel_from_time(time, ctx.cfg.canvas_size.x, range);
+    ctx.painter.line_segment(
+        [
+            (ctx.to_screen)(x, 0.),
+            (ctx.to_screen)(x, ctx.cfg.canvas_size.y),
+        ],
+        stroke,
+    );
+}
+
+fn shift_brightness(color: Color32, delta: f32, background: Color32) -> Color32 {
+    // Lighten the color on dark backgrounds (blend toward white),
+    // darken it on light backgrounds (blend toward black).
+    let bg_luminance = crate::config::get_luminance(background);
+    let rgba = Rgba::from(color);
+    let result = if bg_luminance < 0.5 {
+        // Dark background: lighten
+        rgba * (1.0 - delta) + Rgba::WHITE * delta
+    } else {
+        // Light background: darken
+        rgba * (1.0 - delta) + Rgba::BLACK * delta
+    };
+    Color32::from(result)
+}
+
+pub(crate) fn apply_brightness_shift(
+    color: Color32,
+    brightness_shift: Option<f32>,
+    background: Color32,
+) -> Color32 {
+    match brightness_shift {
+        Some(delta) => shift_brightness(color, delta, background),
+        None => color,
+    }
+}
+
+trait VariableExt {
+    fn bool_drawing_spec(
+        &self,
+        user_color: Color32,
+        theme: &SurferTheme,
+        value_kind: ValueKind,
+    ) -> (f32, Color32, Option<Color32>);
+}
+
+impl VariableExt for String {
+    /// Return the height and color with which to draw this value if it is a boolean
+    fn bool_drawing_spec(
+        &self,
+        user_color: Color32,
+        theme: &SurferTheme,
+        value_kind: ValueKind,
+    ) -> (f32, Color32, Option<Color32>) {
+        let color = value_kind.color(user_color, theme);
+        let (height, background) = match (value_kind, self) {
+            (
+                ValueKind::HighImp
+                | ValueKind::Undef
+                | ValueKind::DontCare
+                | ValueKind::Warn
+                | ValueKind::Error
+                | ValueKind::Custom(_),
+                _,
+            ) => (0.5, None),
+            (ValueKind::Weak, other) => {
+                if other.to_lowercase() == "l" {
+                    (0., None)
+                } else {
+                    (1., Some(color.gamma_multiply(theme.waveform_opacity)))
+                }
+            }
+            (ValueKind::Normal, other) => {
+                if other == "0" {
+                    (0., None)
+                } else {
+                    (1., Some(color.gamma_multiply(theme.waveform_opacity)))
+                }
+            }
+            (ValueKind::Event, _) => (1., Some(color.gamma_multiply(theme.waveform_opacity))),
+        };
+        (height, color, background)
+    }
+}
+
+impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
+    pub(crate) fn generate_draw_commands(
+        &self,
+        source: &CanvasSource<'_>,
         cfg: &DrawConfig,
         msgs: &mut Vec<Message>,
-        viewport_idx: usize,
-    ) {
+    ) -> Option<CachedDrawData> {
         #[cfg(feature = "performance_plot")]
         self.timing.borrow_mut().start("Generate draw commands");
-        if let Some(waves) = &self.user.waves {
-            let draw_data = match waves.inner {
-                DataContainer::Waves(_) => {
-                    self.generate_wave_draw_commands(waves, cfg, msgs, viewport_idx)
-                }
-                DataContainer::Transactions(_) => {
-                    self.generate_transaction_draw_commands(waves, cfg, msgs, viewport_idx)
-                }
-                DataContainer::Empty => None,
-            };
-            self.draw_data.borrow_mut()[viewport_idx] = draw_data;
-        }
+        let result = match source.document.inner {
+            DataContainer::Waves(_) => self.generate_wave_draw_commands(source, cfg, msgs),
+            DataContainer::Transactions(_) => self.generate_transaction_draw_commands(source, cfg),
+            DataContainer::Empty => None,
+        };
         #[cfg(feature = "performance_plot")]
         self.timing.borrow_mut().end("Generate draw commands");
+        result
     }
 
-    fn generate_wave_draw_commands(
+    pub(crate) fn generate_wave_draw_commands(
         &self,
-        waves: &WaveData,
+        source: &CanvasSource<'_>,
         cfg: &DrawConfig,
         msgs: &mut Vec<Message>,
-        viewport_idx: usize,
     ) -> Option<CachedDrawData> {
+        let waves = source.document;
+        let items = source.items;
+        let viewport = source.viewport;
         let mut draw_commands = HashMap::new();
 
         let max_timestamp = waves.safe_max_timestamp();
         let max_time = max_timestamp.to_f64().unwrap_or(f64::MAX);
         let mut clock_edges_by_clock = vec![];
-        let viewport = waves.viewports[viewport_idx];
         let range = waves.time_range();
         // Compute which timestamp to draw in each pixel. We'll draw from -extra_draw_width to
         // width + extra_draw_width in order to draw initial transitions outside the screen
@@ -427,12 +644,18 @@ impl SystemState {
             })
             .collect::<Vec<_>>();
 
-        let trace_style = self.trace_style();
+        let trace_style = self.trace_style;
         let translators = &self.translators;
-        let commands = waves
+        let wave_source = WaveRenderData {
+            container: waves.inner.as_waves()?,
+            viewport,
+            range,
+            generation: waves.cache_generation,
+        };
+        let commands = items
             .items_tree
             .iter_visible()
-            .map(|node| (node.item_ref, waves.displayed_items.get(&node.item_ref)))
+            .map(|node| (node.item_ref, items.displayed_items.get(&node.item_ref)))
             .filter_map(|(id, item)| match item {
                 Some(DisplayedItem::Variable(variable_ref)) => Some((id, variable_ref)),
                 _ => None,
@@ -447,10 +670,9 @@ impl SystemState {
                     displayed_variable,
                     id,
                     &timestamps,
-                    waves,
+                    &wave_source,
                     translators,
                     cfg.canvas_size.x,
-                    viewport_idx,
                     trace_style,
                 )
             })
@@ -488,7 +710,7 @@ impl SystemState {
 
         let clock_edges = self.get_clock_hightlight_data(clock_edges_by_clock);
 
-        let ticks = self.get_ticks_for_viewport_idx(waves, viewport_idx, cfg);
+        let ticks = self.get_ticks_for_viewport(waves, viewport, cfg);
 
         Some(CachedDrawData::WaveDrawData(CachedWaveDrawData {
             draw_commands,
@@ -497,31 +719,32 @@ impl SystemState {
         }))
     }
 
-    fn generate_transaction_draw_commands(
+    pub(crate) fn generate_transaction_draw_commands(
         &self,
-        waves: &WaveData,
+        source: &CanvasSource<'_>,
         cfg: &DrawConfig,
-        msgs: &mut Vec<Message>,
-        viewport_idx: usize,
     ) -> Option<CachedDrawData> {
+        let waves = source.document;
+        let items = source.items;
+        let viewport = source.viewport;
         let mut draw_commands = HashMap::new();
         let mut stream_to_displayed_txs = HashMap::new();
         let mut inc_relation_tx_ids = vec![];
         let mut out_relation_tx_ids = vec![];
 
-        let (focused_tx_ref, old_focused_tx) = &waves.focused_transaction;
+        let focused_tx_ref = source.focused_transaction;
         let mut new_focused_tx: Option<&Transaction> = None;
 
-        let viewport = waves.viewports[viewport_idx];
         let range = waves.time_range();
 
-        let displayed_streams = waves
+        let displayed_items = &items.displayed_items;
+        let displayed_streams = items
             .items_tree
             .iter_visible()
             .map(|node| node.item_ref)
             .collect::<Vec<_>>()
             .par_iter()
-            .map(|id| waves.displayed_items.get(id))
+            .map(|id| displayed_items.get(id))
             .filter_map(|item| match item {
                 Some(DisplayedItem::Stream(stream_ref)) => Some(stream_ref),
                 _ => None,
@@ -652,12 +875,6 @@ impl SystemState {
             for rel in &focused_tx.out_relations {
                 out_relation_tx_ids.push(TransactionRef { id: rel.sink_tx_id });
             }
-            if old_focused_tx.is_none() || Some(focused_tx) != old_focused_tx.as_ref() {
-                msgs.push(Message::FocusTransaction(
-                    focused_tx_ref.clone(),
-                    Some(focused_tx.clone()),
-                ));
-            }
         }
 
         Some(TransactionDrawData(CachedTransactionDrawData {
@@ -671,18 +888,24 @@ impl SystemState {
     /// Calculate the offset reserved for the default timeline header, so the name/value
     /// columns and the canvas all start their rows at the same y.
     pub(crate) fn default_timeline_offset(&self) -> f32 {
-        if self.show_default_timeline() {
-            self.user.config.layout.waveforms_text_size + self.user.config.layout.waveforms_gap * 4.
+        if self.show_default_timeline {
+            self.config.layout.waveforms_text_size + self.config.layout.waveforms_gap * 4.
         } else {
             0.0
         }
     }
 
-    pub fn draw_items(&mut self, ui: &mut Ui, msgs: &mut Vec<Message>, viewport_idx: usize) {
-        let Some(waves) = &self.user.waves else {
-            return;
-        };
-
+    pub(crate) fn draw_canvas(
+        &self,
+        view: &CanvasView<'_>,
+        cache: &mut WaveDrawCache,
+        ui: &mut Ui,
+        msgs: &mut Vec<Message>,
+        tile_id: crate::tiles::TileId,
+    ) {
+        let source = &view.source;
+        let waves = source;
+        self.ensure_drawing_infos_cached(source.items);
         let (response, mut painter) =
             ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
 
@@ -697,22 +920,24 @@ impl SystemState {
         let cfg = match waves.inner {
             DataContainer::Waves(_) => DrawConfig::new(
                 Vec2::new(frame_width, frame_height),
-                self.user.config.layout.waveforms_line_height,
-                self.user.config.layout.waveforms_text_size,
+                self.config.layout.waveforms_line_height,
+                self.config.layout.waveforms_text_size,
             ),
             DataContainer::Transactions(_) => DrawConfig::new(
                 Vec2::new(frame_width, frame_height),
-                self.user.config.layout.transactions_line_height,
-                self.user.config.layout.waveforms_text_size,
+                self.config.layout.transactions_line_height,
+                self.config.layout.waveforms_text_size,
             ),
             DataContainer::Empty => return,
         };
-        // the draw commands have been invalidated, recompute
-        if self.draw_data.borrow()[viewport_idx].is_none()
-            || Some(response.rect) != *self.last_canvas_rect.borrow()
-        {
-            self.generate_draw_commands(&cfg, msgs, viewport_idx);
-            *self.last_canvas_rect.borrow_mut() = Some(response.rect);
+        if cache.commands.is_none() || Some(response.rect) != cache.rect {
+            let commands = self.generate_draw_commands(source, &cfg, msgs);
+            cache.commands = commands;
+            cache.rect = Some(response.rect);
+            #[cfg(test)]
+            {
+                cache.builds += 1;
+            }
         }
 
         let to_screen =
@@ -727,7 +952,7 @@ impl SystemState {
             || response.clicked_by(PointerButton::Secondary)
             || response.drag_started()
         {
-            msgs.push(Message::SetActiveViewport(viewport_idx));
+            msgs.push(Message::SetActiveViewport(tile_id));
         }
 
         if ui.ui_contains_pointer() {
@@ -737,13 +962,13 @@ impl SystemState {
             if scroll_delta != Vec2::ZERO {
                 msgs.push(Message::CanvasScroll {
                     delta: scroll_delta,
-                    viewport_idx,
+                    tile_id,
                 });
             }
 
             let zoom_delta = ui.input(egui::InputState::zoom_delta);
             if zoom_delta != 1. {
-                let mouse_ptr = Some(waves.viewports[viewport_idx].as_time_bigint(
+                let mouse_ptr = Some(waves.viewport.as_time_bigint(
                     mouse_ptr_pos.x,
                     frame_width,
                     range,
@@ -752,32 +977,36 @@ impl SystemState {
                 msgs.push(Message::CanvasZoom {
                     mouse_ptr,
                     delta: zoom_delta,
-                    viewport_idx,
+                    tile_id,
                 });
             }
         }
 
-        ui.input(|i| {
-            // If we have a single touch, we'll interpret that as a pan
-            let touch = i.any_touches() && i.multi_touch().is_none();
-            let right_mouse = i.pointer.button_down(PointerButton::Secondary);
-            if touch || right_mouse {
-                msgs.push(Message::CanvasScroll {
-                    delta: Vec2 {
-                        x: i.pointer.delta().y,
-                        y: i.pointer.delta().x,
-                    },
-                    viewport_idx,
-                });
-            }
+        // Query input before inspecting the response; response helpers also access
+        // egui state and must not run while an input lock is held.
+        let (single_touch, pointer_delta) = ui.input(|i| {
+            (
+                i.any_touches() && i.multi_touch().is_none(),
+                i.pointer.delta(),
+            )
         });
+        if (single_touch && response.dragged()) || response.dragged_by(PointerButton::Secondary) {
+            msgs.push(Message::CanvasScroll {
+                delta: Vec2 {
+                    x: pointer_delta.y,
+                    y: pointer_delta.x,
+                },
+                tile_id,
+            });
+        }
 
         let modifiers = ui.input(|i| i.modifiers);
         let do_measure = self.do_measure(&modifiers);
         let handle_cursor = !modifiers.command
             && ((response.dragged_by(PointerButton::Primary) && !do_measure)
                 || response.clicked_by(PointerButton::Primary));
-        let needs_pointer_pos_canvas = self.annotation_kind.is_none() || handle_cursor;
+        let needs_pointer_pos_canvas =
+            source.interaction.annotation_kind.is_none() || handle_cursor;
         let pointer_pos_canvas = if needs_pointer_pos_canvas {
             pointer_pos_global.map(|p| to_screen.inverse().transform_pos(p))
         } else {
@@ -786,17 +1015,16 @@ impl SystemState {
 
         // Handle cursor
         if handle_cursor
-            && let Some(snap_point) =
-                self.snap_to_edge(pointer_pos_canvas, waves, frame_width, viewport_idx)
+            && let Some(snap_point) = self.snap_to_edge(pointer_pos_canvas, source, frame_width)
         {
-            msgs.push(Message::CursorSet(snap_point));
+            msgs.push(Message::ToDocument(DocumentCommand::CursorSet(snap_point)));
         }
 
         // Draw background
         painter.rect_filled(
             response.rect,
             CornerRadius::ZERO,
-            self.user.config.theme.canvas_colors.background,
+            self.config.theme.canvas_colors.background,
         );
 
         // Check for mouse gesture starting
@@ -807,17 +1035,25 @@ impl SystemState {
                 ui.input(|i| i.pointer.press_origin())
                     .map(|p| to_screen.inverse().transform_pos(p)),
                 None,
+                tile_id,
             ));
         }
         let timeline_offset = self.default_timeline_offset();
 
-        if self.annotation_kind.is_some() && response.drag_started_by(PointerButton::Primary) {
+        if source.interaction.annotation_kind.is_some()
+            && response.drag_started_by(PointerButton::Primary)
+        {
             let start = ui
                 .input(|i| i.pointer.press_origin())
                 .map(|p| to_screen.inverse().transform_pos(p));
-            let time =
-                waves.viewports[viewport_idx].as_time_bigint(start.unwrap().x, frame_width, range);
-            msgs.push(Message::SetMouseGestureDragStart(start, Some(time)));
+            let time = waves
+                .viewport
+                .as_time_bigint(start.unwrap().x, frame_width, range);
+            msgs.push(Message::SetMouseGestureDragStart(
+                start,
+                Some(time),
+                tile_id,
+            ));
         }
 
         // Check for measure drag starting. Snap the start X to the nearest transition
@@ -829,14 +1065,10 @@ impl SystemState {
 
             let snapped_pos = if let Some(start_pos) = press_origin_local {
                 // Snap to nearest edge/time then convert back to pixel X
-                if let Some(snap_time) =
-                    self.snap_to_edge(Some(start_pos), waves, frame_width, viewport_idx)
-                {
-                    let x = waves.viewports[viewport_idx].pixel_from_time(
-                        &snap_time,
-                        frame_width,
-                        range,
-                    );
+                if let Some(snap_time) = self.snap_to_edge(Some(start_pos), source, frame_width) {
+                    let x = waves
+                        .viewport
+                        .pixel_from_time(&snap_time, frame_width, range);
                     Some(Pos2 { x, y: start_pos.y })
                 } else {
                     Some(start_pos)
@@ -845,28 +1077,36 @@ impl SystemState {
                 None
             };
 
-            msgs.push(Message::SetMeasureDragStart(snapped_pos));
+            msgs.push(Message::SetMeasureDragStart(snapped_pos, tile_id));
         }
 
         let mut ctx = DrawingContext {
             painter: &mut painter,
             cfg: &cfg,
             to_screen: &|x, y| to_screen.transform_pos(Pos2::new(x, y)),
-            theme: &self.user.config.theme,
+            theme: &self.config.theme,
         };
 
-        // `waves.drawing_infos` holds offset-free (canonical) positions; the canvas isn't
+        // `waves.items.drawing_infos` holds offset-free (canonical) positions; the canvas isn't
         // inside a `ScrollArea` like the name/value columns, so scrolling is applied here
         // explicitly instead.
-        let row_offset = timeline_offset - waves.scroll_offset;
+        let row_offset = timeline_offset - view.scroll_offset;
 
         let background_offset = y_zero + row_offset;
         let visible_top = -row_offset;
         let visible_bottom = ctx.cfg.canvas_size.y - row_offset;
-        for drawing_info in waves.visible_drawing_infos(visible_top, visible_bottom) {
+        for drawing_info in waves
+            .items
+            .visible_drawing_infos(visible_top, visible_bottom)
+            .iter()
+        {
             // Use vidx so all sub-fields of a compound share the same stripe index
-            let background_color =
-                self.get_background_color(waves, drawing_info.vidx(), drawing_info.vidx().0);
+            let background_color = self.get_background_color(
+                waves.items,
+                waves.focused_item,
+                drawing_info.vidx(),
+                drawing_info.vidx().0,
+            );
 
             self.draw_background(drawing_info, background_offset, &ctx, background_color);
         }
@@ -874,19 +1114,13 @@ impl SystemState {
         #[cfg(feature = "performance_plot")]
         self.timing.borrow_mut().start("Wave drawing");
 
-        match &self.draw_data.borrow()[viewport_idx] {
+        match &cache.commands {
             Some(CachedDrawData::WaveDrawData(draw_data)) => {
-                self.draw_wave_data(waves, draw_data, row_offset, &mut ctx);
+                self.draw_wave_data(source, draw_data, row_offset, &mut ctx);
             }
             Some(CachedDrawData::TransactionDrawData(draw_data)) => {
                 self.draw_transaction_data(
-                    waves,
-                    draw_data,
-                    viewport_idx,
-                    ui,
-                    msgs,
-                    row_offset,
-                    &mut ctx,
+                    source, draw_data, ui, msgs, row_offset, &mut ctx, tile_id,
                 );
             }
             None => {}
@@ -894,34 +1128,33 @@ impl SystemState {
         #[cfg(feature = "performance_plot")]
         self.timing.borrow_mut().end("Wave drawing");
 
-        let viewport = &waves.viewports[viewport_idx];
-        waves.draw_graphics(&mut ctx, viewport, &self.user.config.theme);
+        let viewport = waves.viewport;
+        waves
+            .items
+            .draw_graphics(&mut ctx, viewport, waves.time_range(), &self.config.theme);
 
         //Draw cursor and allow measure if no annotation is currently being drawn
-        if self.annotation_kind.is_none() {
-            waves.draw_cursor(&self.user.config.theme, &mut ctx, viewport);
+        if source.interaction.annotation_kind.is_none() {
+            waves.draw_cursor(&self.config.theme, &mut ctx, viewport);
 
             self.draw_measure_widget(
                 ui,
-                waves,
+                source,
                 pointer_pos_canvas,
                 pointer_pos_mouse_gesture,
                 &response,
                 msgs,
                 &mut ctx,
-                viewport_idx,
             );
         }
 
-        waves.draw_markers(
-            &self.user.config.theme,
-            &mut ctx,
-            &waves.viewports[viewport_idx],
-        );
+        waves
+            .items
+            .draw_markers(waves.document, &self.config.theme, &mut ctx, waves.viewport);
 
-        self.draw_marker_boxes(waves, &mut ctx, viewport, row_offset);
+        self.draw_marker_boxes(waves.document, waves.items, &mut ctx, viewport, row_offset);
 
-        if self.show_default_timeline() {
+        if self.show_default_timeline {
             let rect = Rect {
                 min: Pos2 { x: 0.0, y: y_zero },
                 max: Pos2 {
@@ -932,34 +1165,41 @@ impl SystemState {
             ctx.painter.rect_filled(
                 rect,
                 CornerRadius::ZERO,
-                self.user.config.theme.canvas_colors.background,
+                self.config.theme.canvas_colors.background,
             );
-            self.draw_default_timeline(waves, &ctx, viewport_idx);
+            self.draw_default_timeline(waves.document, &ctx, viewport);
         }
 
         let time_formatter = TimeFormatter::new(
             &waves.inner.metadata().timescale,
-            &self.user.wanted_timeunit,
-            &self.get_time_format(),
+            &self.wanted_timeunit,
+            &self.time_format,
         );
 
         self.draw_mouse_gesture_widget(
             ui,
-            waves,
+            source,
             pointer_pos_mouse_gesture,
             &response,
             msgs,
             &mut ctx,
-            viewport_idx,
+            tile_id,
             timeline_offset,
         );
 
-        waves.draw_annotations(
+        crate::annotation::AnnotationView {
+            document: waves.document,
+            items: waves.items,
+            viewport,
+            selected_annotation: view.selected_annotation,
+            menu_position: view.annotation_menu.map(|(position, _)| position),
+            menu_time: view.annotation_menu.map(|(_, time)| time),
+        }
+        .draw_annotations(
             ui,
-            &waves.viewports[viewport_idx],
-            viewport_idx,
+            tile_id,
             &mut ctx,
-            &self.user.config.theme,
+            &self.config.theme,
             msgs,
             timeline_offset,
             response.rect,
@@ -967,52 +1207,54 @@ impl SystemState {
             &time_formatter,
         );
 
-        self.handle_canvas_context_menu(&response, waves, to_screen, &mut ctx, msgs, viewport_idx);
+        self.handle_canvas_context_menu(&response, source, to_screen, &mut ctx, msgs);
     }
 
-    fn draw_wave_data(
+    pub(crate) fn draw_wave_data(
         &self,
-        waves: &WaveData,
+        source: &CanvasSource<'_>,
         draw_data: &CachedWaveDrawData,
         row_offset: f32,
         ctx: &mut DrawingContext,
     ) {
+        let waves = source.document;
+        let items = source.items;
         let clock_edges = &draw_data.clock_edges;
         let draw_commands = &draw_data.draw_commands;
         let draw_clock_edges = clock_edges.has_edges();
-        let draw_clock_rising_marker =
-            draw_clock_edges && self.user.config.theme.clock_rising_marker;
+        let draw_clock_rising_marker = draw_clock_edges && self.config.theme.clock_rising_marker;
         let ticks = &draw_data.ticks;
-        if !ticks.is_empty() && self.show_ticks() {
-            let stroke = Stroke::from(&self.user.config.theme.ticks.style);
+        if !ticks.is_empty() && self.show_ticks {
+            let stroke = Stroke::from(&self.config.theme.ticks.style);
 
             for (_, x, _) in ticks {
-                waves.draw_tick_line(*x, ctx, &stroke);
+                ctx.draw_tick_line(*x, &stroke);
             }
         }
 
         if draw_clock_edges {
-            draw_clock_edge_marks(clock_edges, ctx, &self.user.config);
+            draw_clock_edge_marks(clock_edges, ctx, self.config);
         }
         // Only the rows visible in the current scroll position need to be drawn; `top`/`bottom`
-        // are derived from `waves.drawing_infos`, which are themselves computed purely from the
+        // are derived from `items.layout_cache`, which are themselves computed purely from the
         // Surfer config layout constants (`waveforms_line_height`/`waveforms_gap`/etc.), not
         // egui defaults.
         let visible_top = -row_offset;
         let visible_bottom = ctx.cfg.canvas_size.y - row_offset;
-        for (item_count, drawing_info) in waves
+        for (item_count, drawing_info) in items
             .visible_drawing_infos(visible_top, visible_bottom)
+            .iter()
             .enumerate()
         {
             let y_offset = drawing_info.top_at(row_offset);
 
-            let displayed_item = waves
+            let displayed_item = items
                 .items_tree
                 .get_visible(drawing_info.vidx())
-                .and_then(|node| waves.displayed_items.get(&node.item_ref));
+                .and_then(|node| items.displayed_items.get(&node.item_ref));
             let color = displayed_item
                 .and_then(super::displayed_item::DisplayedItem::color)
-                .and_then(|color| self.user.config.theme.get_color(color));
+                .and_then(|color| self.config.theme.get_color(color));
 
             match drawing_info {
                 ItemDrawingInfo::Variable(variable_info) => {
@@ -1021,9 +1263,9 @@ impl SystemState {
                             1.0,
                             super::displayed_item::DisplayedItem::height_scaling_factor,
                         );
-                        let y_offset = y_offset + self.user.config.layout.waveforms_gap;
-                        let focus_highlight = if waves.focused_item == Some(drawing_info.vidx()) {
-                            self.focus_highlight()
+                        let y_offset = y_offset + self.config.layout.waveforms_gap;
+                        let focus_highlight = if source.focused_item == Some(drawing_info.vidx()) {
+                            self.focus_highlight
                         } else {
                             FocusHighlight::Off
                         };
@@ -1031,10 +1273,10 @@ impl SystemState {
                             focus_highlight,
                             FocusHighlight::LineWidth | FocusHighlight::LineWidthAndBrightnessShift
                         ) {
-                            self.user.config.theme.linewidth
-                                * self.user.config.theme.focus_highlight_line_width_multiplier
+                            self.config.theme.linewidth
+                                * self.config.theme.focus_highlight_line_width_multiplier
                         } else {
-                            self.user.config.theme.linewidth
+                            self.config.theme.linewidth
                         };
 
                         let color = color.unwrap_or_else(|| {
@@ -1045,16 +1287,16 @@ impl SystemState {
                                     .and_then(|w| w.variable_meta(&variable.variable_ref).ok())
                                     .and_then(|meta| {
                                         if meta.is_event() {
-                                            Some(self.user.config.theme.variable_event)
+                                            Some(self.config.theme.variable_event)
                                         } else if meta.is_parameter() {
-                                            Some(self.user.config.theme.variable_parameter)
+                                            Some(self.config.theme.variable_parameter)
                                         } else {
                                             None
                                         }
                                     })
-                                    .unwrap_or(self.user.config.theme.variable_default)
+                                    .unwrap_or(self.config.theme.variable_default)
                             } else {
-                                self.user.config.theme.variable_default
+                                self.config.theme.variable_default
                             }
                         });
                         let brightness_shift = if matches!(
@@ -1062,7 +1304,7 @@ impl SystemState {
                             FocusHighlight::BrightnessShift
                                 | FocusHighlight::LineWidthAndBrightnessShift
                         ) {
-                            Some(self.user.config.theme.focus_highlight_brightness_shift)
+                            Some(self.config.theme.focus_highlight_brightness_shift)
                         } else {
                             None
                         };
@@ -1073,7 +1315,7 @@ impl SystemState {
                                         let draw_clock = (digital_commands.drawing_type
                                             == DigitalDrawingType::Clock)
                                             && draw_clock_rising_marker;
-                                        let draw_background = self.fill_high_values();
+                                        let draw_background = self.fill_high_values;
                                         for (old, new) in digital_commands
                                             .values
                                             .iter()
@@ -1109,16 +1351,14 @@ impl SystemState {
                                     DigitalDrawingType::Vector => {
                                         // Get background color and determine best text color
                                         let background_color = self.get_background_color(
-                                            waves,
+                                            items,
+                                            source.focused_item,
                                             drawing_info.vidx(),
                                             item_count,
                                         );
 
-                                        let text_color = self
-                                            .user
-                                            .config
-                                            .theme
-                                            .get_best_text_color(background_color);
+                                        let text_color =
+                                            self.config.theme.get_best_text_color(background_color);
 
                                         for (old, new) in digital_commands
                                             .values
@@ -1153,49 +1393,48 @@ impl SystemState {
                     }
                 }
                 ItemDrawingInfo::Divider(_) | ItemDrawingInfo::Group(_) => {
-                    if !self.show_divider_text() {
+                    if !self.show_divider_text {
                         continue;
                     }
 
                     let text_color = color.unwrap_or(
                         // Get background color and determine best text color
-                        self.user
-                            .config
+                        self.config
                             .theme
                             .get_best_text_color(self.get_background_color(
-                                waves,
+                                items,
+                                source.focused_item,
                                 drawing_info.vidx(),
                                 item_count,
                             )),
                     );
 
-                    let wave_y_offset = y_offset + self.user.config.layout.waveforms_gap;
-                    waves.draw_divider_text(
+                    let wave_y_offset = y_offset + self.config.layout.waveforms_gap;
+                    ctx.draw_divider_text(
                         Some(text_color),
                         &displayed_item
                             .map(super::displayed_item::DisplayedItem::name)
                             .unwrap_or_default(),
                         ticks,
-                        ctx,
                         wave_y_offset,
-                        &self.user.config,
+                        self.config,
                     );
                 }
                 ItemDrawingInfo::Marker(_) => {}
                 ItemDrawingInfo::TimeLine(_) => {
                     let text_color = color.unwrap_or(
                         // Get background color and determine best text color
-                        self.user
-                            .config
+                        self.config
                             .theme
                             .get_best_text_color(self.get_background_color(
-                                waves,
+                                items,
+                                source.focused_item,
                                 drawing_info.vidx(),
                                 item_count,
                             )),
                     );
-                    let wave_y_offset = y_offset + self.user.config.layout.waveforms_gap;
-                    waves.draw_ticks(text_color, ticks, ctx, wave_y_offset, Align2::CENTER_TOP);
+                    let wave_y_offset = y_offset + self.config.layout.waveforms_gap;
+                    ctx.draw_ticks(text_color, ticks, wave_y_offset, Align2::CENTER_TOP);
                 }
                 ItemDrawingInfo::Stream(_) => {}
                 ItemDrawingInfo::Placeholder(_) => {}
@@ -1204,16 +1443,18 @@ impl SystemState {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn draw_transaction_data(
+    pub(crate) fn draw_transaction_data(
         &self,
-        waves: &WaveData,
+        source: &CanvasSource<'_>,
         draw_data: &CachedTransactionDrawData,
-        viewport_idx: usize,
         ui: &mut Ui,
         msgs: &mut Vec<Message>,
         row_offset: f32,
         ctx: &mut DrawingContext,
+        tile_id: crate::tiles::TileId,
     ) {
+        let waves = source.document;
+        let items = source.items;
         let draw_commands = &draw_data.draw_commands;
         let stream_to_displayed_txs = &draw_data.stream_to_displayed_txs;
         let inc_relation_tx_ids = &draw_data.inc_relation_tx_ids;
@@ -1223,37 +1464,34 @@ impl SystemState {
         let mut out_relation_starts = vec![];
         let mut focused_transaction_start: Option<Pos2> = None;
 
-        let ticks = self.get_ticks_for_viewport_idx(waves, viewport_idx, ctx.cfg);
+        let ticks = self.get_ticks_for_viewport(waves, source.viewport, ctx.cfg);
 
-        if !ticks.is_empty() && self.show_ticks() {
-            let stroke = Stroke::from(&self.user.config.theme.ticks.style);
+        if !ticks.is_empty() && self.show_ticks {
+            let stroke = Stroke::from(&self.config.theme.ticks.style);
 
             for (_, x, _) in &ticks {
-                waves.draw_tick_line(*x, ctx, &stroke);
+                ctx.draw_tick_line(*x, &stroke);
             }
         }
 
         // Draws the surrounding border of the stream
-        let border_stroke = Stroke::new(
-            self.user.config.theme.linewidth,
-            self.user.config.theme.foreground,
-        );
+        let border_stroke = Stroke::new(self.config.theme.linewidth, self.config.theme.foreground);
 
         let visible_top = -row_offset;
         let visible_bottom = ctx.cfg.canvas_size.y - row_offset;
         // Loop over all items to enable drawing relations to non-visible transactions
-        for (item_count, drawing_info) in waves.drawing_infos.iter().enumerate() {
+        for (item_count, drawing_info) in items.layout_cache.borrow().infos.iter().enumerate() {
             let is_visible = drawing_info.overlaps(visible_top, visible_bottom);
             let y_offset = drawing_info.top_at(row_offset);
 
-            let displayed_item = waves
+            let displayed_item = items
                 .items_tree
                 .get_visible(drawing_info.vidx())
-                .and_then(|node| waves.displayed_items.get(&node.item_ref));
+                .and_then(|node| items.displayed_items.get(&node.item_ref));
             let color = displayed_item
                 .and_then(super::displayed_item::DisplayedItem::color)
-                .and_then(|color| self.user.config.theme.get_color(color));
-            let tx_color = color.unwrap_or(self.user.config.theme.transaction_default);
+                .and_then(|color| self.config.theme.get_color(color));
+            let tx_color = color.unwrap_or(self.config.theme.transaction_default);
 
             match drawing_info {
                 ItemDrawingInfo::Stream(stream) => {
@@ -1273,9 +1511,8 @@ impl SystemState {
 
                                 let start = Pos2::new(min.x, f32::midpoint(min.y, max.y));
 
-                                let is_transaction_focused = waves
+                                let is_transaction_focused = source
                                     .focused_transaction
-                                    .0
                                     .as_ref()
                                     .is_some_and(|t| t == tx_ref);
 
@@ -1307,7 +1544,7 @@ impl SystemState {
                                     if response.clicked() {
                                         msgs.push(Message::FocusTransaction(
                                             Some(tx_ref.clone()),
-                                            None,
+                                            tile_id,
                                         ));
                                     }
 
@@ -1360,16 +1597,16 @@ impl SystemState {
                     }
                     let text_color = color.unwrap_or(
                         // Get background color and determine best text color
-                        self.user
-                            .config
+                        self.config
                             .theme
                             .get_best_text_color(self.get_background_color(
-                                waves,
+                                items,
+                                source.focused_item,
                                 drawing_info.vidx(),
                                 item_count,
                             )),
                     );
-                    waves.draw_ticks(text_color, &ticks, ctx, y_offset, Align2::CENTER_TOP);
+                    ctx.draw_ticks(text_color, &ticks, y_offset, Align2::CENTER_TOP);
                 }
                 ItemDrawingInfo::Variable(_) => {}
                 ItemDrawingInfo::Divider(_) => {}
@@ -1383,8 +1620,8 @@ impl SystemState {
         if let Some(focused_pos) = focused_transaction_start {
             let path_stroke = PathStroke::from(&ctx.theme.relation_arrow.style);
             // let stroke = PathStroke::from({
-            // color = self.user.config.theme.annotation_arrow.color
-            // width = self.user.config.theme.annotation_arrow.width
+            // color = self.config.theme.annotation_arrow.color
+            // width = self.config.theme.annotation_arrow.width
             // });
             for start_pos in inc_relation_starts {
                 self.draw_arrow(start_pos, focused_pos, ctx, &path_stroke);
@@ -1397,7 +1634,7 @@ impl SystemState {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn draw_region(
+    pub(crate) fn draw_region(
         &self,
         ((old_x, prev_region), (new_x, _)): (&(f32, DrawnRegion), &(f32, DrawnRegion)),
         user_color: Color32,
@@ -1429,7 +1666,7 @@ impl SystemState {
                 trace_coords(*old_x, 0.5),
             ];
 
-            if self.draw_vector_unknowns_as_line()
+            if self.draw_vector_unknowns_as_line
                 && matches!(prev_result.kind, ValueKind::HighImp | ValueKind::Undef)
             {
                 let stroke = Stroke {
@@ -1443,12 +1680,12 @@ impl SystemState {
                 return;
             }
 
-            if self.user.config.theme.wide_opacity != 0.0 {
+            if self.config.theme.wide_opacity != 0.0 {
                 // For performance, it might be nice to draw both the background and line with this
                 // call, but using convex_polygon on our polygons create artefacts on thin transitions.
                 ctx.painter.add(PathShape::convex_polygon(
                     points.clone(),
-                    color.gamma_multiply(self.user.config.theme.wide_opacity),
+                    color.gamma_multiply(self.config.theme.wide_opacity),
                     PathStroke::NONE,
                 ));
             }
@@ -1464,11 +1701,11 @@ impl SystemState {
                 TraceValue::AllOnes => {
                     let stroke_thick = Stroke {
                         color,
-                        width: self.user.config.theme.thick_linewidth,
+                        width: self.config.theme.thick_linewidth,
                     };
                     let stroke = Stroke {
                         color,
-                        width: self.user.config.theme.linewidth,
+                        width: self.config.theme.linewidth,
                     };
                     ctx.painter
                         .add(PathShape::line(points[0..4].to_vec(), stroke_thick));
@@ -1478,7 +1715,7 @@ impl SystemState {
                 TraceValue::AllZeros => {
                     let stroke_thick = Stroke {
                         color,
-                        width: self.user.config.theme.linewidth,
+                        width: self.config.theme.linewidth,
                     };
                     ctx.painter
                         .add(PathShape::line(points[3..7].to_vec(), stroke_thick));
@@ -1486,7 +1723,7 @@ impl SystemState {
                 TraceValue::AllZerosThick => {
                     let stroke_thick = Stroke {
                         color,
-                        width: self.user.config.theme.thick_linewidth,
+                        width: self.config.theme.thick_linewidth,
                     };
                     ctx.painter
                         .add(PathShape::line(points[3..7].to_vec(), stroke_thick));
@@ -1524,7 +1761,7 @@ impl SystemState {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn draw_bool_transition(
+    pub(crate) fn draw_bool_transition(
         &self,
         ((old_x, prev_region), (new_x, new_region)): (&(f32, DrawnRegion), &(f32, DrawnRegion)),
         force_anti_alias: bool,
@@ -1545,7 +1782,7 @@ impl SystemState {
             let (old_height, old_color, old_bg) = {
                 let (h, c, bg) = prev_result.value.bool_drawing_spec(
                     color,
-                    &self.user.config.theme,
+                    &self.config.theme,
                     prev_result.kind,
                 );
                 (h, apply_brightness_shift(c, brightness_shift, bg_color), bg)
@@ -1553,7 +1790,7 @@ impl SystemState {
             let (new_height, _, _) =
                 new_result
                     .value
-                    .bool_drawing_spec(color, &self.user.config.theme, new_result.kind);
+                    .bool_drawing_spec(color, &self.config.theme, new_result.kind);
 
             if let (Some(old_bg), true) = (old_bg, draw_background) {
                 ctx.painter.add(RectShape::new(
@@ -1609,7 +1846,7 @@ impl SystemState {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn draw_event(
+    pub(crate) fn draw_event(
         &self,
         (x, prev_region): &(f32, DrawnRegion),
         color: Color32,
@@ -1649,7 +1886,13 @@ impl SystemState {
     }
 
     /// Draws a curvy arrow from `start` to `end`.
-    fn draw_arrow(&self, start: Pos2, end: Pos2, ctx: &DrawingContext, stroke: &PathStroke) {
+    pub(crate) fn draw_arrow(
+        &self,
+        start: Pos2,
+        end: Pos2,
+        ctx: &DrawingContext,
+        stroke: &PathStroke,
+    ) {
         let x_diff = (end.x - start.x).max(100.);
         let scaled_x_diff = 0.4 * x_diff;
 
@@ -1674,7 +1917,7 @@ impl SystemState {
 
     /// Draws arrowheads for the vector going from `vec_start` to `vec_tip`.
     /// The `angle` has to be in degrees.
-    fn draw_arrowheads(
+    pub(crate) fn draw_arrowheads(
         &self,
         vec_start: Pos2,
         vec_tip: Pos2,
@@ -1712,14 +1955,13 @@ impl SystemState {
         ));
     }
 
-    fn handle_canvas_context_menu(
+    pub(crate) fn handle_canvas_context_menu(
         &self,
         response: &Response,
-        waves: &WaveData,
+        waves: &CanvasSource<'_>,
         to_screen: RectTransform,
         ctx: &mut DrawingContext,
         msgs: &mut Vec<Message>,
-        viewport_idx: usize,
     ) {
         let frame_size = response.rect.size();
         response.context_menu(|ui| {
@@ -1730,15 +1972,14 @@ impl SystemState {
                     y: offset,
                 };
 
-            let snap_pos =
-                self.snap_to_edge(Some(top_left.to_pos2()), waves, frame_size.x, viewport_idx);
+            let snap_pos = self.snap_to_edge(Some(top_left.to_pos2()), waves, frame_size.x);
 
             if let Some(time) = snap_pos {
                 draw_vertical_line_at_time(
                     &time,
                     ctx,
-                    &self.user.config.theme.cursor,
-                    &waves.viewports[viewport_idx],
+                    &self.config.theme.cursor,
+                    waves.viewport,
                     waves.time_range(),
                 );
                 ui.menu_button("Set marker", |ui| {
@@ -1769,20 +2010,20 @@ impl SystemState {
     /// if the cursor is close enough to any transition. If the cursor is on the canvas and no
     /// transitions are close enough for snapping, the raw point will be returned. If the cursor is
     /// off the canvas, `None` is returned
-    pub fn snap_to_edge(
+    pub(crate) fn snap_to_edge(
         &self,
         pointer_pos_canvas: Option<Pos2>,
-        waves: &WaveData,
+        waves: &CanvasSource<'_>,
         frame_width: f32,
-        viewport_idx: usize,
     ) -> Option<BigInt> {
         let pos = pointer_pos_canvas?;
-        let viewport = &waves.viewports[viewport_idx];
+        let viewport = waves.viewport;
         let range = waves.time_range();
         let timestamp = viewport.as_time_bigint(pos.x, frame_width, range);
         if let Some(utimestamp) = timestamp.to_biguint()
-            && let Some(item_ref) = waves.item_ref_at_canvas_y(pos.y)
-            && let Some(DisplayedItem::Variable(variable)) = &waves.displayed_items.get(&item_ref)
+            && let Some(item_ref) = waves.items.item_ref_at_canvas_y(pos.y)
+            && let Some(DisplayedItem::Variable(variable)) =
+                &waves.items.displayed_items.get(&item_ref)
             && let Ok(Some(res)) = waves
                 .inner
                 .as_waves()
@@ -1801,10 +2042,10 @@ impl SystemState {
             let prev = viewport.pixel_from_time(prev_time, frame_width, range);
             let next = viewport.pixel_from_time(next_time, frame_width, range);
             if (prev - pos.x).abs() < (next - pos.x).abs() {
-                if (prev - pos.x).abs() <= self.user.config.snap_distance {
+                if (prev - pos.x).abs() <= self.config.snap_distance {
                     return Some(prev_time.clone());
                 }
-            } else if (next - pos.x).abs() <= self.user.config.snap_distance {
+            } else if (next - pos.x).abs() <= self.config.snap_distance {
                 return Some(next_time.clone());
             }
         }
@@ -1812,95 +2053,1308 @@ impl SystemState {
     }
 }
 
-/// Draw a vertical line at the given time with the specified stroke.
-#[inline]
-pub(crate) fn draw_vertical_line_at_time(
-    time: &BigInt,
-    ctx: &mut DrawingContext,
-    stroke: impl Into<Stroke>,
-    viewport: &Viewport,
-    range: &TimeRange,
-) {
-    let x = viewport.pixel_from_time(time, ctx.cfg.canvas_size.x, range);
-    ctx.painter.line_segment(
-        [
-            (ctx.to_screen)(x, 0.),
-            (ctx.to_screen)(x, ctx.cfg.canvas_size.y),
-        ],
-        stroke,
-    );
-}
+#[cfg(test)]
+mod view_cache_tests {
+    use super::*;
+    use crate::{StartupParams, wave_source::WaveSource};
 
-fn shift_brightness(color: Color32, delta: f32, background: Color32) -> Color32 {
-    // Lighten the color on dark backgrounds (blend toward white),
-    // darken it on light backgrounds (blend toward black).
-    let bg_luminance = crate::config::get_luminance(background);
-    let rgba = Rgba::from(color);
-    let result = if bg_luminance < 0.5 {
-        // Dark background: lighten
-        rgba * (1.0 - delta) + Rgba::WHITE * delta
-    } else {
-        // Light background: darken
-        rgba * (1.0 - delta) + Rgba::BLACK * delta
-    };
-    Color32::from(result)
-}
-
-pub(crate) fn apply_brightness_shift(
-    color: Color32,
-    brightness_shift: Option<f32>,
-    background: Color32,
-) -> Color32 {
-    match brightness_shift {
-        Some(delta) => shift_brightness(color, delta, background),
-        None => color,
+    fn tile_id(state: &SystemState, index: usize) -> crate::tiles::TileId {
+        state.user.workspace.layout.tile_order()[index]
     }
-}
+    fn views(state: &SystemState) -> Vec<&crate::tile_kinds::waveform::WaveformView> {
+        state
+            .user
+            .workspace
+            .layout
+            .tile_order()
+            .into_iter()
+            .filter_map(|id| {
+                state
+                    .user
+                    .workspace
+                    .waveform_resources(id)
+                    .map(|(_, view)| view)
+            })
+            .collect()
+    }
+    async fn settle(state: &mut SystemState) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !(state.waves_fully_loaded() && state.batch_commands_completed()) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "wave load did not finish"
+            );
+            state.handle_async_messages();
+            state.handle_batch_commands();
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    }
 
-trait VariableExt {
-    fn bool_drawing_spec(
-        &self,
-        user_color: Color32,
-        theme: &SurferTheme,
-        value_kind: ValueKind,
-    ) -> (f32, Color32, Option<Color32>);
-}
+    fn render(ctx: &egui::Context, state: &SystemState, right_width: f32) {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 500.0))),
+                ..Default::default()
+            },
+            |ui| {
+                for (index, rect) in [
+                    Rect::from_min_size(Pos2::ZERO, Vec2::new(300.0, 400.0)),
+                    Rect::from_min_size(Pos2::new(320.0, 0.0), Vec2::new(right_width, 400.0)),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let mut pane = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt(("view", index))
+                            .max_rect(rect),
+                    );
+                    pane.set_clip_rect(rect);
+                    state.draw_items(&mut pane, &mut Vec::new(), tile_id(state, index));
+                }
+            },
+        );
+        output.textures_delta.clear();
+    }
 
-impl VariableExt for String {
-    /// Return the height and color with which to draw this value if it is a boolean
-    fn bool_drawing_spec(
-        &self,
-        user_color: Color32,
-        theme: &SurferTheme,
-        value_kind: ValueKind,
-    ) -> (f32, Color32, Option<Color32>) {
-        let color = value_kind.color(user_color, theme);
-        let (height, background) = match (value_kind, self) {
-            (
-                ValueKind::HighImp
-                | ValueKind::Undef
-                | ValueKind::DontCare
-                | ValueKind::Warn
-                | ValueKind::Error
-                | ValueKind::Custom(_),
-                _,
-            ) => (0.5, None),
-            (ValueKind::Weak, other) => {
-                if other.to_lowercase() == "l" {
-                    (0., None)
-                } else {
-                    (1., Some(color.gamma_multiply(theme.waveform_opacity)))
-                }
-            }
-            (ValueKind::Normal, other) => {
-                if other == "0" {
-                    (0., None)
-                } else {
-                    (1., Some(color.gamma_multiply(theme.waveform_opacity)))
-                }
-            }
-            (ValueKind::Event, _) => (1., Some(color.gamma_multiply(theme.waveform_opacity))),
+    async fn loaded_counter() -> SystemState {
+        let mut state = SystemState::new_default_config()
+            .unwrap()
+            .with_params(StartupParams {
+                waves: Some(WaveSource::File(
+                    project_root::get_project_root()
+                        .unwrap()
+                        .join("examples/counter.vcd")
+                        .try_into()
+                        .unwrap(),
+                )),
+                ..Default::default()
+            });
+        settle(&mut state).await;
+        state.update(Message::AddVariables(vec![
+            crate::wave_container::VariableRef::from_hierarchy_string("tb.dut.counter"),
+        ]));
+        settle(&mut state).await;
+        state
+    }
+
+    #[tokio::test]
+    async fn adding_variables_without_a_waveform_creates_one_atomic_history_entry() {
+        use crate::tiles::{commands::WorkspaceCommand, kind::TileKind, layout::Placement};
+        let mut state = loaded_counter().await;
+        let first = tile_id(&state, 0);
+        state.update(Message::Workspace(WorkspaceCommand::CloseTile(first)));
+        state.update(Message::Workspace(WorkspaceCommand::CreateTile {
+            kind: "logs".into(),
+            placement: Placement::Root,
+            focus: true,
+        }));
+        let logs = state.user.workspace.layout.focused().unwrap();
+        state.undo_stack.clear();
+        state.redo_stack.clear();
+        let variable = crate::wave_container::VariableRef::from_hierarchy_string("tb.dut.counter");
+        let invalid = crate::wave_container::VariableRef::from_hierarchy_string("tb.dut.missing");
+        assert!(
+            state
+                .update(Message::AddVariables(vec![
+                    variable.clone(),
+                    invalid.clone()
+                ]))
+                .is_none()
+        );
+        assert_eq!(state.user.workspace.layout.tile_order(), [logs]);
+        assert!(state.undo_stack.is_empty());
+        assert!(state.user.workspace.item_lists.is_empty());
+
+        state.update(Message::AddVariables(vec![variable.clone()]));
+        settle(&mut state).await;
+        let created = state.user.workspace.layout.focused().unwrap();
+        assert_ne!(created, logs);
+        let list = state.user.workspace.tiles[&created]
+            .kind
+            .item_list()
+            .unwrap();
+        assert_eq!(
+            state.user.workspace.item_lists[&list].displayed_items.len(),
+            1
+        );
+        assert_eq!(state.undo_stack.len(), 1);
+        assert_eq!(state.undo_stack[0].label(), "Add variables");
+        assert!(matches!(
+            &state.user.workspace.tiles[&logs].kind,
+            TileKind::Logs(_)
+        ));
+        state.update(Message::Undo(1));
+        assert_eq!(state.user.workspace.layout.tile_order(), [logs]);
+        assert!(state.user.workspace.item_lists.is_empty());
+        assert_eq!(state.redo_stack.len(), 1);
+        state.update(Message::AddVariables(vec![invalid]));
+        state.update(Message::AddVariables(vec![]));
+        assert_eq!(state.redo_stack.len(), 1);
+        state.update(Message::Redo(1));
+        assert!(state.user.workspace.tiles.contains_key(&created));
+        assert_eq!(
+            state.user.workspace.item_lists[&list].displayed_items.len(),
+            1
+        );
+
+        // Existing-list edits do not roll back unrelated shared marker navigation.
+        state.update(Message::Workspace(WorkspaceCommand::FocusTile(created)));
+        state
+            .user
+            .waves
+            .as_mut()
+            .unwrap()
+            .markers
+            .insert(7, 10.into());
+        state.update(Message::AddVariables(vec![variable.clone()]));
+        state
+            .user
+            .waves
+            .as_mut()
+            .unwrap()
+            .markers
+            .insert(7, 20.into());
+        state.update(Message::Undo(1));
+        assert_eq!(
+            state.user.waves.as_ref().unwrap().markers[&7],
+            BigInt::from(20)
+        );
+        assert_eq!(
+            state.user.workspace.item_lists[&list].displayed_items.len(),
+            1
+        );
+
+        state.update(Message::Workspace(WorkspaceCommand::CloseTile(created)));
+        state.update(Message::Workspace(WorkspaceCommand::CloseTile(logs)));
+        state.undo_stack.clear();
+        state.update(Message::AddVariables(vec![variable]));
+        assert_eq!(state.user.workspace.tiles.len(), 1);
+        assert_eq!(state.undo_stack.len(), 1);
+        state.update(Message::Undo(1));
+        assert!(state.user.workspace.tiles.is_empty());
+        assert!(state.user.workspace.item_lists.is_empty());
+    }
+
+    #[tokio::test]
+    async fn framebuffer_render_keeps_preferred_width_when_source_has_fewer_pixels() {
+        use crate::tile_kinds::frame_buffer::FrameBufferMessage;
+        use crate::tiles::kind::{TileKind, TileMessage};
+        let mut state = loaded_counter().await;
+        state.user.waves.as_mut().unwrap().cursor = Some(10.into());
+        state
+            .update(Message::SetFrameBufferVariable(
+                crate::wave_container::VariableRef::from_hierarchy_string("tb.dut.counter"),
+            ))
+            .unwrap();
+        settle(&mut state).await;
+        let id = state.framebuffer_target().unwrap();
+        state
+            .update(Message::ToTile(
+                id,
+                TileMessage::FrameBuffer(FrameBufferMessage::Width(1024)),
+            ))
+            .unwrap();
+        let TileKind::FrameBuffer(tile) = &state.user.workspace.tiles[&id].kind else {
+            panic!()
         };
-        (height, color, background)
+        let original = tile.state.clone();
+        let mut cache = None;
+        let (bits, _, _) = crate::frame_buffer::read_frame_buffer(
+            state.user.waves.as_ref(),
+            &original.content,
+            &mut cache,
+        )
+        .unwrap();
+        assert!(!bits.is_empty());
+        assert!(bits.len() < original.settings.pixels_per_row);
+        let ctx = egui::Context::default();
+        for _ in 0..2 {
+            let mut messages = vec![];
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(640.0, 480.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    tile.ui(ui, id, state.user.waves.as_ref(), &mut messages);
+                },
+            );
+            output.textures_delta.clear();
+            assert!(
+                messages.is_empty(),
+                "rendering must not enqueue a settings edit"
+            );
+            assert_eq!(tile.state, original);
+        }
+    }
+
+    #[tokio::test]
+    async fn canvas_generation_uses_explicit_document_list_and_viewport() {
+        let mut state = loaded_counter().await;
+        let document = state.user.waves.take().unwrap();
+        let id = tile_id(&state, 0);
+        let (items, view) = state.user.workspace.waveform_resources(id).unwrap();
+        let waves = crate::wave_data::WaveformRead {
+            document: &document,
+            items,
+            view,
+            tile_id: id,
+        };
+        let cfg = DrawConfig::new(Vec2::new(400.0, 300.0), 20.0, 12.0);
+        let generate = |items: &ItemList, viewport: &Viewport| {
+            let mut messages = Vec::new();
+            let Some(CachedDrawData::WaveDrawData(data)) =
+                state.waveform_services().generate_draw_commands(
+                    &CanvasSource {
+                        tile_id: crate::tiles::TileId(1),
+                        interaction: &Default::default(),
+                        document: waves.document,
+                        items,
+                        viewport,
+                        focused_item: None,
+                        focused_transaction: &None,
+                    },
+                    &cfg,
+                    &mut messages,
+                )
+            else {
+                panic!("expected wave draw commands");
+            };
+            data
+        };
+        // Generation must not consult the currently installed waveform or its caches.
+        assert!(state.user.waves.is_none());
+        let viewport = views(&state)[0].viewport;
+        let populated = generate(waves.items, &viewport);
+        assert!(!populated.draw_commands.is_empty());
+        let empty = generate(&ItemList::default(), &viewport);
+        assert!(empty.draw_commands.is_empty());
+        assert_eq!(populated.ticks, empty.ticks);
+
+        let mut zoomed = viewport;
+        zoomed.curr_left = crate::viewport::Relative(0.25);
+        zoomed.curr_right = crate::viewport::Relative(0.5);
+        let linked = generate(waves.items, &zoomed);
+        assert_eq!(linked.draw_commands.len(), populated.draw_commands.len());
+        assert_ne!(linked.ticks, populated.ticks);
+        assert_eq!(generate(waves.items, &viewport).ticks, populated.ticks);
+    }
+
+    #[tokio::test]
+    async fn waveform_bodies_keep_columns_caches_and_drag_input_local() {
+        let mut state = loaded_counter().await;
+        let document = state.user.waves.take().unwrap();
+        let id = tile_id(&state, 0);
+        let (items, view) = state.user.workspace.waveform_resources(id).unwrap();
+        let waves = crate::wave_data::WaveformRead {
+            document: &document,
+            items,
+            view,
+            tile_id: id,
+        };
+        let mut caches = [WaveDrawCache::default(), WaveDrawCache::default()];
+        let ctx = egui::Context::default();
+        let mut frame = |events: Vec<egui::Event>| {
+            let mut messages = Vec::new();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 500.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    for (index, cache) in caches.iter_mut().enumerate() {
+                        let rect = Rect::from_min_size(
+                            Pos2::new(index as f32 * 400.0, 0.0),
+                            Vec2::new(380.0, 400.0),
+                        );
+                        let mut pane =
+                            ui.new_child(egui::UiBuilder::new().id_salt(index).max_rect(rect));
+                        pane.set_clip_rect(rect);
+                        state.waveform_services().draw_waveform_body(
+                            &CanvasView {
+                                source: CanvasSource {
+                                    tile_id: crate::tiles::TileId(index as u64 + 1),
+                                    interaction: &Default::default(),
+                                    document: waves.document,
+                                    items: waves.items,
+                                    viewport: &views(&state)[0].viewport,
+                                    focused_item: None,
+                                    focused_transaction: &None,
+                                },
+                                scroll_offset: index as f32 * 20.0,
+                                selected_annotation: None,
+                                annotation_menu: None,
+                            },
+                            cache,
+                            crate::tile_kinds::waveform_body::WaveformColumns {
+                                focus_ids: false,
+                                names: Some(100.0),
+                                values: (index == 0).then_some(100.0),
+                            },
+                            &mut pane,
+                            &mut messages,
+                        );
+                    }
+                },
+            );
+            output.textures_delta.clear();
+            fn duplicate_id_warning(shape: &egui::Shape) -> bool {
+                match shape {
+                    egui::Shape::Text(text) => {
+                        text.galley.text().contains("First use of")
+                            || text.galley.text().contains("Second use of")
+                    }
+                    egui::Shape::Vec(shapes) => shapes.iter().any(duplicate_id_warning),
+                    _ => false,
+                }
+            }
+            assert!(
+                !output
+                    .shapes
+                    .iter()
+                    .any(|shape| duplicate_id_warning(&shape.shape)),
+                "waveform panels must have distinct egui IDs"
+            );
+            messages
+        };
+        frame(Vec::new());
+        let start = Pos2::new(650.0, 150.0);
+        frame(vec![
+            egui::Event::PointerMoved(start),
+            egui::Event::PointerButton {
+                pos: start,
+                button: PointerButton::Secondary,
+                pressed: true,
+                modifiers: egui::Modifiers::default(),
+            },
+        ]);
+        let messages = frame(vec![egui::Event::PointerMoved(
+            start + Vec2::new(30.0, 20.0),
+        )]);
+        let targets: Vec<_> = messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::CanvasScroll { tile_id, .. } => Some(*tile_id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            targets,
+            [crate::tiles::TileId(2)],
+            "only the canvas owning the drag should pan"
+        );
+        assert!(state.user.waves.is_none());
+        let first = caches[0].rect.unwrap();
+        let second = caches[1].rect.unwrap();
+        assert_eq!(first.left(), 200.0);
+        assert_eq!(first.right(), 380.0);
+        assert_eq!(second.left(), 500.0);
+        assert_eq!(second.right(), 780.0);
+        assert_eq!(caches.map(|cache| cache.builds), [1, 1]);
+    }
+
+    #[tokio::test]
+    async fn gesture_commands_keep_their_origin_when_focus_changes() {
+        let mut state = loaded_counter().await;
+        state.update(Message::AddViewport);
+        let origin = Pos2::new(40.0, 30.0);
+        state.update(Message::SetMouseGestureDragStart(
+            Some(origin),
+            Some(BigInt::from(17)),
+            tile_id(&state, 0),
+        ));
+        state.update(Message::SetMouseGestureAnnotation(
+            Some(crate::mousegestures::AnnotationKind::Rectangle),
+            tile_id(&state, 0),
+        ));
+        state.update(Message::SetMeasureDragStart(
+            Some(origin),
+            tile_id(&state, 1),
+        ));
+        state.update(Message::SetActiveViewport(tile_id(&state, 1)));
+        state.update(Message::SetMouseGestureDragStart(
+            None,
+            None,
+            tile_id(&state, 0),
+        ));
+        {
+            let views = &views(&state);
+            assert!(views[0].interaction.gesture_start_location.is_none());
+            assert!(views[0].interaction.measure_start_location.is_none());
+            assert!(views[0].interaction.annotation_kind.is_some());
+            assert_eq!(views[1].interaction.measure_start_location, Some(origin));
+            assert!(views[1].interaction.annotation_kind.is_none());
+            assert!(views[0].clone().interaction.annotation_kind.is_none());
+        }
+        let view = &mut state
+            .user
+            .waveform_edit_at(tile_id(&state, 1))
+            .unwrap()
+            .view;
+        view.scroll_offset = 80.0;
+        view.reset_runtime();
+        assert!(view.interaction.measure_start_location.is_none());
+        assert_eq!(view.scroll_offset, 80.0);
+    }
+
+    #[tokio::test]
+    async fn linked_views_keep_independent_row_focus_through_insert_and_undo() {
+        use crate::displayed_item_tree::VisibleItemIndex;
+        let mut state = loaded_counter().await;
+        state.update(Message::AddDivider(Some("one".into()), None));
+        state.update(Message::AddDivider(Some("two".into()), None));
+        state.update(Message::AddViewport);
+        state.update(Message::SetActiveViewport(tile_id(&state, 0)));
+        state.update(Message::FocusItem(VisibleItemIndex(2)));
+        let first_focus = views(&state)[0].focused_item;
+        state.update(Message::SetActiveViewport(tile_id(&state, 1)));
+        state.update(Message::FocusItem(VisibleItemIndex(0)));
+        state.update(Message::AddDivider(
+            Some("inserted".into()),
+            Some(VisibleItemIndex(0)),
+        ));
+        {
+            let waves = state.user.waveform_read().unwrap();
+            assert_eq!(views(&state)[0].focused_item, first_focus);
+            assert_ne!(
+                views(&state)[0].focused_index(waves.items),
+                views(&state)[1].focused_index(waves.items)
+            );
+        }
+        state.update(Message::Undo(1));
+        let waves = state.user.waveform_read().unwrap();
+        assert_eq!(views(&state)[0].focused_item, first_focus);
+        assert_eq!(
+            views(&state)[0].focused_index(waves.items),
+            Some(VisibleItemIndex(2))
+        );
+    }
+
+    #[tokio::test]
+    async fn linked_views_keep_row_identity_through_move_and_undo() {
+        use crate::displayed_item_tree::VisibleItemIndex;
+        let mut state = loaded_counter().await;
+        state.update(Message::AddDivider(Some("one".into()), None));
+        state.update(Message::AddDivider(Some("two".into()), None));
+        state.update(Message::FocusItem(VisibleItemIndex(2)));
+        state.update(Message::AddViewport);
+        state.update(Message::SetActiveViewport(tile_id(&state, 1)));
+        state.update(Message::FocusItem(VisibleItemIndex(0)));
+        let identities = views(&state)
+            .iter()
+            .map(|view| view.focused_item)
+            .collect::<Vec<_>>();
+        state.update(Message::MoveFocusedItem(crate::MoveDir::Down, 2));
+        {
+            let waves = state.user.waveform_read().unwrap();
+            assert_eq!(
+                views(&state)
+                    .iter()
+                    .map(|view| view.focused_item)
+                    .collect::<Vec<_>>(),
+                identities
+            );
+            assert_eq!(
+                views(&state)[0].focused_index(waves.items),
+                Some(VisibleItemIndex(1))
+            );
+            assert_eq!(
+                views(&state)[1].focused_index(waves.items),
+                Some(VisibleItemIndex(2))
+            );
+        }
+        state.update(Message::Undo(1));
+        let waves = state.user.waveform_read().unwrap();
+        assert_eq!(
+            views(&state)
+                .iter()
+                .map(|view| view.focused_item)
+                .collect::<Vec<_>>(),
+            identities
+        );
+        assert_eq!(
+            views(&state)[0].focused_index(waves.items),
+            Some(VisibleItemIndex(2))
+        );
+        assert_eq!(
+            views(&state)[1].focused_index(waves.items),
+            Some(VisibleItemIndex(0))
+        );
+    }
+
+    #[tokio::test]
+    async fn row_drop_uses_captured_items_after_focus_and_selection_change() {
+        use crate::displayed_item_tree::{ItemIndex, TargetPosition, VisibleItemIndex};
+        let mut state = loaded_counter().await;
+        state.update(Message::AddDivider(Some("one".into()), None));
+        state.update(Message::AddDivider(Some("two".into()), None));
+        state.update(Message::AddViewport);
+        let captured = state
+            .user
+            .waveform_read()
+            .unwrap()
+            .items
+            .items_tree
+            .get_visible(VisibleItemIndex(0))
+            .unwrap()
+            .item_ref;
+        state.update(Message::SetActiveViewport(tile_id(&state, 1)));
+        state.update(Message::FocusItem(VisibleItemIndex(1)));
+        state.update(Message::SetItemSelected(VisibleItemIndex(1), true));
+        let focus = views(&state)[1].focused_item;
+        state.update(Message::MoveDraggedItems {
+            tile_id: crate::tiles::TileId(1),
+            items: vec![captured],
+            position: TargetPosition {
+                before: ItemIndex(3),
+                level: 0,
+            },
+        });
+        let waves = state.user.waveform_read().unwrap();
+        assert_eq!(
+            waves.items.items_tree.iter().last().unwrap().item_ref,
+            captured
+        );
+        assert_eq!(views(&state)[1].focused_item, focus);
+        assert_eq!(
+            state.user.workspace.layout.focused(),
+            Some(tile_id(&state, 1))
+        );
+        state.update(Message::Undo(1));
+        assert_eq!(
+            state
+                .user
+                .waveform_read()
+                .unwrap()
+                .items
+                .items_tree
+                .iter()
+                .next()
+                .unwrap()
+                .item_ref,
+            captured
+        );
+    }
+
+    #[tokio::test]
+    async fn navigation_validates_before_mutation_and_invalidates_only_its_view() {
+        let mut state = loaded_counter().await;
+        state.update(Message::AddViewport);
+        let ctx = egui::Context::default();
+        render(&ctx, &state, 300.0);
+        let before = views(&state)[0].viewport;
+        for command in [
+            Message::CanvasZoom {
+                delta: f32::NAN,
+                mouse_ptr: None,
+                tile_id: crate::tiles::TileId(1),
+            },
+            Message::CanvasZoom {
+                delta: 0.0,
+                mouse_ptr: None,
+                tile_id: crate::tiles::TileId(1),
+            },
+            Message::ZoomToRange {
+                start: 100.into(),
+                end: 50.into(),
+                tile_id: crate::tiles::TileId(1),
+            },
+            Message::GoToTime(Some(BigInt::from(1u8) << 4096), tile_id(&state, 0)),
+            Message::GoToStart {
+                tile_id: crate::tiles::TileId(u64::MAX),
+            },
+        ] {
+            assert!(state.update(command).is_none());
+            assert_eq!(views(&state)[0].viewport, before);
+            assert!(
+                views(&state)
+                    .iter()
+                    .all(|view| view.draw_cache.borrow().commands.is_some())
+            );
+        }
+        state.update(Message::SetActiveViewport(tile_id(&state, 1)));
+        // Switching input focus may invalidate the old renderer globally; repopulate both.
+        render(&ctx, &state, 300.0);
+        state.update(Message::CanvasZoom {
+            delta: 0.5,
+            mouse_ptr: None,
+            tile_id: crate::tiles::TileId(1),
+        });
+        assert_ne!(views(&state)[0].viewport, before);
+        assert!(views(&state)[0].draw_cache.borrow().commands.is_none());
+        assert!(views(&state)[1].draw_cache.borrow().commands.is_some());
+        assert_eq!(
+            state.user.workspace.layout.focused(),
+            Some(tile_id(&state, 1))
+        );
+    }
+
+    #[tokio::test]
+    async fn deleting_marker_rows_preserves_shared_time_and_explicit_deletion_is_undoable() {
+        let mut state = loaded_counter().await;
+        state.update(Message::AddMarker {
+            time: 42.into(),
+            name: Some("shared".into()),
+            move_focus: false,
+        });
+        let (row, marker) = state
+            .user
+            .waveform_read()
+            .unwrap()
+            .items
+            .displayed_items
+            .iter()
+            .find_map(|(id, item)| match item {
+                DisplayedItem::Marker(marker) => Some((*id, marker.idx)),
+                _ => None,
+            })
+            .unwrap();
+        state.update(Message::RemoveItems(vec![row]));
+        let waves = state.user.waveform_read().unwrap();
+        assert_eq!(waves.document.markers.get(&marker), Some(&BigInt::from(42)));
+        assert!(!waves.items.displayed_items.contains_key(&row));
+        state.update(Message::Undo(1));
+        assert!(
+            state
+                .user
+                .waveform_read()
+                .unwrap()
+                .items
+                .displayed_items
+                .contains_key(&row)
+        );
+        state.update(Message::RemoveItems(vec![row]));
+        state.update(Message::RemoveMarker(marker));
+        assert!(
+            !state
+                .user
+                .waveform_read()
+                .unwrap()
+                .document
+                .markers
+                .contains_key(&marker)
+        );
+        state.update(Message::Undo(1));
+        let waves = state.user.waveform_read().unwrap();
+        assert_eq!(waves.document.markers.get(&marker), Some(&BigInt::from(42)));
+        assert!(!waves.items.displayed_items.contains_key(&row));
+    }
+
+    #[tokio::test]
+    async fn invalid_insertions_preserve_content_identity_and_redo() {
+        use crate::displayed_item_tree::VisibleItemIndex;
+        let mut state = loaded_counter().await;
+        state.update(Message::AddDivider(Some("valid".into()), None));
+        state.update(Message::Undo(1));
+        let undo = state.undo_stack.len();
+        let redo = state.redo_stack.len();
+        let before = {
+            let waves = state.user.waveform_read().unwrap();
+            ron::to_string(&crate::tiles::serde::ItemListFile::from(waves.items)).unwrap()
+        };
+        for message in [
+            Message::AddDivider(None, Some(VisibleItemIndex(999))),
+            Message::AddTimeLine(Some(VisibleItemIndex(999))),
+        ] {
+            assert!(state.update(message).is_none());
+            assert_eq!(state.undo_stack.len(), undo);
+            assert_eq!(state.redo_stack.len(), redo);
+            let waves = state.user.waveform_read().unwrap();
+            assert_eq!(
+                ron::to_string(&crate::tiles::serde::ItemListFile::from(waves.items)).unwrap(),
+                before
+            );
+        }
+        state.update(Message::Redo(1));
+        assert!(state.user.waveform_read().unwrap().items.displayed_items.values().any(|item| matches!(item, DisplayedItem::Divider(divider) if divider.name.as_deref() == Some("valid"))));
+    }
+
+    #[tokio::test]
+    async fn transaction_focus_is_per_view_and_records_only_inspector_creation() {
+        let mut state = SystemState::new_default_config()
+            .unwrap()
+            .with_params(StartupParams {
+                waves: Some(WaveSource::File(
+                    project_root::get_project_root()
+                        .unwrap()
+                        .join("examples/my_db.ftr")
+                        .try_into()
+                        .unwrap(),
+                )),
+                ..Default::default()
+            });
+        settle(&mut state).await;
+        // Load transaction bodies without adding stream rows: inspector lookup must
+        // depend on the shared document, not on displayed stream membership.
+        let transactions = state
+            .user
+            .waves
+            .as_mut()
+            .unwrap()
+            .inner
+            .as_transactions_mut()
+            .unwrap();
+        let streams = transactions
+            .get_streams()
+            .into_iter()
+            .map(|stream| stream.id)
+            .collect::<Vec<_>>();
+        for stream in streams {
+            transactions.inner.load_stream_into_memory(stream).unwrap();
+        }
+        state.update(Message::AddViewport);
+        let first = TransactionRef {
+            id: ftr_parser::types::TransactionId(4),
+        };
+        let second = TransactionRef {
+            id: ftr_parser::types::TransactionId(34),
+        };
+        let history = state.undo_stack.len();
+        state.update(Message::FocusTransaction(
+            Some(first.clone()),
+            tile_id(&state, 0),
+        ));
+        state.update(Message::FocusTransaction(
+            Some(second.clone()),
+            tile_id(&state, 1),
+        ));
+        let details = *state
+            .user
+            .workspace
+            .tiles
+            .iter()
+            .find(|(_, entry)| entry.kind.kind_name() == "transaction_details")
+            .unwrap()
+            .0;
+        let rendered_transaction = |state: &SystemState| {
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 600.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    crate::tiles::render::PaneRenderer::ui(
+                        &crate::tiles::kind::ApplicationPanes {
+                            state,
+                            focus_ids: false,
+                        },
+                        details,
+                        true,
+                        ui,
+                        &mut Vec::new(),
+                    );
+                },
+            );
+            output.textures_delta.clear();
+            fn collect(shape: &egui::Shape, text: &mut Vec<String>) {
+                match shape {
+                    egui::Shape::Text(value) => text.push(value.galley.text().into()),
+                    egui::Shape::Vec(shapes) => {
+                        shapes.iter().for_each(|shape| collect(shape, text))
+                    }
+                    _ => {}
+                }
+            }
+            let mut text = Vec::new();
+            for shape in output.shapes {
+                collect(&shape.shape, &mut text);
+            }
+            text.windows(2)
+                .find(|pair| pair[0] == "Transaction ID")
+                .map(|pair| pair[1].clone())
+                .unwrap_or_else(|| panic!("transaction id missing from inspector: {text:?}"))
+        };
+        state
+            .update(Message::SetActiveViewport(tile_id(&state, 0)))
+            .unwrap();
+        state
+            .update(Message::Workspace(
+                crate::tiles::commands::WorkspaceCommand::FocusTile(details),
+            ))
+            .unwrap();
+        assert_eq!(rendered_transaction(&state), "4");
+        state
+            .update(Message::SetActiveViewport(tile_id(&state, 1)))
+            .unwrap();
+        state
+            .update(Message::Workspace(
+                crate::tiles::commands::WorkspaceCommand::FocusTile(details),
+            ))
+            .unwrap();
+        assert_eq!(rendered_transaction(&state), "34");
+        assert_eq!(state.undo_stack.len(), history + 1);
+        assert_eq!(state.undo_stack.last().unwrap().label(), "Open tile");
+        let focus = |state: &SystemState| {
+            views(state)
+                .iter()
+                .map(|view| view.focused_transaction.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(focus(&state), [Some(first), Some(second.clone())]);
+        state.update(Message::AddDivider(Some("edit".into()), None));
+        state.update(Message::FocusTransaction(None, tile_id(&state, 0)));
+        state.update(Message::Undo(1));
+        assert_eq!(focus(&state), [None, Some(second)]);
+        // A focused transaction need not have a displayed stream in this view.
+        state.update(Message::SetActiveViewport(tile_id(&state, 1)));
+        state.update(Message::MoveTransaction { next: true });
+    }
+
+    #[tokio::test]
+    async fn annotation_selection_is_per_view_and_survives_content_undo() {
+        let mut state = loaded_counter().await;
+        state.update(Message::AddViewport);
+        let ids = [
+            egui::Id::new("first annotation"),
+            egui::Id::new("second annotation"),
+        ];
+        for (index, id) in ids.iter().enumerate() {
+            state.user.waveform_edit().unwrap().items.annotations.push(
+                crate::annotation::Annotation::Rect(crate::rectangle::RectAnnotation::new(
+                    *id,
+                    BigInt::ZERO,
+                    BigInt::from(10),
+                    None,
+                    None,
+                    Rect::ZERO,
+                    index as i32,
+                )),
+            );
+        }
+        let ids: Vec<_> = state
+            .user
+            .waveform_read()
+            .unwrap()
+            .items
+            .annotations
+            .iter()
+            .map(crate::annotation::Annotatable::get_id)
+            .collect();
+        state.update(Message::AnnotationClicked(
+            Some(ids[0]),
+            None,
+            Some(tile_id(&state, 0)),
+            None,
+            None,
+        ));
+        state.update(Message::UpdateAnnotationName(ids[0], "renamed".into()));
+        state.update(Message::AnnotationClicked(
+            Some(ids[1]),
+            None,
+            Some(tile_id(&state, 1)),
+            None,
+            None,
+        ));
+        state.update(Message::Undo(1));
+        let selected = |state: &SystemState| {
+            views(state)
+                .iter()
+                .map(|view| view.selected_annotation)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(selected(&state), [Some(ids[0]), Some(ids[1])]);
+        state.update(Message::RemoveAnnotation(ids[0]));
+        assert_eq!(selected(&state), [None, Some(ids[1])]);
+        state.update(Message::Undo(1));
+        assert_eq!(selected(&state), [None, Some(ids[1])]);
+        state.update(Message::Redo(1));
+        assert_eq!(selected(&state), [None, Some(ids[1])]);
+    }
+
+    #[tokio::test]
+    async fn queued_row_scroll_keeps_its_tile_and_closed_targets_do_not_redirect() {
+        let mut state = loaded_counter().await;
+        for row in 0..32 {
+            state
+                .update(Message::AddDivider(Some(format!("row {row}")), None))
+                .unwrap();
+        }
+        let first = tile_id(&state, 0);
+        state.update(Message::AddViewport).unwrap();
+        let second = tile_id(&state, 1);
+        let ctx = egui::Context::default();
+        render(&ctx, &state, 400.0);
+        for id in [first, second] {
+            state
+                .update(Message::WaveformBodyMeasured {
+                    tile_id: id,
+                    height: 100.0,
+                    scroll_offset: None,
+                })
+                .unwrap();
+        }
+        state.update(Message::SetActiveViewport(first)).unwrap();
+        let queued = state.scroll_rows_message(true, usize::MAX).unwrap();
+        state.update(Message::SetActiveViewport(second)).unwrap();
+        state.update(queued).unwrap();
+        let offset = state
+            .user
+            .waveform_read_at(first)
+            .unwrap()
+            .view
+            .scroll_offset;
+        assert!(offset > 0.0);
+        assert_eq!(
+            state
+                .user
+                .waveform_read_at(second)
+                .unwrap()
+                .view
+                .scroll_offset,
+            0.0
+        );
+        assert_eq!(state.user.workspace.layout.focused(), Some(second));
+        let stale = state.scroll_rows_message(false, usize::MAX).unwrap();
+        state
+            .update(Message::Workspace(
+                crate::tiles::commands::WorkspaceCommand::CloseTile(second),
+            ))
+            .unwrap();
+        assert!(state.update(stale).is_none());
+        assert_eq!(
+            state
+                .user
+                .waveform_read_at(first)
+                .unwrap()
+                .view
+                .scroll_offset,
+            offset
+        );
+    }
+
+    #[tokio::test]
+    async fn body_measurements_keep_their_origin_when_focus_changes() {
+        let mut state = loaded_counter().await;
+        state.update(Message::AddViewport);
+        for id in state.user.workspace.layout.tile_order() {
+            state
+                .update(Message::ToTile(
+                    id,
+                    crate::tiles::kind::TileMessage::Waveform(
+                        crate::tile_kinds::waveform::WaveformMessage::LinkVerticalScroll(true),
+                    ),
+                ))
+                .unwrap();
+        }
+        state.update(Message::SetActiveViewport(tile_id(&state, 1)));
+        state.update(Message::WaveformBodyMeasured {
+            tile_id: crate::tiles::TileId(1),
+            height: 400.0,
+            scroll_offset: Some(25.0),
+        });
+        state.update(Message::WaveformBodyMeasured {
+            tile_id: crate::tiles::TileId(2),
+            height: 200.0,
+            scroll_offset: Some(80.0),
+        });
+        state.update(Message::WaveformBodyMeasured {
+            tile_id: crate::tiles::TileId(100),
+            height: 10.0,
+            scroll_offset: Some(0.0),
+        });
+        state.update(Message::WaveformBodyMeasured {
+            tile_id: crate::tiles::TileId(1),
+            height: f32::NAN,
+            scroll_offset: Some(f32::INFINITY),
+        });
+        assert_eq!(
+            state.user.workspace.layout.focused(),
+            Some(tile_id(&state, 1))
+        );
+        assert_eq!(views(&state)[0].viewport_height, 400.0);
+        assert_eq!(views(&state)[1].viewport_height, 200.0);
+        assert_eq!(views(&state)[0].scroll_offset, 80.0);
+        assert_eq!(views(&state)[1].scroll_offset, 80.0);
+    }
+
+    #[tokio::test]
+    async fn borrowed_marker_edits_share_time_but_keep_independent_rows_separate() {
+        use crate::tiles::{
+            commands::{SplitMode, WorkspaceCommand},
+            layout::Direction,
+        };
+        let mut state = loaded_counter().await;
+        let mut runtime = std::mem::take(&mut state.workspace_runtime);
+        let mut workspace = std::mem::take(&mut state.user.workspace);
+        let mut document = state.user.waves.take().unwrap();
+        let first = workspace.layout.focused().unwrap();
+        let row = workspace
+            .waveform_edit(first, &mut document)
+            .unwrap()
+            .add_marker(&42.into(), Some("shared time".into()), false)
+            .unwrap();
+        let list_id = workspace.tiles[&first].kind.item_list().unwrap();
+        let DisplayedItem::Marker(marker) = &workspace.item_lists[&list_id].displayed_items[&row]
+        else {
+            panic!()
+        };
+        let marker = marker.idx;
+        workspace
+            .apply_command(
+                &mut runtime,
+                WorkspaceCommand::SplitTile {
+                    tile: first,
+                    dir: Direction::Right,
+                    mode: SplitMode::Independent,
+                },
+            )
+            .unwrap();
+        let second = workspace.layout.focused().unwrap();
+        let copy_list = workspace.tiles[&second].kind.item_list().unwrap();
+        document.cursor = Some(88.into());
+        workspace
+            .waveform_edit(first, &mut document)
+            .unwrap()
+            .move_marker_to_cursor(marker)
+            .unwrap();
+        assert_eq!(document.markers[&marker], BigInt::from(88));
+        workspace
+            .waveform_edit(first, &mut document)
+            .unwrap()
+            .remove_displayed_items(&[row]);
+        assert!(
+            !workspace.item_lists[&list_id]
+                .displayed_items
+                .contains_key(&row)
+        );
+        assert!(
+            workspace.item_lists[&copy_list]
+                .displayed_items
+                .contains_key(&row)
+        );
+        assert_eq!(document.markers[&marker], BigInt::from(88));
+        assert_eq!(workspace.layout.focused(), Some(second));
+    }
+
+    #[tokio::test]
+    async fn adding_variables_edits_the_native_list_and_only_the_target_focus() {
+        use crate::tile_kinds::waveform::WaveformMessage;
+        use crate::tiles::{
+            commands::{SplitMode, WorkspaceCommand},
+            kind::{TileKind, TileMessage},
+            layout::{Direction, Placement},
+        };
+        let mut state = loaded_counter().await;
+        let old = state.user.waveform_read().unwrap();
+        let old_count = old.items.items_tree.len();
+        let old_tile = old.tile_id;
+        let variable = old
+            .items
+            .displayed_items
+            .values()
+            .find_map(|item| match item {
+                DisplayedItem::Variable(variable) => Some(variable.variable_ref.clone()),
+                _ => None,
+            })
+            .unwrap();
+        state
+            .update(Message::Workspace(WorkspaceCommand::CreateTile {
+                kind: "waveform".into(),
+                placement: Placement::TabAfter(old_tile),
+                focus: true,
+            }))
+            .unwrap();
+        let first = state.user.workspace.layout.focused().unwrap();
+        let list_id = state.user.workspace.tiles[&first].kind.item_list().unwrap();
+        let position = state.user.workspace.item_lists[&list_id].end_insert_position();
+        state
+            .update(Message::ToTile(
+                first,
+                TileMessage::Waveform(WaveformMessage::AddDivider {
+                    name: None,
+                    position,
+                }),
+            ))
+            .unwrap();
+        let divider = state.user.workspace.item_lists[&list_id]
+            .items_tree
+            .iter()
+            .next()
+            .unwrap()
+            .item_ref;
+        state
+            .update(Message::ToTile(
+                first,
+                TileMessage::Waveform(WaveformMessage::FocusItem(Some(divider))),
+            ))
+            .unwrap();
+        state
+            .update(Message::Workspace(WorkspaceCommand::SplitTile {
+                tile: first,
+                dir: Direction::Right,
+                mode: SplitMode::Linked,
+            }))
+            .unwrap();
+        let second = state.user.workspace.layout.focused().unwrap();
+        state.update(Message::AddVariables(vec![variable])).unwrap();
+        let list = &state.user.workspace.item_lists[&list_id];
+        assert_eq!(list.items_tree.len(), 2);
+        let inserted = list.items_tree.iter().last().unwrap().item_ref;
+        assert!(matches!(
+            list.displayed_items[&inserted],
+            DisplayedItem::Variable(_)
+        ));
+        let TileKind::Waveform(first_tile) = &state.user.workspace.tiles[&first].kind else {
+            panic!()
+        };
+        let TileKind::Waveform(second_tile) = &state.user.workspace.tiles[&second].kind else {
+            panic!()
+        };
+        assert_eq!(first_tile.view.focused_item, Some(divider));
+        assert_eq!(second_tile.view.focused_item, Some(inserted));
+        assert_eq!(
+            state
+                .user
+                .waveform_read_at(old_tile)
+                .unwrap()
+                .items
+                .items_tree
+                .len(),
+            old_count
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_ownership_moves_into_linked_tiles_with_independent_time_navigation() {
+        let mut state = loaded_counter().await;
+        state.update(Message::AddViewport);
+        let order = state.user.workspace.layout.tile_order();
+        let focused = state.user.workspace.layout.focused();
+        let list_id = state.user.workspace.tiles[&order[0]]
+            .kind
+            .item_list()
+            .unwrap();
+        let mut waves = crate::wave_data::WaveformData {
+            document: state.user.waves.take().unwrap(),
+            items: state.user.workspace.item_lists.remove(&list_id).unwrap(),
+            viewports: order
+                .iter()
+                .map(|id| {
+                    let crate::tiles::kind::TileKind::Waveform(tile) =
+                        state.user.workspace.tiles.remove(id).unwrap().kind
+                    else {
+                        panic!()
+                    };
+                    tile.view
+                })
+                .collect(),
+            annotation_list_visible: false,
+            last_active_viewport_idx: order.iter().position(|id| Some(*id) == focused).unwrap(),
+        };
+        let item = waves.items.items_tree.iter().next().unwrap().item_ref;
+        let row_address = waves.items.items_tree.iter().next().unwrap() as *const _ as usize;
+        waves.viewports[0].focused_item = Some(item);
+        waves.viewports[0].scroll_offset = 25.0;
+        waves.viewports[1].scroll_offset = 80.0;
+        waves.viewports[1].viewport.curr_left = crate::viewport::Relative(0.25);
+        waves.last_active_viewport_idx = 1;
+        waves.annotation_list_visible = true;
+        let mut runtime = crate::tiles::runtime::WorkspaceRuntime::default();
+        let migrated = waves.into_workspace(&mut runtime).unwrap();
+        let workspace = &migrated.workspace;
+        let order = workspace.layout.tile_order();
+        assert_eq!(order.len(), 2);
+        assert_eq!(workspace.layout.focused(), Some(order[1]));
+        assert_eq!(workspace.item_lists.len(), 1);
+        let list = workspace.item_lists.values().next().unwrap();
+        assert_eq!(
+            list.items_tree.iter().next().unwrap() as *const _ as usize,
+            row_address
+        );
+        assert!(migrated.annotation_list_visible);
+        assert!(migrated.document.inner.as_waves().is_some());
+        for (index, id) in order.iter().enumerate() {
+            let crate::tiles::kind::TileKind::Waveform(tile) = &workspace.tiles[id].kind else {
+                panic!()
+            };
+            assert_eq!(tile.show_name_column, index == 0);
+            assert_eq!(tile.show_value_column, index == 0);
+            assert!(tile.link_vertical_scroll);
+            assert_eq!(tile.view.scroll_offset, 80.0);
+            assert_eq!(
+                tile.view.viewport.curr_left,
+                crate::viewport::Relative([0.0, 0.25][index])
+            );
+            assert_eq!(tile.view.focused_item, (index == 0).then_some(item));
+            assert_eq!(tile.view.viewport_height, 0.0);
+        }
+        crate::tiles::workspace::Workspace::from_file(workspace.to_file().unwrap()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn unlinked_vertical_offsets_round_trip_independently() {
+        let mut state = loaded_counter().await;
+        let first = tile_id(&state, 0);
+        state.update(Message::AddViewport);
+        let second = tile_id(&state, 1);
+        for id in [first, second] {
+            state
+                .update(Message::ToTile(
+                    id,
+                    crate::tiles::kind::TileMessage::Waveform(
+                        crate::tile_kinds::waveform::WaveformMessage::LinkVerticalScroll(false),
+                    ),
+                ))
+                .unwrap();
+        }
+        state.update(Message::SetActiveViewport(first));
+        state.update(Message::ToTile(
+            first,
+            crate::tiles::kind::TileMessage::Waveform(
+                crate::tile_kinds::waveform::WaveformMessage::ScrollTo(25.0),
+            ),
+        ));
+        state.update(Message::SetActiveViewport(second));
+        state.update(Message::ToTile(
+            second,
+            crate::tiles::kind::TileMessage::Waveform(
+                crate::tile_kinds::waveform::WaveformMessage::ScrollTo(80.0),
+            ),
+        ));
+        let encoded = ron::to_string(&state.user.workspace).unwrap();
+        let restored: crate::tiles::workspace::Workspace = ron::from_str(&encoded).unwrap();
+        assert_eq!(restored.layout.focused(), Some(second));
+        assert_eq!(
+            restored.waveform_resources(first).unwrap().1.scroll_offset,
+            25.0
+        );
+        assert_eq!(
+            restored.waveform_resources(second).unwrap().1.scroll_offset,
+            80.0
+        );
+    }
+
+    #[tokio::test]
+    async fn drawing_two_views_reuses_each_cache_and_resizes_only_one() {
+        let mut state = loaded_counter().await;
+        state.update(Message::AddViewport);
+        let ctx = egui::Context::default();
+        for _ in 0..3 {
+            render(&ctx, &state, 400.0);
+        }
+        let builds = || {
+            views(&state)
+                .iter()
+                .map(|view| view.draw_cache.borrow().builds)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            builds(),
+            [1, 1],
+            "each view should build once and then reuse its own cache"
+        );
+        render(&ctx, &state, 500.0);
+        assert_eq!(
+            builds(),
+            [1, 2],
+            "resizing the second view must not evict the first"
+        );
+
+        // A newly created view always carries a fresh cache of its own.
+        state.update(Message::AddViewport);
+        assert_eq!(views(&state)[2].draw_cache.borrow().builds, 0);
     }
 }

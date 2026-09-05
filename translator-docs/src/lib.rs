@@ -57,8 +57,10 @@
 
     Plugins may need to maintain state between calls. This can be done by
     simply using static variables in the plugin.
-    ```
-    static STATE: Mutex<bool> = Mutex::new(false)
+    ```rust
+    use std::sync::Mutex;
+
+    static STATE: Mutex<bool> = Mutex::new(false);
     ```
 
     > NOTE: The static variables are shared between all "instances" of the
@@ -69,14 +71,14 @@
 
     To build your plugin, call
     ```bash
-    cargo build --debug --target wasm32-unknown-unknown
+    cargo build --target wasm32-unknown-unknown
     ```
     which will create `target/debug/cool_surfer_translator.wasm`
 
     This file can then be copied to the local or global plugin translator directories in order to be found and automatically loaded by Surfer
 
     Local:
-    ```
+    ```text
     .surfer/translators/
     ```
 

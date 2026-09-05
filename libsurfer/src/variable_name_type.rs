@@ -9,7 +9,7 @@ use crate::displayed_item::DisplayedItemRef;
 use crate::displayed_item_tree::{Node, VisibleItemIndex};
 use crate::message::MessageTarget;
 use crate::wave_container::{ScopeRefExt, VariableRefExt};
-use crate::{displayed_item::DisplayedItem, wave_container::VariableRef, wave_data::WaveData};
+use crate::{displayed_item::DisplayedItem, item_list::ItemList, wave_container::VariableRef};
 
 #[derive(PartialEq, Copy, Clone, Debug, Deserialize, Display, FromStr, Serialize, Sequence)]
 pub enum VariableNameType {
@@ -25,8 +25,12 @@ pub enum VariableNameType {
 
 const ELLIPSIS: &str = "…";
 
-impl WaveData {
-    pub fn compute_variable_display_names(&mut self) {
+impl ItemList {
+    pub fn compute_variable_display_names(
+        &mut self,
+        data: &crate::data_container::DataContainer,
+        display_variable_indices: bool,
+    ) {
         // First pass: collect all unique variable refs
         let full_names: Vec<&VariableRef> = self
             .items_tree
@@ -58,9 +62,8 @@ impl WaveData {
                                 .cloned()
                                 .unwrap_or_else(|| variable.variable_ref.name.clone()),
                         };
-                        if self.display_variable_indices {
-                            let index = self
-                                .inner
+                        if display_variable_indices {
+                            let index = data
                                 .as_waves()
                                 .unwrap()
                                 .variable_meta(&variable.variable_ref)
@@ -82,7 +85,12 @@ impl WaveData {
         }
     }
 
-    pub fn force_variable_name_type(&mut self, name_type: VariableNameType) {
+    pub fn force_variable_name_type(
+        &mut self,
+        name_type: VariableNameType,
+        data: &crate::data_container::DataContainer,
+        display_variable_indices: bool,
+    ) {
         for Node { item_ref, .. } in self.items_tree.iter() {
             self.displayed_items.entry(*item_ref).and_modify(|item| {
                 if let DisplayedItem::Variable(variable) = item {
@@ -91,13 +99,14 @@ impl WaveData {
             });
         }
         self.default_variable_name_type = name_type;
-        self.compute_variable_display_names();
+        self.compute_variable_display_names(data, display_variable_indices);
     }
 
     pub fn change_variable_name_type(
         &mut self,
         target: MessageTarget<VisibleItemIndex>,
         name_type: VariableNameType,
+        focused_item: Option<VisibleItemIndex>,
     ) -> bool {
         let mut recompute_names = false;
         let mut change_type = |item_ref: DisplayedItemRef| {
@@ -120,7 +129,7 @@ impl WaveData {
                 self.items_tree
                     .iter_visible_selected()
                     .for_each(|node| change_type(node.item_ref));
-                self.focused_item
+                focused_item
                     .and_then(|vidx| self.items_tree.get_visible(vidx))
                     .map(|node| node.item_ref)
                     .map(change_type);

@@ -1,15 +1,12 @@
 //! Analog signal rendering: command generation and waveform drawing.
 
 use crate::analog_signal_cache::{AnalogSignalCache, CacheQueryResult, is_nan_highimp};
-use crate::displayed_item::{
-    AnalogSettings, DisplayedFieldRef, DisplayedItemRef, DisplayedVariable,
-};
+use crate::displayed_item::{AnalogSettings, DisplayedItemRef, DisplayedVariable};
 use crate::drawing_canvas::{AnalogDrawingCommands, DrawingCommands, VariableDrawCommands};
 use crate::message::Message;
-use crate::translation::TranslatorList;
 use crate::view::DrawingContext;
 use crate::viewport::Viewport;
-use crate::wave_data::{TimeRange, WaveData};
+use crate::wave_data::TimeRange;
 use ecolor::Color32;
 use emath::{Align2, Pos2, Rect, Vec2};
 use epaint::{CornerRadius, PathShape, Stroke};
@@ -37,18 +34,15 @@ pub enum AnalogDrawingCommand {
 pub(crate) fn variable_analog_draw_commands(
     displayed_variable: &DisplayedVariable,
     display_id: DisplayedItemRef,
-    waves: &WaveData,
-    translators: &TranslatorList,
+    source: &crate::drawing_canvas::WaveRenderData<'_>,
+    translator: &crate::translation::DynTranslator,
     view_width: f32,
-    viewport_idx: usize,
 ) -> Option<VariableDrawCommands> {
     let render_mode = displayed_variable.analog.as_ref()?;
 
-    let wave_container = waves.inner.as_waves()?;
-    let displayed_field_ref: DisplayedFieldRef = display_id.into();
-    let translator = waves.variable_translator(&displayed_field_ref, translators);
-    let viewport = &waves.viewports[viewport_idx];
-    let range = waves.time_range();
+    let wave_container = source.container;
+    let viewport = source.viewport;
+    let range = source.range;
 
     let signal_id = wave_container
         .signal_id(&displayed_variable.variable_ref)
@@ -58,9 +52,7 @@ pub(crate) fn variable_analog_draw_commands(
 
     // Check if cache exists and is valid (correct generation and matching key)
     let cache = match &render_mode.cache {
-        Some(entry)
-            if entry.generation == waves.cache_generation && entry.cache_key == cache_key =>
-        {
+        Some(entry) if entry.generation == source.generation && entry.cache_key == cache_key => {
             if let Some(cache) = entry.get() {
                 cache
             } else {
