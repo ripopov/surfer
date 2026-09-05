@@ -543,6 +543,7 @@ impl SystemState {
                 msgs.push(Message::OpenMemoryViewer {
                     scope: scope.clone(),
                     name: Some(scope.name()),
+                    placement: None,
                 });
             }
         });

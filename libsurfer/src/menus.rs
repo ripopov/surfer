@@ -89,33 +89,55 @@ impl SystemState {
 
     fn tile_menu(&self, ui: &mut Ui, messages: &mut Vec<Message>) {
         use crate::tiles::{
-            commands::WorkspaceCommand,
+            TileTarget,
             kind::KINDS,
-            layout::Placement,
+            layout::Direction,
             view::{TileCtx, TileReadServices, tab_context_menu},
         };
+        let workspace = &self.user.workspace;
         ui.menu_button("New tile", |ui| {
             for kind in KINDS {
-                if ui.button(kind.name).clicked() {
-                    let placement = self
-                        .user
-                        .workspace
-                        .layout
-                        .focused()
-                        .map_or(Placement::Root, Placement::TabAfter);
-                    messages.push(Message::Workspace(WorkspaceCommand::OpenTile {
-                        kind: kind.name.into(),
-                        placement,
-                        focus: true,
-                    }));
+                if ui.button(kind.name).clicked()
+                    && let Some(command) = workspace.open_command(kind.name, None)
+                {
+                    messages.push(Message::Workspace(command));
                     ui.close();
                 }
             }
         });
-        for id in self.user.workspace.layout.tile_order() {
-            let entry = &self.user.workspace.tiles[&id];
+        let focused = TileTarget::Focused;
+        for (label, action, command) in [
+            (
+                "Split right",
+                ShortcutAction::TileSplitRight,
+                workspace.split_command(focused, Direction::Right, false),
+            ),
+            (
+                "Split down",
+                ShortcutAction::TileSplitDown,
+                workspace.split_command(focused, Direction::Down, false),
+            ),
+            (
+                "Close tile",
+                ShortcutAction::TileClose,
+                workspace.close_command(focused),
+            ),
+        ] {
+            ButtonBuilder::new(label, command.map(Message::Workspace))
+                .shortcut(self.user.config.shortcuts.format_shortcut(action))
+                .add_closing_menu(messages, ui);
+        }
+        ButtonBuilder::new(
+            "Reset workspace",
+            Message::Workspace(workspace.reset_command()),
+        )
+        .add_closing_menu(messages, ui);
+        ui.separator();
+        let titles = workspace.titles();
+        for id in workspace.layout.tile_order() {
+            let entry = &workspace.tiles[&id];
             ui.push_id(self.workspace_runtime.egui_id(id, "tile menu"), |ui| {
-                ui.menu_button(entry.display_title(), |ui| {
+                ui.menu_button(&titles[&id], |ui| {
                     let services = TileReadServices {
                         document: self.user.waves.as_ref(),
                         item_lists: &self.user.workspace.item_lists,
@@ -335,13 +357,6 @@ impl SystemState {
             )
             .enabled(waves_loaded)
             .add_closing_menu(msgs, ui);
-            ui.separator();
-            b("Add viewport", Message::AddViewport)
-                .enabled(waves_loaded)
-                .add_closing_menu(msgs, ui);
-            b("Remove viewport", Message::RemoveViewport)
-                .enabled(waves_loaded)
-                .add_closing_menu(msgs, ui);
             ui.separator();
 
             b(
@@ -940,9 +955,14 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
             if let DisplayedItem::Variable(_) = clicked_item
                 && ui.button("Show Memory Viewer").clicked()
             {
+                // Opens beside the tile whose row was clicked (§7.2).
                 msgs.push(Message::OpenMemoryViewer {
                     scope: path.root.path.clone(),
                     name: Some(path.root.name.clone()),
+                    placement: Some(crate::tiles::layout::Placement::Beside(
+                        waves.tile_id,
+                        crate::tiles::layout::Direction::Right,
+                    )),
                 });
             }
             ui.menu_button("Copy", |ui| {

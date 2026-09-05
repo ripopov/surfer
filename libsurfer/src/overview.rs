@@ -27,7 +27,8 @@ impl SystemState {
     }
 
     fn draw_overview(&self, ui: &mut Ui, waves: &WaveformRead<'_>, msgs: &mut Vec<Message>) {
-        let (response, mut painter) = ui.allocate_painter(ui.available_size(), Sense::drag());
+        let (response, mut painter) =
+            ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
         let frame_size = response.rect.size();
         let cfg = DrawConfig::new(
             frame_size,
@@ -48,8 +49,9 @@ impl SystemState {
         let viewport_all = waves.viewport_all();
         let base_fill_color = self.user.config.theme.canvas_colors.foreground;
 
-        // Draw rectangles for each viewport
-        self.user
+        // Draw one window per visible waveform tile, highlighting the target.
+        let windows = self
+            .user
             .workspace
             .layout
             .visible_tiles()
@@ -61,14 +63,29 @@ impl SystemState {
                     .map(|(_, view)| (id, &view.viewport))
             })
             .map(|(idx, viewport)| (idx, get_viewport_rect(&ctx, range, &viewport_all, viewport)))
-            .for_each(|(idx, rect)| {
-                let gamma = if idx == waves.tile_id { 0.6 } else { 0.3 };
-                ctx.painter.rect_filled(
-                    rect,
-                    CornerRadius::ZERO,
-                    base_fill_color.gamma_multiply(gamma),
-                );
-            });
+            .collect::<Vec<_>>();
+        for (idx, rect) in &windows {
+            let gamma = if *idx == waves.tile_id { 0.6 } else { 0.3 };
+            ctx.painter.rect_filled(
+                *rect,
+                CornerRadius::ZERO,
+                base_fill_color.gamma_multiply(gamma),
+            );
+        }
+        // Clicking a window focuses its tile; overlapping windows resolve to the
+        // narrowest one, which is the one drawn on top.
+        if response.clicked_by(PointerButton::Primary)
+            && let Some(pos) = response.interact_pointer_pos()
+            && let Some((id, _)) = windows
+                .iter()
+                .filter(|(_, rect)| rect.contains(pos))
+                .min_by(|a, b| a.1.width().total_cmp(&b.1.width()))
+            && *id != waves.tile_id
+        {
+            msgs.push(Message::Workspace(
+                crate::tiles::commands::WorkspaceCommand::FocusTile(*id),
+            ));
+        }
 
         // Draw cursor
         waves.draw_cursor(&self.user.config.theme, &mut ctx, &viewport_all);

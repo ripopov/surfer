@@ -56,6 +56,14 @@ pub enum WaveSource {
 
 pub const STATE_FILE_EXTENSION: &str = "surf.ron";
 
+/// A parsed hierarchy is private until its matching body is available.
+pub(crate) struct PendingDocument {
+    pub source: WaveSource,
+    pub format: WaveFormat,
+    pub waves: WaveContainer,
+    pub options: LoadOptions,
+}
+
 impl WaveSource {
     #[must_use]
     pub fn as_file(&self) -> Option<&Utf8Path> {
@@ -111,7 +119,7 @@ impl WaveSource {
 
     /// The file/URL name to show in the window title for this source, if it has one of
     /// its own. `None` for sources with no inherent name (dropped raw data, cxxrtl), which
-    /// fall back to the design's top-level scope name(s); see `WaveformData::window_title`.
+    /// fall back to the design's top-level scope name(s); see `WaveData::window_title`.
     #[must_use]
     pub(crate) fn title_name(&self) -> Option<String> {
         match self {
@@ -131,7 +139,7 @@ impl WaveSource {
 
     /// The window/tab title to show while this source is loaded, e.g. "foo.vcd - Surfer",
     /// based only on the source's own name (see `title_name`). Used where no design
-    /// hierarchy is available yet to fall back on; see `WaveformData::window_title` for that.
+    /// hierarchy is available yet to fall back on; see `WaveData::window_title` for that.
     #[must_use]
     pub fn window_title(&self) -> String {
         format_window_title(self.title_name().as_deref())
@@ -255,6 +263,16 @@ pub enum LoadProgressStatus {
 }
 
 impl SystemState {
+    pub(crate) fn begin_document_load(&mut self) -> u64 {
+        self.document_load_request = self
+            .document_load_request
+            .checked_add(1)
+            .expect("document load request identity exhausted");
+        self.progress_tracker = None;
+        self.pending_document = None;
+        self.document_load_request
+    }
+
     pub fn load_from_file(
         &mut self,
         filename: Utf8PathBuf,
@@ -293,6 +311,7 @@ impl SystemState {
         filename: Utf8PathBuf,
         load_options: LoadOptions,
     ) -> Result<()> {
+        let request = self.begin_document_load();
         info!("Loading a waveform file: {filename}");
         let start = web_time::Instant::now();
         let source = WaveSource::File(filename.clone());
@@ -300,6 +319,7 @@ impl SystemState {
         let sender = self.channels.msg_sender.clone();
         if !filename.exists() {
             error!("Waveform file is missing: {filename}");
+            checked_send(&sender, Message::DocumentLoadFailed(request));
             return Ok(());
         }
         perform_work(move || {
@@ -314,16 +334,20 @@ impl SystemState {
                 Ok(header) => header,
                 Err(e) => {
                     error!("{e:?}");
+                    checked_send(&sender, Message::DocumentLoadFailed(request));
                     return;
                 }
             };
             checked_send(
                 &sender,
-                Message::WaveHeaderLoaded(
-                    start,
-                    source,
-                    load_options,
-                    HeaderResult::LocalFile(Box::new(header)),
+                Message::DocumentLoadResult(
+                    request,
+                    Box::new(Message::WaveHeaderLoaded(
+                        start,
+                        source,
+                        load_options,
+                        HeaderResult::LocalFile(Box::new(header)),
+                    )),
                 ),
             );
         });
@@ -435,6 +459,7 @@ impl SystemState {
         force_switch: bool,
         file_index: Option<usize>,
     ) {
+        let request = self.begin_document_load();
         #[cfg(all(not(target_arch = "wasm32"), feature = "https"))]
         crate::async_util::ensure_rustls_crypto_provider();
         if file_index.is_some() {
@@ -463,6 +488,7 @@ impl SystemState {
                         Ok(r) => r,
                         Err(e) => {
                             error!("{e:?}");
+                            checked_send(&sender, Message::DocumentLoadFailed(request));
                             return;
                         }
                     };
@@ -475,7 +501,7 @@ impl SystemState {
                             LoadOptions::Clear => {
                                 info!("Connecting to a surfer server at: {url}");
                                 // Request status
-                                get_server_status(sender.clone(), url.clone(), 0);
+                                get_server_status(sender.clone(), url.clone(), 0, request);
                                 // Request hierarchy
                                 if let Some(file_index) = file_index {
                                     get_hierarchy_from_server(
@@ -483,6 +509,7 @@ impl SystemState {
                                         url,
                                         load_options,
                                         file_index,
+                                        request,
                                     );
                                 }
                             }
@@ -495,6 +522,7 @@ impl SystemState {
                                             url,
                                             load_options,
                                             file_index,
+                                            request,
                                         );
                                     } else {
                                         info!("Reloading from surver instance at: {url}");
@@ -503,11 +531,12 @@ impl SystemState {
                                             url,
                                             load_options,
                                             file_index,
+                                            request,
                                         );
                                     }
                                 } else if force_switch {
                                     // We started Surfer with a Surver URL as argument, so request status
-                                    get_server_status(sender.clone(), url.clone(), 0);
+                                    get_server_status(sender.clone(), url.clone(), 0, request);
                                 } else {
                                     warn!(
                                         "Cannot reload from surver instance without a selected file index"
@@ -528,10 +557,17 @@ impl SystemState {
                         Ok(bytes) => bytes,
                         Err(e) => {
                             error!("{e:?}");
+                            checked_send(&sender, Message::DocumentLoadFailed(request));
                             return;
                         }
                     };
-                    checked_send(&sender, Message::FileDownloaded(url, bytes, load_options));
+                    checked_send(
+                        &sender,
+                        Message::DocumentLoadResult(
+                            request,
+                            Box::new(Message::FileDownloaded(url, bytes, load_options)),
+                        ),
+                    );
                 });
 
                 self.progress_tracker =
@@ -545,6 +581,7 @@ impl SystemState {
         filename: camino::Utf8PathBuf,
         load_options: LoadOptions,
     ) -> Result<()> {
+        let request = self.begin_document_load();
         info!("Loading a transaction file: {filename}");
         let sender = self.channels.msg_sender.clone();
         let source = WaveSource::File(filename.clone());
@@ -557,14 +594,20 @@ impl SystemState {
         match result {
             Ok(ftr) => checked_send(
                 &sender,
-                Message::TransactionStreamsLoaded(
-                    source,
-                    format,
-                    TransactionContainer { inner: ftr },
-                    load_options,
+                Message::DocumentLoadResult(
+                    request,
+                    Box::new(Message::TransactionStreamsLoaded(
+                        source,
+                        format,
+                        TransactionContainer { inner: ftr },
+                        load_options,
+                    )),
                 ),
             ),
-            Err(e) => error!("{e:?}"),
+            Err(e) => {
+                error!("{e:?}");
+                checked_send(&sender, Message::DocumentLoadFailed(request));
+            }
         };
         Ok(())
     }
@@ -574,6 +617,7 @@ impl SystemState {
         bytes: Vec<u8>,
         load_options: LoadOptions,
     ) {
+        let request = self.begin_document_load();
         let sender = self.channels.msg_sender.clone();
 
         let result = parse::parse_ftr_from_bytes(bytes);
@@ -583,14 +627,20 @@ impl SystemState {
         match result {
             Ok(ftr) => checked_send(
                 &sender,
-                Message::TransactionStreamsLoaded(
-                    source,
-                    WaveFormat::Ftr,
-                    TransactionContainer { inner: ftr },
-                    load_options,
+                Message::DocumentLoadResult(
+                    request,
+                    Box::new(Message::TransactionStreamsLoaded(
+                        source,
+                        WaveFormat::Ftr,
+                        TransactionContainer { inner: ftr },
+                        load_options,
+                    )),
                 ),
             ),
-            Err(e) => error!("{e:?}"),
+            Err(e) => {
+                error!("{e:?}");
+                checked_send(&sender, Message::DocumentLoadFailed(request));
+            }
         };
     }
 
@@ -612,11 +662,12 @@ impl SystemState {
                 Arc::new(AtomicU64::new(file_info.bytes_loaded)),
             )));
             // get another status update
-            get_server_status(sender, server.to_string(), 250);
+            get_server_status(sender, server.to_string(), 250, self.document_load_request);
         }
     }
 
     pub fn connect_to_cxxrtl(&mut self, kind: CxxrtlKind, keep_variables: bool) {
+        let request = self.begin_document_load();
         let sender = self.channels.msg_sender.clone();
 
         self.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::Connecting(format!(
@@ -632,11 +683,13 @@ impl SystemState {
                 #[cfg(target_arch = "wasm32")]
                 CxxrtlKind::Tcp { .. } => {
                     error!("Cxxrtl tcp is not supported om wasm");
+                    checked_send(&sender, Message::DocumentLoadFailed(request));
                     return;
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 CxxrtlKind::Mailbox => {
                     error!("CXXRTL mailboxes are only supported on wasm for now");
+                    checked_send(&sender, Message::DocumentLoadFailed(request));
                     return;
                 }
                 #[cfg(target_arch = "wasm32")]
@@ -651,14 +704,20 @@ impl SystemState {
             match container {
                 Ok(c) => checked_send(
                     &sender,
-                    Message::WavesLoaded(
-                        WaveSource::Cxxrtl(kind),
-                        WaveFormat::CxxRtl,
-                        Box::new(WaveContainer::Cxxrtl(Box::new(Mutex::new(c)))),
-                        load_options,
+                    Message::DocumentLoadResult(
+                        request,
+                        Box::new(Message::WavesLoaded(
+                            WaveSource::Cxxrtl(kind),
+                            WaveFormat::CxxRtl,
+                            Box::new(WaveContainer::Cxxrtl(Box::new(Mutex::new(c)))),
+                            load_options,
+                        )),
                     ),
                 ),
-                Err(e) => error!("{e:?}"),
+                Err(e) => {
+                    error!("{e:?}");
+                    checked_send(&sender, Message::DocumentLoadFailed(request));
+                }
             };
         };
         #[cfg(not(target_arch = "wasm32"))]
@@ -673,6 +732,7 @@ impl SystemState {
         bytes: Vec<u8>,
         load_options: LoadOptions,
     ) {
+        let request = self.begin_document_load();
         let start = web_time::Instant::now();
         let sender = self.channels.msg_sender.clone();
         let source_copy = source.clone();
@@ -686,16 +746,20 @@ impl SystemState {
                 Ok(header) => header,
                 Err(e) => {
                     error!("{e:?}");
+                    checked_send(&sender, Message::DocumentLoadFailed(request));
                     return;
                 }
             };
             checked_send(
                 &sender,
-                Message::WaveHeaderLoaded(
-                    start,
-                    source,
-                    load_options,
-                    HeaderResult::LocalBytes(Box::new(header)),
+                Message::DocumentLoadResult(
+                    request,
+                    Box::new(Message::WaveHeaderLoaded(
+                        start,
+                        source,
+                        load_options,
+                        HeaderResult::LocalBytes(Box::new(header)),
+                    )),
                 ),
             );
         });
@@ -725,6 +789,7 @@ impl SystemState {
         body_len: u64,
         hierarchy: Arc<wellen::Hierarchy>,
     ) {
+        let request = self.document_load_request;
         let start = web_time::Instant::now();
         let sender = self.channels.msg_sender.clone();
         let source_copy = source.clone();
@@ -743,12 +808,20 @@ impl SystemState {
                     Ok(body) => body,
                     Err(e) => {
                         error!("{e:?}");
+                        checked_send(&sender, Message::DocumentLoadFailed(request));
                         return;
                     }
                 };
                 checked_send(
                     &sender,
-                    Message::WaveBodyLoaded(start, source, BodyResult::Local(body)),
+                    Message::DocumentLoadResult(
+                        request,
+                        Box::new(Message::WaveBodyLoaded(
+                            start,
+                            source,
+                            BodyResult::Local(body),
+                        )),
+                    ),
                 );
             };
             if let Some(pool) = pool {
@@ -866,5 +939,192 @@ pub fn draw_progress_information(ui: &mut egui::Ui, progress_data: &LoadProgress
                 .desired_width(300.);
             ui.add(progress_bar);
         }
+    }
+}
+
+#[cfg(test)]
+mod load_request_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn failed_staged_document_preserves_active_document_workspace_and_history() {
+        let mut state = SystemState::new_default_config().unwrap();
+        state.on_waves_loaded(
+            WaveSource::Url("active-document".into()),
+            WaveFormat::Vcd,
+            WaveContainer::Empty,
+            LoadOptions::Clear,
+        );
+        let tile = state.user.workspace.layout.focused().unwrap();
+        state
+            .update(Message::Workspace(
+                crate::tiles::commands::WorkspaceCommand::RenameTile {
+                    tile,
+                    title: Some("Keep this workspace".into()),
+                },
+            ))
+            .unwrap();
+        let before = state.encode_state().unwrap();
+        let history = state.undo_stack.len();
+        let request = state.begin_document_load();
+        let path = project_root::get_project_root()
+            .unwrap()
+            .join("examples/counter.vcd");
+        let header = wellen::viewers::read_header_from_file(
+            path.to_str().unwrap(),
+            &WELLEN_SURFER_DEFAULT_OPTIONS,
+        )
+        .unwrap();
+        state
+            .update(Message::DocumentLoadResult(
+                request,
+                Box::new(Message::WaveHeaderLoaded(
+                    Instant::now(),
+                    WaveSource::Data,
+                    LoadOptions::Clear,
+                    HeaderResult::LocalFile(Box::new(header)),
+                )),
+            ))
+            .unwrap();
+        assert!(state.pending_document.is_some());
+        assert!(!state.waves_fully_loaded());
+        assert_eq!(state.encode_state().unwrap(), before);
+        assert_eq!(state.undo_stack.len(), history);
+        state.update(Message::DocumentLoadFailed(request)).unwrap();
+        assert!(state.pending_document.is_none());
+        assert_eq!(state.encode_state().unwrap(), before);
+        assert_eq!(state.undo_stack.len(), history);
+    }
+
+    #[tokio::test]
+    async fn parse_failure_is_terminal_and_stale_failures_preserve_newer_progress() {
+        let mut state = SystemState::new_default_config().unwrap();
+        state.load_wave_from_bytes(
+            WaveSource::Data,
+            b"not a waveform".to_vec(),
+            LoadOptions::Clear,
+        );
+        let failed = state.document_load_request;
+        assert!(state.progress_tracker.is_some());
+        let completion = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                if let Ok(message) = state.channels.msg_receiver.try_recv() {
+                    break message;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(matches!(&completion, Message::DocumentLoadFailed(request) if *request == failed));
+        state.update(completion).unwrap();
+        assert!(state.progress_tracker.is_none());
+        assert!(state.user.waves.is_none());
+        assert_ne!(state.document_load_request, failed);
+
+        let current = state.begin_document_load();
+        state.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::ReadingHeader(
+            WaveSource::Data,
+        )));
+        state.update(Message::DocumentLoadFailed(failed)).unwrap();
+        assert!(state.progress_tracker.is_some());
+        assert_eq!(state.document_load_request, current);
+        state.update(Message::DocumentLoadFailed(current)).unwrap();
+        assert!(state.progress_tracker.is_none());
+        let menu = state.user.show_menu;
+        state
+            .update(Message::DocumentLoadResult(
+                current,
+                Box::new(Message::SetMenuVisible(!state.show_menu())),
+            ))
+            .unwrap();
+        assert_eq!(
+            state.user.show_menu, menu,
+            "failed requests reject subsequent completions"
+        );
+    }
+
+    #[test]
+    fn stale_transaction_and_download_completions_do_not_start_or_install_documents() {
+        let mut state = SystemState::new_default_config().unwrap();
+        let path = project_root::get_project_root()
+            .unwrap()
+            .join("examples/my_db.ftr");
+        state.load_transactions_from_bytes(
+            WaveSource::Data,
+            std::fs::read(path).unwrap(),
+            LoadOptions::Clear,
+        );
+        let stale = state.document_load_request;
+        let completion = state.channels.msg_receiver.try_recv().unwrap();
+        assert!(
+            matches!(&completion, Message::DocumentLoadResult(request, _) if *request == stale)
+        );
+        let current = state.begin_document_load();
+        state.update(completion).unwrap();
+        assert!(state.user.waves.is_none());
+        state
+            .update(Message::DocumentLoadResult(
+                stale,
+                Box::new(Message::FileDownloaded(
+                    "https://example.invalid/obsolete.vcd".into(),
+                    Vec::new().into(),
+                    LoadOptions::Clear,
+                )),
+            ))
+            .unwrap();
+        assert_eq!(state.document_load_request, current);
+        assert!(state.progress_tracker.is_none());
+        assert!(state.user.waves.is_none());
+    }
+
+    #[tokio::test]
+    async fn stale_local_headers_and_bodies_cannot_replace_a_newer_request() {
+        let mut state = SystemState::new_default_config().unwrap();
+        let path = project_root::get_project_root()
+            .unwrap()
+            .join("examples/counter.vcd");
+        let header_message = |request| {
+            let header = wellen::viewers::read_header_from_file(
+                path.to_str().unwrap(),
+                &WELLEN_SURFER_DEFAULT_OPTIONS,
+            )
+            .unwrap();
+            Message::DocumentLoadResult(
+                request,
+                Box::new(Message::WaveHeaderLoaded(
+                    Instant::now(),
+                    WaveSource::Data,
+                    LoadOptions::Clear,
+                    HeaderResult::LocalFile(Box::new(header)),
+                )),
+            )
+        };
+        let stale = state.begin_document_load();
+        let current = state.begin_document_load();
+        state.update(header_message(stale)).unwrap();
+        assert!(state.user.waves.is_none());
+        state.update(header_message(current)).unwrap();
+        assert!(state.user.waves.is_none());
+        assert!(state.pending_document.is_some());
+        assert!(state.user.workspace.tiles.is_empty());
+        // A new request starts before the body worker completes. Even when the
+        // source is identical, the previous body must never attach to it.
+        state.begin_document_load();
+        let completion = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                if let Ok(message) = state.channels.msg_receiver.try_recv() {
+                    break message;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            matches!(&completion, Message::DocumentLoadResult(request, _) if *request == current)
+        );
+        state.update(completion).unwrap();
+        assert!(state.user.waves.is_none());
     }
 }

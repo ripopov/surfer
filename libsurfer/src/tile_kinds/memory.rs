@@ -33,6 +33,25 @@ impl Clone for MemoryTile {
     }
 }
 impl MemoryTile {
+    pub(crate) fn attach(
+        &mut self,
+        document: &mut crate::wave_data::WaveData,
+    ) -> Option<crate::wellen::LoadSignalsCmd> {
+        self.reset_runtime();
+        let scope = self.settings.scope.as_mut()?;
+        scope.id = Default::default();
+        let container = document.inner.as_waves_mut()?;
+        if !container.scope_exists(scope) {
+            return None;
+        }
+        let variables = container.variables_in_scope(scope);
+        container
+            .load_variables(variables.iter())
+            .map_err(|error| tracing::warn!("Memory array load failed: {error}"))
+            .ok()
+            .flatten()
+    }
+
     pub(crate) fn reset_runtime(&mut self) {
         *self.runtime.get_mut() = Default::default();
     }
@@ -97,6 +116,7 @@ mod tests {
                     id: Default::default(),
                 },
                 name: Some(array.into()),
+                placement: None,
             })
             .unwrap();
         state.user.workspace.layout.focused().unwrap()

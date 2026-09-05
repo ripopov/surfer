@@ -68,10 +68,6 @@ impl WaveformReadServices<'_> {
         ui: &mut Ui,
         msgs: &mut Vec<Message>,
     ) -> WaveformBodyResponse {
-        if ui.rect_contains_pointer(ui.max_rect()) && ui.input(|input| input.pointer.any_pressed())
-        {
-            msgs.push(Message::SetActiveViewport(view.source.tile_id));
-        }
         self.ensure_drawing_infos_cached(view.source.items);
         let column_view = ItemListView {
             document: view.source.document,

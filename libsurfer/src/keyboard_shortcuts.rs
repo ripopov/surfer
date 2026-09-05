@@ -6,7 +6,19 @@ use crate::SystemState;
 use crate::message::{Message, MessageTarget};
 use crate::wave_data::{PER_SCROLL_EVENT, SCROLL_EVENTS_PER_PAGE};
 
-const NUMBER_OF_SHORTCUTS: usize = 32; // Update to reflect the actual number of shortcut actions defined in ShortcutAction enum
+impl SystemState {
+    /// Resolve a tile shortcut against the focused tile; a missing target is a no-op.
+    fn tile_command(
+        &self,
+        resolve: impl FnOnce(
+            &crate::tiles::workspace::Workspace,
+        ) -> Option<crate::tiles::commands::WorkspaceCommand>,
+    ) -> Option<Message> {
+        resolve(&self.user.workspace).map(Message::Workspace)
+    }
+}
+
+const NUMBER_OF_SHORTCUTS: usize = 46; // Update to reflect the actual number of shortcut actions defined in ShortcutAction enum
 
 // Table-driven dispatch action enum
 #[derive(Clone, Copy, Debug)]
@@ -43,6 +55,20 @@ pub enum ShortcutAction {
     ZoomToCursor,
     GoToTime,
     FocusVariableNameFilter,
+    TileSplitRight,
+    TileSplitDown,
+    TileClose,
+    TileNext,
+    TilePrev,
+    TileFocusLeft,
+    TileFocusRight,
+    TileFocusUp,
+    TileFocusDown,
+    TileMoveLeft,
+    TileMoveRight,
+    TileMoveUp,
+    TileMoveDown,
+    ShowLogs,
 }
 
 // Cached dispatch table entry: (action, modifier_priority)
@@ -118,6 +144,34 @@ pub struct SurferShortcuts {
     pub go_to_time: Vec<KeyboardShortcut>,
     #[serde(with = "keyboard_shortcuts_serde")]
     pub focus_variable_name_filter: Vec<KeyboardShortcut>,
+    #[serde(with = "keyboard_shortcuts_serde")]
+    pub tile_split_right: Vec<KeyboardShortcut>,
+    #[serde(with = "keyboard_shortcuts_serde")]
+    pub tile_split_down: Vec<KeyboardShortcut>,
+    #[serde(with = "keyboard_shortcuts_serde")]
+    pub tile_close: Vec<KeyboardShortcut>,
+    #[serde(with = "keyboard_shortcuts_serde")]
+    pub tile_next: Vec<KeyboardShortcut>,
+    #[serde(with = "keyboard_shortcuts_serde")]
+    pub tile_prev: Vec<KeyboardShortcut>,
+    #[serde(with = "keyboard_shortcuts_serde")]
+    pub tile_focus_left: Vec<KeyboardShortcut>,
+    #[serde(with = "keyboard_shortcuts_serde")]
+    pub tile_focus_right: Vec<KeyboardShortcut>,
+    #[serde(with = "keyboard_shortcuts_serde")]
+    pub tile_focus_up: Vec<KeyboardShortcut>,
+    #[serde(with = "keyboard_shortcuts_serde")]
+    pub tile_focus_down: Vec<KeyboardShortcut>,
+    #[serde(with = "keyboard_shortcuts_serde")]
+    pub tile_move_left: Vec<KeyboardShortcut>,
+    #[serde(with = "keyboard_shortcuts_serde")]
+    pub tile_move_right: Vec<KeyboardShortcut>,
+    #[serde(with = "keyboard_shortcuts_serde")]
+    pub tile_move_up: Vec<KeyboardShortcut>,
+    #[serde(with = "keyboard_shortcuts_serde")]
+    pub tile_move_down: Vec<KeyboardShortcut>,
+    #[serde(with = "keyboard_shortcuts_serde")]
+    pub show_logs: Vec<KeyboardShortcut>,
 
     #[serde(skip)]
     cached_dispatch_table: Vec<DispatchEntry>,
@@ -282,6 +336,62 @@ impl SurferShortcuts {
                 action: ShortcutAction::FocusVariableNameFilter,
                 priority: modifier_priority(&self.focus_variable_name_filter),
             },
+            DispatchEntry {
+                action: ShortcutAction::TileSplitRight,
+                priority: modifier_priority(&self.tile_split_right),
+            },
+            DispatchEntry {
+                action: ShortcutAction::TileSplitDown,
+                priority: modifier_priority(&self.tile_split_down),
+            },
+            DispatchEntry {
+                action: ShortcutAction::TileClose,
+                priority: modifier_priority(&self.tile_close),
+            },
+            DispatchEntry {
+                action: ShortcutAction::TileNext,
+                priority: modifier_priority(&self.tile_next),
+            },
+            DispatchEntry {
+                action: ShortcutAction::TilePrev,
+                priority: modifier_priority(&self.tile_prev),
+            },
+            DispatchEntry {
+                action: ShortcutAction::TileFocusLeft,
+                priority: modifier_priority(&self.tile_focus_left),
+            },
+            DispatchEntry {
+                action: ShortcutAction::TileFocusRight,
+                priority: modifier_priority(&self.tile_focus_right),
+            },
+            DispatchEntry {
+                action: ShortcutAction::TileFocusUp,
+                priority: modifier_priority(&self.tile_focus_up),
+            },
+            DispatchEntry {
+                action: ShortcutAction::TileFocusDown,
+                priority: modifier_priority(&self.tile_focus_down),
+            },
+            DispatchEntry {
+                action: ShortcutAction::TileMoveLeft,
+                priority: modifier_priority(&self.tile_move_left),
+            },
+            DispatchEntry {
+                action: ShortcutAction::TileMoveRight,
+                priority: modifier_priority(&self.tile_move_right),
+            },
+            DispatchEntry {
+                action: ShortcutAction::TileMoveUp,
+                priority: modifier_priority(&self.tile_move_up),
+            },
+            DispatchEntry {
+                action: ShortcutAction::TileMoveDown,
+                priority: modifier_priority(&self.tile_move_down),
+            },
+            DispatchEntry {
+                action: ShortcutAction::ShowLogs,
+                priority: modifier_priority(&self.show_logs),
+            },
         ]);
 
         debug_assert!(
@@ -329,11 +439,30 @@ impl SurferShortcuts {
             ShortcutAction::ZoomToCursor => &self.zoom_to_cursor,
             ShortcutAction::GoToTime => &self.go_to_time,
             ShortcutAction::FocusVariableNameFilter => &self.focus_variable_name_filter,
+            ShortcutAction::TileSplitRight => &self.tile_split_right,
+            ShortcutAction::TileSplitDown => &self.tile_split_down,
+            ShortcutAction::TileClose => &self.tile_close,
+            ShortcutAction::TileNext => &self.tile_next,
+            ShortcutAction::TilePrev => &self.tile_prev,
+            ShortcutAction::TileFocusLeft => &self.tile_focus_left,
+            ShortcutAction::TileFocusRight => &self.tile_focus_right,
+            ShortcutAction::TileFocusUp => &self.tile_focus_up,
+            ShortcutAction::TileFocusDown => &self.tile_focus_down,
+            ShortcutAction::TileMoveLeft => &self.tile_move_left,
+            ShortcutAction::TileMoveRight => &self.tile_move_right,
+            ShortcutAction::TileMoveUp => &self.tile_move_up,
+            ShortcutAction::TileMoveDown => &self.tile_move_down,
+            ShortcutAction::ShowLogs => &self.show_logs,
         }
     }
 
     /// Execute the action corresponding to the given shortcut.
     fn execute_action(&self, action: ShortcutAction, msgs: &mut Vec<Message>, state: &SystemState) {
+        use crate::tiles::{
+            TileTarget::Focused,
+            commands::WorkspaceCommand,
+            layout::{Direction, Placement},
+        };
         match action {
             ShortcutAction::OpenFile => {
                 msgs.push(Message::OpenFileDialog(crate::file_dialog::OpenMode::Open));
@@ -572,6 +701,64 @@ impl SurferShortcuts {
                     true,
                 ));
             }
+            ShortcutAction::TileSplitRight => {
+                msgs.extend(
+                    state.tile_command(|w| w.split_command(Focused, Direction::Right, false)),
+                );
+            }
+            ShortcutAction::TileSplitDown => {
+                msgs.extend(
+                    state.tile_command(|w| w.split_command(Focused, Direction::Down, false)),
+                );
+            }
+            ShortcutAction::TileClose => {
+                msgs.extend(state.tile_command(|w| w.close_command(Focused)));
+            }
+            ShortcutAction::TileNext => {
+                msgs.extend(state.tile_command(|w| w.cycle_tab_command(Focused, 1)));
+            }
+            ShortcutAction::TilePrev => {
+                msgs.extend(state.tile_command(|w| w.cycle_tab_command(Focused, -1)));
+            }
+            ShortcutAction::TileFocusLeft => {
+                msgs.extend(
+                    state.tile_command(|w| w.focus_neighbor_command(Focused, Direction::Left)),
+                );
+            }
+            ShortcutAction::TileFocusRight => {
+                msgs.extend(
+                    state.tile_command(|w| w.focus_neighbor_command(Focused, Direction::Right)),
+                );
+            }
+            ShortcutAction::TileFocusUp => {
+                msgs.extend(
+                    state.tile_command(|w| w.focus_neighbor_command(Focused, Direction::Up)),
+                );
+            }
+            ShortcutAction::TileFocusDown => {
+                msgs.extend(
+                    state.tile_command(|w| w.focus_neighbor_command(Focused, Direction::Down)),
+                );
+            }
+            ShortcutAction::TileMoveLeft => {
+                msgs.extend(state.tile_command(|w| w.move_command(Focused, Direction::Left)));
+            }
+            ShortcutAction::TileMoveRight => {
+                msgs.extend(state.tile_command(|w| w.move_command(Focused, Direction::Right)));
+            }
+            ShortcutAction::TileMoveUp => {
+                msgs.extend(state.tile_command(|w| w.move_command(Focused, Direction::Up)));
+            }
+            ShortcutAction::TileMoveDown => {
+                msgs.extend(state.tile_command(|w| w.move_command(Focused, Direction::Down)));
+            }
+            ShortcutAction::ShowLogs => {
+                msgs.push(Message::Workspace(WorkspaceCommand::OpenTile {
+                    kind: "logs".into(),
+                    placement: Placement::Edge(Direction::Down),
+                    focus: true,
+                }));
+            }
         }
     }
 
@@ -701,5 +888,120 @@ mod keyboard_shortcuts_serde {
             })?;
 
         Ok(KeyboardShortcut::new(modifiers, logical_key))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tiles::{
+        TileId,
+        commands::{SplitMode, WorkspaceCommand},
+        layout::{Direction, Placement},
+    };
+    use egui::Key;
+
+    fn press(state: &SystemState, key: Key, modifiers: Modifiers) -> Vec<Message> {
+        let ctx = egui::Context::default();
+        let mut msgs = Vec::new();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                state
+                    .user
+                    .config
+                    .shortcuts
+                    .process(ui.ctx(), &mut msgs, state)
+            },
+        );
+        output.textures_delta.clear();
+        msgs
+    }
+
+    fn create(state: &mut SystemState, kind: &str, placement: Placement) -> TileId {
+        state
+            .update(Message::Workspace(WorkspaceCommand::CreateTile {
+                kind: kind.into(),
+                placement,
+                focus: true,
+            }))
+            .unwrap();
+        state.user.workspace.layout.focused().unwrap()
+    }
+
+    #[test]
+    fn tile_shortcuts_resolve_against_the_focused_tile() {
+        let mut state = SystemState::new_default_config().unwrap();
+        assert!(press(&state, Key::Backslash, Modifiers::COMMAND).is_empty());
+        let waveform = create(&mut state, "waveform", Placement::Root);
+        let logs = create(&mut state, "logs", Placement::TabAfter(waveform));
+        state
+            .update(Message::Workspace(WorkspaceCommand::FocusTile(waveform)))
+            .unwrap();
+        let msgs = press(&state, Key::Backslash, Modifiers::COMMAND);
+        assert!(matches!(
+            msgs.as_slice(),
+            [Message::Workspace(WorkspaceCommand::SplitTile { tile, dir: Direction::Right, mode: SplitMode::Linked })] if *tile == waveform
+        ));
+        let msgs = press(
+            &state,
+            Key::Backslash,
+            Modifiers::COMMAND | Modifiers::SHIFT,
+        );
+        assert!(matches!(
+            msgs.as_slice(),
+            [Message::Workspace(WorkspaceCommand::SplitTile { tile, dir: Direction::Down, .. })] if *tile == waveform
+        ));
+        assert!(matches!(
+            press(&state, Key::W, Modifiers::COMMAND).as_slice(),
+            [Message::Workspace(WorkspaceCommand::CloseTile(tile))] if *tile == waveform
+        ));
+        assert!(matches!(
+            press(&state, Key::PageDown, Modifiers::COMMAND).as_slice(),
+            [Message::Workspace(WorkspaceCommand::FocusTile(tile))] if *tile == logs
+        ));
+        assert!(matches!(
+            press(&state, Key::PageUp, Modifiers::COMMAND).as_slice(),
+            [Message::Workspace(WorkspaceCommand::FocusTile(tile))] if *tile == logs
+        ));
+        assert!(matches!(
+            press(&state, Key::ArrowRight, Modifiers::COMMAND | Modifiers::ALT).as_slice(),
+            [Message::Workspace(WorkspaceCommand::MoveTile { tile, to: Placement::Edge(Direction::Right) })] if *tile == waveform
+        ));
+        // No rendered geometry: spatial focus has no neighbor and stays silent.
+        assert!(
+            press(
+                &state,
+                Key::ArrowRight,
+                Modifiers::COMMAND | Modifiers::SHIFT
+            )
+            .is_empty()
+        );
+        assert!(matches!(
+            press(&state, Key::L, Modifiers::COMMAND | Modifiers::SHIFT).as_slice(),
+            [Message::Workspace(WorkspaceCommand::OpenTile { kind, placement: Placement::Edge(Direction::Down), focus: true })] if kind == "logs"
+        ));
+        // Plain PageDown still scrolls the waveform rather than switching tabs.
+        assert!(matches!(
+            press(&state, Key::PageDown, Modifiers::NONE).as_slice(),
+            [Message::CanvasScroll { tile_id, .. }] if *tile_id == waveform
+        ));
+        state
+            .update(Message::Workspace(WorkspaceCommand::FocusTile(logs)))
+            .unwrap();
+        assert!(press(&state, Key::Backslash, Modifiers::COMMAND).is_empty());
+        assert!(matches!(
+            press(&state, Key::W, Modifiers::COMMAND).as_slice(),
+            [Message::Workspace(WorkspaceCommand::CloseTile(tile))] if *tile == logs
+        ));
     }
 }

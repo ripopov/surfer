@@ -271,10 +271,8 @@ impl Annotatable for ArrowAnnotation {
         ui.add(arrow_annotation);
 
         if exact_clicked {
-            // Notify the application that this annotation was clicked and that the
-            // current viewport should become active
-
-            msgs.push(Message::SetActiveViewport(tile_id));
+            // Notify the application that this annotation was clicked; the layout
+            // adapter has already focused the tile under the pointer.
             msgs.push(Message::AnnotationClicked(
                 Some(self.annotation_data.id),
                 pointer_click_pos,

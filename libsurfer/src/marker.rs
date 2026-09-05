@@ -16,7 +16,7 @@ use crate::{
     time::TimeFormatter,
     view::DrawingContext,
     viewport::Viewport,
-    wave_data::{WaveData, WaveformData},
+    wave_data::WaveData,
 };
 
 pub const DEFAULT_MARKER_NAME: &str = "Marker";
@@ -24,30 +24,107 @@ const MAX_MARKERS: usize = 255;
 const MAX_MARKER_INDEX: u8 = 254;
 const CURSOR_MARKER_IDX: u8 = 255;
 
-impl WaveformData {
-    pub fn add_marker(
+impl crate::SystemState {
+    /// Apply an edit that changes one shared marker time and/or its row in the
+    /// target waveform's list. The record retains only that marker's previous
+    /// value and that list, so other markers and views are untouched by undo.
+    pub(crate) fn edit_shared_marker(
         &mut self,
-        location: &BigInt,
-        name: Option<String>,
-        move_focus: bool,
-    ) -> Option<DisplayedItemRef> {
-        self.edit().add_marker(location, name, move_focus)
+        label: String,
+        known: Option<u8>,
+        edit: impl FnOnce(&mut crate::wave_data::WaveformEdit<'_>) -> Option<()>,
+    ) -> Option<()> {
+        let target = self
+            .user
+            .workspace
+            .resolve_waveform(crate::tiles::TileTarget::Focused)?;
+        let list = self.user.workspace.tiles[&target].kind.item_list()?;
+        let before_markers = self.user.waves.as_ref()?.markers.clone();
+        let items = &self.user.workspace.item_lists[&list];
+        let before = Self::current_canvas_state(list, items, label);
+        let rows_before = items.displayed_items.len();
+        let mut waves = self.user.waveform_edit_at(target)?;
+        edit(&mut waves)?;
+        let after = &self.user.waves.as_ref()?.markers;
+        let changed = known
+            .into_iter()
+            .chain(before_markers.keys().copied())
+            .chain(after.keys().copied())
+            .find(|id| before_markers.get(id) != after.get(id));
+        let rows_changed =
+            rows_before != self.user.workspace.item_lists[&list].displayed_items.len();
+        let id = match changed {
+            Some(id) => id,
+            None if rows_changed => known?,
+            None => return None,
+        };
+        let time = before_markers.get(&id).cloned();
+        self.record_edit(crate::tiles::history::UndoRecord::Marker {
+            id,
+            time,
+            lists: vec![before],
+        });
+        self.invalidate_draw_commands();
+        Some(())
     }
-    pub fn remove_marker(&mut self, idx: u8) {
-        self.edit().remove_marker(idx);
-    }
-    pub fn set_marker_position(
-        &mut self,
-        idx: u8,
-        location: &BigInt,
-    ) -> Result<(), crate::item_list::ItemEditError> {
-        self.edit().set_marker_position(idx, location)
-    }
-    pub fn move_marker_to_cursor(
-        &mut self,
-        idx: u8,
-    ) -> Result<(), crate::item_list::ItemEditError> {
-        self.edit().move_marker_to_cursor(idx)
+
+    pub(crate) fn remove_shared_marker(&mut self, id: u8) -> Option<()> {
+        let time = self.user.waves.as_ref()?.markers.get(&id).cloned();
+        let affected = self
+            .user
+            .workspace
+            .item_lists
+            .iter()
+            .filter_map(|(list, items)| {
+                let rows = items
+                    .displayed_items
+                    .iter()
+                    .filter_map(|(row, item)| {
+                        matches!(item, DisplayedItem::Marker(marker) if marker.idx == id)
+                            .then_some(*row)
+                    })
+                    .collect::<Vec<_>>();
+                (!rows.is_empty()).then_some((*list, rows))
+            })
+            .collect::<Vec<_>>();
+        if time.is_none() && affected.is_empty() {
+            return None;
+        }
+        let mut lists = Vec::new();
+        for (list, rows) in affected {
+            let items = self.user.workspace.item_lists.get_mut(&list).unwrap();
+            lists.push(Self::current_canvas_state(
+                list,
+                items,
+                "Remove marker".into(),
+            ));
+            let mut views = self
+                .user
+                .workspace
+                .tiles
+                .values_mut()
+                .filter_map(|entry| match &mut entry.kind {
+                    crate::tiles::kind::TileKind::Waveform(tile) if tile.items == list => {
+                        Some(&mut tile.view)
+                    }
+                    _ => None,
+                })
+                .map(|view| {
+                    let focus = view.focus_snapshot(items);
+                    (view, focus)
+                })
+                .collect::<Vec<_>>();
+            items.remove_items(&rows);
+            for (view, focus) in &mut views {
+                view.reconcile_item_focus(items, *focus);
+                view.reconcile_annotations(items);
+                view.invalidate_draw_cache();
+            }
+        }
+        self.user.waves.as_mut().unwrap().markers.remove(&id);
+        self.record_edit(crate::tiles::history::UndoRecord::Marker { id, time, lists });
+        self.invalidate_draw_commands();
+        Some(())
     }
 }
 
@@ -83,20 +160,6 @@ impl crate::wave_data::WaveformEdit<'_> {
         self.markers.insert(idx, location.clone());
 
         Some(item_ref)
-    }
-
-    pub fn remove_marker(&mut self, idx: u8) {
-        self.document.markers.remove(&idx);
-        let rows = self
-            .items
-            .displayed_items
-            .iter()
-            .filter_map(|(id, item)| match item {
-                DisplayedItem::Marker(marker) if marker.idx == idx => Some(*id),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        self.remove_displayed_items(&rows);
     }
 
     /// Set the marker with the specified id to the location.

@@ -199,6 +199,11 @@ pub enum Message {
         command: String,
     },
     SetupCxxrtl(CxxrtlKind),
+    /// Internal completion tied to the document request that started the work.
+    #[serde(skip)]
+    DocumentLoadResult(u64, Box<Message>),
+    #[serde(skip)]
+    DocumentLoadFailed(u64),
     #[serde(skip)]
     /// Message sent when waveform file header is loaded.
     WaveHeaderLoaded(
@@ -356,9 +361,13 @@ pub enum Message {
     SetFrameBufferWidth(usize),
     SetFrameBufferRange(Vec<(i64, i64)>),
     SetMouseGestureDragStart(Option<Pos2>, Option<BigInt>, crate::tiles::TileId),
+    /// Open a memory viewer for an array. `placement` defaults to beside the
+    /// focused tile; item context menus pass their originating tile.
     OpenMemoryViewer {
         scope: ScopeRef,
         name: Option<String>,
+        #[serde(default)]
+        placement: Option<crate::tiles::layout::Placement>,
     },
     SetMeasureDragStart(Option<Pos2>, crate::tiles::TileId),
     /// Set or clear focus state for a widget identified by id string.
@@ -481,8 +490,6 @@ pub enum Message {
 
     /// Run more than one message in sequence
     Batch(Vec<Message>),
-    AddViewport,
-    RemoveViewport,
     /// Select Theme
     SelectTheme(Option<String>),
     /// Enable animations
@@ -556,7 +563,6 @@ pub enum Message {
         Option<RectTransform>,
         Option<f32>,
     ),
-    SetActiveViewport(crate::tiles::TileId),
     ClickHandled(),
     UpdateCommentBox(Vec<(Id, Comment)>),
     AddCommentMessage(Id, String, String),

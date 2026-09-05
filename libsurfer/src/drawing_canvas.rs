@@ -948,13 +948,6 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
             pointer_pos_global.map(|p| to_screen.inverse().transform_pos(p));
         let range = waves.time_range();
 
-        if response.clicked_by(PointerButton::Primary)
-            || response.clicked_by(PointerButton::Secondary)
-            || response.drag_started()
-        {
-            msgs.push(Message::SetActiveViewport(tile_id));
-        }
-
         if ui.ui_contains_pointer() {
             let pointer_pos = pointer_pos_global.unwrap();
             let scroll_delta = ui.input(|i| i.smooth_scroll_delta);
@@ -2061,6 +2054,19 @@ mod view_cache_tests {
     fn tile_id(state: &SystemState, index: usize) -> crate::tiles::TileId {
         state.user.workspace.layout.tile_order()[index]
     }
+    /// The legacy "add viewport" gesture: a linked split of the target waveform.
+    fn add_viewport(state: &mut SystemState) {
+        let command = state
+            .user
+            .workspace
+            .split_command(
+                crate::tiles::TileTarget::Focused,
+                crate::tiles::layout::Direction::Right,
+                false,
+            )
+            .expect("a waveform tile to split");
+        state.update(Message::Workspace(command)).unwrap();
+    }
     fn views(state: &SystemState) -> Vec<&crate::tile_kinds::waveform::WaveformView> {
         state
             .user
@@ -2458,7 +2464,7 @@ mod view_cache_tests {
     #[tokio::test]
     async fn gesture_commands_keep_their_origin_when_focus_changes() {
         let mut state = loaded_counter().await;
-        state.update(Message::AddViewport);
+        add_viewport(&mut state);
         let origin = Pos2::new(40.0, 30.0);
         state.update(Message::SetMouseGestureDragStart(
             Some(origin),
@@ -2473,7 +2479,9 @@ mod view_cache_tests {
             Some(origin),
             tile_id(&state, 1),
         ));
-        state.update(Message::SetActiveViewport(tile_id(&state, 1)));
+        state.update(Message::Workspace(
+            crate::tiles::commands::WorkspaceCommand::FocusTile(tile_id(&state, 1)),
+        ));
         state.update(Message::SetMouseGestureDragStart(
             None,
             None,
@@ -2505,11 +2513,15 @@ mod view_cache_tests {
         let mut state = loaded_counter().await;
         state.update(Message::AddDivider(Some("one".into()), None));
         state.update(Message::AddDivider(Some("two".into()), None));
-        state.update(Message::AddViewport);
-        state.update(Message::SetActiveViewport(tile_id(&state, 0)));
+        add_viewport(&mut state);
+        state.update(Message::Workspace(
+            crate::tiles::commands::WorkspaceCommand::FocusTile(tile_id(&state, 0)),
+        ));
         state.update(Message::FocusItem(VisibleItemIndex(2)));
         let first_focus = views(&state)[0].focused_item;
-        state.update(Message::SetActiveViewport(tile_id(&state, 1)));
+        state.update(Message::Workspace(
+            crate::tiles::commands::WorkspaceCommand::FocusTile(tile_id(&state, 1)),
+        ));
         state.update(Message::FocusItem(VisibleItemIndex(0)));
         state.update(Message::AddDivider(
             Some("inserted".into()),
@@ -2539,8 +2551,10 @@ mod view_cache_tests {
         state.update(Message::AddDivider(Some("one".into()), None));
         state.update(Message::AddDivider(Some("two".into()), None));
         state.update(Message::FocusItem(VisibleItemIndex(2)));
-        state.update(Message::AddViewport);
-        state.update(Message::SetActiveViewport(tile_id(&state, 1)));
+        add_viewport(&mut state);
+        state.update(Message::Workspace(
+            crate::tiles::commands::WorkspaceCommand::FocusTile(tile_id(&state, 1)),
+        ));
         state.update(Message::FocusItem(VisibleItemIndex(0)));
         let identities = views(&state)
             .iter()
@@ -2590,7 +2604,7 @@ mod view_cache_tests {
         let mut state = loaded_counter().await;
         state.update(Message::AddDivider(Some("one".into()), None));
         state.update(Message::AddDivider(Some("two".into()), None));
-        state.update(Message::AddViewport);
+        add_viewport(&mut state);
         let captured = state
             .user
             .waveform_read()
@@ -2600,7 +2614,9 @@ mod view_cache_tests {
             .get_visible(VisibleItemIndex(0))
             .unwrap()
             .item_ref;
-        state.update(Message::SetActiveViewport(tile_id(&state, 1)));
+        state.update(Message::Workspace(
+            crate::tiles::commands::WorkspaceCommand::FocusTile(tile_id(&state, 1)),
+        ));
         state.update(Message::FocusItem(VisibleItemIndex(1)));
         state.update(Message::SetItemSelected(VisibleItemIndex(1), true));
         let focus = views(&state)[1].focused_item;
@@ -2641,7 +2657,7 @@ mod view_cache_tests {
     #[tokio::test]
     async fn navigation_validates_before_mutation_and_invalidates_only_its_view() {
         let mut state = loaded_counter().await;
-        state.update(Message::AddViewport);
+        add_viewport(&mut state);
         let ctx = egui::Context::default();
         render(&ctx, &state, 300.0);
         let before = views(&state)[0].viewport;
@@ -2674,7 +2690,9 @@ mod view_cache_tests {
                     .all(|view| view.draw_cache.borrow().commands.is_some())
             );
         }
-        state.update(Message::SetActiveViewport(tile_id(&state, 1)));
+        state.update(Message::Workspace(
+            crate::tiles::commands::WorkspaceCommand::FocusTile(tile_id(&state, 1)),
+        ));
         // Switching input focus may invalidate the old renderer globally; repopulate both.
         render(&ctx, &state, 300.0);
         state.update(Message::CanvasZoom {
@@ -2804,7 +2822,7 @@ mod view_cache_tests {
         for stream in streams {
             transactions.inner.load_stream_into_memory(stream).unwrap();
         }
-        state.update(Message::AddViewport);
+        add_viewport(&mut state);
         let first = TransactionRef {
             id: ftr_parser::types::TransactionId(4),
         };
@@ -2837,10 +2855,7 @@ mod view_cache_tests {
                 },
                 |ui| {
                     crate::tiles::render::PaneRenderer::ui(
-                        &crate::tiles::kind::ApplicationPanes {
-                            state,
-                            focus_ids: false,
-                        },
+                        &crate::tiles::kind::ApplicationPanes::new(state, false),
                         details,
                         true,
                         ui,
@@ -2868,7 +2883,9 @@ mod view_cache_tests {
                 .unwrap_or_else(|| panic!("transaction id missing from inspector: {text:?}"))
         };
         state
-            .update(Message::SetActiveViewport(tile_id(&state, 0)))
+            .update(Message::Workspace(
+                crate::tiles::commands::WorkspaceCommand::FocusTile(tile_id(&state, 0)),
+            ))
             .unwrap();
         state
             .update(Message::Workspace(
@@ -2877,7 +2894,9 @@ mod view_cache_tests {
             .unwrap();
         assert_eq!(rendered_transaction(&state), "4");
         state
-            .update(Message::SetActiveViewport(tile_id(&state, 1)))
+            .update(Message::Workspace(
+                crate::tiles::commands::WorkspaceCommand::FocusTile(tile_id(&state, 1)),
+            ))
             .unwrap();
         state
             .update(Message::Workspace(
@@ -2899,14 +2918,16 @@ mod view_cache_tests {
         state.update(Message::Undo(1));
         assert_eq!(focus(&state), [None, Some(second)]);
         // A focused transaction need not have a displayed stream in this view.
-        state.update(Message::SetActiveViewport(tile_id(&state, 1)));
+        state.update(Message::Workspace(
+            crate::tiles::commands::WorkspaceCommand::FocusTile(tile_id(&state, 1)),
+        ));
         state.update(Message::MoveTransaction { next: true });
     }
 
     #[tokio::test]
     async fn annotation_selection_is_per_view_and_survives_content_undo() {
         let mut state = loaded_counter().await;
-        state.update(Message::AddViewport);
+        add_viewport(&mut state);
         let ids = [
             egui::Id::new("first annotation"),
             egui::Id::new("second annotation"),
@@ -2973,7 +2994,7 @@ mod view_cache_tests {
                 .unwrap();
         }
         let first = tile_id(&state, 0);
-        state.update(Message::AddViewport).unwrap();
+        add_viewport(&mut state);
         let second = tile_id(&state, 1);
         let ctx = egui::Context::default();
         render(&ctx, &state, 400.0);
@@ -2986,9 +3007,17 @@ mod view_cache_tests {
                 })
                 .unwrap();
         }
-        state.update(Message::SetActiveViewport(first)).unwrap();
+        state
+            .update(Message::Workspace(
+                crate::tiles::commands::WorkspaceCommand::FocusTile(first),
+            ))
+            .unwrap();
         let queued = state.scroll_rows_message(true, usize::MAX).unwrap();
-        state.update(Message::SetActiveViewport(second)).unwrap();
+        state
+            .update(Message::Workspace(
+                crate::tiles::commands::WorkspaceCommand::FocusTile(second),
+            ))
+            .unwrap();
         state.update(queued).unwrap();
         let offset = state
             .user
@@ -3028,7 +3057,7 @@ mod view_cache_tests {
     #[tokio::test]
     async fn body_measurements_keep_their_origin_when_focus_changes() {
         let mut state = loaded_counter().await;
-        state.update(Message::AddViewport);
+        add_viewport(&mut state);
         for id in state.user.workspace.layout.tile_order() {
             state
                 .update(Message::ToTile(
@@ -3039,7 +3068,9 @@ mod view_cache_tests {
                 ))
                 .unwrap();
         }
-        state.update(Message::SetActiveViewport(tile_id(&state, 1)));
+        state.update(Message::Workspace(
+            crate::tiles::commands::WorkspaceCommand::FocusTile(tile_id(&state, 1)),
+        ));
         state.update(Message::WaveformBodyMeasured {
             tile_id: crate::tiles::TileId(1),
             height: 400.0,
@@ -3220,14 +3251,14 @@ mod view_cache_tests {
     #[tokio::test]
     async fn legacy_ownership_moves_into_linked_tiles_with_independent_time_navigation() {
         let mut state = loaded_counter().await;
-        state.update(Message::AddViewport);
+        add_viewport(&mut state);
         let order = state.user.workspace.layout.tile_order();
         let focused = state.user.workspace.layout.focused();
         let list_id = state.user.workspace.tiles[&order[0]]
             .kind
             .item_list()
             .unwrap();
-        let mut waves = crate::wave_data::WaveformData {
+        let mut waves = crate::tiles::legacy::LegacyWaveformV0 {
             document: state.user.waves.take().unwrap(),
             items: state.user.workspace.item_lists.remove(&list_id).unwrap(),
             viewports: order
@@ -3288,7 +3319,7 @@ mod view_cache_tests {
     async fn unlinked_vertical_offsets_round_trip_independently() {
         let mut state = loaded_counter().await;
         let first = tile_id(&state, 0);
-        state.update(Message::AddViewport);
+        add_viewport(&mut state);
         let second = tile_id(&state, 1);
         for id in [first, second] {
             state
@@ -3300,14 +3331,18 @@ mod view_cache_tests {
                 ))
                 .unwrap();
         }
-        state.update(Message::SetActiveViewport(first));
+        state.update(Message::Workspace(
+            crate::tiles::commands::WorkspaceCommand::FocusTile(first),
+        ));
         state.update(Message::ToTile(
             first,
             crate::tiles::kind::TileMessage::Waveform(
                 crate::tile_kinds::waveform::WaveformMessage::ScrollTo(25.0),
             ),
         ));
-        state.update(Message::SetActiveViewport(second));
+        state.update(Message::Workspace(
+            crate::tiles::commands::WorkspaceCommand::FocusTile(second),
+        ));
         state.update(Message::ToTile(
             second,
             crate::tiles::kind::TileMessage::Waveform(
@@ -3330,7 +3365,7 @@ mod view_cache_tests {
     #[tokio::test]
     async fn drawing_two_views_reuses_each_cache_and_resizes_only_one() {
         let mut state = loaded_counter().await;
-        state.update(Message::AddViewport);
+        add_viewport(&mut state);
         let ctx = egui::Context::default();
         for _ in 0..3 {
             render(&ctx, &state, 400.0);
@@ -3354,7 +3389,7 @@ mod view_cache_tests {
         );
 
         // A newly created view always carries a fresh cache of its own.
-        state.update(Message::AddViewport);
+        add_viewport(&mut state);
         assert_eq!(views(&state)[2].draw_cache.borrow().builds, 0);
     }
 }

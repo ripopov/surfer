@@ -2,6 +2,11 @@
 use super::{TileId, kind::TileSettings, layout::LayoutNode};
 
 pub(crate) enum UndoRecord {
+    Marker {
+        id: u8,
+        time: Option<num::BigInt>,
+        lists: Vec<crate::CanvasState>,
+    },
     Items(Box<crate::CanvasState>),
     Resources(Box<ResourceChange>),
     Move {
@@ -28,6 +33,7 @@ pub(crate) enum UndoRecord {
 impl UndoRecord {
     pub(crate) fn label(&self) -> &str {
         match self {
+            Self::Marker { lists, .. } => lists.first().map_or("Edit marker", |list| &list.message),
             Self::Items(items) => &items.message,
             Self::Resources(change) => change.label,
             Self::Move { .. } => "Move tile",
@@ -81,6 +87,10 @@ impl ResourceEditStart {
                     next = id;
                 }
                 "Close other tabs"
+            }
+            WorkspaceCommand::Reset { keep } => {
+                removed.extend(workspace.tiles.keys().filter(|id| Some(**id) != *keep));
+                "Reset workspace"
             }
             _ => return None,
         };
@@ -387,6 +397,36 @@ impl crate::SystemState {
         redo: bool,
     ) -> Result<UndoRecord, UndoRecord> {
         match record {
+            UndoRecord::Marker { id, time, lists } => {
+                if self.user.waves.is_none()
+                    || lists
+                        .iter()
+                        .any(|list| !self.user.workspace.item_lists.contains_key(&list.list))
+                {
+                    return Err(UndoRecord::Marker { id, time, lists });
+                }
+                let markers = &mut self.user.waves.as_mut().unwrap().markers;
+                let inverse_time = match time {
+                    Some(time) => markers.insert(id, time),
+                    None => markers.remove(&id),
+                };
+                let inverse_lists = lists
+                    .into_iter()
+                    .map(|list| {
+                        // All resource dependencies were checked before mutating either side.
+                        match self.restore_canvas_state(list) {
+                            Ok(inverse) => inverse,
+                            Err(_) => unreachable!("validated marker history list"),
+                        }
+                    })
+                    .collect();
+                self.invalidate_draw_commands();
+                Ok(UndoRecord::Marker {
+                    id,
+                    time: inverse_time,
+                    lists: inverse_lists,
+                })
+            }
             UndoRecord::Move {
                 tile,
                 mut before,
@@ -426,6 +466,11 @@ impl crate::SystemState {
             }
             UndoRecord::Resources(mut change) => {
                 let restored = change.restore(&mut self.user.workspace);
+                if restored {
+                    for tile in &change.present_tiles {
+                        self.attach_tile_source(*tile);
+                    }
+                }
                 let record = UndoRecord::Resources(change);
                 if restored { Ok(record) } else { Err(record) }
             }
@@ -474,6 +519,12 @@ impl crate::SystemState {
                     .tiles
                     .get(&tile)
                     .is_some_and(|entry| settings.capture_like(&entry.kind).is_some());
+                let source_changed = self
+                    .user
+                    .workspace
+                    .tiles
+                    .get(&tile)
+                    .is_some_and(|entry| settings.source_changed(&entry.kind));
                 let restored = matches_kind
                     && self
                         .user
@@ -484,7 +535,14 @@ impl crate::SystemState {
                             self.user.waves.as_ref(),
                         )
                         .is_ok();
-                if restored { Ok(record) } else { Err(record) }
+                if restored {
+                    if source_changed {
+                        self.attach_tile_source(tile);
+                    }
+                    Ok(record)
+                } else {
+                    Err(record)
+                }
             }
         }
     }
@@ -514,6 +572,470 @@ mod tests {
             }))
             .unwrap();
         state.user.workspace.layout.focused().unwrap()
+    }
+
+    #[tokio::test]
+    async fn inspector_source_commands_load_signals_and_survive_undo_redo() {
+        use crate::{
+            StartupParams, WaveSource,
+            frame_buffer::FrameBufferContent,
+            tile_kinds::{
+                frame_buffer::{FrameBufferMessage, FrameBufferState},
+                memory::MemoryMessage,
+            },
+            wave_container::{ScopeRef, ScopeRefExt, VariableRef, VariableRefExt},
+        };
+        async fn settle(state: &mut SystemState) {
+            tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                loop {
+                    state.handle_async_messages();
+                    state.handle_batch_commands();
+                    if state.waves_fully_loaded() {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .expect("signal loading timed out");
+        }
+        for kind in ["memory", "frame_buffer"] {
+            let mut state = SystemState::new_default_config()
+                .unwrap()
+                .with_params(StartupParams {
+                    waves: Some(WaveSource::File(
+                        project_root::get_project_root()
+                            .unwrap()
+                            .join("examples/counter.vcd")
+                            .try_into()
+                            .unwrap(),
+                    )),
+                    ..Default::default()
+                });
+            settle(&mut state).await;
+            let variable = VariableRef::from_hierarchy_string("tb.dut.counter");
+            let loaded = |state: &SystemState| {
+                let waves = state.user.waves.as_ref().unwrap().inner.as_waves().unwrap();
+                waves.is_signal_loaded(&waves.signal_id(&variable).unwrap())
+            };
+            assert!(
+                !loaded(&state),
+                "fixture must begin with unloaded signal data"
+            );
+            let target = open(&mut state, kind);
+            let message = if kind == "memory" {
+                let mut settings = crate::memory_viewer::MemoryViewerSettings::default();
+                settings.scope = Some(ScopeRef::from_hierarchy_string("tb.dut"));
+                TileMessage::Memory(MemoryMessage::Settings(Box::new(settings)))
+            } else {
+                TileMessage::FrameBuffer(FrameBufferMessage::State(Box::new(FrameBufferState {
+                    content: Some(FrameBufferContent::Variable(variable.clone())),
+                    ..Default::default()
+                })))
+            };
+            state.update(Message::ToTile(target, message)).unwrap();
+            settle(&mut state).await;
+            assert!(
+                loaded(&state),
+                "{kind} source command must request its signal data"
+            );
+            let has_source = |state: &SystemState| match &state.user.workspace.tiles[&target].kind {
+                TileKind::Memory(tile) => tile.settings.scope.is_some(),
+                TileKind::FrameBuffer(tile) => tile.state.content.is_some(),
+                _ => unreachable!(),
+            };
+            state.update(Message::Undo(1)).unwrap();
+            assert!(!has_source(&state));
+            state.update(Message::Redo(1)).unwrap();
+            settle(&mut state).await;
+            assert!(has_source(&state));
+            assert!(loaded(&state));
+
+            // Model a restored inspector whose source has not been fetched yet.
+            // Resource replay must use the same attachment path as settings replay.
+            let pending = VariableRef::from_hierarchy_string("tb._tmp");
+            let pending_loaded = |state: &SystemState| {
+                let waves = state.user.waves.as_ref().unwrap().inner.as_waves().unwrap();
+                waves.is_signal_loaded(&waves.signal_id(&pending).unwrap())
+            };
+            assert!(!pending_loaded(&state));
+            match &mut state.user.workspace.tiles.get_mut(&target).unwrap().kind {
+                TileKind::Memory(tile) => {
+                    tile.settings.scope = Some(ScopeRef::from_hierarchy_string("tb"))
+                }
+                TileKind::FrameBuffer(tile) => {
+                    tile.state.content = Some(FrameBufferContent::Variable(pending.clone()))
+                }
+                _ => unreachable!(),
+            }
+            state
+                .update(Message::Workspace(WorkspaceCommand::CloseTile(target)))
+                .unwrap();
+            assert!(!state.user.workspace.tiles.contains_key(&target));
+            state.update(Message::Undo(1)).unwrap();
+            settle(&mut state).await;
+            assert!(state.user.workspace.tiles.contains_key(&target));
+            assert!(
+                pending_loaded(&state),
+                "{kind} resource restoration must attach its source"
+            );
+        }
+    }
+
+    #[test]
+    fn reset_is_one_record_that_restores_tiles_lists_and_layout() {
+        use super::super::layout::same_topology;
+        use crate::{
+            displayed_item_tree::{ItemIndex, TargetPosition},
+            tile_kinds::waveform::WaveformMessage,
+        };
+        let mut state = SystemState::new_default_config().unwrap();
+        let first = open(&mut state, "waveform");
+        state
+            .update(Message::ToTile(
+                first,
+                TileMessage::Waveform(WaveformMessage::AddDivider {
+                    name: Some("row".into()),
+                    position: TargetPosition {
+                        before: ItemIndex(0),
+                        level: 0,
+                    },
+                }),
+            ))
+            .unwrap();
+        let second = open(&mut state, "waveform");
+        let logs = open(&mut state, "logs");
+        state
+            .update(Message::Workspace(WorkspaceCommand::FocusTile(first)))
+            .unwrap();
+        let root_before = state.user.workspace.layout.root().cloned();
+        let history = state.undo_stack.len();
+        let reset = state.user.workspace.reset_command();
+        assert!(matches!(reset, WorkspaceCommand::Reset { keep: Some(id) } if id == first));
+        state.update(Message::Workspace(reset)).unwrap();
+        assert_eq!(state.undo_stack.len(), history + 1);
+        assert_eq!(state.undo_stack.last().unwrap().label(), "Reset workspace");
+        assert_eq!(
+            state
+                .user
+                .workspace
+                .tiles
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            [first]
+        );
+        assert_eq!(state.user.workspace.item_lists.len(), 1);
+        state.update(Message::Undo(1)).unwrap();
+        for id in [first, second, logs] {
+            assert!(state.user.workspace.tiles.contains_key(&id));
+        }
+        assert_eq!(state.user.workspace.item_lists.len(), 2);
+        assert!(same_topology(
+            state.user.workspace.layout.root(),
+            root_before.as_ref()
+        ));
+        let list = state.user.workspace.tiles[&first].kind.item_list().unwrap();
+        assert_eq!(state.user.workspace.item_lists[&list].items_tree.len(), 1);
+        state.update(Message::Redo(1)).unwrap();
+        assert_eq!(state.user.workspace.tiles.len(), 1);
+        // Resetting an empty workspace creates a fresh waveform; undo removes it again.
+        state
+            .update(Message::Workspace(WorkspaceCommand::CloseTile(first)))
+            .unwrap();
+        assert!(state.user.workspace.tiles.is_empty());
+        let reset = state.user.workspace.reset_command();
+        assert!(matches!(reset, WorkspaceCommand::Reset { keep: None }));
+        state.update(Message::Workspace(reset)).unwrap();
+        let fresh = state.user.workspace.layout.focused().unwrap();
+        assert!(fresh != first && fresh != second);
+        assert_eq!(state.user.workspace.item_lists.len(), 1);
+        state.update(Message::Undo(1)).unwrap();
+        assert!(state.user.workspace.tiles.is_empty());
+        assert!(state.user.workspace.item_lists.is_empty());
+        state.update(Message::Redo(1)).unwrap();
+        assert_eq!(state.user.workspace.layout.focused(), Some(fresh));
+    }
+
+    #[test]
+    fn marker_edits_record_only_their_marker_and_item_edits_keep_marker_times() {
+        use crate::{
+            data_container::DataContainer,
+            wave_data::{TimeRange, WaveData},
+            wave_source::{WaveFormat, WaveSource},
+        };
+        let mut state = SystemState::new_default_config().unwrap();
+        state.user.waves = Some(WaveData {
+            inner: DataContainer::Empty,
+            source: WaveSource::Data,
+            format: WaveFormat::Vcd,
+            active_scope: None,
+            cursor: Some(40.into()),
+            markers: Default::default(),
+            display_variable_indices: false,
+            old_max_timestamp: None,
+            cache_generation: 0,
+            inflight_caches: Default::default(),
+            cached_time_range: TimeRange::default(),
+        });
+        let waveform = open(&mut state, "waveform");
+        let list = state.user.workspace.tiles[&waveform]
+            .kind
+            .item_list()
+            .unwrap();
+        let rows = |state: &SystemState| state.user.workspace.item_lists[&list].items_tree.len();
+        let marker = |state: &SystemState, id: u8| {
+            state.user.waves.as_ref().unwrap().markers.get(&id).cloned()
+        };
+        state
+            .update(Message::AddMarker {
+                time: 10.into(),
+                name: Some("start".into()),
+                move_focus: false,
+            })
+            .unwrap();
+        state
+            .update(Message::SetMarker {
+                id: 5,
+                time: 50.into(),
+            })
+            .unwrap();
+        assert_eq!(rows(&state), 2);
+        assert_eq!(state.undo_stack.len(), 3);
+        // Re-setting the same time is a no-op without a record.
+        assert!(
+            state
+                .update(Message::SetMarker {
+                    id: 5,
+                    time: 50.into(),
+                })
+                .is_none()
+        );
+        assert_eq!(state.undo_stack.len(), 3);
+        state.update(Message::AddDivider(None, None)).unwrap();
+        assert_eq!(rows(&state), 3);
+        // A marker changed by an unrelated path survives undoing the divider and marker 5.
+        state
+            .user
+            .waves
+            .as_mut()
+            .unwrap()
+            .markers
+            .insert(7, 99.into());
+        state.update(Message::Undo(2)).unwrap();
+        assert_eq!(rows(&state), 1);
+        assert_eq!(marker(&state, 5), None);
+        assert_eq!(marker(&state, 7), Some(99.into()));
+        assert_eq!(marker(&state, 0), Some(10.into()));
+        state.update(Message::Redo(1)).unwrap();
+        assert_eq!(marker(&state, 5), Some(50.into()));
+        assert_eq!(marker(&state, 7), Some(99.into()));
+        assert_eq!(rows(&state), 2);
+        state.update(Message::MoveMarkerToCursor(5)).unwrap();
+        assert_eq!(marker(&state, 5), Some(40.into()));
+        assert_eq!(
+            state.undo_stack.last().unwrap().label(),
+            "Move marker 5 to cursor"
+        );
+        state.update(Message::Undo(1)).unwrap();
+        assert_eq!(marker(&state, 5), Some(50.into()));
+        state.update(Message::Undo(2)).unwrap();
+        assert_eq!(rows(&state), 0);
+        assert_eq!(marker(&state, 0), None);
+        assert_eq!(marker(&state, 7), Some(99.into()));
+        assert_eq!(state.user.waves.as_ref().unwrap().markers.len(), 1);
+    }
+
+    #[test]
+    fn shared_marker_deletion_restores_all_lists_without_rewinding_other_markers_or_focus() {
+        use crate::{
+            data_container::DataContainer,
+            wave_data::{TimeRange, WaveData},
+            wave_source::{WaveFormat, WaveSource},
+        };
+        let mut state = SystemState::new_default_config().unwrap();
+        state.user.waves = Some(WaveData {
+            inner: DataContainer::Empty,
+            source: WaveSource::Data,
+            format: WaveFormat::Vcd,
+            active_scope: None,
+            cursor: None,
+            markers: Default::default(),
+            display_variable_indices: false,
+            old_max_timestamp: None,
+            cache_generation: 0,
+            inflight_caches: Default::default(),
+            cached_time_range: TimeRange::default(),
+        });
+        let first = open(&mut state, "waveform");
+        state
+            .update(Message::SetMarker {
+                id: 7,
+                time: 100.into(),
+            })
+            .unwrap();
+        state
+            .update(Message::Workspace(WorkspaceCommand::SplitTile {
+                tile: first,
+                dir: Direction::Right,
+                mode: crate::tiles::commands::SplitMode::Independent,
+            }))
+            .unwrap();
+        let second = state.user.workspace.layout.focused().unwrap();
+        state
+            .update(Message::Workspace(WorkspaceCommand::SplitTile {
+                tile: second,
+                dir: Direction::Down,
+                mode: crate::tiles::commands::SplitMode::Linked,
+            }))
+            .unwrap();
+        assert_eq!(state.user.workspace.item_lists.len(), 2);
+        let inspector = open(&mut state, "markers");
+        let has_row = |items: &crate::item_list::ItemList| {
+            items.displayed_items.values().any(|item| {
+            matches!(item, crate::displayed_item::DisplayedItem::Marker(marker) if marker.idx == 7)
+        })
+        };
+        assert!(state.user.workspace.item_lists.values().all(has_row));
+        let history_len = state.undo_stack.len();
+        state.update(Message::RemoveMarker(7)).unwrap();
+        assert_eq!(state.undo_stack.len(), history_len + 1);
+        assert!(
+            state
+                .user
+                .workspace
+                .item_lists
+                .values()
+                .all(|items| !has_row(items))
+        );
+        assert!(!state.user.waves.as_ref().unwrap().markers.contains_key(&7));
+        // Unrelated document changes must survive replay of this one marker edit.
+        state
+            .user
+            .waves
+            .as_mut()
+            .unwrap()
+            .markers
+            .insert(9, 900.into());
+        state.update(Message::Undo(1)).unwrap();
+        assert!(state.user.workspace.item_lists.values().all(has_row));
+        assert_eq!(state.user.waves.as_ref().unwrap().markers[&7], 100.into());
+        assert_eq!(state.user.waves.as_ref().unwrap().markers[&9], 900.into());
+        assert_eq!(state.user.workspace.layout.focused(), Some(inspector));
+        let redo_len = state.redo_stack.len();
+        assert!(state.update(Message::RemoveMarker(99)).is_none());
+        assert_eq!(state.redo_stack.len(), redo_len);
+        state.update(Message::Redo(1)).unwrap();
+        assert!(
+            state
+                .user
+                .workspace
+                .item_lists
+                .values()
+                .all(|items| !has_row(items))
+        );
+        assert_eq!(state.user.waves.as_ref().unwrap().markers[&9], 900.into());
+        assert_eq!(state.user.workspace.layout.focused(), Some(inspector));
+    }
+
+    #[test]
+    fn graphic_history_targets_its_list_and_preserves_navigation_and_redo_on_noops() {
+        use crate::{
+            displayed_item_tree::{ItemIndex, TargetPosition},
+            graphics::{
+                Anchor, Direction as GraphicDirection, GrPoint, Graphic, GraphicId, GraphicsY,
+            },
+            tile_kinds::waveform::WaveformMessage,
+        };
+        let mut state = SystemState::new_default_config().unwrap();
+        let first = open(&mut state, "waveform");
+        state
+            .update(Message::ToTile(
+                first,
+                TileMessage::Waveform(WaveformMessage::AddDivider {
+                    name: Some("Notes".into()),
+                    position: TargetPosition {
+                        before: ItemIndex(0),
+                        level: 0,
+                    },
+                }),
+            ))
+            .unwrap();
+        let list = state.user.workspace.tiles[&first].kind.item_list().unwrap();
+        let row = *state.user.workspace.item_lists[&list]
+            .displayed_items
+            .keys()
+            .next()
+            .unwrap();
+        let second = open(&mut state, "waveform");
+        let graphic = Graphic::Text {
+            pos: (
+                GrPoint {
+                    x: 10.into(),
+                    y: GraphicsY {
+                        item: row,
+                        anchor: Anchor::Center,
+                    },
+                },
+                GraphicDirection::North,
+            ),
+            text: "A note".into(),
+        };
+        state
+            .update(Message::ToTile(
+                first,
+                TileMessage::Waveform(WaveformMessage::AddGraphic(GraphicId(1), graphic.clone())),
+            ))
+            .unwrap();
+        let history_len = state.undo_stack.len();
+        state
+            .update(Message::ToTile(
+                first,
+                TileMessage::Waveform(WaveformMessage::AddGraphic(GraphicId(1), graphic.clone())),
+            ))
+            .unwrap();
+        assert_eq!(state.undo_stack.len(), history_len);
+        state
+            .update(Message::ToTile(
+                first,
+                TileMessage::Waveform(WaveformMessage::ColumnWidths {
+                    names: 250.0,
+                    values: 80.0,
+                }),
+            ))
+            .unwrap();
+        state.update(Message::Undo(1)).unwrap();
+        assert!(state.user.workspace.item_lists[&list].graphics.is_empty());
+        let redo_len = state.redo_stack.len();
+        state
+            .update(Message::ToTile(
+                first,
+                TileMessage::Waveform(WaveformMessage::RemoveGraphic(GraphicId(99))),
+            ))
+            .unwrap();
+        assert_eq!(state.redo_stack.len(), redo_len);
+        state.update(Message::Redo(1)).unwrap();
+        assert_eq!(
+            state.user.workspace.item_lists[&list].graphics[&GraphicId(1)],
+            graphic
+        );
+        assert_eq!(state.user.workspace.layout.focused(), Some(second));
+        let TileKind::Waveform(tile) = &state.user.workspace.tiles[&first].kind else {
+            unreachable!()
+        };
+        assert_eq!(tile.name_column_width, 250.0);
+        state
+            .update(Message::ToTile(
+                first,
+                TileMessage::Waveform(WaveformMessage::RemoveGraphic(GraphicId(1))),
+            ))
+            .unwrap();
+        assert!(state.user.workspace.item_lists[&list].graphics.is_empty());
+        state.update(Message::Undo(1)).unwrap();
+        assert_eq!(
+            state.user.workspace.item_lists[&list].graphics[&GraphicId(1)],
+            graphic
+        );
     }
 
     #[test]

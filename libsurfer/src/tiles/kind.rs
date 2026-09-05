@@ -28,6 +28,16 @@ pub(crate) enum TileSettings {
 }
 
 impl TileSettings {
+    pub(crate) fn source_changed(&self, kind: &TileKind) -> bool {
+        match (self, kind) {
+            (Self::Memory(before), TileKind::Memory(after)) => before.scope != after.settings.scope,
+            (Self::FrameBuffer(before), TileKind::FrameBuffer(after)) => {
+                before.content != after.state.content
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn label(&self) -> &'static str {
         match self {
             Self::FrameBuffer(_) => "Change framebuffer settings",
@@ -176,27 +186,8 @@ impl super::workspace::Workspace {
                 loads.push(load);
             }
         }
-        if let Some(container) = document.inner.as_waves_mut() {
-            let mut arrays = std::collections::BTreeSet::new();
-            for entry in self.tiles.values() {
-                if let TileKind::Memory(tile) = &entry.kind
-                    && let Some(scope) = &tile.settings.scope
-                    && arrays.insert(scope.strs.clone())
-                    && container.scope_exists(scope)
-                {
-                    let variables = container.variables_in_scope(scope);
-                    match container.load_variables(variables.iter()) {
-                        Ok(Some(command)) => loads.push(command),
-                        Ok(None) => {}
-                        Err(error) => tracing::warn!("Memory array load failed: {error}"),
-                    }
-                }
-            }
-        }
         for entry in self.tiles.values_mut() {
-            if let TileKind::FrameBuffer(tile) = &mut entry.kind
-                && let Some(command) = tile.attach(document)
-            {
+            if let Some(command) = entry.kind.attach_inspector(document) {
                 loads.push(command);
             }
         }
@@ -457,6 +448,38 @@ impl super::workspace::Workspace {
     }
 }
 
+impl TileKind {
+    pub(crate) fn attach_inspector(
+        &mut self,
+        document: &mut crate::wave_data::WaveData,
+    ) -> Option<crate::wellen::LoadSignalsCmd> {
+        match self {
+            Self::Memory(tile) => tile.attach(document),
+            Self::FrameBuffer(tile) => tile.attach(document),
+            _ => None,
+        }
+    }
+}
+
+impl crate::SystemState {
+    pub(crate) fn attach_tile_source(&mut self, target: super::TileId) {
+        let load = self
+            .user
+            .workspace
+            .tiles
+            .get_mut(&target)
+            .and_then(|entry| {
+                self.user
+                    .waves
+                    .as_mut()
+                    .and_then(|document| entry.kind.attach_inspector(document))
+            });
+        if let Some(load) = load {
+            self.load_variables(load);
+        }
+    }
+}
+
 use super::{
     ItemListId,
     commands::SplitMode,
@@ -637,21 +660,130 @@ impl TileEntry {
         }
     }
 
+    /// The title without workspace context. Prefer `Workspace::titles`, which
+    /// numbers waveforms and marks linked views.
     pub fn display_title(&self) -> String {
-        self.title.clone().unwrap_or_else(|| match &self.kind {
-            TileKind::Waveform(_) => "Waveform".into(),
-            TileKind::Logs(_) => "Logs".into(),
-            TileKind::Markers(_) => "Markers".into(),
-            TileKind::FrameBuffer(_) => "Frame Buffer".into(),
-            TileKind::Memory(_) => "Memory".into(),
-            TileKind::AnnotationList(_) => "Annotations".into(),
-            TileKind::TransactionDetails(_) => "Transaction Details".into(),
-            TileKind::Unknown(tile) => format!("Unavailable: {}", tile.kind_name),
-        })
+        self.title
+            .clone()
+            .unwrap_or_else(|| self.kind.default_title())
     }
 }
 
+/// A palette command a kind registers for itself. It is offered only while the
+/// captured tile is of that kind and always executes against that tile.
+pub struct KindCommand {
+    pub name: &'static str,
+    pub suggestions: &'static [&'static str],
+    pub parse: fn(&str) -> Option<TileMessage>,
+}
+
+fn parse_switch(word: &str) -> Option<bool> {
+    match word {
+        "on" | "true" | "yes" => Some(true),
+        "off" | "false" | "no" => Some(false),
+        _ => None,
+    }
+}
+
+const WAVEFORM_COMMANDS: &[KindCommand] = &[
+    KindCommand {
+        name: "tile_columns",
+        suggestions: &["both", "names", "values", "none"],
+        parse: |word| {
+            let (names, values) = match word {
+                "both" => (true, true),
+                "names" => (true, false),
+                "values" => (false, true),
+                "none" => (false, false),
+                _ => return None,
+            };
+            Some(TileMessage::Waveform(WaveformMessage::Columns {
+                names,
+                values,
+            }))
+        },
+    },
+    KindCommand {
+        name: "tile_link_scroll",
+        suggestions: &["on", "off"],
+        parse: |word| {
+            Some(TileMessage::Waveform(WaveformMessage::LinkVerticalScroll(
+                parse_switch(word)?,
+            )))
+        },
+    },
+];
+
+const LOGS_COMMANDS: &[KindCommand] = &[KindCommand {
+    name: "logs_filter",
+    suggestions: &["off", "error", "warn", "info", "debug", "trace"],
+    parse: |word| {
+        use crate::tile_kinds::logs::LevelFilter;
+        let filter = match word {
+            "off" => LevelFilter::Off,
+            "error" => LevelFilter::Error,
+            "warn" => LevelFilter::Warn,
+            "info" => LevelFilter::Info,
+            "debug" => LevelFilter::Debug,
+            "trace" => LevelFilter::Trace,
+            _ => return None,
+        };
+        Some(TileMessage::Logs(
+            crate::tile_kinds::logs::LogsMessage::SetFilter(filter),
+        ))
+    },
+}];
+
+const ANNOTATION_LIST_COMMANDS: &[KindCommand] = &[KindCommand {
+    name: "annotation_list_comments",
+    suggestions: &["on", "off"],
+    parse: |word| {
+        Some(TileMessage::AnnotationList(
+            crate::tile_kinds::annotation_list::AnnotationListMessage::ShowComments(parse_switch(
+                word,
+            )?),
+        ))
+    },
+}];
+
 impl TileKind {
+    pub fn default_title(&self) -> String {
+        match self {
+            Self::Waveform(_) => "Waveform".into(),
+            Self::Logs(_) => "Logs".into(),
+            Self::Markers(_) => "Markers".into(),
+            Self::FrameBuffer(_) => "Frame Buffer".into(),
+            Self::Memory(tile) => tile
+                .settings
+                .name
+                .clone()
+                .or_else(|| {
+                    tile.settings
+                        .scope
+                        .as_ref()
+                        .map(|scope| scope.strs.join("."))
+                })
+                .map_or_else(|| "Memory".into(), |name| format!("Memory: {name}")),
+            Self::AnnotationList(_) => "Annotations".into(),
+            Self::TransactionDetails(_) => "Transaction Details".into(),
+            Self::Unknown(tile) => format!("Unavailable: {}", tile.kind_name),
+        }
+    }
+
+    /// Kind-specific palette commands; the parser resolves them to the captured tile.
+    pub fn commands(&self) -> &'static [KindCommand] {
+        match self {
+            Self::Waveform(_) => WAVEFORM_COMMANDS,
+            Self::Logs(_) => LOGS_COMMANDS,
+            Self::AnnotationList(_) => ANNOTATION_LIST_COMMANDS,
+            Self::FrameBuffer(_)
+            | Self::Memory(_)
+            | Self::TransactionDetails(_)
+            | Self::Markers(_)
+            | Self::Unknown(_) => &[],
+        }
+    }
+
     pub(crate) fn reset_runtime(&mut self) {
         match self {
             Self::Waveform(tile) => tile.view.reset_runtime(),
@@ -815,7 +947,24 @@ impl TileKind {
 /// Registry-backed renderer used by the application layout adapter.
 pub(crate) struct ApplicationPanes<'a> {
     pub state: &'a crate::SystemState,
+    /// Draw the `item_focus` overlay in the target waveform tile.
     pub focus_ids: bool,
+    target_waveform: Option<super::TileId>,
+    /// Computed once per frame (§6.5).
+    titles: std::collections::BTreeMap<super::TileId, String>,
+}
+impl<'a> ApplicationPanes<'a> {
+    pub fn new(state: &'a crate::SystemState, focus_ids: bool) -> Self {
+        Self {
+            state,
+            focus_ids,
+            target_waveform: state
+                .user
+                .workspace
+                .resolve_waveform(super::TileTarget::Focused),
+            titles: state.user.workspace.titles(),
+        }
+    }
 }
 impl super::render::PaneRenderer for ApplicationPanes<'_> {
     type Command = crate::Message;
@@ -823,13 +972,44 @@ impl super::render::PaneRenderer for ApplicationPanes<'_> {
         (&self.state.user.config.theme.tile_focus_stroke).into()
     }
     fn title(&self, id: super::TileId) -> String {
-        self.state
-            .user
-            .workspace
-            .tiles
-            .get(&id)
-            .map(TileEntry::display_title)
-            .unwrap_or_default()
+        self.titles.get(&id).cloned().unwrap_or_default()
+    }
+    fn tab_bar_menu(
+        &self,
+        anchor: super::TileId,
+        ui: &mut egui::Ui,
+        commands: &mut Vec<crate::Message>,
+    ) {
+        use super::{TileTarget, layout::Direction};
+        let workspace = &self.state.user.workspace;
+        ui.menu_button("New tile", |ui| {
+            for kind in KINDS {
+                if ui.button(kind.name).clicked() {
+                    commands.push(crate::Message::Workspace(
+                        super::commands::WorkspaceCommand::OpenTile {
+                            kind: kind.name.into(),
+                            placement: super::layout::Placement::TabAfter(anchor),
+                            focus: true,
+                        },
+                    ));
+                    ui.close();
+                }
+            }
+        });
+        for (label, dir) in [
+            ("Split right", Direction::Right),
+            ("Split down", Direction::Down),
+        ] {
+            let command = workspace.split_command(TileTarget::Id(anchor), dir, false);
+            if ui
+                .add_enabled(command.is_some(), egui::Button::new(label))
+                .clicked()
+                && let Some(command) = command
+            {
+                commands.push(crate::Message::Workspace(command));
+                ui.close();
+            }
+        }
     }
     fn ui(
         &self,
@@ -847,7 +1027,7 @@ impl super::render::PaneRenderer for ApplicationPanes<'_> {
                 commands,
                 id,
                 crate::tile_kinds::waveform_body::WaveformColumns {
-                    focus_ids: self.focus_ids && focused,
+                    focus_ids: self.focus_ids && self.target_waveform == Some(id),
                     names: tile.show_name_column.then_some(tile.name_column_width),
                     values: tile.show_value_column.then_some(tile.value_column_width),
                 },

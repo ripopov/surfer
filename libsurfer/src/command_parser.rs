@@ -1,5 +1,9 @@
 //! Command prompt handling.
-use crate::tiles::commands::DocumentCommand;
+use crate::tiles::{
+    commands::{DocumentCommand, WorkspaceCommand},
+    input::CommandTarget,
+    layout::Direction as TileDirection,
+};
 use regex::Regex;
 use std::sync::LazyLock;
 use std::{fs, str::FromStr};
@@ -57,7 +61,9 @@ fn separate_at_space(query: &str) -> (String, String, String, String) {
     )
 }
 
-pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
+/// Build the palette/script grammar. `target` is the captured tile target: the
+/// prompt captures it when it opens, scripts pass the live one per statement.
+pub(crate) fn get_parser(state: &SystemState, target: CommandTarget) -> Command<Message> {
     fn single_word(
         suggestions: Vec<String>,
         rest_command: RestCommand,
@@ -113,7 +119,10 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                 .map(|info| info.filename.clone())
                 .collect()
         });
-    let displayed_items = match state.user.waveform_read() {
+    let target_waveform = target
+        .waveform
+        .and_then(|id| state.user.waveform_read_at(id));
+    let displayed_items = match target_waveform {
         Some(v) => v
             .items
             .items_tree
@@ -212,10 +221,60 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
         .as_ref()
         .map(|w| w.inner.metadata().timescale.clone());
 
-    let tile_id = state
-        .user
-        .workspace
-        .resolve_waveform(crate::tiles::TileTarget::Focused);
+    let tile_id = target.waveform;
+    let captured_tile = target.tile;
+    let kind_commands = captured_tile
+        .and_then(|id| state.user.workspace.tiles.get(&id))
+        .map_or(&[][..], |entry| entry.kind.commands());
+    let tile_titles = state.user.workspace.titles();
+    let tile_suggestions = state.user.workspace.tile_suggestions();
+    let open_anchor = captured_tile.or_else(|| state.user.workspace.layout.focused());
+    // Tile commands resolve against the captured target now, so the grammar
+    // below owns plain data and never borrows the workspace.
+    let tile_commands = {
+        let workspace = &state.user.workspace;
+        let captured = captured_tile.map_or(
+            crate::tiles::TileTarget::Focused,
+            crate::tiles::TileTarget::Id,
+        );
+        let waveform = tile_id.map(crate::tiles::TileTarget::Id);
+        let split = |dir, copy| workspace.split_command(captured, dir, copy);
+        let focus = |dir| workspace.focus_neighbor_command(captured, dir);
+        let shift = |dir| workspace.move_command(captured, dir);
+        vec![
+            ("tile_split_right", split(TileDirection::Right, false)),
+            ("tile_split_down", split(TileDirection::Down, false)),
+            ("tile_split_copy_right", split(TileDirection::Right, true)),
+            ("tile_split_copy_down", split(TileDirection::Down, true)),
+            ("tile_close", workspace.close_command(captured)),
+            (
+                "tile_close_others",
+                workspace.close_others_command(captured),
+            ),
+            ("tile_focus_left", focus(TileDirection::Left)),
+            ("tile_focus_right", focus(TileDirection::Right)),
+            ("tile_focus_up", focus(TileDirection::Up)),
+            ("tile_focus_down", focus(TileDirection::Down)),
+            ("tile_next", workspace.cycle_tab_command(captured, 1)),
+            ("tile_prev", workspace.cycle_tab_command(captured, -1)),
+            ("tile_move_left", shift(TileDirection::Left)),
+            ("tile_move_right", shift(TileDirection::Right)),
+            ("tile_move_up", shift(TileDirection::Up)),
+            ("tile_move_down", shift(TileDirection::Down)),
+            ("workspace_reset", Some(workspace.reset_command())),
+            // Legacy viewport spellings resolve to explicit tile commands here.
+            (
+                "viewport_add",
+                waveform.and_then(|target| {
+                    workspace.split_command(target, TileDirection::Right, false)
+                }),
+            ),
+            (
+                "viewport_remove",
+                waveform.and_then(|target| workspace.close_command(target)),
+            ),
+        ]
+    };
     let waveform_ids = state
         .user
         .workspace
@@ -228,7 +287,7 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
         .map(|idx| idx.to_string())
         .collect::<Vec<_>>();
 
-    let markers = if let Some(waves) = state.user.waveform_read() {
+    let markers = if let Some(waves) = target_waveform {
         waves
             .items
             .items_tree
@@ -324,6 +383,9 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
             "show_quick_start",
             "show_logs",
             "show_annotation_list",
+            "tile_new",
+            "tile_focus",
+            "tile_rename",
             #[cfg(feature = "performance_plot")]
             "show_performance",
             "scroll_to_start",
@@ -411,6 +473,9 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
             "show_quick_start",
             "show_logs",
             "show_annotation_list",
+            "tile_new",
+            "tile_focus",
+            "tile_rename",
             #[cfg(not(target_arch = "wasm32"))]
             "create_default_config",
             #[cfg(feature = "performance_plot")]
@@ -425,6 +490,13 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
         commands.push("surver_select_file");
         commands.push("surver_switch_file");
     }
+    commands.extend(
+        tile_commands
+            .iter()
+            .filter(|(name, _)| !name.starts_with("viewport_"))
+            .map(|(name, _)| *name),
+    );
+    commands.extend(kind_commands.iter().map(|command| command.name));
 
     let mut theme_names = state.user.config.theme.theme_names.clone();
     let state_file = state.user.state_file.clone();
@@ -441,7 +513,74 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
             let scopes = scopes.clone();
             let active_scope = active_scope.clone();
             let is_transaction_container = is_transaction_container;
+            if let Some(spec) = kind_commands.iter().find(|spec| spec.name == query) {
+                let tile = captured_tile?;
+                let parse = spec.parse;
+                return single_word(
+                    spec.suggestions.iter().map(|s| (*s).to_string()).collect(),
+                    Box::new(move |word| {
+                        parse(word).map(|message| Command::Terminal(Message::ToTile(tile, message)))
+                    }),
+                );
+            }
+            if let Some((_, command)) = tile_commands.iter().find(|(name, _)| *name == query) {
+                return command
+                    .clone()
+                    .map(|command| Command::Terminal(Message::Workspace(command)));
+            }
             match query {
+                "tile_new" => single_word(
+                    crate::tiles::kind::KINDS
+                        .iter()
+                        .map(|kind| kind.name.to_string())
+                        .collect(),
+                    Box::new(move |word| {
+                        let kind = crate::tiles::kind::KINDS
+                            .iter()
+                            .find(|kind| kind.name == word)?;
+                        Some(Command::Terminal(Message::Workspace(
+                            WorkspaceCommand::OpenTile {
+                                kind: kind.name.into(),
+                                placement: open_anchor.map_or(
+                                    crate::tiles::layout::Placement::Root,
+                                    |id| {
+                                        crate::tiles::layout::Placement::Beside(
+                                            id,
+                                            TileDirection::Right,
+                                        )
+                                    },
+                                ),
+                                focus: true,
+                            },
+                        )))
+                    }),
+                ),
+                "tile_focus" => {
+                    let titles = tile_titles.clone();
+                    single_word(
+                        tile_suggestions.clone(),
+                        Box::new(move |word| {
+                            let tile = crate::tiles::input::find_tile(&titles, word)?;
+                            Some(Command::Terminal(Message::Workspace(
+                                WorkspaceCommand::FocusTile(tile),
+                            )))
+                        }),
+                    )
+                }
+                "tile_rename" => {
+                    let tile = captured_tile?;
+                    Some(Command::NonTerminal(
+                        ParamGreed::Rest,
+                        vec![],
+                        Box::new(move |name, _| {
+                            let name = name.trim();
+                            let title = (!name.is_empty()).then(|| name.to_string());
+                            Some(Command::Terminal(Message::Workspace(
+                                WorkspaceCommand::RenameTile { tile, title },
+                            )))
+                        }),
+                    ))
+                }
                 "load_file" => single_word_delayed_suggestions(
                     Box::new(all_wave_files),
                     Box::new(|word| {
@@ -1086,6 +1225,7 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                         Some(Command::Terminal(Message::OpenMemoryViewer {
                             scope: ScopeRef::from_hierarchy_string(word),
                             name: Some(word.to_string()),
+                            placement: None,
                         }))
                     }),
                 ),
@@ -1284,16 +1424,14 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
                         ))))
                     }),
                 ),
-                "viewport_add" => Some(Command::Terminal(Message::AddViewport)),
-                "viewport_remove" => Some(Command::Terminal(Message::RemoveViewport)),
                 "viewport_set_active" => {
                     let ids = waveform_ids.clone();
                     single_word(
                         viewport_indices.clone(),
                         Box::new(move |word| {
                             let idx = word.parse::<usize>().ok()?;
-                            Some(Command::Terminal(Message::SetActiveViewport(
-                                *ids.get(idx)?,
+                            Some(Command::Terminal(Message::Workspace(
+                                WorkspaceCommand::FocusTile(*ids.get(idx)?),
                             )))
                         }),
                     )
@@ -1312,4 +1450,189 @@ pub(crate) fn get_parser(state: &SystemState) -> Command<Message> {
             }
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        fzcmd::parse_command,
+        tile_kinds::{
+            logs::{LevelFilter, LogsMessage},
+            waveform::WaveformMessage,
+        },
+        tiles::{
+            TileId,
+            commands::SplitMode,
+            kind::TileMessage,
+            layout::{Direction, Placement},
+        },
+    };
+
+    fn workspace_state() -> (SystemState, TileId, TileId) {
+        let mut state = SystemState::new_default_config().unwrap();
+        state
+            .update(Message::Workspace(WorkspaceCommand::CreateTile {
+                kind: "waveform".into(),
+                placement: Placement::Root,
+                focus: true,
+            }))
+            .unwrap();
+        let waveform = state.user.workspace.layout.focused().unwrap();
+        state
+            .update(Message::Workspace(WorkspaceCommand::CreateTile {
+                kind: "logs".into(),
+                placement: Placement::Beside(waveform, Direction::Right),
+                focus: true,
+            }))
+            .unwrap();
+        let logs = state.user.workspace.layout.focused().unwrap();
+        (state, waveform, logs)
+    }
+
+    fn parse(state: &SystemState, input: &str) -> Option<Message> {
+        parse_command(
+            input,
+            get_parser(state, state.user.workspace.command_target()),
+        )
+        .ok()
+    }
+
+    #[test]
+    fn kind_commands_are_offered_only_for_the_captured_tile_kind() {
+        let (mut state, waveform, logs) = workspace_state();
+        assert!(matches!(
+            parse(&state, "logs_filter warn"),
+            Some(Message::ToTile(id, TileMessage::Logs(LogsMessage::SetFilter(LevelFilter::Warn)))) if id == logs
+        ));
+        assert!(parse(&state, "logs_filter loud").is_none());
+        assert!(parse(&state, "tile_columns names").is_none());
+        state
+            .update(Message::Workspace(WorkspaceCommand::FocusTile(waveform)))
+            .unwrap();
+        assert!(parse(&state, "logs_filter warn").is_none());
+        assert!(matches!(
+            parse(&state, "tile_columns names"),
+            Some(Message::ToTile(id, TileMessage::Waveform(WaveformMessage::Columns { names: true, values: false }))) if id == waveform
+        ));
+        assert!(matches!(
+            parse(&state, "tile_link_scroll on"),
+            Some(Message::ToTile(id, TileMessage::Waveform(WaveformMessage::LinkVerticalScroll(true)))) if id == waveform
+        ));
+    }
+
+    #[test]
+    fn prompt_capture_keeps_its_target_while_focus_moves_and_scripts_use_the_live_one() {
+        let (mut state, waveform, logs) = workspace_state();
+        state
+            .update(Message::Workspace(WorkspaceCommand::FocusTile(waveform)))
+            .unwrap();
+        state
+            .update(Message::ShowCommandPrompt(String::new(), None))
+            .unwrap();
+        assert_eq!(state.command_prompt.target.tile, Some(waveform));
+        state
+            .update(Message::Workspace(WorkspaceCommand::FocusTile(logs)))
+            .unwrap();
+        assert_eq!(state.command_prompt.target.tile, Some(waveform));
+        let captured = state.command_prompt.target;
+        assert!(matches!(
+            parse_command("tile_close", get_parser(&state, captured)),
+            Ok(Message::Workspace(WorkspaceCommand::CloseTile(id))) if id == waveform
+        ));
+        state
+            .update(Message::ShowCommandPrompt("item_rename ".into(), None))
+            .unwrap();
+        assert_eq!(state.command_prompt.target.tile, Some(waveform));
+        state.update(Message::HideCommandPrompt).unwrap();
+        state
+            .update(Message::ShowCommandPrompt(String::new(), None))
+            .unwrap();
+        assert_eq!(state.command_prompt.target.tile, Some(logs));
+        assert_eq!(state.command_prompt.target.waveform, Some(waveform));
+        state.update(Message::HideCommandPrompt).unwrap();
+        // Script statements resolve against the state left by the previous one.
+        state
+            .update(Message::ExecuteBatchCommand {
+                line: 1,
+                command: "tile_focus #1".into(),
+            })
+            .unwrap();
+        assert_eq!(state.user.workspace.layout.focused(), Some(waveform));
+        state
+            .update(Message::ExecuteBatchCommand {
+                line: 2,
+                command: "tile_split_right".into(),
+            })
+            .unwrap();
+        let split = state.user.workspace.layout.focused().unwrap();
+        assert_ne!(split, waveform);
+        assert_eq!(
+            state.user.workspace.tiles[&split].kind.item_list(),
+            state.user.workspace.tiles[&waveform].kind.item_list()
+        );
+    }
+
+    #[test]
+    fn tile_commands_resolve_to_concrete_targets_and_legacy_aliases_map_to_tiles() {
+        let (mut state, waveform, logs) = workspace_state();
+        state
+            .update(Message::Workspace(WorkspaceCommand::FocusTile(waveform)))
+            .unwrap();
+        assert!(matches!(
+            parse(&state, "tile_split_copy_down"),
+            Some(Message::Workspace(WorkspaceCommand::SplitTile { tile, dir: Direction::Down, mode: SplitMode::Independent })) if tile == waveform
+        ));
+        assert!(matches!(
+            parse(&state, "viewport_add"),
+            Some(Message::Workspace(WorkspaceCommand::SplitTile { tile, dir: Direction::Right, mode: SplitMode::Linked })) if tile == waveform
+        ));
+        assert!(matches!(
+            parse(&state, "viewport_remove"),
+            Some(Message::Workspace(WorkspaceCommand::CloseTile(tile))) if tile == waveform
+        ));
+        assert!(matches!(
+            parse(&state, "viewport_set_active 0"),
+            Some(Message::Workspace(WorkspaceCommand::FocusTile(tile))) if tile == waveform
+        ));
+        assert!(parse(&state, "viewport_set_active 7").is_none());
+        assert!(matches!(
+            parse(&state, "tile_new memory"),
+            Some(Message::Workspace(WorkspaceCommand::OpenTile { placement: Placement::Beside(anchor, Direction::Right), focus: true, .. })) if anchor == waveform
+        ));
+        assert!(parse(&state, "tile_new pipeline").is_none());
+        assert!(matches!(
+            parse(&state, "tile_focus Logs"),
+            Some(Message::Workspace(WorkspaceCommand::FocusTile(tile))) if tile == logs
+        ));
+        assert!(matches!(
+            parse(&state, "tile_rename Clock view"),
+            Some(Message::Workspace(WorkspaceCommand::RenameTile { tile, title: Some(title) })) if tile == waveform && title == "Clock view"
+        ));
+        assert!(matches!(
+            parse(&state, "tile_close_others"),
+            Some(Message::Workspace(WorkspaceCommand::CloseOtherTiles(tile))) if tile == waveform
+        ));
+        assert!(matches!(
+            parse(&state, "workspace_reset"),
+            Some(Message::Workspace(WorkspaceCommand::Reset { keep: Some(tile) })) if tile == waveform
+        ));
+        assert!(matches!(
+            parse(&state, "tile_move_down"),
+            Some(Message::Workspace(WorkspaceCommand::MoveTile { tile, to: Placement::Edge(Direction::Down) })) if tile == waveform
+        ));
+        // Alone in its group and without rendered geometry there is nothing to cycle or focus.
+        assert!(parse(&state, "tile_next").is_none());
+        assert!(parse(&state, "tile_focus_right").is_none());
+        state
+            .update(Message::Workspace(WorkspaceCommand::FocusTile(logs)))
+            .unwrap();
+        assert!(parse(&state, "tile_split_right").is_none());
+        assert!(matches!(
+            parse(&state, "viewport_add"),
+            Some(Message::Workspace(WorkspaceCommand::SplitTile { tile, .. })) if tile == waveform
+        ));
+        // Injected commands cannot carry an ambient target.
+        assert!(ron::from_str::<Message>("Workspace(CloseTile(Focused))").is_err());
+    }
 }

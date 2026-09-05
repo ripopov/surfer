@@ -233,7 +233,7 @@ impl<'de> Deserialize<'de> for UserState {
         if version == 0 {
             let previous = probe.waves.is_none();
             if let Some(old) = probe.waves.or(probe.previous_waves) {
-                let old: crate::wave_data::WaveformData =
+                let old: crate::tiles::legacy::LegacyWaveformV0 =
                     crate::tiles::serde::decode(old.get_ron()).map_err(D::Error::custom)?;
                 let mut runtime = crate::tiles::runtime::WorkspaceRuntime::default();
                 let migrated = old.into_workspace(&mut runtime).map_err(D::Error::custom)?;
@@ -818,10 +818,13 @@ impl SystemState {
     /// Used for testing to make sure the GUI is at its final state before taking a
     /// snapshot.
     pub fn waves_fully_loaded(&self) -> bool {
-        self.user
-            .waves
-            .as_ref()
-            .is_some_and(|w| w.inner.is_fully_loaded())
+        self.can_start_batch_command()
+            && self.pending_document.is_none()
+            && self
+                .user
+                .waves
+                .as_ref()
+                .is_some_and(|w| w.inner.is_fully_loaded())
     }
 
     /// Returns true if no analog caches are currently being built
@@ -832,10 +835,10 @@ impl SystemState {
             .is_none_or(|w| w.inflight_caches.is_empty())
     }
 
-    /// Returns the current canvas state
+    /// Snapshot one list's content for history. Shared marker times are not
+    /// part of it; marker edits record their own value (§9).
     pub(crate) fn current_canvas_state(
         list: crate::tiles::ItemListId,
-        document: Option<&crate::wave_data::WaveData>,
         items: &crate::item_list::ItemList,
         message: String,
     ) -> CanvasState {
@@ -844,7 +847,8 @@ impl SystemState {
             list,
             items_tree: items.items_tree.clone(),
             displayed_items: items.displayed_items.clone(),
-            markers: document.map(|document| document.markers.clone()),
+            graphics: items.graphics.clone(),
+            default_variable_name_type: items.default_variable_name_type,
             annotations: items.annotations.clone(),
             annotation_group: items.annotation_groups.clone(),
             annotation_counter: items.annotation_counter,
@@ -860,15 +864,7 @@ impl SystemState {
         let Some(items) = self.user.workspace.item_lists.get_mut(&previous.list) else {
             return Err(Box::new(previous));
         };
-        if previous.markers.is_some() && self.user.waves.is_none() {
-            return Err(Box::new(previous));
-        }
-        let inverse = Self::current_canvas_state(
-            previous.list,
-            previous.markers.as_ref().and(self.user.waves.as_ref()),
-            items,
-            previous.message.clone(),
-        );
+        let inverse = Self::current_canvas_state(previous.list, items, previous.message.clone());
         let mut views = self
             .user
             .workspace
@@ -887,6 +883,8 @@ impl SystemState {
             .collect::<Vec<_>>();
         items.items_tree = previous.items_tree;
         items.displayed_items = previous.displayed_items;
+        items.graphics = previous.graphics;
+        items.default_variable_name_type = previous.default_variable_name_type;
         items.annotations = previous.annotations;
         items.annotation_groups = previous.annotation_group;
         items.annotation_counter = previous.annotation_counter;
@@ -897,14 +895,12 @@ impl SystemState {
             view.reconcile_annotations(items);
             view.invalidate_draw_cache();
         }
-        if let Some(markers) = previous.markers {
-            self.user.waves.as_mut().unwrap().markers = markers;
-            self.invalidate_draw_commands();
-        }
+        self.invalidate_draw_commands();
         Ok(inverse)
     }
 
-    /// Push the current canvas state to the undo stack
+    /// Record the target waveform's list before an item edit. Shared marker
+    /// times are not part of the record, so unrelated marker changes survive undo.
     pub(crate) fn save_current_canvas(&mut self, message: String) {
         if let Some(waves) = self.user.waveform_read() {
             self.record_canvas_edit(SystemState::current_canvas_state(
@@ -912,7 +908,6 @@ impl SystemState {
                     .kind
                     .item_list()
                     .unwrap(),
-                Some(waves.document),
                 waves.items,
                 message,
             ));

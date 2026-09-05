@@ -25,7 +25,7 @@ pub enum SplitMode {
 }
 
 /// Resolved user commands. Widget and input boundaries supply concrete tile IDs.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub enum WorkspaceCommand {
     CreateTile {
         kind: String,
@@ -54,6 +54,11 @@ pub enum WorkspaceCommand {
         title: Option<String>,
     },
     SetLayout(Option<LayoutNode>),
+    /// Restore the default layout: one waveform tile. `keep` retains that
+    /// tile and its list; `None` creates an empty waveform.
+    Reset {
+        keep: Option<TileId>,
+    },
 }
 
 #[derive(Debug, Deserialize)]

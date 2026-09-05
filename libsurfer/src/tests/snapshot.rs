@@ -1,4 +1,8 @@
-use crate::tiles::commands::DocumentCommand;
+use crate::tiles::{
+    TileId,
+    commands::{DocumentCommand, SplitMode, WorkspaceCommand},
+    layout::Direction as TileDirection,
+};
 use std::{env, fs::File, io::IsTerminal};
 
 use crate::{arrow::WavePoint, graphics::Anchor};
@@ -1316,6 +1320,7 @@ snapshot_ui_with_file_and_msgs! {memory_viewer_scope_open, "examples/smallsurfer
     Message::OpenMemoryViewer {
         scope: ScopeRef::from_hierarchy_string("image_memory.mem"),
         name: Some("image_memory.mem".to_string()),
+        placement: None,
     },
 ]}
 snapshot_ui!(regex_error_indication, || {
@@ -1881,19 +1886,504 @@ Message::SetNameAlignRight(true)
 ]}
 
 snapshot_ui_with_file_and_msgs! {add_viewport_works, "examples/counter.vcd", [
-    Message::AddViewport,
-    Message::AddViewport,
+    Message::Workspace(WorkspaceCommand::SplitTile { tile: TileId(1), dir: TileDirection::Right, mode: SplitMode::Linked }),
+    Message::Workspace(WorkspaceCommand::SplitTile { tile: TileId(2), dir: TileDirection::Right, mode: SplitMode::Linked }),
     Message::ToDocument(DocumentCommand::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"]))))),
     Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.clk")]),
     Message::AddTimeLine(None),
 ]}
 
+/// Build two independent lists in one tab group through the public commands.
+fn multi_tab_state() -> (SystemState, crate::tiles::TileId, crate::tiles::TileId) {
+    use crate::tiles::{commands::WorkspaceCommand, layout::Placement};
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/counter.vcd")
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+    wait_for_waves_fully_loaded(&mut state, 10);
+    for message in [
+        Message::SetMenuVisible(false),
+        Message::SetSidePanelVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
+    ] {
+        state.update(message);
+    }
+    let first = state.user.workspace.layout.focused().unwrap();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+    ]));
+    state.update(Message::Workspace(WorkspaceCommand::RenameTile {
+        tile: first,
+        title: Some("Clock".into()),
+    }));
+    state.update(Message::Workspace(WorkspaceCommand::CreateTile {
+        kind: "waveform".into(),
+        placement: Placement::TabAfter(first),
+        focus: true,
+    }));
+    let second = state.user.workspace.layout.focused().unwrap();
+    assert_ne!(first, second);
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+    state.update(Message::Workspace(WorkspaceCommand::RenameTile {
+        tile: second,
+        title: Some("Counter".into()),
+    }));
+    wait_for_waves_fully_loaded(&mut state, 10);
+    assert_eq!(state.user.workspace.item_lists.len(), 2);
+    (state, first, second)
+}
+
+snapshot_ui!(multi_tab_second_active, || multi_tab_state().0);
+
+snapshot_ui!(multi_tab_switch_back, || {
+    let (mut state, first, _) = multi_tab_state();
+    state.update(Message::Workspace(
+        crate::tiles::commands::WorkspaceCommand::FocusTile(first),
+    ));
+    state
+});
+
+snapshot_ui!(multi_tab_close_undo, || {
+    let (mut state, _, second) = multi_tab_state();
+    state.update(Message::Workspace(
+        crate::tiles::commands::WorkspaceCommand::CloseTile(second),
+    ));
+    assert!(!state.user.workspace.tiles.contains_key(&second));
+    state.update(Message::Undo(1));
+    assert!(state.user.workspace.tiles.contains_key(&second));
+    state.update(Message::Workspace(
+        crate::tiles::commands::WorkspaceCommand::FocusTile(second),
+    ));
+    state
+});
+
+/// counter.vcd with the chrome hidden, before any workspace edits.
+fn counter_state() -> SystemState {
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/counter.vcd")
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+    wait_for_waves_fully_loaded(&mut state, 10);
+    for message in [
+        Message::SetMenuVisible(false),
+        Message::SetSidePanelVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
+    ] {
+        state.update(message);
+    }
+    state
+}
+
+fn multi_tab_linked_state() -> SystemState {
+    let (mut state, first, second) = multi_tab_state();
+    state.update(Message::Workspace(WorkspaceCommand::SplitTile {
+        tile: second,
+        dir: TileDirection::Right,
+        mode: SplitMode::Linked,
+    }));
+    let linked = state.user.workspace.layout.focused().unwrap();
+    assert_ne!(linked, second);
+    assert_eq!(state.user.workspace.item_lists.len(), 2);
+    state.update(Message::Workspace(WorkspaceCommand::RenameTile {
+        tile: linked,
+        title: Some("Counter detail".into()),
+    }));
+    state.update(Message::ToTile(
+        linked,
+        crate::tiles::kind::TileMessage::Waveform(
+            crate::tile_kinds::waveform::WaveformMessage::Navigate(
+                crate::tile_kinds::waveform::WaveformNavigation::ZoomToRange {
+                    start: 100.into(),
+                    end: 200.into(),
+                },
+            ),
+        ),
+    ));
+    state.update(Message::Workspace(WorkspaceCommand::FocusTile(first)));
+    state
+}
+
+snapshot_ui!(multi_tab_linked_split, multi_tab_linked_state);
+
+/// A saved workspace installs atomically into a fresh session with the same
+/// document and renders exactly like the session that saved it.
+#[test]
+fn saved_workspace_round_trip_renders_identically() {
+    render_and_compare(Utf8Path::new("multi_tab_linked_split"), || {
+        let saved = multi_tab_linked_state();
+        let encoded = saved.encode_state().unwrap();
+        let restored: UserState = crate::tiles::serde::decode(&encoded).unwrap();
+        let mut fresh = counter_state();
+        fresh.update(Message::Workspace(WorkspaceCommand::RenameTile {
+            tile: fresh.user.workspace.layout.focused().unwrap(),
+            title: Some("Replaced by the saved workspace".into()),
+        }));
+        fresh.update(Message::LoadState(Box::new(restored), None));
+        // Reattachment resolves variable identities, so compare the workspace
+        // contract rather than raw text: layout, tile envelopes and row names.
+        let saved_file = saved.user.workspace.to_file().unwrap();
+        let loaded_file = fresh.user.workspace.to_file().unwrap();
+        assert_eq!(saved_file.layout, loaded_file.layout);
+        assert_eq!(
+            ron::to_string(&saved_file.tiles).unwrap(),
+            ron::to_string(&loaded_file.tiles).unwrap()
+        );
+        let rows = |workspace: &crate::tiles::workspace::Workspace| {
+            workspace
+                .item_lists
+                .iter()
+                .map(|(id, list)| {
+                    (
+                        *id,
+                        list.items_tree
+                            .iter()
+                            .map(|node| list.displayed_items[&node.item_ref].name())
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(rows(&saved.user.workspace), rows(&fresh.user.workspace));
+        wait_for_waves_fully_loaded(&mut fresh, 10);
+        fresh
+    });
+}
+
+/// The overview strip draws one window per visible waveform tile; clicking a
+/// window focuses that tile, preferring the narrowest window under the pointer.
+#[test]
+fn overview_click_focuses_the_waveform_tile_under_the_pointer() {
+    use crate::tiles::layout::Placement;
+    // Drive async file loading the same way the snapshot harness does.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let _enter = runtime.enter();
+    std::thread::spawn(move || {
+        runtime.block_on(async {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+            }
+        });
+    });
+    let (mut state, first, second) = multi_tab_state();
+    state.update(Message::Workspace(WorkspaceCommand::MoveTile {
+        tile: second,
+        to: Placement::Beside(first, TileDirection::Right),
+    }));
+    state.update(Message::SetOverviewVisible(true));
+    state.update(Message::ToTile(
+        second,
+        crate::tiles::kind::TileMessage::Waveform(
+            crate::tile_kinds::waveform::WaveformMessage::Navigate(
+                crate::tile_kinds::waveform::WaveformNavigation::ZoomToRange {
+                    start: 0.into(),
+                    end: 20.into(),
+                },
+            ),
+        ),
+    ));
+    state.update(Message::Workspace(WorkspaceCommand::FocusTile(second)));
+    let ctx = egui::Context::default();
+    let size = Vec2::new(800.0, 600.0);
+    let frame = |events: Vec<Event>, state: &SystemState| {
+        let mut msgs = Vec::new();
+        let mut output = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let waves = state.user.waveform_read().unwrap();
+                state.add_overview_panel(ui, &waves, &mut msgs);
+            },
+        );
+        output.textures_delta.clear();
+        msgs
+    };
+    let click = |pos: Pos2, pressed: bool| {
+        vec![
+            Event::PointerMoved(pos),
+            Event::PointerButton {
+                pos,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            },
+        ]
+    };
+    frame(vec![], &state);
+    // The far right lies only inside the full-range window of the first tile.
+    let right = Pos2::new(size.x - 3.0, size.y - 3.0);
+    frame(click(right, true), &state);
+    let msgs = frame(click(right, false), &state);
+    assert!(
+        matches!(msgs.as_slice(), [Message::Workspace(WorkspaceCommand::FocusTile(id))] if *id == first),
+        "expected a focus command, got {msgs:?}"
+    );
+    // The far left lies inside both windows; the narrower (focused) one wins.
+    let left = Pos2::new(3.0, size.y - 3.0);
+    frame(click(left, true), &state);
+    let msgs = frame(click(left, false), &state);
+    assert!(
+        !msgs
+            .iter()
+            .any(|msg| matches!(msg, Message::Workspace(WorkspaceCommand::FocusTile(_)))),
+        "unexpected {msgs:?}"
+    );
+    state.update(Message::Workspace(WorkspaceCommand::FocusTile(first)));
+    assert_eq!(state.user.workspace.layout.focused(), Some(first));
+}
+
+snapshot_ui!(multi_tab_independent_split, || {
+    let (mut state, _, second) = multi_tab_state();
+    state.update(Message::Workspace(WorkspaceCommand::SplitTile {
+        tile: second,
+        dir: TileDirection::Down,
+        mode: SplitMode::Independent,
+    }));
+    let copy = state.user.workspace.layout.focused().unwrap();
+    assert_eq!(state.user.workspace.item_lists.len(), 3);
+    // The copy owns its list: replacing its rows leaves the original untouched.
+    let list = state.user.workspace.tiles[&copy].kind.item_list().unwrap();
+    let rows = state.user.workspace.item_lists[&list]
+        .displayed_items
+        .keys()
+        .copied()
+        .collect::<Vec<_>>();
+    state.update(Message::ToTile(
+        copy,
+        crate::tiles::kind::TileMessage::Waveform(
+            crate::tile_kinds::waveform::WaveformMessage::RemoveItems(rows),
+        ),
+    ));
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.reset"),
+        VariableRef::from_hierarchy_string("tb.overflow"),
+    ]));
+    state.update(Message::Workspace(WorkspaceCommand::RenameTile {
+        tile: copy,
+        title: Some("Counter copy".into()),
+    }));
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state
+});
+
+snapshot_ui!(multi_tile_every_kind, || {
+    use crate::tiles::layout::Placement;
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join("examples/smallsurfer.vcd")
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+    wait_for_waves_fully_loaded(&mut state, 10);
+    for message in [
+        Message::SetMenuVisible(false),
+        Message::SetSidePanelVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
+    ] {
+        state.update(message);
+    }
+    let waveform = state.user.workspace.layout.focused().unwrap();
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("image_memory.height"),
+        VariableRef::from_hierarchy_string("image_memory.width"),
+    ]));
+    state.update(Message::ToDocument(DocumentCommand::CursorSet(
+        BigInt::from(0),
+    )));
+    state.update(Message::OpenMemoryViewer {
+        scope: ScopeRef::from_hierarchy_string("image_memory.mem"),
+        name: Some("image_memory.mem".to_string()),
+        placement: None,
+    });
+    let memory = state.user.workspace.layout.focused().unwrap();
+    // An array that this document does not contain renders an unavailable state.
+    state.update(Message::OpenMemoryViewer {
+        scope: ScopeRef::from_hierarchy_string("image_memory.missing_array"),
+        name: Some("missing array".to_string()),
+        placement: None,
+    });
+    let missing = state.user.workspace.layout.focused().unwrap();
+    state.update(Message::Workspace(WorkspaceCommand::MoveTile {
+        tile: missing,
+        to: Placement::Beside(memory, TileDirection::Down),
+    }));
+    state.update(Message::Workspace(WorkspaceCommand::OpenTile {
+        kind: "markers".into(),
+        placement: Placement::Beside(waveform, TileDirection::Down),
+        focus: false,
+    }));
+    state.update(Message::SetMarker {
+        id: 0,
+        time: 5.into(),
+    });
+    state.update(Message::SetMarker {
+        id: 1,
+        time: 20.into(),
+    });
+    state.update(Message::Workspace(WorkspaceCommand::OpenTile {
+        kind: "annotation_list".into(),
+        placement: Placement::Edge(TileDirection::Right),
+        focus: false,
+    }));
+    let annotations = *state
+        .user
+        .workspace
+        .tiles
+        .iter()
+        .find(|(_, entry)| entry.kind.kind_name() == "annotation_list")
+        .unwrap()
+        .0;
+    state.update(Message::Workspace(WorkspaceCommand::OpenTile {
+        kind: "frame_buffer".into(),
+        placement: Placement::Beside(annotations, TileDirection::Down),
+        focus: false,
+    }));
+    state.update(Message::Workspace(WorkspaceCommand::OpenTile {
+        kind: "logs".into(),
+        placement: Placement::Edge(TileDirection::Down),
+        focus: false,
+    }));
+    let logs = *state
+        .user
+        .workspace
+        .tiles
+        .iter()
+        .find(|(_, entry)| entry.kind.kind_name() == "logs")
+        .unwrap()
+        .0;
+    // Log text contains timings; hide the records so the tile renders deterministically.
+    state.update(Message::ToTile(
+        logs,
+        crate::tiles::kind::TileMessage::Logs(crate::tile_kinds::logs::LogsMessage::SetFilter(
+            crate::tile_kinds::logs::LevelFilter::Off,
+        )),
+    ));
+    state.update(Message::Workspace(WorkspaceCommand::FocusTile(memory)));
+    wait_for_waves_fully_loaded(&mut state, 10);
+    assert_eq!(state.user.workspace.tiles.len(), 7);
+    state
+});
+
+snapshot_ui_with_file_and_msgs! {hide_single_tab_bar, "examples/counter.vcd", state_mods: (|state: &mut SystemState| {
+    state.user.config.layout.hide_single_tab_bar = true;
+}), [
+    Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.clk")]),
+]}
+
+snapshot_ui!(unknown_tile_kind_preserved, || {
+    use crate::tiles::{kind::TileEntry, layout::Placement};
+    let (mut state, first, _) = multi_tab_state();
+    let entry = TileEntry::from_file(
+        crate::tiles::serde::decode(include_str!("../tiles/fixtures/future-tile.ron")).unwrap(),
+    )
+    .unwrap();
+    let id = state.workspace_runtime.allocate_tile().unwrap();
+    state
+        .user
+        .workspace
+        .layout
+        .insert(id, Placement::Beside(first, TileDirection::Right))
+        .unwrap();
+    state.user.workspace.tiles.insert(id, entry);
+    state.update(Message::Workspace(WorkspaceCommand::FocusTile(first)));
+    // The envelope survives a save unchanged.
+    let saved = state.encode_state().unwrap();
+    assert!(saved.contains("future.pipeline"));
+    state
+});
+
+snapshot_ui!(workspace_reset_keeps_target_waveform, || {
+    use crate::tiles::layout::Placement;
+    let (mut state, _, second) = multi_tab_state();
+    for kind in ["logs", "markers"] {
+        state.update(Message::Workspace(WorkspaceCommand::OpenTile {
+            kind: kind.into(),
+            placement: Placement::Edge(TileDirection::Down),
+            focus: false,
+        }));
+    }
+    state.update(Message::Workspace(WorkspaceCommand::FocusTile(second)));
+    let reset = state.user.workspace.reset_command();
+    state.update(Message::Workspace(reset));
+    assert_eq!(
+        state
+            .user
+            .workspace
+            .tiles
+            .keys()
+            .copied()
+            .collect::<Vec<_>>(),
+        [second]
+    );
+    state
+});
+
+// A version-zero state file migrates into linked tiles with the legacy
+// shared-column look, plus tiles for its open windows; unavailable inspectors
+// render their empty states.
+snapshot_ui!(legacy_state_file_migrates_into_linked_tiles, || {
+    let mut state = counter_state();
+    let restored: UserState =
+        crate::tiles::serde::decode(include_str!("../tiles/fixtures/legacy-state-v0.ron")).unwrap();
+    state.update(Message::LoadState(Box::new(restored), None));
+    for message in [
+        Message::SetMenuVisible(false),
+        Message::SetSidePanelVisible(false),
+        Message::SetToolbarVisible(false),
+        Message::SetOverviewVisible(false),
+    ] {
+        state.update(message);
+    }
+    state.update(Message::AddVariables(vec![
+        VariableRef::from_hierarchy_string("tb.clk"),
+        VariableRef::from_hierarchy_string("tb.dut.counter"),
+    ]));
+    assert_eq!(state.user.workspace.item_lists.len(), 1);
+    assert_eq!(state.user.workspace.tiles.len(), 5);
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state
+});
+
 snapshot_ui_with_file_and_msgs! {remove_viewport_works, "examples/counter.vcd", [
-    Message::AddViewport,
-    Message::AddViewport,
+    Message::Workspace(WorkspaceCommand::SplitTile { tile: TileId(1), dir: TileDirection::Right, mode: SplitMode::Linked }),
+    Message::Workspace(WorkspaceCommand::SplitTile { tile: TileId(2), dir: TileDirection::Right, mode: SplitMode::Linked }),
     Message::ToDocument(DocumentCommand::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["tb"]))))),
     Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.clk")]),
-    Message::AddTimeLine(None), Message::RemoveViewport
+    Message::AddTimeLine(None),
+    Message::Workspace(WorkspaceCommand::CloseTile(TileId(3))),
 ]}
 
 snapshot_ui_with_file_and_msgs! {hierarchy_tree, "examples/counter.vcd", [
@@ -2245,7 +2735,12 @@ fn handle_messages_until(
             }
         };
 
-        let end = matcher(&msg);
+        let end = match &msg {
+            Message::DocumentLoadResult(request, message) => {
+                *request == state.document_load_request && matcher(message)
+            }
+            _ => matcher(&msg),
+        };
 
         state.update(msg);
 
@@ -2724,7 +3219,7 @@ snapshot_ui_with_file_and_msgs! {tx_stream_multiple_viewport_works, "examples/my
     Message::AddStreamOrGenerator(TransactionStreamRef::new_stream(StreamId(1), "pipelined_stream".to_string())),
     Message::AddStreamOrGenerator(TransactionStreamRef::new_stream(StreamId(2), "addr_stream".to_string())),
     Message::AddStreamOrGenerator(TransactionStreamRef::new_stream(StreamId(3), "data_stream".to_string())),
-    Message::AddViewport,
+    Message::Workspace(WorkspaceCommand::SplitTile { tile: TileId(1), dir: TileDirection::Right, mode: SplitMode::Linked }),
     Message::CanvasScroll {delta: Vec2::new(-300., 0.),tile_id: crate::tiles::TileId(2)},
     Message::FocusTransaction(Some(TransactionRef { id: TransactionId(34) }), crate::tiles::TileId(1)),
     Message::FocusTransaction(Some(TransactionRef { id: TransactionId(34) }), crate::tiles::TileId(2)),

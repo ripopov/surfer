@@ -61,6 +61,8 @@ pub trait PaneRenderer {
     fn title(&self, tile: TileId) -> String;
     fn ui(&self, tile: TileId, focused: bool, ui: &mut Ui, commands: &mut Vec<Self::Command>);
     fn tab_context_menu(&self, _tile: TileId, _ui: &mut Ui, _commands: &mut Vec<Self::Command>) {}
+    /// Contents of the tab bar's `+` menu; `anchor` is the group's active tile.
+    fn tab_bar_menu(&self, _anchor: TileId, _ui: &mut Ui, _commands: &mut Vec<Self::Command>) {}
 }
 
 pub struct LayoutAdapter {
@@ -315,6 +317,30 @@ impl<R: PaneRenderer> Behavior<TileId> for PaneBehavior<'_, R> {
         response
     }
 
+    fn top_bar_right_ui(
+        &mut self,
+        tiles: &Tiles<TileId>,
+        ui: &mut Ui,
+        _tile_id: egui_tiles::TileId,
+        tabs: &Tabs,
+        _scroll_offset: &mut f32,
+    ) {
+        if self.hide_tab_bar {
+            return;
+        }
+        let Some(anchor) = tabs.active.and_then(|id| tiles.get_pane(&id).copied()) else {
+            return;
+        };
+        let mut commands = Vec::new();
+        ui.menu_button("➕", |ui| {
+            self.renderer.tab_bar_menu(anchor, ui, &mut commands);
+        })
+        .response
+        .on_hover_text("New tile or split");
+        self.events
+            .extend(commands.into_iter().map(PaneEvent::Command));
+    }
+
     fn tab_bar_height(&self, _style: &egui::Style) -> f32 {
         if self.hide_tab_bar { 0.0 } else { 24.0 }
     }
@@ -484,8 +510,14 @@ mod tests {
         hide_single_tab_bar: bool,
     }
 
+    #[derive(Debug, PartialEq, Eq)]
+    enum ProbeCommand {
+        Pressed(TileId, bool),
+        NewTab(TileId),
+    }
+
     impl PaneRenderer for Probe {
-        type Command = (TileId, bool);
+        type Command = ProbeCommand;
 
         fn title(&self, tile: TileId) -> String {
             format!("Tile {}", tile.0)
@@ -496,10 +528,33 @@ mod tests {
                 .borrow_mut()
                 .insert(tile, (ui.id(), ui.clip_rect()));
             if ui.input(|i| i.pointer.any_pressed()) {
-                commands.push((tile, focused));
+                commands.push(ProbeCommand::Pressed(tile, focused));
             }
             ui.label(format!("Body {}", tile.0));
         }
+
+        fn tab_bar_menu(&self, anchor: TileId, ui: &mut Ui, commands: &mut Vec<Self::Command>) {
+            if ui.button("Add tab").clicked() {
+                commands.push(ProbeCommand::NewTab(anchor));
+                ui.close();
+            }
+        }
+    }
+
+    fn text_position(output: &egui::FullOutput, text: &str) -> Option<egui::Pos2> {
+        fn find(shape: &egui::Shape, text: &str) -> Option<egui::Pos2> {
+            match shape {
+                egui::Shape::Text(shape) if shape.galley.text() == text => {
+                    Some(shape.pos + egui::vec2(4.0, 4.0))
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| find(shape, text)),
+                _ => None,
+            }
+        }
+        output
+            .shapes
+            .iter()
+            .find_map(|shape| find(&shape.shape, text))
     }
 
     fn frame(
@@ -509,7 +564,18 @@ mod tests {
         runtime: &WorkspaceRuntime,
         probe: &Probe,
         events: Vec<egui::Event>,
-    ) -> LayoutPass<(TileId, bool)> {
+    ) -> LayoutPass<ProbeCommand> {
+        frame_with_output(ctx, adapter, layout, runtime, probe, events).0
+    }
+
+    fn frame_with_output(
+        ctx: &egui::Context,
+        adapter: &mut LayoutAdapter,
+        layout: &Layout,
+        runtime: &WorkspaceRuntime,
+        probe: &Probe,
+        events: Vec<egui::Event>,
+    ) -> (LayoutPass<ProbeCommand>, egui::FullOutput) {
         let mut pass = None;
         let mut output = ctx.run_ui(
             egui::RawInput {
@@ -531,7 +597,7 @@ mod tests {
             },
         );
         output.textures_delta.clear();
-        pass.unwrap()
+        (pass.unwrap(), output)
     }
 
     fn pointer(pos: egui::Pos2, pressed: bool) -> Vec<egui::Event> {
@@ -546,7 +612,7 @@ mod tests {
         ]
     }
 
-    fn commit(layout: &mut Layout, pass: LayoutPass<(TileId, bool)>) {
+    fn commit(layout: &mut Layout, pass: LayoutPass<ProbeCommand>) {
         if let Some(edit) = pass.edit {
             layout
                 .apply_proposal(edit.revision, edit.root, edit.focused)
@@ -588,6 +654,82 @@ mod tests {
         let multiple = frame(&ctx, &mut adapter, &layout, &runtime, &probe, vec![]);
         assert_eq!(multiple.rects[&TileId(1)], shown.rects[&TileId(1)]);
         assert_eq!(multiple.tab_rects.len(), 2);
+    }
+
+    #[test]
+    fn tab_bar_plus_menu_targets_the_active_tab_and_hides_with_the_bar() {
+        let ctx = egui::Context::default();
+        let runtime = WorkspaceRuntime::default();
+        let mut probe = Probe::default();
+        let mut layout = Layout::default();
+        layout.insert(TileId(1), Placement::Root).unwrap();
+        layout
+            .insert(TileId(2), Placement::TabAfter(TileId(1)))
+            .unwrap();
+        layout.focus(TileId(2)).unwrap();
+        let mut adapter = LayoutAdapter::new(egui::Id::new("plus"));
+        let (_, output) = frame_with_output(&ctx, &mut adapter, &layout, &runtime, &probe, vec![]);
+        let plus = text_position(&output, "➕").expect("plus button in the tab bar");
+        frame(
+            &ctx,
+            &mut adapter,
+            &layout,
+            &runtime,
+            &probe,
+            pointer(plus, true),
+        );
+        frame(
+            &ctx,
+            &mut adapter,
+            &layout,
+            &runtime,
+            &probe,
+            pointer(plus, false),
+        );
+        let (_, output) = frame_with_output(&ctx, &mut adapter, &layout, &runtime, &probe, vec![]);
+        let texts = |output: &egui::FullOutput| {
+            fn collect(shape: &egui::Shape, out: &mut Vec<String>) {
+                match shape {
+                    egui::Shape::Text(text) => out.push(text.galley.text().to_string()),
+                    egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| collect(s, out)),
+                    _ => {}
+                }
+            }
+            let mut out = Vec::new();
+            output
+                .shapes
+                .iter()
+                .for_each(|s| collect(&s.shape, &mut out));
+            out
+        };
+        let add = text_position(&output, "Add tab")
+            .unwrap_or_else(|| panic!("open menu; visible texts: {:?}", texts(&output)));
+        frame(
+            &ctx,
+            &mut adapter,
+            &layout,
+            &runtime,
+            &probe,
+            pointer(add, true),
+        );
+        let pass = frame(
+            &ctx,
+            &mut adapter,
+            &layout,
+            &runtime,
+            &probe,
+            pointer(add, false),
+        );
+        assert!(
+            pass.events
+                .iter()
+                .any(|event| matches!(event, PaneEvent::Command(ProbeCommand::NewTab(TileId(2)))))
+        );
+        assert!(pass.edit.is_none());
+        layout.remove(TileId(2)).unwrap();
+        probe.hide_single_tab_bar = true;
+        let (_, output) = frame_with_output(&ctx, &mut adapter, &layout, &runtime, &probe, vec![]);
+        assert!(text_position(&output, "➕").is_none());
     }
 
     #[test]
@@ -687,7 +829,12 @@ mod tests {
         let command = pass
             .events
             .iter()
-            .position(|event| matches!(event, PaneEvent::Command((TileId(2), true))))
+            .position(|event| {
+                matches!(
+                    event,
+                    PaneEvent::Command(ProbeCommand::Pressed(TileId(2), true))
+                )
+            })
             .unwrap();
         assert!(focus < command);
         commit(&mut layout, pass);
@@ -706,7 +853,7 @@ mod tests {
         assert_eq!(probe.seen.borrow()[&TileId(2)].0, b.0);
     }
 
-    fn commit_move_through_application(layout: &mut Layout, pass: LayoutPass<(TileId, bool)>) {
+    fn commit_move_through_application(layout: &mut Layout, pass: LayoutPass<ProbeCommand>) {
         use crate::{Message, tiles::commands::WorkspaceCommand};
         let mut state = crate::SystemState::new_default_config().unwrap();
         for _ in layout.tile_order() {

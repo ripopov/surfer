@@ -374,9 +374,12 @@ impl SystemState {
 
         if !self.user.workspace.tiles.is_empty() {
             let focus_ids = self.command_prompt.visible
-                && expand_command(&self.command_prompt_text.borrow(), get_parser(self))
-                    .expanded
-                    .starts_with("item_focus");
+                && expand_command(
+                    &self.command_prompt_text.borrow(),
+                    get_parser(self, self.command_prompt.target),
+                )
+                .expanded
+                .starts_with("item_focus");
             let mut adapter = self.layout_adapter.take().unwrap_or_else(|| {
                 crate::tiles::render::LayoutAdapter::new(ui.id().with("workspace"))
             });
@@ -387,10 +390,7 @@ impl SystemState {
                         ui,
                         &self.user.workspace.layout,
                         &self.workspace_runtime,
-                        &crate::tiles::kind::ApplicationPanes {
-                            state: self,
-                            focus_ids,
-                        },
+                        &crate::tiles::kind::ApplicationPanes::new(self, focus_ids),
                         self.user.config.layout.hide_single_tab_bar,
                     )
                 })

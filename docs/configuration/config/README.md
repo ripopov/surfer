@@ -75,6 +75,8 @@ Controls how time values are rendered in the UI.
 
 ## `[layout]`
 
+`hide_single_tab_bar` (default `false`) hides the workspace tab bar while exactly one tile is open.
+
 Controls the initial UI layout and waveform rendering behavior.
 
 | Key | Default | Values | Description |
@@ -253,7 +255,14 @@ The default configuration defines these actions:
 | `select_all` | `Command+A` |
 | `select_toggle` | `A` |
 | `show_command_prompt` | `Space` |
+| `show_logs` | `Command+Shift+L` |
 | `switch_file` | `Command+Shift+O` |
+| `tile_close` | `Command+W` |
+| `tile_focus_left`, `tile_focus_right`, `tile_focus_up`, `tile_focus_down` | `Command+Shift+Arrow…` |
+| `tile_move_left`, `tile_move_right`, `tile_move_up`, `tile_move_down` | `Command+Alt+Arrow…` |
+| `tile_next`, `tile_prev` | `Command+PageDown`, `Command+PageUp` |
+| `tile_split_down` | `Command+Shift+Backslash` |
+| `tile_split_right` | `Command+Backslash` |
 | `toggle_menu` | `Alt+M` |
 | `toggle_side_panel` | `B` |
 | `toggle_toolbar` | `T` |

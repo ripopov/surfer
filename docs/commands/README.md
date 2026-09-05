@@ -213,7 +213,7 @@ Not all commands are available unless a file is loaded. Also, some commands are 
 
 * ``show_logs``
 
-  Show log window.
+  Open the log tile at the bottom of the workspace.
 
 * ``toggle_menu``
 
@@ -301,7 +301,7 @@ Not all commands are available unless a file is loaded. Also, some commands are 
 
 * ``show_marker_window``
 
-  Display window with markers and differences between markers
+  Open the markers tile, listing markers and their differences for the target waveform
 
 ## Frame buffer
 
@@ -349,22 +349,87 @@ Not all commands are available unless a file is loaded. Also, some commands are 
 
   Open a memory viewer window for the given array (scope).
 
+## Tiles
+
+The central area is a workspace of tiles: waveform views, memory viewers,
+markers, logs, annotations and frame buffers arranged in splits and tab
+groups. Tile commands act on the tile that was focused when the command
+prompt opened; waveform commands from the prompt fall back to the most
+recently focused waveform tile. Layout commands work without a loaded file.
+
+* ``tile_new <KIND>``
+
+  Open a tile of the given kind (``waveform``, ``memory``, ``markers``,
+  ``logs``, ``annotation_list``, ``frame_buffer``, ``transaction_details``)
+  to the right of the focused tile, or as the only tile of an empty workspace.
+  Singleton kinds are revealed instead of duplicated.
+
+* ``tile_split_right``, ``tile_split_down``
+
+  Split the focused tile. A waveform split is *linked*: the new view shows the
+  same items with its own zoom, scroll and focus. Other kinds are cloned when
+  they support it.
+
+* ``tile_split_copy_right``, ``tile_split_copy_down``
+
+  Split the focused waveform into an independent copy of its item list.
+
+* ``tile_close``, ``tile_close_others``
+
+  Close the focused tile, or every other tab in its group. Closing the last
+  view of an item list drops the list; both are undoable.
+
+* ``tile_focus <#ID | TITLE>``
+
+  Reveal and focus a tile by numeric ID or (unique prefix of its) title.
+
+* ``tile_focus_left``, ``tile_focus_right``, ``tile_focus_up``, ``tile_focus_down``
+
+  Focus the visible spatial neighbor.
+
+* ``tile_next``, ``tile_prev``
+
+  Activate the adjacent tab in the focused tile's group.
+
+* ``tile_move_left``, ``tile_move_right``, ``tile_move_up``, ``tile_move_down``
+
+  Move the focused tile one step past its neighbor, or to the workspace edge.
+
+* ``tile_rename <NAME>``
+
+  Give the focused tile a custom title; an empty name restores the default.
+
+* ``workspace_reset``
+
+  Keep only the target waveform tile (creating an empty one if none exists).
+
+* ``tile_columns both|names|values|none``, ``tile_link_scroll on|off``
+
+  Waveform tile settings: which columns to show and whether vertical scrolling
+  is shared with linked views of the same items. Offered only while a waveform
+  tile is focused.
+
+* ``logs_filter off|error|warn|info|debug|trace``, ``annotation_list_comments on|off``
+
+  Settings offered while the logs or annotation tile is focused.
+
 ## Viewports
+
+The following spellings are kept for older command files; each resolves to a
+tile command on the current target waveform.
 
 * ``viewport_add``
 
-  Add a new viewport (additional waveform view pane).
+  Linked split of the target waveform tile to the right (``tile_split_right``).
 
 * ``viewport_remove``
 
-  Remove the most recently added viewport.
+  Close the target waveform tile (``tile_close``).
 
 * ``viewport_set_active <INDEX>``
 
-  Set the active viewport by zero-based index.
-  Command completion suggests currently available viewport indices.
-  If ``INDEX`` is larger than the largest available viewport index,
-  the active viewport is set to that largest available index instead.
+  Focus the ``INDEX``-th waveform tile in layout order.
+  Command completion suggests currently available indices.
 
 ## State files
 

@@ -1,0 +1,31 @@
+// A version-zero state file as written before the tile workspace existed:
+// two viewports over one item list, a focused transaction, and the log window open.
+(
+    waves: Some((
+        source: Data,
+        format: Vcd,
+        active_scope: None,
+        items_tree: (items: [(item_ref: (1), level: 0, unfolded: true, selected: false)]),
+        displayed_items: {(1): Divider((color: None, background_color: None, name: Some("saved row")))},
+        display_item_ref_counter: 1,
+        viewports: [
+            (curr_left: (0.0), curr_right: (1.0), target_left: (0.0), target_right: (1.0), move_start_left: (0.0), move_start_right: (1.0), move_duration: None, move_strategy: Instant),
+            (curr_left: (0.25), curr_right: (1.0), target_left: (0.0), target_right: (1.0), move_start_left: (0.0), move_start_right: (1.0), move_duration: None, move_strategy: Instant),
+        ],
+        cursor: Some((1, [45])),
+        markers: {},
+        selected_annotation: None,
+        annotations: [],
+        annotation_groups: [],
+        annotation_list_visible: true,
+        annotation_counter: 0,
+        last_active_viewport_idx: 1,
+        focused_item: None,
+        focused_transaction: (Some((id: (12))), None),
+        default_variable_name_type: Local,
+        scroll_offset: 0.0,
+        display_variable_indices: false,
+        graphics: {},
+    )),
+    show_logs: true,
+)

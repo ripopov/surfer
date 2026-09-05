@@ -9,7 +9,7 @@ use crate::{
     view::DrawingContext, viewport::Viewport, wave_data::TimeRange,
 };
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Direction {
     North,
     East,
@@ -29,7 +29,7 @@ impl Direction {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Anchor {
     Top,
     Center,
@@ -37,14 +37,14 @@ pub enum Anchor {
     Percentual(f32),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct GraphicsY {
     pub item: DisplayedItemRef,
     pub anchor: Anchor,
 }
 
 /// A point used to place graphics.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct GrPoint {
     /// Timestamp at which to place the graphic
     pub x: BigInt,
@@ -54,7 +54,7 @@ pub struct GrPoint {
 #[derive(Serialize, Deserialize, PartialEq, PartialOrd, Eq, Ord, Hash, Debug, Clone)]
 pub struct GraphicId(pub usize);
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Graphic {
     TextArrow {
         from: (GrPoint, Direction),

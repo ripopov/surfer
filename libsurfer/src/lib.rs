@@ -114,7 +114,6 @@ use eyre::{Result, WrapErr as _};
 use futures::executor::block_on;
 use itertools::Itertools;
 use message::MessageTarget;
-use num::BigInt;
 use serde::Deserialize;
 use surfer_translation_types::Translator;
 use surfer_wcp::{WcpCSMessage, WcpEvent, WcpSCMessage};
@@ -298,7 +297,8 @@ struct CanvasState {
     list: crate::tiles::ItemListId,
     items_tree: DisplayedItemTree,
     displayed_items: HashMap<DisplayedItemRef, DisplayedItem>,
-    markers: Option<HashMap<u8, BigInt>>,
+    graphics: HashMap<crate::graphics::GraphicId, crate::graphics::Graphic>,
+    default_variable_name_type: VariableNameType,
     annotations: Vec<Annotation>,
     annotation_group: Vec<AnnotationGroup>,
     annotation_counter: i32,
@@ -339,6 +339,16 @@ impl SystemState {
             tracing::trace!("{message:?}");
         }
         match message {
+            Message::DocumentLoadFailed(request) => {
+                if request == self.document_load_request {
+                    self.begin_document_load();
+                }
+            }
+            Message::DocumentLoadResult(request, message) => {
+                if request == self.document_load_request {
+                    self.update(*message)?;
+                }
+            }
             Message::ApplyLayoutProposal(edit) => {
                 let movement = if edit.structural {
                     let tile = edit.moved_tile?;
@@ -442,7 +452,6 @@ impl SystemState {
                     let list = self.user.workspace.tiles[&target].kind.item_list()?;
                     Some(Self::current_canvas_state(
                         list,
-                        None,
                         self.user.workspace.item_lists.get(&list)?,
                         label.into(),
                     ))
@@ -459,6 +468,9 @@ impl SystemState {
                     self.record_canvas_edit(before);
                 }
                 if changed && let Some(before) = settings_before {
+                    if before.source_changed(&self.user.workspace.tiles[&target].kind) {
+                        self.attach_tile_source(target);
+                    }
                     let after = before
                         .capture_like(&self.user.workspace.tiles[&target].kind)
                         .expect("tile update preserves kind");
@@ -540,7 +552,7 @@ impl SystemState {
                 let load = if let Some(target) = target {
                     let list = self.user.workspace.tiles[&target].kind.item_list()?;
                     let mut waves = self.user.waveform_edit_at(target)?;
-                    let before = Self::current_canvas_state(list, None, waves.items, undo_msg);
+                    let before = Self::current_canvas_state(list, waves.items, undo_msg);
                     let (load, inserted) =
                         waves.add_variables(&self.translators, vars, None, true, false, None, true);
                     if !inserted.is_empty() {
@@ -637,8 +649,7 @@ impl SystemState {
                     .resolve_waveform(crate::tiles::TileTarget::Focused)?;
                 let list = self.user.workspace.tiles[&target].kind.item_list()?;
                 let mut waves = self.user.waveform_edit_at(target)?;
-                let before =
-                    Self::current_canvas_state(list, None, waves.items, "Add divider".into());
+                let before = Self::current_canvas_state(list, waves.items, "Add divider".into());
                 waves.add_divider(name, vidx).ok()?;
                 self.record_canvas_edit(before);
             }
@@ -649,8 +660,7 @@ impl SystemState {
                     .resolve_waveform(crate::tiles::TileTarget::Focused)?;
                 let list = self.user.workspace.tiles[&target].kind.item_list()?;
                 let mut waves = self.user.waveform_edit_at(target)?;
-                let before =
-                    Self::current_canvas_state(list, None, waves.items, "Add timeline".into());
+                let before = Self::current_canvas_state(list, waves.items, "Add timeline".into());
                 waves.add_timeline(vidx).ok()?;
                 self.record_canvas_edit(before);
             }
@@ -895,15 +905,34 @@ impl SystemState {
                     crate::tile_kinds::frame_buffer::FrameBufferMessage::Range(ranges),
                 )?;
             }
-            Message::OpenMemoryViewer { scope, name } => {
+            Message::OpenMemoryViewer {
+                scope,
+                name,
+                placement,
+            } => {
                 use crate::tiles::{
                     commands::WorkspaceCommand,
                     kind::{TileKind, TileMessage},
                     layout::{Direction, Placement},
                 };
+                let placement = placement
+                    .filter(|placement| match placement {
+                        Placement::TabAfter(anchor) | Placement::Beside(anchor, _) => {
+                            self.user.workspace.tiles.contains_key(anchor)
+                        }
+                        Placement::Edge(_) | Placement::Root => true,
+                    })
+                    .or_else(|| {
+                        self.user
+                            .workspace
+                            .layout
+                            .focused()
+                            .map(|id| Placement::Beside(id, Direction::Right))
+                    })
+                    .unwrap_or(Placement::Root);
                 let command = WorkspaceCommand::CreateTile {
                     kind: "memory".into(),
-                    placement: Placement::Edge(Direction::Right),
+                    placement,
                     focus: true,
                 };
                 let before = crate::tiles::history::ResourceEditStart::capture(
@@ -1569,7 +1598,11 @@ impl SystemState {
                 self.add_batch_commands(read_command_bytes(bytes));
             }
             Message::ExecuteBatchCommand { line, command } => {
-                match crate::fzcmd::parse_command(&command, command_parser::get_parser(self)) {
+                let target = self.user.workspace.command_target();
+                match crate::fzcmd::parse_command(
+                    &command,
+                    command_parser::get_parser(self, target),
+                ) {
                     Ok(message) => {
                         self.update(message);
                     }
@@ -1637,49 +1670,50 @@ impl SystemState {
                 );
                 match header {
                     HeaderResult::LocalFile(header) => {
-                        // register waveform as loaded (but with no variable info yet!)
+                        // Stage the hierarchy until its matching body succeeds.
                         let shared_hierarchy = Arc::new(header.hierarchy);
                         let new_waves = WaveContainer::new_waveform(shared_hierarchy.clone());
-                        self.on_waves_loaded(
-                            source.clone(),
-                            convert_format(header.file_format),
-                            new_waves,
-                            load_options,
-                        );
+                        self.pending_document = Some(crate::wave_source::PendingDocument {
+                            source: source.clone(),
+                            format: convert_format(header.file_format),
+                            waves: new_waves,
+                            options: load_options,
+                        });
                         // start parsing of the body
                         self.load_wave_body(source, header.body, header.body_len, shared_hierarchy);
                     }
                     HeaderResult::LocalBytes(header) => {
-                        // register waveform as loaded (but with no variable info yet!)
+                        // Stage the hierarchy until its matching body succeeds.
                         let shared_hierarchy = Arc::new(header.hierarchy);
                         let new_waves = WaveContainer::new_waveform(shared_hierarchy.clone());
-                        self.on_waves_loaded(
-                            source.clone(),
-                            convert_format(header.file_format),
-                            new_waves,
-                            load_options,
-                        );
+                        self.pending_document = Some(crate::wave_source::PendingDocument {
+                            source: source.clone(),
+                            format: convert_format(header.file_format),
+                            waves: new_waves,
+                            options: load_options,
+                        });
                         // start parsing of the body
                         self.load_wave_body(source, header.body, header.body_len, shared_hierarchy);
                     }
                     HeaderResult::Remote(hierarchy, file_format, server, file_index) => {
-                        // register waveform as loaded (but with no variable info yet!)
+                        // Stage the hierarchy until its matching body succeeds.
                         let new_waves = WaveContainer::new_remote_waveform(
                             &server,
                             hierarchy.clone(),
                             file_index,
                         );
-                        self.on_waves_loaded(
-                            source.clone(),
-                            convert_format(file_format),
-                            new_waves,
-                            load_options,
-                        );
+                        self.pending_document = Some(crate::wave_source::PendingDocument {
+                            source: source.clone(),
+                            format: convert_format(file_format),
+                            waves: new_waves,
+                            options: load_options,
+                        });
                         // body is already being parsed on the server, we need to request the time table though
                         get_time_table_from_server(
                             self.channels.msg_sender.clone(),
                             server,
                             file_index,
+                            self.document_load_request,
                         );
                     }
                 }
@@ -1688,32 +1722,27 @@ impl SystemState {
                 // for files using the `wellen` backend, parse the body in a second step
                 info!("Loaded the body of {source} in {:?}", start.elapsed());
                 self.progress_tracker = None;
-                let enable_time_offset = self.enable_time_offset();
-                let waves = self
-                    .user
+                let mut pending = self.pending_document.take()?;
+                if pending.source != source {
+                    self.pending_document = Some(pending);
+                    return None;
+                }
+                let maybe_cmd = pending
                     .waves
-                    .as_mut()
-                    .expect("Waves should be loaded at this point!");
-                // add source and time table
-                let maybe_cmd = waves // TODO
-                    .inner
-                    .as_waves_mut()?
                     .wellen_add_body(body)
-                    .map_err(|err| {
-                        error!("While getting commands to lazy-load signals: {err:?}");
-                    })
-                    .ok()
-                    .flatten();
-                // Pre-load parameters
-                let param_cmd = waves
-                    .inner
-                    .as_waves_mut()?
+                    .map_err(|error| error!("Failed to attach waveform body: {error:?}"))
+                    .ok()?;
+                let param_cmd = pending
+                    .waves
                     .load_parameters()
-                    .map_err(|err| {
-                        error!("While getting commands to lazy-load parameters: {err:?}");
-                    })
-                    .ok()
-                    .flatten();
+                    .map_err(|error| error!("Failed to request waveform parameters: {error:?}"))
+                    .ok()?;
+                self.on_waves_loaded(
+                    pending.source,
+                    pending.format,
+                    pending.waves,
+                    pending.options,
+                );
 
                 if self.wcp_greeted_signal.load(Ordering::Relaxed)
                     && self.wcp_client_capabilities.waveforms_loaded
@@ -1730,10 +1759,6 @@ impl SystemState {
                     });
                 }
 
-                // Refresh time offset before updating viewports
-                waves.refresh_time_range(enable_time_offset);
-                // update viewports, now that we have the time table
-                self.user.workspace.update_viewports(waves);
                 // make sure we redraw
                 self.invalidate_draw_commands();
                 // start loading parameters
@@ -1747,7 +1772,6 @@ impl SystemState {
             }
             Message::SignalsLoaded(start, res) => {
                 info!("Loaded {} variables in {:?}", res.len(), start.elapsed());
-                self.progress_tracker = None;
                 let waves = self
                     .user
                     .waves
@@ -1757,6 +1781,21 @@ impl SystemState {
                     Err(err) => error!("{err:?}"),
                     Ok(Some(cmd)) => self.load_variables(cmd),
                     _ => {}
+                }
+                if self.pending_document.is_none()
+                    && self
+                        .user
+                        .waves
+                        .as_ref()
+                        .is_some_and(|waves| waves.inner.is_fully_loaded())
+                    && self.progress_tracker.as_ref().is_some_and(|progress| {
+                        matches!(
+                            progress.progress,
+                            crate::wave_source::LoadProgressStatus::LoadingVariables(_)
+                        )
+                    })
+                {
+                    self.progress_tracker = None;
                 }
                 // make sure we redraw since now more variable data is available
                 self.invalidate_draw_commands();
@@ -1848,6 +1887,10 @@ impl SystemState {
                 self.command_prompt.visible = false;
             }
             Message::ShowCommandPrompt(text, selected) => {
+                if !self.command_prompt.visible {
+                    // Capture the target once; it stays fixed while the prompt is open.
+                    self.command_prompt.target = self.user.workspace.command_target();
+                }
                 self.command_prompt.new_text = Some((text, selected.unwrap_or(String::new())));
                 self.command_prompt.visible = true;
             }
@@ -2022,18 +2065,18 @@ impl SystemState {
                 name,
                 move_focus,
             } => {
-                if let Some(name) = &name {
-                    self.save_current_canvas(format!("Add marker {name} at {time}"));
-                } else {
-                    self.save_current_canvas(format!("Add marker at {time}"));
-                }
-                let mut waves = self.user.waveform_edit()?;
-                waves.add_marker(&time, name, move_focus);
+                let label = match &name {
+                    Some(name) => format!("Add marker {name} at {time}"),
+                    None => format!("Add marker at {time}"),
+                };
+                self.edit_shared_marker(label, None, |waves| {
+                    waves.add_marker(&time, name, move_focus).map(|_| ())
+                })?;
             }
             Message::SetMarker { id, time } => {
-                self.save_current_canvas(format!("Set marker {id} to {time}"));
-                let mut waves = self.user.waveform_edit()?;
-                waves.set_marker_position(id, &time).ok()?;
+                self.edit_shared_marker(format!("Set marker {id} to {time}"), Some(id), |waves| {
+                    waves.set_marker_position(id, &time).ok()
+                })?;
             }
             Message::ResolveMarkerRemove(name) => {
                 if let Some(id) = self.user.waveform_read()?.items.resolve_marker_name(&name) {
@@ -2041,23 +2084,14 @@ impl SystemState {
                 }
             }
             Message::RemoveMarker(id) => {
-                let waves = self.user.waveform_read()?;
-                if !waves.document.markers.contains_key(&id)
-                    && !waves.items.displayed_items.values().any(
-                        |item| matches!(item, DisplayedItem::Marker(marker) if marker.idx == id),
-                    )
-                {
-                    return None;
-                }
-                self.save_current_canvas(format!("Remove marker {id}"));
-                self.invalidate_draw_commands();
-                let mut waves = self.user.waveform_edit()?;
-                waves.remove_marker(id);
+                self.remove_shared_marker(id)?;
             }
             Message::MoveMarkerToCursor(idx) => {
-                self.save_current_canvas("Move marker".into());
-                let mut waves = self.user.waveform_edit()?;
-                waves.move_marker_to_cursor(idx).ok()?;
+                self.edit_shared_marker(
+                    format!("Move marker {idx} to cursor"),
+                    Some(idx),
+                    |waves| waves.move_marker_to_cursor(idx).ok(),
+                )?;
             }
             Message::GoToCursorIfNotInView => {
                 let mut waves = self.user.waveform_edit()?;
@@ -2741,28 +2775,6 @@ impl SystemState {
                 self.invalidate_draw_commands();
             }
             Message::Exit | Message::ToggleFullscreen => {} // Handled in eframe::update
-            Message::AddViewport => {
-                let tile = self
-                    .user
-                    .workspace
-                    .resolve_waveform(crate::tiles::TileTarget::Focused)?;
-                self.update(Message::Workspace(
-                    crate::tiles::commands::WorkspaceCommand::SplitTile {
-                        tile,
-                        dir: crate::tiles::layout::Direction::Right,
-                        mode: crate::tiles::commands::SplitMode::Linked,
-                    },
-                ))?;
-            }
-            Message::RemoveViewport => {
-                let tile = self
-                    .user
-                    .workspace
-                    .resolve_waveform(crate::tiles::TileTarget::Focused)?;
-                self.update(Message::Workspace(
-                    crate::tiles::commands::WorkspaceCommand::CloseTile(tile),
-                ))?;
-            }
             Message::SelectTheme(theme_name) => {
                 let theme = SurferTheme::new(theme_name)
                     .with_context(|| "Failed to set theme")
@@ -2787,12 +2799,28 @@ impl SystemState {
             }
             Message::AsyncDone(_) => (),
             Message::AddGraphic(id, g) => {
-                let waves = self.user.waveform_edit()?;
-                waves.items.graphics.insert(id, g);
+                let target = self
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused)?;
+                self.update(Message::ToTile(
+                    target,
+                    crate::tiles::kind::TileMessage::Waveform(
+                        crate::tile_kinds::waveform::WaveformMessage::AddGraphic(id, g),
+                    ),
+                ))?;
             }
             Message::RemoveGraphic(id) => {
-                let waves = self.user.waveform_edit()?;
-                waves.items.graphics.retain(|k, _| k != &id);
+                let target = self
+                    .user
+                    .workspace
+                    .resolve_waveform(crate::tiles::TileTarget::Focused)?;
+                self.update(Message::ToTile(
+                    target,
+                    crate::tiles::kind::TileMessage::Waveform(
+                        crate::tile_kinds::waveform::WaveformMessage::RemoveGraphic(id),
+                    ),
+                ))?;
             }
             Message::ExpandDrawnItem { item, levels } => {
                 self.invalidate_draw_commands();
@@ -3006,12 +3034,6 @@ impl SystemState {
                 let view = waves.view;
                 view.selected_annotation = id;
                 view.annotation_menu = menu;
-            }
-
-            Message::SetActiveViewport(id) => {
-                self.update(Message::Workspace(
-                    crate::tiles::commands::WorkspaceCommand::FocusTile(id),
-                ))?;
             }
 
             Message::RemoveCommentMessage(annotation_id, message_id) => {

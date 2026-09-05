@@ -54,8 +54,8 @@ const TOOLBAR_GROUP_SPECS: [ToolbarGroupSpec; 12] = [
         label: "Add items",
     },
     ToolbarGroupSpec {
-        id: "viewports",
-        label: "Viewports",
+        id: "tiles",
+        label: "Tiles",
     },
     ToolbarGroupSpec {
         id: "undo",
@@ -164,7 +164,7 @@ impl SystemState {
             "navigation",
             "transitions",
             "add_items",
-            "viewports",
+            "tiles",
             "undo",
             "annotations",
         ]);
@@ -309,7 +309,7 @@ impl SystemState {
                     "navigation" => self.draw_toolbar_group_navigation(ui, msgs, wave_loaded),
                     "transitions" => self.draw_toolbar_group_transitions(ui, msgs, item_and_cursor),
                     "add_items" => self.draw_toolbar_group_add_items(ui, msgs, wave_loaded),
-                    "viewports" => self.draw_toolbar_group_viewports(ui, msgs, wave_loaded),
+                    "tiles" => self.draw_toolbar_group_tiles(ui, msgs),
                     "undo" => self.draw_toolbar_group_history(ui, msgs),
                     "cxxrtl" => self.draw_toolbar_group_simulation(ui, msgs),
                     "time" => self.draw_toolbar_group_time_input(ui, msgs),
@@ -583,30 +583,37 @@ impl SystemState {
         );
     }
 
-    fn draw_toolbar_group_viewports(
-        &self,
-        ui: &mut Ui,
-        msgs: &mut Vec<Message>,
-        wave_loaded: bool,
-    ) {
-        let multiple_viewports = !self.user.workspace.tiles.is_empty();
-
-        add_toolbar_button(
-            ui,
-            msgs,
-            icons::ADD_BOX_FILL,
-            "Add viewport",
-            Message::AddViewport,
-            wave_loaded,
-        );
-        add_toolbar_button(
-            ui,
-            msgs,
-            icons::CHECKBOX_INDETERMINATE_FILL,
-            "Remove viewport",
-            Message::RemoveViewport,
-            wave_loaded && multiple_viewports,
-        );
+    fn draw_toolbar_group_tiles(&self, ui: &mut Ui, msgs: &mut Vec<Message>) {
+        use crate::tiles::{TileTarget, layout::Direction};
+        let workspace = &self.user.workspace;
+        let focused = TileTarget::Focused;
+        for (icon, hover, command) in [
+            (
+                icons::SPLIT_CELLS_HORIZONTAL,
+                "Split tile right",
+                workspace.split_command(focused, Direction::Right, false),
+            ),
+            (
+                icons::SPLIT_CELLS_VERTICAL,
+                "Split tile down",
+                workspace.split_command(focused, Direction::Down, false),
+            ),
+            (
+                icons::CLOSE_LINE,
+                "Close tile",
+                workspace.close_command(focused),
+            ),
+        ] {
+            let enabled = command.is_some();
+            add_toolbar_button(
+                ui,
+                msgs,
+                icon,
+                hover,
+                command.map(Message::Workspace),
+                enabled,
+            );
+        }
     }
 
     fn draw_toolbar_group_history(&self, ui: &mut Ui, msgs: &mut Vec<Message>) {

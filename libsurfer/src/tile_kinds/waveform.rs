@@ -7,6 +7,8 @@ use crate::{drawing_canvas::WaveDrawCache, viewport::Viewport};
 
 #[derive(Debug, Deserialize)]
 pub enum WaveformMessage {
+    AddGraphic(crate::graphics::GraphicId, crate::graphics::Graphic),
+    RemoveGraphic(crate::graphics::GraphicId),
     Annotation(super::annotation_list::AnnotationCommand),
     AddDivider {
         name: Option<String>,
@@ -47,6 +49,8 @@ impl WaveformMessage {
     /// Content history belongs to the referenced list; view navigation is excluded.
     pub(crate) fn item_edit_label(&self) -> Option<&'static str> {
         match self {
+            Self::AddGraphic(..) => Some("Add graphic"),
+            Self::RemoveGraphic(_) => Some("Remove graphic"),
             Self::Annotation(_) => Some("Edit annotation"),
             Self::AddDivider { .. } => Some("Add divider"),
             Self::MoveItems { .. } => Some("Move items"),
@@ -187,6 +191,27 @@ impl WaveformTile {
             }
             WaveformMessage::Selection(command) => {
                 let changed = cx.items.apply_selection(command)?;
+                if changed {
+                    self.view.invalidate_draw_cache();
+                    for (peer, _) in &cx.peers {
+                        peer.view.invalidate_draw_cache();
+                    }
+                }
+                Ok(changed)
+            }
+            WaveformMessage::AddGraphic(id, graphic) => {
+                if cx.items.graphics.get(&id) == Some(&graphic) {
+                    return Ok(false);
+                }
+                cx.items.graphics.insert(id, graphic);
+                self.view.invalidate_draw_cache();
+                for (peer, _) in &cx.peers {
+                    peer.view.invalidate_draw_cache();
+                }
+                Ok(true)
+            }
+            WaveformMessage::RemoveGraphic(id) => {
+                let changed = cx.items.graphics.remove(&id).is_some();
                 if changed {
                     self.view.invalidate_draw_cache();
                     for (peer, _) in &cx.peers {

@@ -9,13 +9,17 @@ use crate::item_list::ItemList;
 use super::{
     ItemListId, TileId, TileTarget,
     commands::{SplitMode, WorkspaceCommand},
-    kind::{KINDS, KindCreateError, KindDecodeError, TileEntry, TileKind},
+    kind::{KINDS, KindCreateError, KindDecodeError, TileEntry, TileKind, WAVEFORM},
     layout::{Layout, LayoutError, LayoutFile, Placement},
     runtime::{IdentityError, WorkspaceRuntime},
     serde::{DecodeError, ItemListError, ItemListFile, TileFile, decode},
 };
 
 pub const WORKSPACE_VERSION: u32 = 1;
+
+/// Marks views sharing an item list in default titles (`Waveform 2 🔗1`).
+/// The icon font is a fallback of every text family, so tabs can render it.
+pub const LINKED_LIST_GLYPH: &str = egui_remixicon::icons::LINK;
 
 #[derive(Serialize, Deserialize)]
 pub struct WorkspaceFile {
@@ -323,6 +327,170 @@ mod tests {
     }
 
     #[test]
+    fn reset_keeps_only_the_target_waveform_or_creates_an_empty_one() {
+        use super::super::layout::Direction;
+        let mut workspace = Workspace::default();
+        let mut runtime = WorkspaceRuntime::default();
+        assert!(
+            workspace
+                .apply_command(&mut runtime, WorkspaceCommand::Reset { keep: None })
+                .unwrap()
+        );
+        let created = workspace.layout.focused().unwrap();
+        assert_eq!(workspace.tiles.len(), 1);
+        assert_eq!(workspace.item_lists.len(), 1);
+        assert!(
+            !workspace
+                .apply_command(
+                    &mut runtime,
+                    WorkspaceCommand::Reset {
+                        keep: Some(created)
+                    }
+                )
+                .unwrap()
+        );
+        let second = create(
+            &mut workspace,
+            &mut runtime,
+            Placement::Beside(created, Direction::Down),
+        );
+        workspace
+            .apply_command(
+                &mut runtime,
+                WorkspaceCommand::CreateTile {
+                    kind: "logs".into(),
+                    placement: Placement::TabAfter(second),
+                    focus: true,
+                },
+            )
+            .unwrap();
+        assert_eq!(workspace.item_lists.len(), 2);
+        let kept_list = workspace.tiles[&second].kind.item_list().unwrap();
+        assert!(
+            workspace
+                .apply_command(&mut runtime, WorkspaceCommand::Reset { keep: Some(second) })
+                .unwrap()
+        );
+        assert_eq!(
+            workspace.tiles.keys().copied().collect::<Vec<_>>(),
+            [second]
+        );
+        assert_eq!(
+            workspace.item_lists.keys().copied().collect::<Vec<_>>(),
+            [kept_list]
+        );
+        assert_eq!(workspace.layout.focused(), Some(second));
+        assert!(matches!(
+            workspace.layout.root(),
+            Some(LayoutNode::Tabs { children, .. }) if children == &[LayoutNode::Tile(second)]
+        ));
+        let before = ron::to_string(&workspace.to_file().unwrap()).unwrap();
+        assert!(
+            workspace
+                .apply_command(
+                    &mut runtime,
+                    WorkspaceCommand::Reset {
+                        keep: Some(created)
+                    }
+                )
+                .is_err()
+        );
+        assert_eq!(
+            ron::to_string(&workspace.to_file().unwrap()).unwrap(),
+            before
+        );
+        validate(&workspace);
+    }
+
+    #[test]
+    fn titles_number_waveforms_mark_shared_lists_and_honor_overrides() {
+        use super::super::layout::Direction;
+        let mut workspace = Workspace::default();
+        let mut runtime = WorkspaceRuntime::default();
+        let first = create(&mut workspace, &mut runtime, Placement::Root);
+        assert_eq!(workspace.titles()[&first], "Waveform");
+        workspace
+            .apply_command(
+                &mut runtime,
+                WorkspaceCommand::CreateTile {
+                    kind: "memory".into(),
+                    placement: Placement::TabAfter(first),
+                    focus: true,
+                },
+            )
+            .unwrap();
+        let memory = workspace.layout.focused().unwrap();
+        assert_eq!(workspace.titles()[&memory], "Memory");
+        workspace
+            .apply_command(
+                &mut runtime,
+                WorkspaceCommand::SplitTile {
+                    tile: first,
+                    dir: Direction::Right,
+                    mode: SplitMode::Linked,
+                },
+            )
+            .unwrap();
+        let linked = workspace.layout.focused().unwrap();
+        workspace
+            .apply_command(
+                &mut runtime,
+                WorkspaceCommand::SplitTile {
+                    tile: linked,
+                    dir: Direction::Down,
+                    mode: SplitMode::Independent,
+                },
+            )
+            .unwrap();
+        let independent = workspace.layout.focused().unwrap();
+        let titles = workspace.titles();
+        assert_eq!(titles[&first], format!("Waveform 1 {LINKED_LIST_GLYPH}1"));
+        assert_eq!(titles[&linked], format!("Waveform 2 {LINKED_LIST_GLYPH}1"));
+        assert_eq!(titles[&independent], "Waveform 3");
+        workspace
+            .apply_command(
+                &mut runtime,
+                WorkspaceCommand::RenameTile {
+                    tile: independent,
+                    title: Some("Detail".into()),
+                },
+            )
+            .unwrap();
+        fn memory_tile(
+            workspace: &mut Workspace,
+            id: TileId,
+        ) -> &mut crate::tile_kinds::memory::MemoryTile {
+            match &mut workspace.tiles.get_mut(&id).unwrap().kind {
+                TileKind::Memory(tile) => tile,
+                _ => panic!(),
+            }
+        }
+        memory_tile(&mut workspace, memory).settings.scope =
+            Some(crate::wave_container::ScopeRef {
+                strs: vec!["dut".into(), "mem".into()],
+                id: Default::default(),
+            });
+        assert_eq!(workspace.titles()[&memory], "Memory: dut.mem");
+        memory_tile(&mut workspace, memory).settings.name = Some("RAM".into());
+        let titles = workspace.titles();
+        assert_eq!(titles[&memory], "Memory: RAM");
+        assert_eq!(titles[&independent], "Detail");
+        assert_eq!(
+            workspace.tile_suggestions(),
+            [
+                "#1".to_string(),
+                format!("Waveform 1 {LINKED_LIST_GLYPH}1"),
+                "#2".into(),
+                "Memory: RAM".into(),
+                "#3".into(),
+                format!("Waveform 2 {LINKED_LIST_GLYPH}1"),
+                "#4".into(),
+                "Detail".into()
+            ]
+        );
+    }
+
+    #[test]
     fn loaded_focus_must_reference_the_tiles_own_list() {
         let mut workspace = Workspace::default();
         let mut runtime = WorkspaceRuntime::default();
@@ -562,7 +730,90 @@ impl Workspace {
                     .layout
                     .apply_proposal(self.layout.revision(), file.root, file.focused)?)
             }
+            WorkspaceCommand::Reset { keep } => {
+                if let Some(id) = keep
+                    && !self.tiles.contains_key(&id)
+                {
+                    return Err(LayoutError::Missing(id).into());
+                }
+                let removed = self.tiles.len() - usize::from(keep.is_some());
+                let mut layout = self.layout.clone();
+                let root = keep.map(super::layout::LayoutNode::Tile);
+                let mut changed = layout.restore_topology(root, &keep.into_iter().collect())?;
+                let created = match keep {
+                    Some(id) => {
+                        changed |= layout.focus(id)?;
+                        None
+                    }
+                    None => {
+                        let id = runtime.allocate_tile()?;
+                        layout.insert(id, Placement::Root)?;
+                        layout.focus(id)?;
+                        changed = true;
+                        Some((id, TileKind::create(WAVEFORM.name, runtime)?))
+                    }
+                };
+                if removed == 0 && !changed {
+                    return Ok(false);
+                }
+                self.tiles.retain(|id, _| Some(*id) == keep);
+                if let Some((id, (kind, list))) = created {
+                    self.tiles.insert(id, TileEntry { title: None, kind });
+                    if let Some((list_id, list)) = list {
+                        self.item_lists.insert(list_id, list);
+                    }
+                }
+                self.layout = layout;
+                self.collect_lists();
+                Ok(true)
+            }
         }
+    }
+
+    /// Titles shown on tabs and in menus, computed once per frame. Waveforms
+    /// are numbered by layout order when there are several; views sharing a
+    /// list show the list number after a link glyph. Entry titles override.
+    pub fn titles(&self) -> BTreeMap<TileId, String> {
+        let order = self.layout.tile_order();
+        let waveforms = order
+            .iter()
+            .filter(|id| self.tiles[id].kind.is_waveform())
+            .copied()
+            .collect::<Vec<_>>();
+        let mut list_numbers = BTreeMap::new();
+        let mut list_users = BTreeMap::<ItemListId, usize>::new();
+        for id in &waveforms {
+            if let Some(list) = self.tiles[id].kind.item_list() {
+                let next = list_numbers.len() + 1;
+                list_numbers.entry(list).or_insert(next);
+                *list_users.entry(list).or_default() += 1;
+            }
+        }
+        order
+            .into_iter()
+            .map(|id| {
+                let entry = &self.tiles[&id];
+                let title = entry.title.clone().unwrap_or_else(|| match &entry.kind {
+                    TileKind::Waveform(tile) => {
+                        let mut title = if waveforms.len() == 1 {
+                            "Waveform".to_string()
+                        } else {
+                            let index = waveforms.iter().position(|w| *w == id).unwrap() + 1;
+                            format!("Waveform {index}")
+                        };
+                        if list_users.get(&tile.items).copied().unwrap_or(0) > 1 {
+                            title.push_str(&format!(
+                                " {LINKED_LIST_GLYPH}{}",
+                                list_numbers[&tile.items]
+                            ));
+                        }
+                        title
+                    }
+                    kind => kind.default_title(),
+                });
+                (id, title)
+            })
+            .collect()
     }
 
     fn collect_lists(&mut self) {

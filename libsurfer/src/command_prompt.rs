@@ -14,7 +14,7 @@ pub fn run_fuzzy_parser(input: &str, state: &SystemState, msgs: &mut Vec<Message
     let FuzzyOutput {
         expanded: _,
         suggestions,
-    } = expand_command(input, get_parser(state));
+    } = expand_command(input, get_parser(state, state.command_prompt.target));
 
     msgs.push(Message::CommandPromptUpdate {
         suggestions: suggestions.unwrap_or_else(|_| vec![]),
@@ -24,6 +24,8 @@ pub fn run_fuzzy_parser(input: &str, state: &SystemState, msgs: &mut Vec<Message
 #[derive(Default)]
 pub struct CommandPrompt {
     pub visible: bool,
+    /// Captured when the prompt opens; suggestions and execution use it (§5.1).
+    pub target: crate::tiles::input::CommandTarget,
     pub suggestions: Vec<(String, Vec<bool>)>,
     pub selected: usize,
     pub new_selection: Option<usize>,
@@ -161,12 +163,14 @@ pub fn show_command_prompt(
                                 + selection
                         }
                     };
-                    expand_command(&new_input, get_parser(state)).expanded
+                    expand_command(&new_input, get_parser(state, state.command_prompt.target))
+                        .expanded
                 };
 
                 if response.ctx.input(|i| i.key_pressed(Key::Tab)) {
                     let mut new_input = append_suggestion(input);
-                    let parsed = parse_command(&new_input, get_parser(state));
+                    let parsed =
+                        parse_command(&new_input, get_parser(state, state.command_prompt.target));
                     if let Err(ParseError::MissingParameters) = parsed {
                         new_input += " ";
                     }
@@ -179,7 +183,7 @@ pub fn show_command_prompt(
                     let expanded = append_suggestion(input);
                     let parsed = (
                         expanded.clone(),
-                        parse_command(&expanded, get_parser(state)),
+                        parse_command(&expanded, get_parser(state, state.command_prompt.target)),
                     );
 
                     if let Ok(cmd) = parsed.1 {
@@ -200,7 +204,8 @@ pub fn show_command_prompt(
                 response.request_focus();
 
                 // draw current expansion of input and selected suggestions
-                let expanded = expand_command(input, get_parser(state)).expanded;
+                let expanded =
+                    expand_command(input, get_parser(state, state.command_prompt.target)).expanded;
                 if !expanded.is_empty() {
                     ui.horizontal(|ui| {
                         let label = ui.label(
@@ -341,11 +346,17 @@ pub fn show_command_prompt(
                                             + " "
                                             + &suggestion.0
                                     };
-                                let expanded =
-                                    expand_command(&new_input, get_parser(state)).expanded;
+                                let expanded = expand_command(
+                                    &new_input,
+                                    get_parser(state, state.command_prompt.target),
+                                )
+                                .expanded;
                                 let result = (
                                     expanded.clone(),
-                                    parse_command(&expanded, get_parser(state)),
+                                    parse_command(
+                                        &expanded,
+                                        get_parser(state, state.command_prompt.target),
+                                    ),
                                 );
 
                                 if let Ok(cmd) = result.1 {

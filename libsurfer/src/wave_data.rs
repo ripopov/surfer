@@ -69,16 +69,6 @@ pub struct WaveData {
     pub cached_time_range: TimeRange,
 }
 
-/// Transitional owner of the document and waveform presentation while callers
-/// are migrated to the tile workspace. Shared fields have one owner, `document`.
-pub struct WaveformData {
-    pub document: WaveData,
-    pub items: crate::item_list::ItemList,
-    pub viewports: Vec<crate::tile_kinds::waveform::WaveformView>,
-    pub annotation_list_visible: bool,
-    pub last_active_viewport_idx: usize,
-}
-
 /// Immutable inputs for the resolved waveform tile.
 #[derive(Clone, Copy)]
 pub(crate) struct WaveformRead<'a> {
@@ -112,38 +102,6 @@ impl std::ops::Deref for WaveformEdit<'_> {
 impl std::ops::DerefMut for WaveformEdit<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.document
-    }
-}
-
-impl WaveformData {
-    pub(crate) fn edit_at(&mut self, index: usize) -> Option<WaveformEdit<'_>> {
-        if index >= self.viewports.len() {
-            return None;
-        }
-        let (before, rest) = self.viewports.split_at_mut(index);
-        let (view, after) = rest.split_first_mut()?;
-        Some(WaveformEdit {
-            document: &mut self.document,
-            items: &mut self.items,
-            view,
-            peers: before.iter_mut().chain(after.iter_mut()).collect(),
-        })
-    }
-    pub(crate) fn edit(&mut self) -> WaveformEdit<'_> {
-        self.edit_at(self.last_active_viewport_idx)
-            .expect("active waveform view exists")
-    }
-}
-
-impl std::ops::Deref for WaveformData {
-    type Target = WaveData;
-    fn deref(&self) -> &Self::Target {
-        &self.document
-    }
-}
-impl std::ops::DerefMut for WaveformData {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.document
     }
 }
 
@@ -246,329 +204,70 @@ where
     (translators.get_translator(&translator_name)) as _
 }
 
-impl WaveformData {
-    #[must_use]
-    pub fn update_with_waves(
-        mut self,
-        new_waves: Box<WaveContainer>,
-        source: WaveSource,
-        format: WaveFormat,
-        translators: &TranslatorList,
-        keep_unavailable: bool,
-    ) -> (WaveformData, Option<LoadSignalsCmd>) {
-        let active_scope = self.document.active_scope.take().filter(|m| {
-            if let ScopeType::WaveScope(w) = m {
-                new_waves.scope_exists(w)
-            } else {
-                false
-            }
-        });
-        let display_items = Self::update_displayed_items(
-            &new_waves,
-            &self.items.displayed_items,
-            keep_unavailable,
-            translators,
-            &mut self.items.items_tree,
-        );
-
-        let old_max_timestamp = self.max_timestamp();
-        let mut new_wavedata = WaveformData {
-            document: crate::wave_data::WaveData {
-                inner: DataContainer::Waves(*new_waves),
-                source,
-                format,
-                active_scope,
-                cursor: self.document.cursor.clone(),
-                markers: self.document.markers.clone(),
-                display_variable_indices: self.document.display_variable_indices,
-                old_max_timestamp,
-                cache_generation: self.document.cache_generation + 1, // Invalidate all existing caches
-                inflight_caches: HashMap::new(),
-                cached_time_range: TimeRange::default(),
-            },
-            items: crate::item_list::ItemList {
-                items_tree: self.items.items_tree,
-                displayed_items: display_items,
-                display_item_ref_counter: self.items.display_item_ref_counter,
-                default_variable_name_type: self.items.default_variable_name_type,
-                annotations: self.items.annotations.clone(),
-                annotation_groups: Vec::new(), // List of unique group names
-                annotation_counter: self.items.annotation_counter,
-                graphics: HashMap::new(),
-                layout_cache: Default::default(),
-                flattened_rows_cache: Default::default(),
-            },
-            viewports: self
-                .viewports
-                .into_iter()
-                .map(|mut view| {
-                    view.reset_runtime();
-                    view
-                })
-                .collect(),
-            annotation_list_visible: false,
-            last_active_viewport_idx: 0,
-        };
-
-        new_wavedata.update_metadata(translators);
-        let load_commands = new_wavedata.load_waves();
-        (new_wavedata, load_commands)
-    }
-
-    pub fn update_with_items(
-        &mut self,
-        new_items: &HashMap<DisplayedItemRef, DisplayedItem>,
-        mut items_tree: DisplayedItemTree,
-        translators: &TranslatorList,
-    ) -> Option<LoadSignalsCmd> {
-        self.items.displayed_items = Self::update_displayed_items(
-            self.document.inner.as_waves().unwrap(),
-            new_items,
-            true,
-            translators,
-            &mut items_tree,
-        );
-        self.items.items_tree = items_tree;
-
-        self.items.display_item_ref_counter = self
-            .items
-            .displayed_items
-            .keys()
-            .map(|dir| dir.0)
-            .max()
-            .unwrap_or(0);
-
-        self.update_metadata(translators);
-        self.load_waves()
-    }
-
-    /// Go through all signals and update the metadata for all signals
-    ///
-    /// Used after loading new waves, signals or switching a bunch of translators
-    fn update_metadata(&mut self, translators: &TranslatorList) {
-        self.edit().update_metadata(translators)
-    }
-
-    /// Get the underlying wave container to load all signals that are being displayed
-    ///
-    /// This is needed for wave containers that lazy-load signals.
-    fn load_waves(&mut self) -> Option<LoadSignalsCmd> {
-        self.edit().load_waves()
-    }
-
-    /// Needs to be called after `update_with`, once the new number of timestamps is available in
-    /// the inner `WaveContainer`.
-    pub fn update_viewports(&mut self) {
-        if let Some(old_max_timestamp) = std::mem::take(&mut self.document.old_max_timestamp) {
-            // FIXME: I'm not sure if Defaulting to 1 time step is the right thing to do if we
-            // have none, but it does avoid some potentially nasty division by zero problems
-            let new_max_timestamp = self
-                .document
-                .inner
-                .max_timestamp()
-                .unwrap_or_else(BigUint::one)
-                .to_bigint()
-                .unwrap();
-            if new_max_timestamp != old_max_timestamp {
-                let old_range = TimeRange {
-                    start: self.document.cached_time_range.start.clone(),
-                    end: old_max_timestamp,
-                };
-                for viewport in &mut self.viewports {
-                    viewport.viewport = viewport.clip_to(&old_range, &new_max_timestamp);
-                }
-            }
-            self.document.cached_time_range.end = new_max_timestamp;
-        }
-    }
-
-    pub(crate) fn update_displayed_items(
-        waves: &WaveContainer,
-        items: &HashMap<DisplayedItemRef, DisplayedItem>,
-        keep_unavailable: bool,
-        translators: &TranslatorList,
-        items_tree: &mut DisplayedItemTree,
-    ) -> HashMap<DisplayedItemRef, DisplayedItem> {
-        items
-            .iter()
-            .filter_map(|(&id, i)| {
-                let new = match i {
-                    // keep without a change
-                    DisplayedItem::Divider(_)
-                    | DisplayedItem::Marker(_)
-                    | DisplayedItem::TimeLine(_)
-                    | DisplayedItem::Stream(_)
-                    | DisplayedItem::Group(_) => Some((id, i.clone())),
-                    DisplayedItem::Variable(s) => {
-                        s.update(waves, keep_unavailable).map(|r| (id, r))
-                    }
-                    DisplayedItem::Placeholder(p) => {
-                        match waves.update_variable_ref(&p.variable_ref) {
-                            None => {
-                                if keep_unavailable {
-                                    Some((id, DisplayedItem::Placeholder(p.clone())))
-                                } else {
-                                    None
-                                }
-                            }
-                            Some(new_variable_ref) => {
-                                let Ok(meta) = waves
-                                    .variable_meta(&new_variable_ref)
-                                    .context("When updating")
-                                    .map_err(|e| error!("{e:#?}"))
-                                else {
-                                    return Some((id, DisplayedItem::Placeholder(p.clone())));
-                                };
-                                let translator = variable_translator(
-                                    p.format.as_ref(),
-                                    &[],
-                                    translators,
-                                    || Ok(meta.clone()),
-                                );
-                                let info = translator.variable_info(&meta).unwrap();
-                                Some((
-                                    id,
-                                    DisplayedItem::Variable(
-                                        p.clone().into_variable(info, new_variable_ref),
-                                    ),
-                                ))
-                            }
+/// Reattach displayed items to a (re)loaded container, dropping or keeping
+/// unavailable variables and pruning their rows from the tree.
+pub(crate) fn update_displayed_items(
+    waves: &WaveContainer,
+    items: &HashMap<DisplayedItemRef, DisplayedItem>,
+    keep_unavailable: bool,
+    translators: &TranslatorList,
+    items_tree: &mut DisplayedItemTree,
+) -> HashMap<DisplayedItemRef, DisplayedItem> {
+    items
+        .iter()
+        .filter_map(|(&id, i)| {
+            let new = match i {
+                // keep without a change
+                DisplayedItem::Divider(_)
+                | DisplayedItem::Marker(_)
+                | DisplayedItem::TimeLine(_)
+                | DisplayedItem::Stream(_)
+                | DisplayedItem::Group(_) => Some((id, i.clone())),
+                DisplayedItem::Variable(s) => s.update(waves, keep_unavailable).map(|r| (id, r)),
+                DisplayedItem::Placeholder(p) => match waves.update_variable_ref(&p.variable_ref) {
+                    None => {
+                        if keep_unavailable {
+                            Some((id, DisplayedItem::Placeholder(p.clone())))
+                        } else {
+                            None
                         }
                     }
-                };
+                    Some(new_variable_ref) => {
+                        let Ok(meta) = waves
+                            .variable_meta(&new_variable_ref)
+                            .context("When updating")
+                            .map_err(|e| error!("{e:#?}"))
+                        else {
+                            return Some((id, DisplayedItem::Placeholder(p.clone())));
+                        };
+                        let translator =
+                            variable_translator(p.format.as_ref(), &[], translators, || {
+                                Ok(meta.clone())
+                            });
+                        let info = translator.variable_info(&meta).unwrap();
+                        Some((
+                            id,
+                            DisplayedItem::Variable(
+                                p.clone().into_variable(info, new_variable_ref),
+                            ),
+                        ))
+                    }
+                },
+            };
 
-                // remove element from item_tree if we are about to remove it from the displayed_items
-                // we only remove variables or placeholders, so we don't have to think about traversing
-                if new.is_none() {
-                    let removed = items_tree.drain_recursive_if(|n| n.item_ref == id);
-                    assert!(
-                        removed.len() <= 1,
-                        "more elements removed then should be possible"
-                    );
-                }
+            // remove element from item_tree if we are about to remove it from the displayed_items
+            // we only remove variables or placeholders, so we don't have to think about traversing
+            if new.is_none() {
+                let removed = items_tree.drain_recursive_if(|n| n.item_ref == id);
+                assert!(
+                    removed.len() <= 1,
+                    "more elements removed then should be possible"
+                );
+            }
 
-                new
-            })
-            .collect()
-    }
-
-    #[must_use]
-    pub fn select_preferred_translator(
-        &self,
-        var: &VariableMeta,
-        translators: &TranslatorList,
-    ) -> String {
-        select_preferred_translator(var, translators)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn add_variables(
-        &mut self,
-        translators: &TranslatorList,
-        variables: Vec<VariableRef>,
-        target_position: Option<TargetPosition>,
-        update_display_names: bool,
-        ignore_failures: bool,
-        variable_name_type: Option<VariableNameType>,
-        focus_view: Option<usize>,
-    ) -> (Option<LoadSignalsCmd>, Vec<DisplayedItemRef>) {
-        let index = focus_view.filter(|index| *index < self.viewports.len());
-        let active = index.unwrap_or(self.last_active_viewport_idx);
-        self.edit_at(active)
-            .expect("active waveform view exists")
-            .add_variables(
-                translators,
-                variables,
-                target_position,
-                update_display_names,
-                ignore_failures,
-                variable_name_type,
-                index.is_some(),
-            )
-    }
-
-    /// Remove a single item, it's legal to call this function with an invalid ID
-    pub fn remove_displayed_item(&mut self, id: DisplayedItemRef) {
-        self.remove_displayed_items(&[id]);
-    }
-
-    pub fn remove_displayed_items(&mut self, ids: &[DisplayedItemRef]) {
-        self.edit().remove_displayed_items(ids)
-    }
-
-    pub fn add_divider(
-        &mut self,
-        name: Option<String>,
-        vidx: Option<VisibleItemIndex>,
-    ) -> Result<DisplayedItemRef, crate::item_list::ItemEditError> {
-        self.edit().add_divider(name, vidx)
-    }
-
-    pub fn add_timeline(
-        &mut self,
-        vidx: Option<VisibleItemIndex>,
-    ) -> Result<DisplayedItemRef, crate::item_list::ItemEditError> {
-        self.edit().add_timeline(vidx)
-    }
-
-    pub fn add_group(
-        &mut self,
-        name: String,
-        target_position: Option<TargetPosition>,
-    ) -> Result<DisplayedItemRef, crate::item_list::ItemEditError> {
-        self.edit().add_group(name, target_position)
-    }
-
-    pub fn add_generator(
-        &mut self,
-        gen_ref: TransactionStreamRef,
-    ) -> Result<(), crate::item_list::ItemEditError> {
-        self.edit().add_generator(gen_ref)
-    }
-
-    pub fn add_stream(
-        &mut self,
-        stream_ref: TransactionStreamRef,
-    ) -> Result<(), crate::item_list::ItemEditError> {
-        self.edit().add_stream(stream_ref)
-    }
-
-    pub fn add_all_streams(&mut self) -> Result<(), crate::item_list::ItemEditError> {
-        self.edit().add_all_streams()
-    }
-
-    #[must_use]
-    pub fn index_for_ref_or_focus(&self, item_ref: Option<DisplayedItemRef>) -> Option<ItemIndex> {
-        self.viewports[self.last_active_viewport_idx].index_for_ref_or_focus(&self.items, item_ref)
-    }
-
-    pub fn go_to_cursor_if_not_in_view(&mut self) -> bool {
-        self.edit().go_to_cursor_if_not_in_view()
-    }
-
-    pub fn remove_placeholders(&mut self) {
-        self.edit().remove_placeholders()
-    }
-
-    /// Find the cursor position at the next (or previous, if `next` is false) transition of `variable`.
-    ///
-    /// If `skip_zero` is true, use the next transition to a non-zero value.
-    pub fn cursor_at_transition(
-        &self,
-        cursor: Option<&BigInt>,
-        next: bool,
-        variable: Option<VisibleItemIndex>,
-        skip_zero: bool,
-    ) -> Option<BigInt> {
-        self.viewports[self.last_active_viewport_idx].cursor_at_transition(
-            &self.document,
-            &self.items,
-            cursor,
-            next,
-            variable,
-            skip_zero,
-        )
-    }
+            new
+        })
+        .collect()
 }
 
 impl WaveformEdit<'_> {
@@ -629,7 +328,7 @@ impl WaveformEdit<'_> {
             .iter()
             .map(|view| view.focus_snapshot(self.items))
             .collect::<Vec<_>>();
-        self.items.displayed_items = WaveformData::update_displayed_items(
+        self.items.displayed_items = update_displayed_items(
             container,
             &self.items.displayed_items,
             keep_unavailable,
@@ -1324,89 +1023,56 @@ impl WaveformEdit<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_container::DataContainer;
-    use crate::displayed_item_tree::DisplayedItemTree;
     use crate::item_drawing_info::{DividerDrawingInfo, ItemDrawingInfo};
-    use crate::viewport::Viewport;
-    use crate::wave_source::{WaveFormat, WaveSource};
 
-    fn wave_data_with_rows() -> WaveformData {
-        WaveformData {
-            document: crate::wave_data::WaveData {
-                inner: DataContainer::Empty,
-                source: WaveSource::Data,
-                format: WaveFormat::Vcd,
-                active_scope: None,
-                cursor: None,
-                markers: HashMap::new(),
-                display_variable_indices: false,
-                old_max_timestamp: None,
-                cache_generation: 0,
-                inflight_caches: HashMap::new(),
-                cached_time_range: TimeRange {
-                    start: BigInt::from(0),
-                    end: BigInt::from(0),
-                },
-            },
-            items: crate::item_list::ItemList {
-                items_tree: DisplayedItemTree::new(),
-                displayed_items: HashMap::new(),
-                display_item_ref_counter: 0,
-                default_variable_name_type: VariableNameType::Local,
-                annotations: Vec::new(),
-                annotation_groups: Vec::new(),
-                annotation_counter: 0,
-                graphics: HashMap::new(),
-                flattened_rows_cache: Default::default(),
-                layout_cache: std::cell::RefCell::new(crate::item_list::ItemLayoutCache {
-                    infos: vec![
-                        ItemDrawingInfo::Divider(DividerDrawingInfo {
-                            vidx: VisibleItemIndex(0),
-                            top: 120.0,
-                            bottom: 140.0,
-                        }),
-                        ItemDrawingInfo::Divider(DividerDrawingInfo {
-                            vidx: VisibleItemIndex(1),
-                            top: 140.0,
-                            bottom: 160.0,
-                        }),
-                    ],
-                    signature: None,
-                    total_height: 40.0,
-                }),
-            },
-            viewports: vec![crate::tile_kinds::waveform::WaveformView {
-                scroll_offset: 80.0,
-                ..Viewport::new().into()
-            }],
-            annotation_list_visible: false,
-            last_active_viewport_idx: 0,
+    fn items_with_rows() -> crate::item_list::ItemList {
+        crate::item_list::ItemList {
+            layout_cache: std::cell::RefCell::new(crate::item_list::ItemLayoutCache {
+                infos: vec![
+                    ItemDrawingInfo::Divider(DividerDrawingInfo {
+                        vidx: VisibleItemIndex(0),
+                        top: 120.0,
+                        bottom: 140.0,
+                    }),
+                    ItemDrawingInfo::Divider(DividerDrawingInfo {
+                        vidx: VisibleItemIndex(1),
+                        top: 140.0,
+                        bottom: 160.0,
+                    }),
+                ],
+                signature: None,
+                total_height: 40.0,
+            }),
+            ..Default::default()
         }
     }
 
     #[test]
     fn get_item_at_y_finds_correct_item() {
-        let waves = wave_data_with_rows();
+        let items = items_with_rows();
 
-        assert_eq!(waves.items.get_item_at_y(125.0), Some(VisibleItemIndex(0)));
-        assert_eq!(waves.items.get_item_at_y(145.0), Some(VisibleItemIndex(1)));
-        assert_eq!(waves.items.get_item_at_y(165.0), None);
+        assert_eq!(items.get_item_at_y(125.0), Some(VisibleItemIndex(0)));
+        assert_eq!(items.get_item_at_y(145.0), Some(VisibleItemIndex(1)));
+        assert_eq!(items.get_item_at_y(165.0), None);
     }
 
     #[test]
     fn get_item_at_y_is_not_shifted_by_scroll_offset() {
-        let waves = wave_data_with_rows();
-
-        assert_eq!(waves.items.get_item_at_y(125.0), Some(VisibleItemIndex(0)));
-        assert_eq!(waves.items.get_item_at_y(145.0), Some(VisibleItemIndex(1)));
+        let items = items_with_rows();
+        let view = crate::tile_kinds::waveform::WaveformView {
+            scroll_offset: 80.0,
+            ..crate::viewport::Viewport::new().into()
+        };
+        assert_eq!(view.get_top_item(&items), 0);
+        assert_eq!(items.get_item_at_y(125.0), Some(VisibleItemIndex(0)));
+        assert_eq!(items.get_item_at_y(145.0), Some(VisibleItemIndex(1)));
     }
 
     #[test]
     fn visible_drawing_infos_returns_overlapping_rows() {
-        let waves = wave_data_with_rows();
+        let items = items_with_rows();
 
-        let visible = waves
-            .items
+        let visible = items
             .visible_drawing_infos(140.0, 150.0)
             .iter()
             .map(ItemDrawingInfo::vidx)
@@ -1417,10 +1083,9 @@ mod tests {
 
     #[test]
     fn visible_drawing_infos_includes_boundary_rows() {
-        let waves = wave_data_with_rows();
+        let items = items_with_rows();
 
-        let visible = waves
-            .items
+        let visible = items
             .visible_drawing_infos(140.0, 140.0)
             .iter()
             .map(ItemDrawingInfo::vidx)

@@ -11,7 +11,6 @@ use crate::message::Message;
 use crate::transaction_container::{StreamScopeRef, TransactionContainer};
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
 use crate::wave_data::ScopeType;
-use crate::wave_data::WaveformData;
 
 // Transactions file extension
 pub const TRANSACTIONS_FILE_EXTENSION: &str = "ftr";
@@ -428,16 +427,4 @@ fn subheader(body: &mut TableBody, left: &str, right: &str) {
             ui.label(RichText::new(right).size(SUBHEADER_SIZE));
         });
     });
-}
-impl WaveformData {
-    pub fn add_stream_or_generator_from_name(
-        &mut self,
-        scope: Option<StreamScopeRef>,
-        name: String,
-    ) -> Option<()> {
-        self.edit().add_stream_or_generator_from_name(scope, name)
-    }
-    pub fn add_all_from_stream_scope(&mut self, scope_name: String) -> Option<()> {
-        self.edit().add_all_from_stream_scope(scope_name)
-    }
 }

@@ -29,6 +29,8 @@ pub struct SystemState {
     pub user: UserState,
     pub(crate) layout_adapter: Option<crate::tiles::render::LayoutAdapter>,
     pub(crate) workspace_runtime: crate::tiles::runtime::WorkspaceRuntime,
+    pub(crate) document_load_request: u64,
+    pub(crate) pending_document: Option<crate::wave_source::PendingDocument>,
     pub(crate) file_history: FileHistory,
     /// Which translator to use for each variable
     pub(crate) translators: TranslatorList,
@@ -157,6 +159,8 @@ impl SystemState {
             translator_generation: 0,
             layout_adapter: None,
             workspace_runtime: Default::default(),
+            document_load_request: 0,
+            pending_document: None,
             all_variable_rows_cache: None,
 
             char_to_add_to_prompt: RefCell::new(None),

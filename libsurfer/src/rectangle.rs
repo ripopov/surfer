@@ -280,7 +280,6 @@ impl Annotatable for RectAnnotation {
             });
 
             if res.clicked_by(egui::PointerButton::Primary) {
-                msgs.push(Message::SetActiveViewport(tile_id));
                 msgs.push(Message::AnnotationClicked(
                     Some(self.annotation_data.id),
                     res.interact_pointer_pos(),

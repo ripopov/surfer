@@ -259,11 +259,12 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    crate::tiles::kind::ApplicationPanes {
-                        state,
-                        focus_ids: false,
-                    }
-                    .ui(logs, true, ui, &mut messages);
+                    crate::tiles::kind::ApplicationPanes::new(state, false).ui(
+                        logs,
+                        true,
+                        ui,
+                        &mut messages,
+                    );
                 },
             );
             output.textures_delta.clear();

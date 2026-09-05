@@ -4,9 +4,10 @@
 
 pub mod commands;
 pub(crate) mod history;
+pub mod input;
 pub mod kind;
 pub mod layout;
-mod legacy;
+pub(crate) mod legacy;
 mod placement;
 pub mod render;
 pub mod runtime;

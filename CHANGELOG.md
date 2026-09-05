@@ -13,6 +13,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## Added
 
+* The central area is a tiled workspace: waveform views, memory viewers, markers, logs, annotations and frame buffers are tiles that can be split, tabbed, dragged, renamed and closed. The layout is saved in state files. Tab bars have a `+` menu; the Tiles menu, `tile_*` commands and `Command+Backslash`/`Command+Shift+Backslash`/`Command+W`/`Command+PageUp/PageDown`/`Command+Shift+Arrows`/`Command+Alt+Arrows` shortcuts split, close, cycle, focus and move tiles.
+* A waveform split is linked (same items, own zoom) or an independent copy; linked views can share vertical scrolling.
+* Tile and layout edits are undoable; `workspace_reset` restores a single waveform tile.
+
 * Keyboard shortcut for Zoom to fit, default Shift + F.
 * Filtering on level in the log message window.
 * Three new themes based on Rose Pine.

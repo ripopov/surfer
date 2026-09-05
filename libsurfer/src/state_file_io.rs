@@ -287,42 +287,8 @@ mod tests {
 
     #[test]
     fn legacy_state_moves_rows_views_and_pending_document_settings_into_workspace() {
-        use crate::{
-            data_container::DataContainer,
-            viewport::Viewport,
-            wave_data::{TimeRange, WaveData, WaveformData},
-            wave_source::WaveFormat,
-        };
-        let mut legacy = WaveformData {
-            document: WaveData {
-                inner: DataContainer::Empty,
-                source: WaveSource::Data,
-                format: WaveFormat::Vcd,
-                active_scope: None,
-                cursor: Some(45.into()),
-                markers: Default::default(),
-                display_variable_indices: false,
-                old_max_timestamp: None,
-                cache_generation: 0,
-                inflight_caches: Default::default(),
-                cached_time_range: TimeRange::default(),
-            },
-            items: Default::default(),
-            viewports: vec![Viewport::new().into(), Viewport::new().into()],
-            annotation_list_visible: true,
-            last_active_viewport_idx: 1,
-        };
-        legacy.add_divider(Some("saved row".into()), None).unwrap();
-        legacy.viewports[1].focused_transaction =
-            Some(crate::transaction_container::TransactionRef {
-                id: ftr_parser::types::TransactionId(12),
-            });
-        legacy.viewports[1].viewport.curr_left = crate::viewport::Relative(0.25);
-        let encoded = format!(
-            "(waves: Some({}), show_logs: true)",
-            ron::to_string(&legacy).unwrap()
-        );
-        let restored: crate::state::UserState = crate::tiles::serde::decode(&encoded).unwrap();
+        let encoded = include_str!("tiles/fixtures/legacy-state-v0.ron");
+        let restored: crate::state::UserState = crate::tiles::serde::decode(encoded).unwrap();
         assert_eq!(restored.state_version, 1);
         assert!(
             restored

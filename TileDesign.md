@@ -1275,3 +1275,76 @@ unclosable waveform pane; bundling the layout with unrelated multi-source work.
 8. **No plugin system or multi-document abstraction yet.** An enum registry,
    one document, explicit commands and versioned per-kind DTOs are sufficient.
    Validate performance and API ergonomics before adding further abstraction.
+
+---
+
+## 15. Implementation status
+
+This section records how the shipped code maps onto the design above and
+where it deliberately deviates. It is the reference for extending the
+workspace; earlier sections describe intent, this one describes the contract
+that exists.
+
+### 15.1 Module map
+
+| Design | Code |
+|---|---|
+| `tiles/mod.rs` identity, `TileTarget` | `tiles/mod.rs` |
+| `tiles/layout.rs` | `tiles/layout.rs` (`Layout`, `LayoutNode`, `Placement`, validation, geometry, spatial navigation) plus `tiles/placement.rs` (stable anchors for move undo) |
+| `tiles/kind.rs` registry | `tiles/kind.rs`: `TileKind`, `TileMessage`, `TileSettings` (undo payloads), `KindDescriptor`/`KINDS`, codecs, `KindCommand` palette registry, `ApplicationPanes` renderer |
+| `tiles/view.rs` trait + `TileCtx` | `tiles/view.rs`: `TileCtx`/`TileReadServices`, generic tab context menu. There is no `TileView` trait object; kinds dispatch through the enum (§15.2) |
+| `tiles/render.rs` | `tiles/render.rs`: `egui_tiles` adapter, `PaneRenderer`, proposals, focus/close events, tab bar `+` menu |
+| `tiles/serde.rs` | `tiles/serde.rs` (envelopes, raw payloads, list DTO) and `tiles/workspace.rs` (`WorkspaceFile`, validation, atomic `replace`) |
+| `tiles/commands.rs` transactions/undo | `tiles/commands.rs` (`WorkspaceCommand`, `DocumentCommand`), `tiles/workspace.rs` (dispatcher), `tiles/history.rs` (`UndoRecord`) |
+| `tiles/runtime.rs` | `tiles/runtime.rs` (allocators, epochs, request tokens) |
+| input resolution (§5) | `tiles/input.rs`: `CommandTarget`, and `Workspace` helpers that turn keyboard/palette/toolbar/menu intent into concrete commands |
+| legacy migration (§8.3) | `tiles/legacy.rs`: `LegacyWaveDataV0` DTO → `LegacyWaveformV0::into_workspace`; fixture `tiles/fixtures/legacy-state-v0.ron` |
+
+### 15.2 Deviations from the text above
+
+* **Enum dispatch instead of a `TileView` trait object.** `TileKind` matches
+  exhaustively in `kind.rs` for rendering, update, codecs, runtime reset,
+  split policy and palette commands. Adding a kind touches that one file plus
+  the kind's module; the compiler lists every dispatch point.
+* **Kind-specific palette commands are static tables.** `KindCommand { name,
+  suggestions, parse }` is registered per kind (`tile_columns`,
+  `tile_link_scroll`, `logs_filter`, `annotation_list_comments`). The parser
+  offers them only while the captured tile is of that kind.
+* **Captured palette target.** `CommandPrompt::target` is captured when the
+  prompt opens and used for suggestions and execution; `ExecuteBatchCommand`
+  resolves each statement against the live workspace.
+* **Marker history.** `UndoRecord::Marker { id, time, lists }` retains one
+  marker's previous time and the affected lists; item-edit records never
+  snapshot shared marker times.
+* **`WorkspaceCommand::Reset { keep }`** implements "Reset Workspace"
+  (§11.3): keep the target waveform or create an empty one, as one undoable
+  record. Palette `workspace_reset`, Tiles menu entry.
+* **Legacy `viewport_*` spellings** and `Message::AddViewport`-style variants
+  are gone from the internal API; the parser maps `viewport_add`,
+  `viewport_remove` and `viewport_set_active` to tile commands on the target
+  waveform.
+* **Titles** are computed once per frame by `Workspace::titles()`:
+  `Waveform` / `Waveform N`, a link glyph plus list number for views sharing a
+  list, `Memory: <name>` for memory tiles, entry title overrides.
+* **Toolbar group `tiles`** replaces `viewports` (Split right, Split down,
+  Close). Menus and the tab bar `+` use the same resolvers as the palette.
+* **Document loads are staged.** A parsed header waits in
+  `SystemState::pending_document` until its body arrives; every load carries
+  a request id and stale or failed completions never touch the workspace.
+* **Async tile work.** No kind performs off-thread work yet, so
+  `WorkspaceRuntime::request`/`accepts` are the token contract for future kinds
+  (§10.2) and are covered by unit tests only.
+
+### 15.3 Adding a kind, concretely
+
+1. Add the state struct, its serde DTO with `#[serde(deny_unknown_fields)]`,
+   its message enum and (if it edits content) its `TileSettings` payload in
+   `tile_kinds/<kind>.rs`.
+2. Register in `tiles/kind.rs`: `KindDescriptor`, `TileKind` variant,
+   `TileMessage` variant, `TileEntry::{from_file,to_file}`, `create`,
+   `descriptor`, `default_title`, `supports_split`/`split_clone`,
+   `reset_runtime`, `apply_tile_message`, `ApplicationPanes::ui`, and
+   `commands()` when it offers palette commands.
+3. Add an opener (`Workspace::open_command` covers the generic case), tests
+   for round trip, targeting and undo, and a snapshot showing the empty and
+   unavailable states.

@@ -261,6 +261,7 @@ pub fn get_hierarchy_from_server(
     server: String,
     load_options: LoadOptions,
     file_index: usize,
+    request: u64,
 ) {
     let start = web_time::Instant::now();
     let source = WaveSource::Url(server.clone());
@@ -275,18 +276,32 @@ pub fn get_hierarchy_from_server(
             Ok(h) => h,
             Err(e) => {
                 error!("{e:?}");
+                checked_send(&sender, Message::DocumentLoadFailed(request));
                 return;
             }
         };
         let header = HeaderResult::Remote(Arc::new(h.hierarchy), h.file_format, server, file_index);
         checked_send(
             &sender,
-            Message::WaveHeaderLoaded(start, source, load_options, header),
+            Message::DocumentLoadResult(
+                request,
+                Box::new(Message::WaveHeaderLoaded(
+                    start,
+                    source,
+                    load_options,
+                    header,
+                )),
+            ),
         );
     });
 }
 
-pub fn get_time_table_from_server(sender: Sender<Message>, server: String, file_index: usize) {
+pub fn get_time_table_from_server(
+    sender: Sender<Message>,
+    server: String,
+    file_index: usize,
+    request: u64,
+) {
     let start = web_time::Instant::now();
     let source = WaveSource::Url(server.clone());
 
@@ -300,17 +315,25 @@ pub fn get_time_table_from_server(sender: Sender<Message>, server: String, file_
             Ok(table) => table,
             Err(e) => {
                 error!("{e:?}");
+                checked_send(&sender, Message::DocumentLoadFailed(request));
                 return;
             }
         };
         checked_send(
             &sender,
-            Message::WaveBodyLoaded(start, source, BodyResult::Remote(table, server)),
+            Message::DocumentLoadResult(
+                request,
+                Box::new(Message::WaveBodyLoaded(
+                    start,
+                    source,
+                    BodyResult::Remote(table, server),
+                )),
+            ),
         );
     });
 }
 
-pub fn get_server_status(sender: Sender<Message>, server: String, delay_ms: u64) {
+pub fn get_server_status(sender: Sender<Message>, server: String, delay_ms: u64, request: u64) {
     let start = web_time::Instant::now();
     perform_async_work(async move {
         sleep_ms(delay_ms).await;
@@ -323,10 +346,17 @@ pub fn get_server_status(sender: Sender<Message>, server: String, delay_ms: u64)
             Ok(status) => status,
             Err(e) => {
                 error!("{e:?}");
+                checked_send(&sender, Message::DocumentLoadFailed(request));
                 return;
             }
         };
-        checked_send(&sender, Message::SetSurverStatus(start, server, status));
+        checked_send(
+            &sender,
+            Message::DocumentLoadResult(
+                request,
+                Box::new(Message::SetSurverStatus(start, server, status)),
+            ),
+        );
     });
 }
 
@@ -335,6 +365,7 @@ pub fn server_reload(
     server: String,
     load_options: LoadOptions,
     file_index: usize,
+    request: u64,
 ) {
     let start = web_time::Instant::now();
     perform_async_work(async move {
@@ -343,21 +374,28 @@ pub fn server_reload(
             Ok(status) => {
                 checked_send(
                     &sender,
-                    Message::SetSurverStatus(start, server.clone(), status),
+                    Message::DocumentLoadResult(
+                        request,
+                        Box::new(Message::SetSurverStatus(start, server.clone(), status)),
+                    ),
                 );
                 true
             }
             Err(crate::remote::ReloadError::FileUnchanged) => {
-                checked_send(&sender, Message::StopProgressTracker);
+                checked_send(
+                    &sender,
+                    Message::DocumentLoadResult(request, Box::new(Message::StopProgressTracker)),
+                );
                 false
             }
             Err(e) => {
                 error!("{e:?}");
+                checked_send(&sender, Message::DocumentLoadFailed(request));
                 false
             }
         };
         if request_hierarchy {
-            get_hierarchy_from_server(sender, server, load_options, file_index);
+            get_hierarchy_from_server(sender, server, load_options, file_index, request);
         }
     });
 }
