@@ -1,5 +1,9 @@
 # Tiling state and resource ownership
 
+For a visual introduction with interactive ownership, layout, command-routing,
+and request-lifetime examples, read the [Tiling architecture chapter](../html/tiling.html).
+The HTML chapter opens directly from disk and works offline.
+
 `Workspace` owns the layout, tile entries, and shared item lists. Its storage is
 private to `tiles::workspace` and its implementation modules. Renderers, input
 handlers, and other application code use the immutable `layout()`, `tiles()`, and

@@ -1,5 +1,10 @@
 # Development Information
 
+The [interactive architecture book](../html/tiling.html) explains features through
+visual models and experiments. Its first chapter covers tiling, state ownership,
+and the path toward an integrated debug platform. Open the HTML file directly
+from the checkout; no build or server is needed.
+
 Anyone is welcome to contribute to Surfer. As Surfer is licensed under
 [EUPL 1.2](https://interoperable-europe.ec.europa.eu/collection/eupl/eupl-text-eupl-12)
 it is assumed that your contribution will also follow that license.
