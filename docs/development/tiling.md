@@ -11,6 +11,13 @@ remove a tile's resources.
 The application dispatcher records semantic history around workspace commands.
 Layout adapters submit revision-checked proposals through `apply_layout_edit`.
 Workspace commands handle creation, splitting, moving, closing, and renaming.
+The egui adapter keeps tab bars around panes but prunes obsolete tab wrappers
+around splits. Drops that would nest a split inside tabs are translated into
+semantic moves: a pane-edge drop splits the destination tab group, and a tab
+drop onto a split joins its nearest visible pane. The persistent layout still
+allows only tile leaves inside tabs. Invalid runtime trees are discarded and
+rebuilt from the validated workspace, and submitted proposals are reconciled
+on the next frame even if the dispatcher ignored or rejected them.
 Tile messages and dedicated document/list operations handle settings, navigation,
 source attachment, marker edits, and restoration of list content. List edits
 repair the references and caches of surviving views sharing that content.

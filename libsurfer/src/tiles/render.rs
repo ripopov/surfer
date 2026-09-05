@@ -122,7 +122,18 @@ impl LayoutAdapter {
             self.revision = None;
             self.reconcile(layout);
         }
-        let before = read_tree(&self.tree)?;
+        // Runtime state is disposable. Never let a failed conversion poison all
+        // subsequent frames while the authoritative layout remains valid.
+        let before = match read_tree(&self.tree) {
+            Ok(root) => root,
+            Err(error) => {
+                tracing::warn!("Discarding invalid runtime layout: {error}");
+                ui.ctx().stop_dragging();
+                self.revision = None;
+                self.reconcile(layout);
+                read_tree(&self.tree)?
+            }
+        };
         if self.drag_origin.is_none() && self.tree.dragged_id(ui.ctx()).is_some() {
             self.drag_origin = Some(before.clone());
         }
@@ -157,7 +168,38 @@ impl LayoutAdapter {
         }
         // Dropping can create bare panes until the library's next UI pass.
         self.tree.simplify(&simplification());
-        let after = read_tree(&self.tree)?;
+        let converted = read_tree(&self.tree).or_else(|error| {
+            // egui_tiles can split an active pane *inside* a multi-tab group.
+            // Surfer splits the group instead. Translate that drop through the
+            // semantic layout API, preserving the other tabs and their order.
+            if behavior.dropped
+                && matches!(error, AdapterError::Layout(LayoutError::NestedTabs))
+                && let Some((tile, placement)) = self.dragged_tile.and_then(|tile| {
+                    docked_placement(
+                        &self.tree,
+                        tile,
+                        &behavior.rects,
+                        ui.input(|i| i.pointer.interact_pos()),
+                    )
+                    .map(|p| (tile, p))
+                })
+            {
+                let mut candidate = layout.clone();
+                candidate.move_tile(tile, placement)?;
+                return Ok(candidate.to_file().root);
+            }
+            Err(error)
+        });
+        let after = match converted {
+            Ok(root) => root,
+            Err(error) => {
+                ui.ctx().stop_dragging();
+                self.revision = None;
+                self.reconcile(layout);
+                ui.ctx().request_repaint();
+                return Err(error);
+            }
+        };
         let dragging =
             self.tree.dragged_id(ui.ctx()).is_some() && !ui.input(|i| i.pointer.any_released());
         let mut edit = None;
@@ -177,6 +219,9 @@ impl LayoutAdapter {
                     structural,
                     moved_tile: structural.then_some(moved_tile).flatten(),
                 });
+                // The dispatcher may reject or ignore this proposal. Reconcile
+                // next frame even if the authority's revision did not advance.
+                self.revision = None;
             }
         }
         Ok(LayoutPass {
@@ -193,13 +238,84 @@ fn simplification() -> SimplificationOptions {
     SimplificationOptions {
         prune_empty_tabs: true,
         prune_empty_containers: true,
-        prune_single_child_tabs: false,
+        // Keep tabs around panes (all_panes_must_have_tabs), but remove the
+        // obsolete tab wrapper when docking replaces its pane with a split.
+        prune_single_child_tabs: true,
         prune_single_child_containers: true,
         all_panes_must_have_tabs: true,
         // Surfer owns normalization; retain surviving container identities.
         join_nested_linear_containers: false,
         flatten_tabs_in_tabs: true,
     }
+}
+
+/// Translate unsupported nesting produced by a drop into a semantic tile move.
+/// Called only after read_tree has checked runtime nodes for cycles and limits.
+fn docked_placement(
+    tree: &Tree<TileId>,
+    tile: TileId,
+    rects: &BTreeMap<TileId, Rect>,
+    pointer: Option<egui::Pos2>,
+) -> Option<super::layout::Placement> {
+    use super::layout::{Direction, Placement};
+    let mut node = tree.tiles.find_pane(&tile)?;
+    let mut parent = tree.tiles.parent_of(node)?;
+    if let Some(Tile::Container(Container::Tabs(tabs))) = tree.tiles.get(parent) {
+        if tabs.children.as_slice() != [node] {
+            // A tab dropped onto a split would hide that entire split. Instead
+            // tab it with the nearest visible pane in the destination subtree.
+            let mut pending = tabs
+                .children
+                .iter()
+                .copied()
+                .filter(|id| *id != node)
+                .collect::<Vec<_>>();
+            let mut anchors = Vec::new();
+            while let Some(id) = pending.pop() {
+                match tree.tiles.get(id)? {
+                    Tile::Pane(anchor) => anchors.push(*anchor),
+                    Tile::Container(Container::Tabs(tabs)) => pending.push(tabs.active?),
+                    Tile::Container(Container::Linear(linear)) => {
+                        pending.extend(linear.children.iter().copied())
+                    }
+                    _ => return None,
+                }
+            }
+            let anchor = anchors.into_iter().min_by(|a, b| {
+                let distance = |id: &TileId| {
+                    rects
+                        .get(id)
+                        .zip(pointer)
+                        .map_or(f32::INFINITY, |(rect, pos)| rect.distance_to_pos(pos))
+                };
+                distance(a).total_cmp(&distance(b)).then(a.cmp(b))
+            })?;
+            return Some(Placement::TabAfter(anchor));
+        }
+        node = parent;
+        parent = tree.tiles.parent_of(node)?;
+    }
+    let Tile::Container(Container::Linear(linear)) = tree.tiles.get(parent)? else {
+        return None;
+    };
+    if linear.children.len() != 2 {
+        return None;
+    }
+    let index = linear.children.iter().position(|id| *id == node)?;
+    let anchor = match tree.tiles.get(linear.children[1 - index])? {
+        Tile::Pane(anchor) => *anchor,
+        Tile::Container(Container::Tabs(tabs)) if tabs.children.len() == 1 => {
+            *tree.tiles.get_pane(&tabs.children[0])?
+        }
+        _ => return None,
+    };
+    let direction = match (linear.dir, index) {
+        (LinearDir::Horizontal, 0) => Direction::Left,
+        (LinearDir::Horizontal, _) => Direction::Right,
+        (LinearDir::Vertical, 0) => Direction::Up,
+        (LinearDir::Vertical, _) => Direction::Down,
+    };
+    Some(Placement::Beside(anchor, direction))
 }
 
 struct PaneBehavior<'a, R: PaneRenderer> {
@@ -964,6 +1080,147 @@ mod tests {
         );
         let pass = frame(&ctx, &mut adapter, &layout, &runtime, &probe, vec![]);
         assert!(pass.edit.is_none());
+    }
+
+    #[test]
+    fn pointer_docking_edges_preserves_every_tile() {
+        // Exercise docking into both single-pane and multi-tab groups, including
+        // tearing a tab out of its own group. The content edges and panel edges
+        // can select different insertion targets in egui_tiles.
+        for tabbed in [false, true] {
+            for source_id in [TileId(1), TileId(2), TileId(3)] {
+                for edge in 0..8 {
+                    let ctx = egui::Context::default();
+                    let runtime = WorkspaceRuntime::default();
+                    let probe = Probe::default();
+                    let mut layout = Layout::default();
+                    layout.insert(TileId(1), Placement::Root).unwrap();
+                    layout
+                        .insert(TileId(2), Placement::Beside(TileId(1), Direction::Right))
+                        .unwrap();
+                    layout
+                        .insert(
+                            TileId(3),
+                            if tabbed {
+                                Placement::TabAfter(TileId(2))
+                            } else {
+                                Placement::Beside(TileId(2), Direction::Down)
+                            },
+                        )
+                        .unwrap();
+                    let mut adapter = LayoutAdapter::new(egui::Id::new("edges"));
+                    let pass = frame(&ctx, &mut adapter, &layout, &runtime, &probe, vec![]);
+                    let source = pass.tab_rects[&source_id].left_center() + egui::vec2(12.0, 0.0);
+                    let rect = pass.rects[&TileId(2)];
+                    let target = match edge {
+                        0 => rect.left_center() + egui::vec2(2.0, 0.0),
+                        1 => rect.right_center() - egui::vec2(2.0, 0.0),
+                        2 => rect.center_top() + egui::vec2(0.0, 2.0),
+                        3 => rect.center_bottom() - egui::vec2(0.0, 2.0),
+                        4 => egui::pos2(10.0, 300.0),
+                        5 => egui::pos2(790.0, 300.0),
+                        6 => egui::pos2(400.0, 10.0),
+                        _ => egui::pos2(400.0, 590.0),
+                    };
+                    let pass = frame(
+                        &ctx,
+                        &mut adapter,
+                        &layout,
+                        &runtime,
+                        &probe,
+                        pointer(source, true),
+                    );
+                    commit(&mut layout, pass);
+                    for pos in [source + egui::vec2(30.0, 0.0), target, target] {
+                        let pass = frame(
+                            &ctx,
+                            &mut adapter,
+                            &layout,
+                            &runtime,
+                            &probe,
+                            vec![egui::Event::PointerMoved(pos)],
+                        );
+                        commit(&mut layout, pass);
+                    }
+                    let pass = frame(
+                        &ctx,
+                        &mut adapter,
+                        &layout,
+                        &runtime,
+                        &probe,
+                        pointer(target, false),
+                    );
+                    if pass.edit.as_ref().is_some_and(|edit| edit.structural) {
+                        commit_move_through_application(&mut layout, pass);
+                    } else {
+                        commit(&mut layout, pass);
+                    }
+                    assert_eq!(
+                        layout.tile_order().into_iter().collect::<BTreeSet<_>>(),
+                        BTreeSet::from([TileId(1), TileId(2), TileId(3)])
+                    );
+                    let pass = frame(&ctx, &mut adapter, &layout, &runtime, &probe, vec![]);
+                    assert!(!pass.rects.is_empty());
+                    assert!(pass.edit.is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ignored_and_stale_proposals_are_not_replayed() {
+        let ctx = egui::Context::default();
+        let runtime = WorkspaceRuntime::default();
+        let probe = Probe::default();
+        let mut layout = Layout::default();
+        layout.insert(TileId(1), Placement::Root).unwrap();
+        layout
+            .insert(TileId(2), Placement::TabAfter(TileId(1)))
+            .unwrap();
+        let mut adapter = LayoutAdapter::new(egui::Id::new("ignored"));
+        for stale in [false, true] {
+            adapter.reconcile(&layout);
+            let pane = adapter.tree.tiles.find_pane(&TileId(2)).unwrap();
+            let root = adapter.tree.root.unwrap();
+            let Some(Tile::Container(Container::Tabs(tabs))) = adapter.tree.tiles.get_mut(root)
+            else {
+                panic!()
+            };
+            tabs.active = Some(pane);
+            let pass = frame(&ctx, &mut adapter, &layout, &runtime, &probe, vec![]);
+            let edit = pass.edit.expect("tab selection proposal");
+            if stale {
+                layout.remove(TileId(2)).unwrap();
+                assert_eq!(
+                    layout.apply_proposal(edit.revision, edit.root, edit.focused),
+                    Err(LayoutError::StaleRevision)
+                );
+            }
+            let pass = frame(&ctx, &mut adapter, &layout, &runtime, &probe, vec![]);
+            assert!(pass.edit.is_none());
+            assert_eq!(read_tree(&adapter.tree).unwrap().as_ref(), layout.root());
+            assert!(pass.rects.contains_key(&TileId(1)));
+        }
+    }
+
+    #[test]
+    fn invalid_runtime_tree_recovers_at_the_same_revision() {
+        let ctx = egui::Context::default();
+        let runtime = WorkspaceRuntime::default();
+        let probe = Probe::default();
+        let mut layout = Layout::default();
+        layout.insert(TileId(1), Placement::Root).unwrap();
+        let mut adapter = LayoutAdapter::new(egui::Id::new("recovery"));
+        adapter.reconcile(&layout);
+        let root = adapter.tree.root.unwrap();
+        adapter.tree.tiles.insert(
+            root,
+            Tile::Container(Container::Tabs(Tabs::new(vec![root]))),
+        );
+        let pass = frame(&ctx, &mut adapter, &layout, &runtime, &probe, vec![]);
+        assert!(pass.rects.contains_key(&TileId(1)));
+        assert!(pass.edit.is_none());
+        assert_eq!(read_tree(&adapter.tree).unwrap().as_ref(), layout.root());
     }
 
     #[test]
