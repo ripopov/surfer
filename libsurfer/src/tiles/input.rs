@@ -57,7 +57,7 @@ impl Workspace {
         copy: bool,
     ) -> Option<WorkspaceCommand> {
         let tile = self.resolve_tile(target)?;
-        let kind = &self.tiles.get(&tile)?.kind;
+        let kind = &self.tiles().get(&tile)?.kind;
         let mode = match (kind.is_waveform(), copy) {
             (true, false) => SplitMode::Linked,
             (true, true) => SplitMode::Independent,
@@ -95,14 +95,14 @@ impl Workspace {
     ) -> Option<WorkspaceCommand> {
         let from = self.resolve_tile(target)?;
         Some(WorkspaceCommand::FocusTile(
-            self.layout.neighbor(from, dir)?,
+            self.layout().neighbor(from, dir)?,
         ))
     }
 
     /// Activate the adjacent tab in the target's group, wrapping around.
     pub fn cycle_tab_command(&self, target: TileTarget, delta: isize) -> Option<WorkspaceCommand> {
         let from = self.resolve_tile(target)?;
-        let next = self.layout.next_in_group(from, delta)?;
+        let next = self.layout().next_in_group(from, delta)?;
         (next != from).then_some(WorkspaceCommand::FocusTile(next))
     }
 
@@ -110,7 +110,7 @@ impl Workspace {
     /// workspace edge when the target already borders it.
     pub fn move_command(&self, target: TileTarget, dir: Direction) -> Option<WorkspaceCommand> {
         let tile = self.resolve_tile(target)?;
-        let to = match self.layout.neighbor(tile, dir) {
+        let to = match self.layout().neighbor(tile, dir) {
             Some(neighbor) => Placement::Beside(neighbor, dir),
             None => Placement::Edge(dir),
         };
@@ -124,8 +124,8 @@ impl Workspace {
             return None;
         }
         let placement = anchor
-            .filter(|id| self.tiles.contains_key(id))
-            .or_else(|| self.layout.focused())
+            .filter(|id| self.tiles().contains_key(id))
+            .or_else(|| self.layout().focused())
             .map_or(Placement::Root, |id| {
                 Placement::Beside(id, Direction::Right)
             });
@@ -151,7 +151,7 @@ impl Workspace {
 
     /// Palette suggestions for `tile_focus`: `#id` and display titles.
     pub fn tile_suggestions(&self) -> Vec<String> {
-        self.layout
+        self.layout()
             .tile_order()
             .into_iter()
             .filter_map(|id| {
@@ -185,7 +185,7 @@ mod tests {
                 },
             )
             .unwrap();
-        workspace.layout.focused().unwrap()
+        workspace.layout().focused().unwrap()
     }
 
     fn rect(x: f32, y: f32) -> egui::Rect {
@@ -289,9 +289,8 @@ mod tests {
                 .is_none()
         );
         workspace
-            .layout
             .set_geometry(
-                workspace.layout.revision(),
+                workspace.layout().revision(),
                 BTreeMap::from([(left, rect(0.0, 0.0)), (right, rect(100.0, 0.0))]),
             )
             .unwrap();

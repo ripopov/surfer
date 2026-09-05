@@ -168,3 +168,8 @@ Flamegraphs can be generated using [cargo-flamegraph](https://github.com/flamegr
 ```bash
 CARGO_PROFILE_RELEASE_DEBUG=true ca flamegraph -- examples/picorv32.vcd -c performance.sucl
 ```
+
+## Architecture
+
+See [Tiling state and resource ownership](tiling.md) for workspace mutation,
+resource dependencies, persistence, and undo/redo boundaries.

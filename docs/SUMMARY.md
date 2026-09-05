@@ -15,4 +15,5 @@
   - [Theme parameters](./configuration/themes/parameters.md)
   - [Built-in themes](./configuration/themes/builtin.md)
 - [Development](./development/README.md)
+  - [Tiling state and resource ownership](./development/tiling.md)
 - [Compile Features](./features.md)

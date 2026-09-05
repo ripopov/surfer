@@ -53,7 +53,7 @@ impl SystemState {
         let windows = self
             .user
             .workspace
-            .layout
+            .layout()
             .visible_tiles()
             .into_iter()
             .filter_map(|id| {

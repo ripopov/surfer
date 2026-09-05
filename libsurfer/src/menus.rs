@@ -134,13 +134,13 @@ impl SystemState {
         .add_closing_menu(messages, ui);
         ui.separator();
         let titles = workspace.titles();
-        for id in workspace.layout.tile_order() {
-            let entry = &workspace.tiles[&id];
+        for id in workspace.layout().tile_order() {
+            let entry = &workspace.tiles()[&id];
             ui.push_id(self.workspace_runtime.egui_id(id, "tile menu"), |ui| {
                 ui.menu_button(&titles[&id], |ui| {
                     let services = TileReadServices {
                         document: self.user.waves.as_ref(),
-                        item_lists: &self.user.workspace.item_lists,
+                        item_lists: self.user.workspace.item_lists(),
                         config: &self.user.config,
                         translators: &self.translators,
                         runtime: &self.workspace_runtime,
@@ -148,7 +148,7 @@ impl SystemState {
                     let mut cx = TileCtx::new(
                         services,
                         id,
-                        self.user.workspace.layout.focused() == Some(id),
+                        self.user.workspace.layout().focused() == Some(id),
                         messages,
                     );
                     tab_context_menu(entry, ui, &mut cx);

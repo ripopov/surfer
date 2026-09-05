@@ -955,7 +955,7 @@ mod load_request_tests {
             WaveContainer::Empty,
             LoadOptions::Clear,
         );
-        let tile = state.user.workspace.layout.focused().unwrap();
+        let tile = state.user.workspace.layout().focused().unwrap();
         state
             .update(Message::Workspace(
                 crate::tiles::commands::WorkspaceCommand::RenameTile {
@@ -1107,7 +1107,7 @@ mod load_request_tests {
         state.update(header_message(current)).unwrap();
         assert!(state.user.waves.is_none());
         assert!(state.pending_document.is_some());
-        assert!(state.user.workspace.tiles.is_empty());
+        assert!(state.user.workspace.tiles().is_empty());
         // A new request starts before the body worker completes. Even when the
         // source is identical, the previous body must never attach to it.
         state.begin_document_load();

@@ -224,11 +224,11 @@ pub(crate) fn get_parser(state: &SystemState, target: CommandTarget) -> Command<
     let tile_id = target.waveform;
     let captured_tile = target.tile;
     let kind_commands = captured_tile
-        .and_then(|id| state.user.workspace.tiles.get(&id))
+        .and_then(|id| state.user.workspace.tiles().get(&id))
         .map_or(&[][..], |entry| entry.kind.commands());
     let tile_titles = state.user.workspace.titles();
     let tile_suggestions = state.user.workspace.tile_suggestions();
-    let open_anchor = captured_tile.or_else(|| state.user.workspace.layout.focused());
+    let open_anchor = captured_tile.or_else(|| state.user.workspace.layout().focused());
     // Tile commands resolve against the captured target now, so the grammar
     // below owns plain data and never borrows the workspace.
     let tile_commands = {
@@ -278,7 +278,7 @@ pub(crate) fn get_parser(state: &SystemState, target: CommandTarget) -> Command<
     let waveform_ids = state
         .user
         .workspace
-        .layout
+        .layout()
         .tile_order()
         .into_iter()
         .filter(|id| state.user.workspace.waveform_resources(*id).is_some())
@@ -1478,7 +1478,7 @@ mod tests {
                 focus: true,
             }))
             .unwrap();
-        let waveform = state.user.workspace.layout.focused().unwrap();
+        let waveform = state.user.workspace.layout().focused().unwrap();
         state
             .update(Message::Workspace(WorkspaceCommand::CreateTile {
                 kind: "logs".into(),
@@ -1486,7 +1486,7 @@ mod tests {
                 focus: true,
             }))
             .unwrap();
-        let logs = state.user.workspace.layout.focused().unwrap();
+        let logs = state.user.workspace.layout().focused().unwrap();
         (state, waveform, logs)
     }
 
@@ -1558,18 +1558,18 @@ mod tests {
                 command: "tile_focus #1".into(),
             })
             .unwrap();
-        assert_eq!(state.user.workspace.layout.focused(), Some(waveform));
+        assert_eq!(state.user.workspace.layout().focused(), Some(waveform));
         state
             .update(Message::ExecuteBatchCommand {
                 line: 2,
                 command: "tile_split_right".into(),
             })
             .unwrap();
-        let split = state.user.workspace.layout.focused().unwrap();
+        let split = state.user.workspace.layout().focused().unwrap();
         assert_ne!(split, waveform);
         assert_eq!(
-            state.user.workspace.tiles[&split].kind.item_list(),
-            state.user.workspace.tiles[&waveform].kind.item_list()
+            state.user.workspace.tiles()[&split].kind.waveform_list(),
+            state.user.workspace.tiles()[&waveform].kind.waveform_list()
         );
     }
 

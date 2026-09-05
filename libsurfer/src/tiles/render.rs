@@ -870,11 +870,13 @@ mod tests {
                 )
                 .unwrap();
         }
-        state.user.workspace.layout = layout.clone();
+        let mut file = state.user.workspace.to_file().unwrap();
+        file.layout = layout.to_file();
+        state.user.workspace = crate::tiles::workspace::Workspace::from_file(file).unwrap();
+        let mut edit = pass.edit.unwrap();
+        edit.revision = state.user.workspace.layout().revision();
         let before = layout.root().cloned();
-        state
-            .update(Message::ApplyLayoutProposal(pass.edit.unwrap()))
-            .unwrap();
+        state.update(Message::ApplyLayoutProposal(edit)).unwrap();
         for event in pass.events {
             match event {
                 PaneEvent::Focus(id) => {
@@ -887,18 +889,18 @@ mod tests {
         }
         assert_eq!(state.undo_stack.len(), 1);
         assert_eq!(state.undo_stack[0].label(), "Move tile");
-        let after = state.user.workspace.layout.root().cloned();
+        let after = state.user.workspace.layout().root().cloned();
         state.update(Message::Undo(1)).unwrap();
         assert!(same_topology(
-            state.user.workspace.layout.root(),
+            state.user.workspace.layout().root(),
             before.as_ref()
         ));
         state.update(Message::Redo(1)).unwrap();
         assert!(same_topology(
-            state.user.workspace.layout.root(),
+            state.user.workspace.layout().root(),
             after.as_ref()
         ));
-        *layout = state.user.workspace.layout;
+        *layout = state.user.workspace.layout().clone();
     }
 
     #[test]

@@ -355,14 +355,15 @@ mod tests {
                     },
                 )
                 .unwrap();
-            let id = workspace.layout.focused().unwrap();
-            let list = workspace.tiles[&id].kind.item_list().unwrap();
-            workspace
-                .item_lists
+            let id = workspace.layout().focused().unwrap();
+            let list = workspace.tiles()[&id].kind.waveform_list().unwrap();
+            let mut file = workspace.to_file().unwrap();
+            file.item_lists
                 .get_mut(&list)
                 .unwrap()
                 .annotations
                 .push(annotation());
+            workspace = Workspace::from_file(file).unwrap();
             ids.push(id);
         }
         let annotation_id = annotation().get_id();
@@ -378,8 +379,8 @@ mod tests {
             .apply_tile_message(ids[0], rename(), None)
             .unwrap();
         let name = |workspace: &Workspace, id| {
-            let list = workspace.tiles[&id].kind.item_list().unwrap();
-            workspace.item_lists[&list].annotations[0]
+            let list = workspace.tiles()[&id].kind.waveform_list().unwrap();
+            workspace.item_lists()[&list].annotations[0]
                 .get_name()
                 .to_owned()
         };
@@ -415,16 +416,18 @@ mod tests {
                     focus: true,
                 }))
                 .unwrap();
-            let id = state.user.workspace.layout.focused().unwrap();
-            let list = state.user.workspace.tiles[&id].kind.item_list().unwrap();
-            state
-                .user
-                .workspace
-                .item_lists
+            let id = state.user.workspace.layout().focused().unwrap();
+            let list = state.user.workspace.tiles()[&id]
+                .kind
+                .waveform_list()
+                .unwrap();
+            let mut file = state.user.workspace.to_file().unwrap();
+            file.item_lists
                 .get_mut(&list)
                 .unwrap()
                 .annotations
                 .push(annotation());
+            state.user.workspace = Workspace::from_file(file).unwrap();
             ids.push(id);
         }
         let annotation_id = annotation().get_id();
@@ -438,8 +441,11 @@ mod tests {
             )
         };
         let name = |state: &crate::SystemState, id| {
-            let list = state.user.workspace.tiles[&id].kind.item_list().unwrap();
-            state.user.workspace.item_lists[&list].annotations[0]
+            let list = state.user.workspace.tiles()[&id]
+                .kind
+                .waveform_list()
+                .unwrap();
+            state.user.workspace.item_lists()[&list].annotations[0]
                 .get_name()
                 .to_owned()
         };
@@ -459,7 +465,7 @@ mod tests {
             ))
             .unwrap();
         let viewport = |state: &crate::SystemState| {
-            let TileKind::Waveform(tile) = &state.user.workspace.tiles[&ids[0]].kind else {
+            let TileKind::Waveform(tile) = &state.user.workspace.tiles()[&ids[0]].kind else {
                 panic!()
             };
             ron::to_string(&tile.view.viewport).unwrap()
@@ -468,7 +474,7 @@ mod tests {
         state.update(Message::Undo(1)).unwrap();
         assert_eq!(name(&state, ids[0]), "Rectangle 1");
         assert_eq!(name(&state, ids[1]), "Rectangle 1");
-        assert_eq!(state.user.workspace.layout.focused(), Some(ids[1]));
+        assert_eq!(state.user.workspace.layout().focused(), Some(ids[1]));
         assert_eq!(viewport(&state), navigation);
         assert_eq!(state.redo_stack.len(), 1);
         assert!(
@@ -507,7 +513,7 @@ mod tests {
             })
         };
         state.update(open()).unwrap();
-        let id = state.user.workspace.layout.focused().unwrap();
+        let id = state.user.workspace.layout().focused().unwrap();
         state
             .update(crate::Message::ToTile(
                 id,
@@ -515,15 +521,15 @@ mod tests {
             ))
             .unwrap();
         state.update(open()).unwrap();
-        assert_eq!(state.user.workspace.tiles.len(), 1);
-        assert_eq!(state.user.workspace.layout.focused(), Some(id));
+        assert_eq!(state.user.workspace.tiles().len(), 1);
+        assert_eq!(state.user.workspace.layout().focused(), Some(id));
         let saved = state.encode_state().unwrap();
         let restored: crate::state::UserState = crate::tiles::serde::decode(&saved).unwrap();
-        let TileKind::AnnotationList(tile) = &restored.workspace.tiles[&id].kind else {
+        let TileKind::AnnotationList(tile) = &restored.workspace.tiles()[&id].kind else {
             panic!()
         };
         assert!(tile.show_comments);
         assert!(!saved.contains("show_annotation_list"));
-        assert!(restored.workspace.item_lists.is_empty());
+        assert!(restored.workspace.item_lists().is_empty());
     }
 }

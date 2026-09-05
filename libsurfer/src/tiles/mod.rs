@@ -3,13 +3,14 @@
 //! Application IDs are independent of the layout library's runtime node IDs.
 
 pub mod commands;
-pub(crate) mod history;
+pub(crate) use workspace::history;
 pub mod input;
 pub mod kind;
 pub mod layout;
-pub(crate) mod legacy;
+pub(crate) use workspace::legacy;
 mod placement;
 pub mod render;
+pub mod resources;
 pub mod runtime;
 pub mod serde;
 pub mod view;

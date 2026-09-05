@@ -148,7 +148,7 @@ impl<'de> Deserialize<'de> for LegacyWaveformV0 {
 /// explicit until its corresponding kind is installed by the caller.
 pub struct MigratedWaveform {
     pub document: crate::wave_data::WaveData,
-    pub workspace: super::workspace::Workspace,
+    pub workspace: crate::tiles::workspace::Workspace,
     pub annotation_list_visible: bool,
 }
 
@@ -157,14 +157,14 @@ impl LegacyWaveformV0 {
     /// into their final owners; no second mutable copy of any resource remains.
     pub fn into_workspace(
         self,
-        runtime: &mut super::runtime::WorkspaceRuntime,
-    ) -> Result<MigratedWaveform, super::workspace::WorkspaceError> {
-        use super::{
+        runtime: &mut crate::tiles::runtime::WorkspaceRuntime,
+    ) -> Result<MigratedWaveform, crate::tiles::workspace::WorkspaceError> {
+        use crate::tile_kinds::waveform::WaveformTile;
+        use crate::tiles::{
             kind::{TileEntry, TileKind},
             layout::{Layout, LayoutFile, LayoutNode, SplitDir},
             workspace::Workspace,
         };
-        use crate::tile_kinds::waveform::WaveformTile;
         let Self {
             document,
             items,

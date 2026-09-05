@@ -119,10 +119,10 @@ mod tests {
                 placement: None,
             })
             .unwrap();
-        state.user.workspace.layout.focused().unwrap()
+        state.user.workspace.layout().focused().unwrap()
     }
     fn memory(state: &crate::SystemState, id: TileId) -> &MemoryTile {
-        let TileKind::Memory(tile) = &state.user.workspace.tiles[&id].kind else {
+        let TileKind::Memory(tile) = &state.user.workspace.tiles()[&id].kind else {
             panic!()
         };
         tile
@@ -134,7 +134,7 @@ mod tests {
         let first = open(&mut state, "instructions");
         assert_eq!(state.undo_stack.len(), 1);
         state.update(Message::Undo(1)).unwrap();
-        assert!(state.user.workspace.tiles.is_empty());
+        assert!(state.user.workspace.tiles().is_empty());
         state.update(Message::Redo(1)).unwrap();
         assert_eq!(
             memory(&state, first).settings.scope.as_ref().unwrap().strs,
@@ -142,7 +142,7 @@ mod tests {
         );
         let second = open(&mut state, "data");
         assert_ne!(first, second);
-        assert!(state.user.workspace.item_lists.is_empty());
+        assert!(state.user.workspace.item_lists().is_empty());
         let mut edited = memory(&state, first).settings.clone();
         edited.name = Some("Instructions edited".into());
         state
@@ -151,7 +151,7 @@ mod tests {
                 TileMessage::Memory(MemoryMessage::Settings(Box::new(edited))),
             ))
             .unwrap();
-        assert_eq!(state.user.workspace.layout.focused(), Some(second));
+        assert_eq!(state.user.workspace.layout().focused(), Some(second));
         state.update(Message::Undo(1)).unwrap();
         assert_eq!(
             memory(&state, first).settings.name.as_deref(),
@@ -164,8 +164,8 @@ mod tests {
         );
         let saved = state.encode_state().unwrap();
         let restored: crate::state::UserState = crate::tiles::serde::decode(&saved).unwrap();
-        assert_eq!(restored.workspace.tiles.len(), 2);
-        let TileKind::Memory(tile) = &restored.workspace.tiles[&first].kind else {
+        assert_eq!(restored.workspace.tiles().len(), 2);
+        let TileKind::Memory(tile) = &restored.workspace.tiles()[&first].kind else {
             panic!()
         };
         assert_eq!(tile.settings.name.as_deref(), Some("Instructions edited"));
@@ -200,7 +200,7 @@ mod tests {
                 mode: SplitMode::Clone,
             }))
             .unwrap();
-        let copy = state.user.workspace.layout.focused().unwrap();
+        let copy = state.user.workspace.layout().focused().unwrap();
         assert_ne!(first, copy);
         assert!(memory(&state, copy).runtime.borrow().cache.is_none());
         assert!(memory(&state, first).runtime.borrow().cache.is_some());
@@ -218,6 +218,6 @@ mod tests {
         );
         state.update(Message::Undo(1)).unwrap();
         assert!(memory(&state, first).runtime.borrow().cache.is_none());
-        assert_eq!(state.user.workspace.layout.focused(), Some(copy));
+        assert_eq!(state.user.workspace.layout().focused(), Some(copy));
     }
 }

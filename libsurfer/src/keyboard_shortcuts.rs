@@ -935,7 +935,7 @@ mod tests {
                 focus: true,
             }))
             .unwrap();
-        state.user.workspace.layout.focused().unwrap()
+        state.user.workspace.layout().focused().unwrap()
     }
 
     #[test]

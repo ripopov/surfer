@@ -1,6 +1,6 @@
 //! Workspace resource ownership and atomic replacement after decoding.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use ::serde::{Deserialize, Serialize};
 
@@ -11,6 +11,7 @@ use super::{
     commands::{SplitMode, WorkspaceCommand},
     kind::{KINDS, KindCreateError, KindDecodeError, TileEntry, TileKind, WAVEFORM},
     layout::{Layout, LayoutError, LayoutFile, Placement},
+    resources::{self, Dependencies, ResourceError, ResourceId},
     runtime::{IdentityError, WorkspaceRuntime},
     serde::{DecodeError, ItemListError, ItemListFile, TileFile, decode},
 };
@@ -130,7 +131,7 @@ mod tests {
         let mut workspace = Workspace::default();
         let mut runtime = WorkspaceRuntime::default();
         let first = create(&mut workspace, &mut runtime, Placement::Root);
-        let original = workspace.tiles[&first].kind.item_list().unwrap();
+        let original = workspace.tiles[&first].kind.waveform_list().unwrap();
         workspace
             .item_lists
             .get_mut(&original)
@@ -152,7 +153,7 @@ mod tests {
             validate(&workspace);
         }
         let independent = workspace.layout.focused().unwrap();
-        let copied = workspace.tiles[&independent].kind.item_list().unwrap();
+        let copied = workspace.tiles[&independent].kind.waveform_list().unwrap();
         assert_ne!(original, copied);
         assert!(
             workspace.item_lists[&copied]
@@ -365,7 +366,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(workspace.item_lists.len(), 2);
-        let kept_list = workspace.tiles[&second].kind.item_list().unwrap();
+        let kept_list = workspace.tiles[&second].kind.waveform_list().unwrap();
         assert!(
             workspace
                 .apply_command(&mut runtime, WorkspaceCommand::Reset { keep: Some(second) })
@@ -505,15 +506,38 @@ mod tests {
     }
 }
 
+/// Owns the aggregate; storage is accessible only to workspace implementation
+/// modules, never renderers or other application modules.
+///
+/// ```compile_fail
+/// let mut workspace = libsurfer::tiles::workspace::Workspace::default();
+/// workspace.tiles().clear(); // Membership cannot be edited through a read view.
+/// ```
+/// ```compile_fail
+/// let mut workspace = libsurfer::tiles::workspace::Workspace::default();
+/// workspace.item_lists().clear(); // Shared resources cannot be removed directly.
+/// ```
+/// ```compile_fail
+/// let mut workspace = libsurfer::tiles::workspace::Workspace::default();
+/// workspace.layout().remove(libsurfer::tiles::TileId(1));
+/// ```
 #[derive(Default)]
 pub struct Workspace {
-    pub layout: Layout,
-    pub tiles: BTreeMap<TileId, TileEntry>,
-    pub item_lists: BTreeMap<ItemListId, ItemList>,
+    layout: Layout,
+    tiles: BTreeMap<TileId, TileEntry>,
+    item_lists: BTreeMap<ItemListId, ItemList>,
 }
+
+pub(crate) mod history;
+#[cfg(test)]
+mod kind_tests;
+pub(crate) mod legacy;
+mod operations;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkspaceError {
+    #[error(transparent)]
+    Resource(#[from] ResourceError),
     #[error("unsupported workspace version {0}")]
     Version(u32),
     #[error(transparent)]
@@ -524,8 +548,8 @@ pub enum WorkspaceError {
     Layout(#[from] LayoutError),
     #[error(transparent)]
     Identity(#[from] IdentityError),
-    #[error("tile references missing item list {0:?}")]
-    MissingList(ItemListId),
+    #[error("item list {0:?} already exists")]
+    DuplicateList(ItemListId),
     #[error("unreferenced item list {0:?}")]
     OrphanList(ItemListId),
     #[error("invalid item list {0:?}: {1}")]
@@ -541,6 +565,24 @@ pub enum WorkspaceError {
 }
 
 impl Workspace {
+    pub fn layout(&self) -> &Layout {
+        &self.layout
+    }
+    pub fn tiles(&self) -> &BTreeMap<TileId, TileEntry> {
+        &self.tiles
+    }
+    pub fn item_lists(&self) -> &BTreeMap<ItemListId, ItemList> {
+        &self.item_lists
+    }
+
+    pub(crate) fn set_geometry(
+        &mut self,
+        revision: u64,
+        rects: BTreeMap<TileId, egui::Rect>,
+    ) -> Result<(), LayoutError> {
+        self.layout.set_geometry(revision, rects)
+    }
+
     pub fn resolve_tile(&self, target: TileTarget) -> Option<TileId> {
         let id = match target {
             TileTarget::Id(id) => id,
@@ -627,18 +669,14 @@ impl Workspace {
                         Ok(false)
                     };
                 }
-                let id = runtime.allocate_tile()?;
-                let mut layout = self.layout.clone();
-                layout.insert(id, placement)?;
-                if focus {
-                    layout.focus(id)?;
-                }
-                let (kind, list) = TileKind::create(&kind, runtime)?;
-                self.tiles.insert(id, TileEntry { title: None, kind });
-                if let Some((id, list)) = list {
-                    self.item_lists.insert(id, list);
-                }
-                self.layout = layout;
+                let (kind, lists) = TileKind::create(&kind, runtime)?;
+                self.insert_prepared(
+                    runtime,
+                    TileEntry { title: None, kind },
+                    lists,
+                    placement,
+                    focus,
+                )?;
                 Ok(true)
             }
             WorkspaceCommand::SplitTile { tile, dir, mode } => {
@@ -653,28 +691,21 @@ impl Workspace {
                     .split_clone()
                     .ok_or(WorkspaceError::CannotSplit(tile))?;
                 let title = source.title.clone();
-                let list = if mode == SplitMode::Independent {
-                    let original = kind.item_list().ok_or(WorkspaceError::CannotSplit(tile))?;
-                    let content = self
-                        .item_lists
-                        .get(&original)
-                        .ok_or(WorkspaceError::MissingList(original))?
-                        .copy_content();
-                    let id = runtime.allocate_list()?;
-                    kind.replace_item_list(id);
-                    Some((id, content))
+                let lists = if mode == SplitMode::Independent {
+                    let (copy, lists) =
+                        resources::independent_copy(&kind, &self.item_lists, runtime)?;
+                    kind = copy;
+                    lists
                 } else {
-                    None
+                    BTreeMap::new()
                 };
-                let id = runtime.allocate_tile()?;
-                let mut layout = self.layout.clone();
-                layout.insert(id, Placement::Beside(tile, dir))?;
-                layout.focus(id)?;
-                self.tiles.insert(id, TileEntry { title, kind });
-                if let Some((id, list)) = list {
-                    self.item_lists.insert(id, list);
-                }
-                self.layout = layout;
+                self.insert_prepared(
+                    runtime,
+                    TileEntry { title, kind },
+                    lists,
+                    Placement::Beside(tile, dir),
+                    true,
+                )?;
                 Ok(true)
             }
             WorkspaceCommand::CloseTile(tile) => {
@@ -759,9 +790,7 @@ impl Workspace {
                 self.tiles.retain(|id, _| Some(*id) == keep);
                 if let Some((id, (kind, list))) = created {
                     self.tiles.insert(id, TileEntry { title: None, kind });
-                    if let Some((list_id, list)) = list {
-                        self.item_lists.insert(list_id, list);
-                    }
+                    self.item_lists.extend(list);
                 }
                 self.layout = layout;
                 self.collect_lists();
@@ -783,7 +812,7 @@ impl Workspace {
         let mut list_numbers = BTreeMap::new();
         let mut list_users = BTreeMap::<ItemListId, usize>::new();
         for id in &waveforms {
-            if let Some(list) = self.tiles[id].kind.item_list() {
+            if let Some(list) = self.tiles[id].kind.waveform_list() {
                 let next = list_numbers.len() + 1;
                 list_numbers.entry(list).or_insert(next);
                 *list_users.entry(list).or_default() += 1;
@@ -817,19 +846,9 @@ impl Workspace {
     }
 
     fn collect_lists(&mut self) {
-        if self
-            .tiles
-            .values()
-            .any(|tile| tile.kind.has_unknown_resources())
-        {
-            return;
-        }
-        let referenced: BTreeSet<_> = self
-            .tiles
-            .values()
-            .filter_map(|tile| tile.kind.item_list())
-            .collect();
-        self.item_lists.retain(|id, _| referenced.contains(id));
+        let dependencies =
+            Dependencies::union(self.tiles.values().map(|tile| tile.kind.dependencies()));
+        resources::retain(&mut self.item_lists, &dependencies);
     }
 
     pub fn from_file(file: WorkspaceFile) -> Result<Self, WorkspaceError> {
@@ -850,10 +869,15 @@ impl Workspace {
             .into_iter()
             .map(|(id, entry)| Ok((id, TileEntry::from_file(entry)?)))
             .collect::<Result<BTreeMap<_, _>, WorkspaceError>>()?;
-        let referenced: BTreeSet<_> = tiles
-            .values()
-            .filter_map(|tile| tile.kind.item_list())
-            .collect();
+        let dependencies = Dependencies::union(tiles.values().map(|tile| tile.kind.dependencies()));
+        dependencies.validate(
+            &file
+                .item_lists
+                .keys()
+                .copied()
+                .map(ResourceId::ItemList)
+                .collect(),
+        )?;
         for kind in KINDS.iter().filter(|kind| kind.singleton) {
             if tiles
                 .values()
@@ -864,17 +888,9 @@ impl Workspace {
                 return Err(WorkspaceError::Singleton(kind.name.into()));
             }
         }
-        for id in &referenced {
-            if !file.item_lists.contains_key(id) {
-                return Err(WorkspaceError::MissingList(*id));
-            }
-        }
-        // An opaque payload may reference resources that this version cannot inspect.
-        if !tiles.values().any(|tile| tile.kind.has_unknown_resources()) {
-            for id in file.item_lists.keys() {
-                if !referenced.contains(id) {
-                    return Err(WorkspaceError::OrphanList(*id));
-                }
+        for id in file.item_lists.keys() {
+            if !dependencies.retains(ResourceId::ItemList(*id)) {
+                return Err(WorkspaceError::OrphanList(*id));
             }
         }
         let workspace = Self {
@@ -887,10 +903,9 @@ impl Workspace {
                 .collect(),
         };
         for (id, tile) in &workspace.tiles {
-            if let Some(list) = tile.kind.item_list()
-                && !tile
-                    .kind
-                    .valid_item_references(&workspace.item_lists[&list])
+            if !tile
+                .kind
+                .valid_resource_references(|list| workspace.item_lists.get(&list))
             {
                 return Err(WorkspaceError::InvalidItemReference(*id));
             }
@@ -943,5 +958,416 @@ impl<'de> Deserialize<'de> for Workspace {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let file = WorkspaceFile::deserialize(deserializer)?;
         Self::from_file(file).map_err(::serde::de::Error::custom)
+    }
+}
+
+impl Workspace {
+    pub(crate) fn set_default_name_type(
+        &mut self,
+        name_type: crate::variable_name_type::VariableNameType,
+    ) {
+        for list in self.item_lists.values_mut() {
+            list.default_variable_name_type = name_type;
+        }
+    }
+
+    pub(crate) fn ensure_annotation_groups(&mut self) {
+        for list in self.item_lists.values_mut() {
+            if list.annotation_groups.is_empty() {
+                list.annotation_groups
+                    .push(crate::annotation_list::AnnotationGroup {
+                        name: crate::annotation_list::DEFAULT_GROUP_NAME.into(),
+                        annotations: Vec::new(),
+                    });
+            }
+        }
+    }
+
+    pub(crate) fn recompute_display_names(&mut self, document: &crate::wave_data::WaveData) {
+        for items in self.item_lists.values_mut() {
+            items
+                .compute_variable_display_names(&document.inner, document.display_variable_indices);
+        }
+    }
+
+    /// Install a fully prepared tile and its owned resources as one operation.
+    /// All membership and reference checks precede changes to the live aggregate.
+    pub(crate) fn insert_prepared(
+        &mut self,
+        runtime: &mut WorkspaceRuntime,
+        entry: TileEntry,
+        lists: BTreeMap<ItemListId, ItemList>,
+        placement: Placement,
+        focus: bool,
+    ) -> Result<TileId, WorkspaceError> {
+        let id = runtime.allocate_tile()?;
+        if self.tiles.contains_key(&id) {
+            return Err(LayoutError::Duplicate(id).into());
+        }
+        let mut layout = self.layout.clone();
+        layout.insert(id, placement)?;
+        if focus {
+            layout.focus(id)?;
+        }
+        if let Some(descriptor) = entry.kind.descriptor()
+            && descriptor.singleton
+            && self
+                .tiles
+                .values()
+                .any(|tile| tile.kind.kind_name() == descriptor.name)
+        {
+            return Err(WorkspaceError::Singleton(descriptor.name.into()));
+        }
+        for (list, items) in &lists {
+            if self.item_lists.contains_key(list) {
+                return Err(WorkspaceError::DuplicateList(*list));
+            }
+            WorkspaceRuntime::default().install_workspace([], [*list])?;
+            ItemListFile::from(items)
+                .validate()
+                .map_err(|error| WorkspaceError::ItemList(*list, error))?;
+        }
+        let dependencies = entry.kind.dependencies();
+        dependencies.validate(
+            &self
+                .item_lists
+                .keys()
+                .chain(lists.keys())
+                .copied()
+                .map(ResourceId::ItemList)
+                .collect(),
+        )?;
+        if !entry.kind.valid_resource_references(|list| {
+            lists.get(&list).or_else(|| self.item_lists.get(&list))
+        }) {
+            return Err(WorkspaceError::InvalidItemReference(id));
+        }
+        for list in lists.keys() {
+            if !dependencies.retains(ResourceId::ItemList(*list)) {
+                return Err(WorkspaceError::OrphanList(*list));
+            }
+        }
+        self.tiles.insert(id, entry);
+        self.item_lists.extend(lists);
+        self.layout = layout;
+        self.reconcile_waveform_scroll();
+        runtime.mark_workspace_initialized();
+        Ok(id)
+    }
+}
+
+impl Workspace {
+    pub(crate) fn restore_items(
+        &mut self,
+        previous: crate::CanvasState,
+    ) -> Result<crate::CanvasState, Box<crate::CanvasState>> {
+        let Some(items) = self.item_lists.get_mut(&previous.list) else {
+            return Err(Box::new(previous));
+        };
+        let inverse = crate::SystemState::current_canvas_state(
+            previous.list,
+            items,
+            previous.message.clone(),
+        );
+        let mut views = self
+            .tiles
+            .values_mut()
+            .filter_map(|entry| match &mut entry.kind {
+                crate::tiles::kind::TileKind::Waveform(tile) if tile.items == previous.list => {
+                    Some(&mut tile.view)
+                }
+                _ => None,
+            })
+            .map(|view| {
+                let focus = view.focus_snapshot(items);
+                (view, focus)
+            })
+            .collect::<Vec<_>>();
+        items.items_tree = previous.items_tree;
+        items.displayed_items = previous.displayed_items;
+        items.graphics = previous.graphics;
+        items.default_variable_name_type = previous.default_variable_name_type;
+        items.annotations = previous.annotations;
+        items.annotation_groups = previous.annotation_group;
+        items.annotation_counter = previous.annotation_counter;
+        *items.layout_cache.get_mut() = Default::default();
+        items.flattened_rows_cache.get_mut().clear();
+        for (view, focus) in &mut views {
+            view.reconcile_item_focus(items, *focus);
+            view.reconcile_annotations(items);
+            view.invalidate_draw_cache();
+        }
+        Ok(inverse)
+    }
+}
+
+impl Workspace {
+    pub(crate) fn remove_marker_rows(&mut self, id: u8) -> Vec<crate::CanvasState> {
+        use crate::displayed_item::DisplayedItem;
+        let affected = self
+            .item_lists
+            .iter()
+            .filter_map(|(list, items)| {
+                let rows = items
+                    .displayed_items
+                    .iter()
+                    .filter_map(|(row, item)| {
+                        matches!(item, DisplayedItem::Marker(marker) if marker.idx == id)
+                            .then_some(*row)
+                    })
+                    .collect::<Vec<_>>();
+                (!rows.is_empty()).then_some((*list, rows))
+            })
+            .collect::<Vec<_>>();
+        let mut lists = Vec::new();
+        for (list, rows) in affected {
+            let items = self.item_lists.get_mut(&list).unwrap();
+            lists.push(crate::SystemState::current_canvas_state(
+                list,
+                items,
+                "Remove marker".into(),
+            ));
+            let mut views = self
+                .tiles
+                .values_mut()
+                .filter_map(|entry| match &mut entry.kind {
+                    crate::tiles::kind::TileKind::Waveform(tile) if tile.items == list => {
+                        Some(&mut tile.view)
+                    }
+                    _ => None,
+                })
+                .map(|view| {
+                    let focus = view.focus_snapshot(items);
+                    (view, focus)
+                })
+                .collect::<Vec<_>>();
+            items.remove_items(&rows);
+            for (view, focus) in &mut views {
+                view.reconcile_item_focus(items, *focus);
+                view.reconcile_annotations(items);
+                view.invalidate_draw_cache();
+            }
+        }
+        lists
+    }
+}
+
+#[cfg(test)]
+mod cleanup_tests {
+    use super::*;
+    use crate::tiles::{kind::LOGS, layout::Direction};
+
+    fn saved(workspace: &Workspace) -> String {
+        ron::to_string(&workspace.to_file().unwrap()).unwrap()
+    }
+    fn assert_valid(workspace: &Workspace) {
+        Workspace::from_file(workspace.to_file().unwrap()).unwrap();
+        assert_eq!(
+            workspace
+                .layout
+                .tile_order()
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>(),
+            workspace.tiles.keys().copied().collect()
+        );
+    }
+
+    #[test]
+    fn prepared_insertions_reject_invalid_membership_resources_and_focus_atomically() {
+        let mut workspace = Workspace::default();
+        let mut runtime = WorkspaceRuntime::default();
+        workspace
+            .apply_command(
+                &mut runtime,
+                WorkspaceCommand::CreateTile {
+                    kind: WAVEFORM.name.into(),
+                    placement: Placement::Root,
+                    focus: true,
+                },
+            )
+            .unwrap();
+        let first = workspace.layout.focused().unwrap();
+        let list = workspace.tiles[&first].kind.waveform_list().unwrap();
+        let original = saved(&workspace);
+        let revision = workspace.layout.revision();
+        let token = runtime.request(first).unwrap();
+        let valid = workspace.tiles[&first].clone();
+        let missing = TileEntry {
+            title: None,
+            kind: TileKind::Waveform(Box::new(crate::tile_kinds::waveform::WaveformTile::new(
+                ItemListId(999),
+            ))),
+        };
+        let mut invalid_focus = valid.clone();
+        if let TileKind::Waveform(tile) = &mut invalid_focus.kind {
+            tile.view.focused_item = Some(crate::displayed_item::DisplayedItemRef(999));
+        }
+        let cases = [
+            (valid.clone(), BTreeMap::new(), Placement::Root),
+            (missing, BTreeMap::new(), Placement::TabAfter(first)),
+            (
+                valid.clone(),
+                BTreeMap::from([(list, ItemList::default())]),
+                Placement::TabAfter(first),
+            ),
+            (
+                valid,
+                BTreeMap::from([(ItemListId(999), ItemList::default())]),
+                Placement::TabAfter(first),
+            ),
+            (invalid_focus, BTreeMap::new(), Placement::TabAfter(first)),
+        ];
+        for (entry, lists, placement) in cases {
+            assert!(
+                workspace
+                    .insert_prepared(&mut runtime, entry, lists, placement, true)
+                    .is_err()
+            );
+            assert_eq!(saved(&workspace), original);
+            assert_eq!(workspace.layout.revision(), revision);
+            assert!(runtime.accepts(token, Some(token)));
+            assert_valid(&workspace);
+        }
+        workspace
+            .apply_command(
+                &mut runtime,
+                WorkspaceCommand::CreateTile {
+                    kind: LOGS.name.into(),
+                    placement: Placement::Beside(first, Direction::Right),
+                    focus: true,
+                },
+            )
+            .unwrap();
+        assert_valid(&workspace);
+    }
+
+    #[test]
+    fn unknown_owner_does_not_hide_a_known_missing_dependency_on_load() {
+        let mut workspace = Workspace::default();
+        let mut runtime = WorkspaceRuntime::default();
+        workspace
+            .apply_command(
+                &mut runtime,
+                WorkspaceCommand::CreateTile {
+                    kind: WAVEFORM.name.into(),
+                    placement: Placement::Root,
+                    focus: true,
+                },
+            )
+            .unwrap();
+        let unknown =
+            TileEntry::from_file(decode(include_str!("fixtures/future-tile.ron")).unwrap())
+                .unwrap();
+        workspace
+            .insert_prepared(
+                &mut runtime,
+                unknown,
+                BTreeMap::new(),
+                Placement::Edge(Direction::Right),
+                false,
+            )
+            .unwrap();
+        let mut file = workspace.to_file().unwrap();
+        file.item_lists.clear();
+        assert!(matches!(
+            Workspace::from_file(file),
+            Err(WorkspaceError::Resource(ResourceError::Missing(_)))
+        ));
+    }
+
+    #[test]
+    fn unknown_owner_close_undo_redo_preserves_payload_and_conservative_resources() {
+        use crate::Message;
+        let mut state = crate::SystemState::new_default_config().unwrap();
+        state
+            .update(Message::Workspace(WorkspaceCommand::CreateTile {
+                kind: WAVEFORM.name.into(),
+                placement: Placement::Root,
+                focus: true,
+            }))
+            .unwrap();
+        let waveform = state.user.workspace.layout.focused().unwrap();
+        let unknown =
+            TileEntry::from_file(decode(include_str!("fixtures/future-tile.ron")).unwrap())
+                .unwrap();
+        let payload = unknown.to_file().unwrap().payload.get_ron().to_owned();
+        let extra = state.workspace_runtime.allocate_list().unwrap();
+        let id = state
+            .user
+            .workspace
+            .insert_prepared(
+                &mut state.workspace_runtime,
+                unknown,
+                [(extra, ItemList::default())].into(),
+                Placement::Edge(Direction::Right),
+                true,
+            )
+            .unwrap();
+        state
+            .update(Message::Workspace(WorkspaceCommand::CloseTile(waveform)))
+            .unwrap();
+        assert_eq!(state.user.workspace.item_lists.len(), 2);
+        assert_valid(&state.user.workspace);
+        state.update(Message::Undo(1)).unwrap();
+        assert_valid(&state.user.workspace);
+        state
+            .update(Message::Workspace(WorkspaceCommand::CloseTile(id)))
+            .unwrap();
+        assert!(!state.user.workspace.item_lists.contains_key(&extra));
+        assert_valid(&state.user.workspace);
+        state.update(Message::Undo(1)).unwrap();
+        assert!(state.user.workspace.item_lists.contains_key(&extra));
+        assert_eq!(
+            state.user.workspace.tiles[&id]
+                .to_file()
+                .unwrap()
+                .payload
+                .get_ron(),
+            payload
+        );
+        assert_valid(&state.user.workspace);
+        state.update(Message::Redo(1)).unwrap();
+        assert!(!state.user.workspace.item_lists.contains_key(&extra));
+        assert_valid(&state.user.workspace);
+    }
+
+    #[test]
+    fn lifecycle_changes_reject_old_completions_and_never_recycle_closed_ids() {
+        let mut workspace = Workspace::default();
+        let mut runtime = WorkspaceRuntime::default();
+        workspace
+            .apply_command(
+                &mut runtime,
+                WorkspaceCommand::CreateTile {
+                    kind: WAVEFORM.name.into(),
+                    placement: Placement::Root,
+                    focus: true,
+                },
+            )
+            .unwrap();
+        let first = workspace.layout.focused().unwrap();
+        let old = runtime.request(first).unwrap();
+        let file = saved(&workspace);
+        workspace.replace(&mut runtime, &file).unwrap();
+        assert!(!runtime.accepts(old, Some(old)));
+        let current = runtime.request(first).unwrap();
+        runtime.document_changed().unwrap();
+        assert!(!runtime.accepts(current, Some(current)));
+        workspace
+            .apply_command(&mut runtime, WorkspaceCommand::CloseTile(first))
+            .unwrap();
+        assert_eq!(workspace.resolve_tile(TileTarget::Id(first)), None);
+        workspace
+            .apply_command(
+                &mut runtime,
+                WorkspaceCommand::CreateTile {
+                    kind: WAVEFORM.name.into(),
+                    placement: Placement::Root,
+                    focus: true,
+                },
+            )
+            .unwrap();
+        assert_ne!(workspace.layout.focused(), Some(first));
+        assert_valid(&workspace);
     }
 }

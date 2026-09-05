@@ -209,14 +209,14 @@ impl crate::SystemState {
     pub(crate) fn framebuffer_target(&self) -> Option<TileId> {
         self.user
             .workspace
-            .layout
+            .layout()
             .focused()
             .into_iter()
-            .chain(self.user.workspace.layout.focus_history().iter().copied())
-            .chain(self.user.workspace.layout.tile_order())
+            .chain(self.user.workspace.layout().focus_history().iter().copied())
+            .chain(self.user.workspace.layout().tile_order())
             .find(|id| {
                 matches!(
-                    self.user.workspace.tiles.get(id).map(|entry| &entry.kind),
+                    self.user.workspace.tiles().get(id).map(|entry| &entry.kind),
                     Some(crate::tiles::kind::TileKind::FrameBuffer(_))
                 )
             })
@@ -229,7 +229,7 @@ impl crate::SystemState {
             && let Some(crate::tiles::kind::TileEntry {
                 kind: crate::tiles::kind::TileKind::FrameBuffer(tile),
                 ..
-            }) = self.user.workspace.tiles.get(&id)
+            }) = self.user.workspace.tiles().get(&id)
             && tile.state.content.is_none()
         {
             let mut state = tile.state.clone();
@@ -238,16 +238,7 @@ impl crate::SystemState {
                 id,
                 TileMessage::FrameBuffer(FrameBufferMessage::State(Box::new(state))),
             ))?;
-            if let Some(document) = self.user.waves.as_mut() {
-                let crate::tiles::kind::TileKind::FrameBuffer(tile) =
-                    &mut self.user.workspace.tiles.get_mut(&id)?.kind
-                else {
-                    return None;
-                };
-                if let Some(load) = tile.attach(document) {
-                    self.load_variables(load);
-                }
-            }
+            self.attach_tile_source(id);
             return Some(id);
         }
         self.open_framebuffer_state(FrameBufferState {
@@ -256,9 +247,9 @@ impl crate::SystemState {
         })
     }
     fn open_framebuffer_state(&mut self, state: FrameBufferState) -> Option<TileId> {
+        state.validate().ok()?;
         use crate::tiles::{
             commands::WorkspaceCommand,
-            kind::TileKind,
             layout::{Direction, Placement},
         };
         let command = WorkspaceCommand::CreateTile {
@@ -272,21 +263,18 @@ impl crate::SystemState {
             .workspace
             .apply_command(&mut self.workspace_runtime, command)
             .ok()?;
-        let id = self.user.workspace.layout.focused()?;
-        let TileKind::FrameBuffer(tile) = &mut self.user.workspace.tiles.get_mut(&id)?.kind else {
-            return None;
-        };
-        tile.state = state;
-        let load = self
-            .user
-            .waves
-            .as_mut()
-            .and_then(|document| tile.attach(document));
+        let id = self.user.workspace.layout().focused()?;
+        self.user
+            .workspace
+            .apply_tile_message(
+                id,
+                TileMessage::FrameBuffer(FrameBufferMessage::State(Box::new(state))),
+                self.user.waves.as_ref(),
+            )
+            .ok()?;
+        self.attach_tile_source(id);
         if let Some(record) = before.and_then(|before| before.finish(&self.user.workspace)) {
             self.record_edit(record);
-        }
-        if let Some(load) = load {
-            self.load_variables(load);
         }
         Some(id)
     }
@@ -319,7 +307,7 @@ mod tests {
         }
     }
     fn tile(state: &crate::SystemState, id: TileId) -> &FrameBufferTile {
-        let TileKind::FrameBuffer(tile) = &state.user.workspace.tiles[&id].kind else {
+        let TileKind::FrameBuffer(tile) = &state.user.workspace.tiles()[&id].kind else {
             panic!()
         };
         tile
@@ -396,7 +384,7 @@ mod tests {
         state
             .update(Message::SetFrameBufferVariable(source("red")))
             .unwrap();
-        assert_eq!(state.user.workspace.tiles.len(), 1);
+        assert_eq!(state.user.workspace.tiles().len(), 1);
         assert_eq!(tile(&state, first).state.settings.color_settings.r_bits, 5);
         state
             .update(Message::SetFrameBufferVariable(source("blue")))
@@ -409,7 +397,7 @@ mod tests {
                 TileMessage::FrameBuffer(FrameBufferMessage::Width(32)),
             ))
             .unwrap();
-        assert_eq!(state.user.workspace.layout.focused(), Some(second));
+        assert_eq!(state.user.workspace.layout().focused(), Some(second));
         assert_eq!(tile(&state, second).state.settings.pixels_per_row, 16);
         state.update(Message::Undo(1)).unwrap();
         assert_eq!(tile(&state, first).state.settings.pixels_per_row, 16);
@@ -417,7 +405,7 @@ mod tests {
         assert_eq!(tile(&state, first).state.settings.pixels_per_row, 32);
         let saved = state.encode_state().unwrap();
         let restored: crate::state::UserState = crate::tiles::serde::decode(&saved).unwrap();
-        let TileKind::FrameBuffer(restored) = &restored.workspace.tiles[&first].kind else {
+        let TileKind::FrameBuffer(restored) = &restored.workspace.tiles()[&first].kind else {
             panic!()
         };
         assert_eq!(restored.state, tile(&state, first).state);
@@ -443,8 +431,8 @@ mod tests {
         };
         let old = format!("(frame_buffer: {})", ron::to_string(&settings).unwrap());
         let restored: crate::state::UserState = crate::tiles::serde::decode(&old).unwrap();
-        assert_eq!(restored.workspace.tiles.len(), 1);
-        let TileKind::FrameBuffer(tile) = &restored.workspace.tiles.values().next().unwrap().kind
+        assert_eq!(restored.workspace.tiles().len(), 1);
+        let TileKind::FrameBuffer(tile) = &restored.workspace.tiles().values().next().unwrap().kind
         else {
             panic!()
         };
@@ -455,6 +443,6 @@ mod tests {
             ron::to_string(&FrameBufferSettings::default()).unwrap()
         );
         let restored: crate::state::UserState = crate::tiles::serde::decode(&default).unwrap();
-        assert!(restored.workspace.tiles.is_empty());
+        assert!(restored.workspace.tiles().is_empty());
     }
 }

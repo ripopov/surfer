@@ -151,7 +151,7 @@ mod tests {
         let placement = state
             .user
             .workspace
-            .layout
+            .layout()
             .focused()
             .map_or(Placement::Root, Placement::TabAfter);
         state
@@ -161,7 +161,7 @@ mod tests {
                 focus: true,
             }))
             .unwrap();
-        state.user.workspace.layout.focused().unwrap()
+        state.user.workspace.layout().focused().unwrap()
     }
 
     fn frame(
@@ -184,16 +184,16 @@ mod tests {
                 let mut cx = TileCtx::new(
                     TileReadServices {
                         document: None,
-                        item_lists: &state.user.workspace.item_lists,
+                        item_lists: state.user.workspace.item_lists(),
                         config: &state.user.config,
                         translators: &state.translators,
                         runtime: &state.workspace_runtime,
                     },
                     id,
-                    state.user.workspace.layout.focused() == Some(id),
+                    state.user.workspace.layout().focused() == Some(id),
                     &mut commands,
                 );
-                state.user.workspace.tiles[&id]
+                state.user.workspace.tiles()[&id]
                     .kind
                     .tab_context_menu(ui, &mut cx);
             },
@@ -235,7 +235,7 @@ mod tests {
         let (_, commands) = frame(&state, first, &context, vec![pointer(false)]);
         assert_eq!(commands.len(), 1);
         assert!(matches!(&commands[0], Message::ToTile(id, _) if *id == first));
-        let TileKind::Waveform(before) = &state.user.workspace.tiles[&first].kind else {
+        let TileKind::Waveform(before) = &state.user.workspace.tiles()[&first].kind else {
             panic!()
         };
         assert!(before.show_name_column, "drawing must not mutate settings");
@@ -245,15 +245,15 @@ mod tests {
         for command in commands {
             state.update(command).unwrap();
         }
-        let TileKind::Waveform(first_tile) = &state.user.workspace.tiles[&first].kind else {
+        let TileKind::Waveform(first_tile) = &state.user.workspace.tiles()[&first].kind else {
             panic!()
         };
-        let TileKind::Waveform(second_tile) = &state.user.workspace.tiles[&second].kind else {
+        let TileKind::Waveform(second_tile) = &state.user.workspace.tiles()[&second].kind else {
             panic!()
         };
         assert!(!first_tile.show_name_column);
         assert!(first_tile.show_value_column);
         assert!(second_tile.show_name_column && second_tile.show_value_column);
-        assert_eq!(state.user.workspace.layout.focused(), Some(second));
+        assert_eq!(state.user.workspace.layout().focused(), Some(second));
     }
 }

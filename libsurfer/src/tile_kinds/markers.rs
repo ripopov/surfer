@@ -37,11 +37,11 @@ mod tests {
         for flag in ["show_cursor_window", "show_marker_window"] {
             let state: crate::state::UserState =
                 crate::tiles::serde::decode(&format!("({flag}: true)")).unwrap();
-            assert_eq!(state.workspace.tiles.len(), 1);
+            assert_eq!(state.workspace.tiles().len(), 1);
             assert_eq!(
                 state
                     .workspace
-                    .tiles
+                    .tiles()
                     .values()
                     .next()
                     .unwrap()
@@ -52,7 +52,7 @@ mod tests {
             let encoded = ron::to_string(&state).unwrap();
             assert!(!encoded.contains(flag));
             let restored: crate::state::UserState = crate::tiles::serde::decode(&encoded).unwrap();
-            assert_eq!(restored.workspace.tiles.len(), 1);
+            assert_eq!(restored.workspace.tiles().len(), 1);
         }
     }
 
@@ -84,7 +84,7 @@ mod tests {
                     focus: true,
                 }))
                 .unwrap();
-            let id = state.user.workspace.layout.focused().unwrap();
+            let id = state.user.workspace.layout().focused().unwrap();
             let waves = state.user.waveform_edit_at(id).unwrap();
             waves
                 .items
@@ -109,7 +109,7 @@ mod tests {
                 focus: true,
             }))
             .unwrap();
-        let markers = state.user.workspace.layout.focused().unwrap();
+        let markers = state.user.workspace.layout().focused().unwrap();
         let ctx = egui::Context::default();
         let frame = |events, state: &SystemState| {
             let mut messages = Vec::new();

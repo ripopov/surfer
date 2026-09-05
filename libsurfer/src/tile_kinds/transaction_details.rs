@@ -54,7 +54,7 @@ mod tests {
                 focus: true,
             }))
             .unwrap();
-        let waveform = state.user.workspace.layout.focused().unwrap();
+        let waveform = state.user.workspace.layout().focused().unwrap();
         let focus = |id: Option<TransactionId>| {
             Message::ToTile(
                 waveform,
@@ -67,31 +67,31 @@ mod tests {
         let details = *state
             .user
             .workspace
-            .tiles
+            .tiles()
             .iter()
             .find(|(_, entry)| entry.kind.kind_name() == "transaction_details")
             .unwrap()
             .0;
-        assert_eq!(state.user.workspace.layout.focused(), Some(waveform));
+        assert_eq!(state.user.workspace.layout().focused(), Some(waveform));
         assert!(
             state
                 .user
                 .workspace
-                .layout
+                .layout()
                 .visible_tiles()
                 .contains(&details)
         );
-        let revision = state.user.workspace.layout.revision();
+        let revision = state.user.workspace.layout().revision();
         state.update(focus(Some(TransactionId(13)))).unwrap();
-        assert_eq!(state.user.workspace.tiles.len(), 2);
-        assert_eq!(state.user.workspace.layout.revision(), revision);
+        assert_eq!(state.user.workspace.tiles().len(), 2);
+        assert_eq!(state.user.workspace.layout().revision(), revision);
         state.update(focus(None)).unwrap();
-        assert!(state.user.workspace.tiles.contains_key(&details));
-        assert_eq!(state.user.workspace.layout.focused(), Some(waveform));
+        assert!(state.user.workspace.tiles().contains_key(&details));
+        assert_eq!(state.user.workspace.layout().focused(), Some(waveform));
         let encoded = state.encode_state().unwrap();
         let restored: crate::state::UserState = crate::tiles::serde::decode(&encoded).unwrap();
         assert_eq!(
-            restored.workspace.tiles[&details].kind.kind_name(),
+            restored.workspace.tiles()[&details].kind.kind_name(),
             "transaction_details"
         );
         assert!(
@@ -110,12 +110,12 @@ mod tests {
         let reopened = *state
             .user
             .workspace
-            .tiles
+            .tiles()
             .iter()
             .find(|(_, entry)| entry.kind.kind_name() == "transaction_details")
             .unwrap()
             .0;
         assert_ne!(reopened, details);
-        assert_eq!(state.user.workspace.layout.focused(), Some(waveform));
+        assert_eq!(state.user.workspace.layout().focused(), Some(waveform));
     }
 }

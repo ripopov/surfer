@@ -478,7 +478,7 @@ impl SystemState {
             msgs,
         );
         if (response.name_width.is_some() || response.value_width.is_some())
-            && let Some(entry) = self.user.workspace.tiles.get(&tile_id)
+            && let Some(entry) = self.user.workspace.tiles().get(&tile_id)
             && let crate::tiles::kind::TileKind::Waveform(tile) = &entry.kind
         {
             msgs.push(Message::ToTile(
@@ -2052,7 +2052,7 @@ mod view_cache_tests {
     use crate::{StartupParams, wave_source::WaveSource};
 
     fn tile_id(state: &SystemState, index: usize) -> crate::tiles::TileId {
-        state.user.workspace.layout.tile_order()[index]
+        state.user.workspace.layout().tile_order()[index]
     }
     /// The legacy "add viewport" gesture: a linked split of the target waveform.
     fn add_viewport(state: &mut SystemState) {
@@ -2071,7 +2071,7 @@ mod view_cache_tests {
         state
             .user
             .workspace
-            .layout
+            .layout()
             .tile_order()
             .into_iter()
             .filter_map(|id| {
@@ -2155,7 +2155,7 @@ mod view_cache_tests {
             placement: Placement::Root,
             focus: true,
         }));
-        let logs = state.user.workspace.layout.focused().unwrap();
+        let logs = state.user.workspace.layout().focused().unwrap();
         state.undo_stack.clear();
         state.redo_stack.clear();
         let variable = crate::wave_container::VariableRef::from_hierarchy_string("tb.dut.counter");
@@ -2168,39 +2168,43 @@ mod view_cache_tests {
                 ]))
                 .is_none()
         );
-        assert_eq!(state.user.workspace.layout.tile_order(), [logs]);
+        assert_eq!(state.user.workspace.layout().tile_order(), [logs]);
         assert!(state.undo_stack.is_empty());
-        assert!(state.user.workspace.item_lists.is_empty());
+        assert!(state.user.workspace.item_lists().is_empty());
 
         state.update(Message::AddVariables(vec![variable.clone()]));
         settle(&mut state).await;
-        let created = state.user.workspace.layout.focused().unwrap();
+        let created = state.user.workspace.layout().focused().unwrap();
         assert_ne!(created, logs);
-        let list = state.user.workspace.tiles[&created]
+        let list = state.user.workspace.tiles()[&created]
             .kind
-            .item_list()
+            .waveform_list()
             .unwrap();
         assert_eq!(
-            state.user.workspace.item_lists[&list].displayed_items.len(),
+            state.user.workspace.item_lists()[&list]
+                .displayed_items
+                .len(),
             1
         );
         assert_eq!(state.undo_stack.len(), 1);
         assert_eq!(state.undo_stack[0].label(), "Add variables");
         assert!(matches!(
-            &state.user.workspace.tiles[&logs].kind,
+            &state.user.workspace.tiles()[&logs].kind,
             TileKind::Logs(_)
         ));
         state.update(Message::Undo(1));
-        assert_eq!(state.user.workspace.layout.tile_order(), [logs]);
-        assert!(state.user.workspace.item_lists.is_empty());
+        assert_eq!(state.user.workspace.layout().tile_order(), [logs]);
+        assert!(state.user.workspace.item_lists().is_empty());
         assert_eq!(state.redo_stack.len(), 1);
         state.update(Message::AddVariables(vec![invalid]));
         state.update(Message::AddVariables(vec![]));
         assert_eq!(state.redo_stack.len(), 1);
         state.update(Message::Redo(1));
-        assert!(state.user.workspace.tiles.contains_key(&created));
+        assert!(state.user.workspace.tiles().contains_key(&created));
         assert_eq!(
-            state.user.workspace.item_lists[&list].displayed_items.len(),
+            state.user.workspace.item_lists()[&list]
+                .displayed_items
+                .len(),
             1
         );
 
@@ -2227,7 +2231,9 @@ mod view_cache_tests {
             BigInt::from(20)
         );
         assert_eq!(
-            state.user.workspace.item_lists[&list].displayed_items.len(),
+            state.user.workspace.item_lists()[&list]
+                .displayed_items
+                .len(),
             1
         );
 
@@ -2235,11 +2241,11 @@ mod view_cache_tests {
         state.update(Message::Workspace(WorkspaceCommand::CloseTile(logs)));
         state.undo_stack.clear();
         state.update(Message::AddVariables(vec![variable]));
-        assert_eq!(state.user.workspace.tiles.len(), 1);
+        assert_eq!(state.user.workspace.tiles().len(), 1);
         assert_eq!(state.undo_stack.len(), 1);
         state.update(Message::Undo(1));
-        assert!(state.user.workspace.tiles.is_empty());
-        assert!(state.user.workspace.item_lists.is_empty());
+        assert!(state.user.workspace.tiles().is_empty());
+        assert!(state.user.workspace.item_lists().is_empty());
     }
 
     #[tokio::test]
@@ -2261,7 +2267,7 @@ mod view_cache_tests {
                 TileMessage::FrameBuffer(FrameBufferMessage::Width(1024)),
             ))
             .unwrap();
-        let TileKind::FrameBuffer(tile) = &state.user.workspace.tiles[&id].kind else {
+        let TileKind::FrameBuffer(tile) = &state.user.workspace.tiles()[&id].kind else {
             panic!()
         };
         let original = tile.state.clone();
@@ -2635,7 +2641,7 @@ mod view_cache_tests {
         );
         assert_eq!(views(&state)[1].focused_item, focus);
         assert_eq!(
-            state.user.workspace.layout.focused(),
+            state.user.workspace.layout().focused(),
             Some(tile_id(&state, 1))
         );
         state.update(Message::Undo(1));
@@ -2704,7 +2710,7 @@ mod view_cache_tests {
         assert!(views(&state)[0].draw_cache.borrow().commands.is_none());
         assert!(views(&state)[1].draw_cache.borrow().commands.is_some());
         assert_eq!(
-            state.user.workspace.layout.focused(),
+            state.user.workspace.layout().focused(),
             Some(tile_id(&state, 1))
         );
     }
@@ -2841,7 +2847,7 @@ mod view_cache_tests {
         let details = *state
             .user
             .workspace
-            .tiles
+            .tiles()
             .iter()
             .find(|(_, entry)| entry.kind.kind_name() == "transaction_details")
             .unwrap()
@@ -3035,7 +3041,7 @@ mod view_cache_tests {
                 .scroll_offset,
             0.0
         );
-        assert_eq!(state.user.workspace.layout.focused(), Some(second));
+        assert_eq!(state.user.workspace.layout().focused(), Some(second));
         let stale = state.scroll_rows_message(false, usize::MAX).unwrap();
         state
             .update(Message::Workspace(
@@ -3058,7 +3064,7 @@ mod view_cache_tests {
     async fn body_measurements_keep_their_origin_when_focus_changes() {
         let mut state = loaded_counter().await;
         add_viewport(&mut state);
-        for id in state.user.workspace.layout.tile_order() {
+        for id in state.user.workspace.layout().tile_order() {
             state
                 .update(Message::ToTile(
                     id,
@@ -3092,7 +3098,7 @@ mod view_cache_tests {
             scroll_offset: Some(f32::INFINITY),
         });
         assert_eq!(
-            state.user.workspace.layout.focused(),
+            state.user.workspace.layout().focused(),
             Some(tile_id(&state, 1))
         );
         assert_eq!(views(&state)[0].viewport_height, 400.0);
@@ -3111,14 +3117,14 @@ mod view_cache_tests {
         let mut runtime = std::mem::take(&mut state.workspace_runtime);
         let mut workspace = std::mem::take(&mut state.user.workspace);
         let mut document = state.user.waves.take().unwrap();
-        let first = workspace.layout.focused().unwrap();
+        let first = workspace.layout().focused().unwrap();
         let row = workspace
             .waveform_edit(first, &mut document)
             .unwrap()
             .add_marker(&42.into(), Some("shared time".into()), false)
             .unwrap();
-        let list_id = workspace.tiles[&first].kind.item_list().unwrap();
-        let DisplayedItem::Marker(marker) = &workspace.item_lists[&list_id].displayed_items[&row]
+        let list_id = workspace.tiles()[&first].kind.waveform_list().unwrap();
+        let DisplayedItem::Marker(marker) = &workspace.item_lists()[&list_id].displayed_items[&row]
         else {
             panic!()
         };
@@ -3133,8 +3139,8 @@ mod view_cache_tests {
                 },
             )
             .unwrap();
-        let second = workspace.layout.focused().unwrap();
-        let copy_list = workspace.tiles[&second].kind.item_list().unwrap();
+        let second = workspace.layout().focused().unwrap();
+        let copy_list = workspace.tiles()[&second].kind.waveform_list().unwrap();
         document.cursor = Some(88.into());
         workspace
             .waveform_edit(first, &mut document)
@@ -3147,17 +3153,17 @@ mod view_cache_tests {
             .unwrap()
             .remove_displayed_items(&[row]);
         assert!(
-            !workspace.item_lists[&list_id]
+            !workspace.item_lists()[&list_id]
                 .displayed_items
                 .contains_key(&row)
         );
         assert!(
-            workspace.item_lists[&copy_list]
+            workspace.item_lists()[&copy_list]
                 .displayed_items
                 .contains_key(&row)
         );
         assert_eq!(document.markers[&marker], BigInt::from(88));
-        assert_eq!(workspace.layout.focused(), Some(second));
+        assert_eq!(workspace.layout().focused(), Some(second));
     }
 
     #[tokio::test]
@@ -3188,9 +3194,12 @@ mod view_cache_tests {
                 focus: true,
             }))
             .unwrap();
-        let first = state.user.workspace.layout.focused().unwrap();
-        let list_id = state.user.workspace.tiles[&first].kind.item_list().unwrap();
-        let position = state.user.workspace.item_lists[&list_id].end_insert_position();
+        let first = state.user.workspace.layout().focused().unwrap();
+        let list_id = state.user.workspace.tiles()[&first]
+            .kind
+            .waveform_list()
+            .unwrap();
+        let position = state.user.workspace.item_lists()[&list_id].end_insert_position();
         state
             .update(Message::ToTile(
                 first,
@@ -3200,7 +3209,7 @@ mod view_cache_tests {
                 }),
             ))
             .unwrap();
-        let divider = state.user.workspace.item_lists[&list_id]
+        let divider = state.user.workspace.item_lists()[&list_id]
             .items_tree
             .iter()
             .next()
@@ -3219,19 +3228,19 @@ mod view_cache_tests {
                 mode: SplitMode::Linked,
             }))
             .unwrap();
-        let second = state.user.workspace.layout.focused().unwrap();
+        let second = state.user.workspace.layout().focused().unwrap();
         state.update(Message::AddVariables(vec![variable])).unwrap();
-        let list = &state.user.workspace.item_lists[&list_id];
+        let list = &state.user.workspace.item_lists()[&list_id];
         assert_eq!(list.items_tree.len(), 2);
         let inserted = list.items_tree.iter().last().unwrap().item_ref;
         assert!(matches!(
             list.displayed_items[&inserted],
             DisplayedItem::Variable(_)
         ));
-        let TileKind::Waveform(first_tile) = &state.user.workspace.tiles[&first].kind else {
+        let TileKind::Waveform(first_tile) = &state.user.workspace.tiles()[&first].kind else {
             panic!()
         };
-        let TileKind::Waveform(second_tile) = &state.user.workspace.tiles[&second].kind else {
+        let TileKind::Waveform(second_tile) = &state.user.workspace.tiles()[&second].kind else {
             panic!()
         };
         assert_eq!(first_tile.view.focused_item, Some(divider));
@@ -3252,20 +3261,20 @@ mod view_cache_tests {
     async fn legacy_ownership_moves_into_linked_tiles_with_independent_time_navigation() {
         let mut state = loaded_counter().await;
         add_viewport(&mut state);
-        let order = state.user.workspace.layout.tile_order();
-        let focused = state.user.workspace.layout.focused();
-        let list_id = state.user.workspace.tiles[&order[0]]
+        let order = state.user.workspace.layout().tile_order();
+        let focused = state.user.workspace.layout().focused();
+        let list_id = state.user.workspace.tiles()[&order[0]]
             .kind
-            .item_list()
+            .waveform_list()
             .unwrap();
         let mut waves = crate::tiles::legacy::LegacyWaveformV0 {
             document: state.user.waves.take().unwrap(),
-            items: state.user.workspace.item_lists.remove(&list_id).unwrap(),
+            items: state.user.workspace.item_lists()[&list_id].copy_content(),
             viewports: order
                 .iter()
                 .map(|id| {
                     let crate::tiles::kind::TileKind::Waveform(tile) =
-                        state.user.workspace.tiles.remove(id).unwrap().kind
+                        state.user.workspace.tiles()[id].kind.clone()
                     else {
                         panic!()
                     };
@@ -3286,11 +3295,11 @@ mod view_cache_tests {
         let mut runtime = crate::tiles::runtime::WorkspaceRuntime::default();
         let migrated = waves.into_workspace(&mut runtime).unwrap();
         let workspace = &migrated.workspace;
-        let order = workspace.layout.tile_order();
+        let order = workspace.layout().tile_order();
         assert_eq!(order.len(), 2);
-        assert_eq!(workspace.layout.focused(), Some(order[1]));
-        assert_eq!(workspace.item_lists.len(), 1);
-        let list = workspace.item_lists.values().next().unwrap();
+        assert_eq!(workspace.layout().focused(), Some(order[1]));
+        assert_eq!(workspace.item_lists().len(), 1);
+        let list = workspace.item_lists().values().next().unwrap();
         assert_eq!(
             list.items_tree.iter().next().unwrap() as *const _ as usize,
             row_address
@@ -3298,7 +3307,7 @@ mod view_cache_tests {
         assert!(migrated.annotation_list_visible);
         assert!(migrated.document.inner.as_waves().is_some());
         for (index, id) in order.iter().enumerate() {
-            let crate::tiles::kind::TileKind::Waveform(tile) = &workspace.tiles[id].kind else {
+            let crate::tiles::kind::TileKind::Waveform(tile) = &workspace.tiles()[id].kind else {
                 panic!()
             };
             assert_eq!(tile.show_name_column, index == 0);
@@ -3351,7 +3360,7 @@ mod view_cache_tests {
         ));
         let encoded = ron::to_string(&state.user.workspace).unwrap();
         let restored: crate::tiles::workspace::Workspace = ron::from_str(&encoded).unwrap();
-        assert_eq!(restored.layout.focused(), Some(second));
+        assert_eq!(restored.layout().focused(), Some(second));
         assert_eq!(
             restored.waveform_resources(first).unwrap().1.scroll_offset,
             25.0

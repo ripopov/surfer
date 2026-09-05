@@ -377,7 +377,7 @@ impl SystemState {
                         let target = self
                             .user
                             .workspace
-                            .layout
+                            .layout()
                             .tile_order()
                             .into_iter()
                             .filter(|id| self.user.workspace.waveform_resources(*id).is_some())

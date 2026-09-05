@@ -7,7 +7,6 @@ use camino::Utf8PathBuf;
 
 use crate::{
     CanvasState, StartupParams,
-    annotation_list::{AnnotationGroup, DEFAULT_GROUP_NAME},
     clock_highlighting::ClockHighlightType,
     config::{
         ArrowKeyBindings, AutoLoad, FocusHighlight, PrimaryMouseDrag, SurferConfig, TransitionValue,
@@ -250,8 +249,8 @@ impl<'de> Deserialize<'de> for UserState {
             let mut runtime = crate::tiles::runtime::WorkspaceRuntime::default();
             runtime
                 .install_workspace(
-                    state.workspace.tiles.keys().copied(),
-                    state.workspace.item_lists.keys().copied(),
+                    state.workspace.tiles().keys().copied(),
+                    state.workspace.item_lists().keys().copied(),
                 )
                 .map_err(D::Error::custom)?;
             for (visible, kind, direction) in [
@@ -262,7 +261,7 @@ impl<'de> Deserialize<'de> for UserState {
                 ),
                 (
                     version == 0
-                        && state.workspace.layout.tile_order().into_iter().any(|id| {
+                        && state.workspace.layout().tile_order().into_iter().any(|id| {
                             state
                                 .workspace
                                 .waveform_resources(id)
@@ -301,20 +300,20 @@ impl<'de> Deserialize<'de> for UserState {
             && settings != FrameBufferSettings::default()
             && !state
                 .workspace
-                .tiles
+                .tiles()
                 .values()
                 .any(|entry| matches!(entry.kind, crate::tiles::kind::TileKind::FrameBuffer(_)))
         {
             let mut runtime = crate::tiles::runtime::WorkspaceRuntime::default();
             runtime
                 .install_workspace(
-                    state.workspace.tiles.keys().copied(),
-                    state.workspace.item_lists.keys().copied(),
+                    state.workspace.tiles().keys().copied(),
+                    state.workspace.item_lists().keys().copied(),
                 )
                 .map_err(D::Error::custom)?;
             let before = state
                 .workspace
-                .tiles
+                .tiles()
                 .keys()
                 .copied()
                 .collect::<std::collections::BTreeSet<_>>();
@@ -331,18 +330,27 @@ impl<'de> Deserialize<'de> for UserState {
                     },
                 )
                 .map_err(D::Error::custom)?;
-            let entry = state
+            let id = *state
                 .workspace
-                .tiles
-                .iter_mut()
-                .find(|(id, _)| !before.contains(id))
-                .map(|(_, entry)| entry)
+                .tiles()
+                .keys()
+                .find(|id| !before.contains(id))
                 .unwrap();
-            let crate::tiles::kind::TileKind::FrameBuffer(tile) = &mut entry.kind else {
-                unreachable!()
-            };
-            tile.state.settings = settings;
-            tile.state.validate().map_err(D::Error::custom)?;
+            state
+                .workspace
+                .apply_tile_message(
+                    id,
+                    crate::tiles::kind::TileMessage::FrameBuffer(
+                        crate::tile_kinds::frame_buffer::FrameBufferMessage::State(Box::new(
+                            crate::tile_kinds::frame_buffer::FrameBufferState {
+                                settings,
+                                ..Default::default()
+                            },
+                        )),
+                    ),
+                    None,
+                )
+                .map_err(D::Error::custom)?;
         }
         state.state_version = 1;
         Ok(state)
@@ -580,7 +588,8 @@ impl SystemState {
             error!("Document replacement rejected: {error}");
             return;
         }
-        if self.user.workspace.tiles.is_empty() && !self.workspace_runtime.workspace_initialized() {
+        if self.user.workspace.tiles().is_empty() && !self.workspace_runtime.workspace_initialized()
+        {
             if let Err(error) = self.user.workspace.apply_command(
                 &mut self.workspace_runtime,
                 WorkspaceCommand::CreateTile {
@@ -592,9 +601,9 @@ impl SystemState {
                 error!("Initial waveform creation failed: {error}");
                 return;
             }
-            for list in self.user.workspace.item_lists.values_mut() {
-                list.default_variable_name_type = self.user.config.default_variable_name_type;
-            }
+            self.user
+                .workspace
+                .set_default_name_type(self.user.config.default_variable_name_type);
         }
         let previous = self
             .user
@@ -641,14 +650,7 @@ impl SystemState {
             options == LoadOptions::KeepAll,
         );
         self.user.workspace.update_viewports(&mut document);
-        for list in self.user.workspace.item_lists.values_mut() {
-            if list.annotation_groups.is_empty() {
-                list.annotation_groups.push(AnnotationGroup {
-                    name: DEFAULT_GROUP_NAME.into(),
-                    annotations: Vec::new(),
-                });
-            }
-        }
+        self.user.workspace.ensure_annotation_groups();
         self.user.wanted_timeunit = document.inner.metadata().timescale.unit;
         let title = document.window_title();
         self.user.waves = Some(document);
@@ -758,8 +760,8 @@ impl SystemState {
         path: Option<Utf8PathBuf>,
     ) {
         if let Err(error) = self.workspace_runtime.install_workspace(
-            loaded_state.workspace.tiles.keys().copied(),
-            loaded_state.workspace.item_lists.keys().copied(),
+            loaded_state.workspace.tiles().keys().copied(),
+            loaded_state.workspace.item_lists().keys().copied(),
         ) {
             error!("State replacement rejected: {error}");
             return;
@@ -861,40 +863,7 @@ impl SystemState {
         &mut self,
         previous: CanvasState,
     ) -> Result<CanvasState, Box<CanvasState>> {
-        let Some(items) = self.user.workspace.item_lists.get_mut(&previous.list) else {
-            return Err(Box::new(previous));
-        };
-        let inverse = Self::current_canvas_state(previous.list, items, previous.message.clone());
-        let mut views = self
-            .user
-            .workspace
-            .tiles
-            .values_mut()
-            .filter_map(|entry| match &mut entry.kind {
-                crate::tiles::kind::TileKind::Waveform(tile) if tile.items == previous.list => {
-                    Some(&mut tile.view)
-                }
-                _ => None,
-            })
-            .map(|view| {
-                let focus = view.focus_snapshot(items);
-                (view, focus)
-            })
-            .collect::<Vec<_>>();
-        items.items_tree = previous.items_tree;
-        items.displayed_items = previous.displayed_items;
-        items.graphics = previous.graphics;
-        items.default_variable_name_type = previous.default_variable_name_type;
-        items.annotations = previous.annotations;
-        items.annotation_groups = previous.annotation_group;
-        items.annotation_counter = previous.annotation_counter;
-        *items.layout_cache.get_mut() = Default::default();
-        items.flattened_rows_cache.get_mut().clear();
-        for (view, focus) in &mut views {
-            view.reconcile_item_focus(items, *focus);
-            view.reconcile_annotations(items);
-            view.invalidate_draw_cache();
-        }
+        let inverse = self.user.workspace.restore_items(previous)?;
         self.invalidate_draw_commands();
         Ok(inverse)
     }
@@ -904,9 +873,9 @@ impl SystemState {
     pub(crate) fn save_current_canvas(&mut self, message: String) {
         if let Some(waves) = self.user.waveform_read() {
             self.record_canvas_edit(SystemState::current_canvas_state(
-                self.user.workspace.tiles[&waves.tile_id]
+                self.user.workspace.tiles()[&waves.tile_id]
                     .kind
-                    .item_list()
+                    .waveform_list()
                     .unwrap(),
                 waves.items,
                 message,
@@ -1016,7 +985,7 @@ mod empty_workspace_tests {
                 WaveFormat::Vcd,
                 LoadOptions::KeepAll,
             );
-            assert_eq!(state.user.workspace.tiles.is_empty(), explicit);
+            assert_eq!(state.user.workspace.tiles().is_empty(), explicit);
         }
     }
 
@@ -1032,20 +1001,20 @@ mod empty_workspace_tests {
             )
         };
         install(&mut state);
-        assert_eq!(state.user.workspace.tiles.len(), 1);
-        let id = state.user.workspace.layout.focused().unwrap();
+        assert_eq!(state.user.workspace.tiles().len(), 1);
+        let id = state.user.workspace.layout().focused().unwrap();
         state
             .update(crate::Message::Workspace(
                 crate::tiles::commands::WorkspaceCommand::CloseTile(id),
             ))
             .unwrap();
         install(&mut state);
-        assert!(state.user.workspace.tiles.is_empty());
+        assert!(state.user.workspace.tiles().is_empty());
         let saved = state.encode_state().unwrap();
         let restored: UserState = crate::tiles::serde::decode(&saved).unwrap();
         let mut fresh = SystemState::new_default_config().unwrap();
         fresh.load_state(Box::new(restored), None);
         install(&mut fresh);
-        assert!(fresh.user.workspace.tiles.is_empty());
+        assert!(fresh.user.workspace.tiles().is_empty());
     }
 }

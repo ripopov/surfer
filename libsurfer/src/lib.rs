@@ -354,7 +354,7 @@ impl SystemState {
                     let tile = edit.moved_tile?;
                     crate::tiles::history::move_record(
                         tile,
-                        self.user.workspace.layout.root()?,
+                        self.user.workspace.layout().root()?,
                         edit.root.as_ref()?,
                     )
                 } else {
@@ -362,11 +362,9 @@ impl SystemState {
                 };
                 self.user
                     .workspace
-                    .layout
-                    .apply_proposal(edit.revision, edit.root, edit.focused)
+                    .apply_layout_edit(edit)
                     .map_err(|error| warn!("Layout proposal rejected: {error}"))
                     .ok()?;
-                self.user.workspace.reconcile_waveform_scroll();
                 if let Some(record) = movement {
                     self.record_edit(record);
                 }
@@ -376,7 +374,7 @@ impl SystemState {
                     crate::tiles::commands::WorkspaceCommand::MoveTile { tile, .. } => self
                         .user
                         .workspace
-                        .layout
+                        .layout()
                         .root()
                         .cloned()
                         .map(|root| (*tile, root)),
@@ -390,12 +388,12 @@ impl SystemState {
                     &command,
                     crate::tiles::commands::WorkspaceCommand::SetLayout(_)
                 )
-                .then(|| self.user.workspace.layout.root().cloned());
+                .then(|| self.user.workspace.layout().root().cloned());
                 let title_before = match &command {
                     crate::tiles::commands::WorkspaceCommand::RenameTile { tile, .. } => self
                         .user
                         .workspace
-                        .tiles
+                        .tiles()
                         .get(tile)
                         .map(|entry| (*tile, entry.title.clone())),
                     _ => None,
@@ -406,7 +404,7 @@ impl SystemState {
                     .map_err(|error| warn!("Workspace command rejected: {error}"))
                     .ok()?;
                 if let Some((tile, before)) = move_before
-                    && let Some(after) = self.user.workspace.layout.root()
+                    && let Some(after) = self.user.workspace.layout().root()
                     && let Some(record) = crate::tiles::history::move_record(tile, &before, after)
                 {
                     self.record_edit(record);
@@ -417,7 +415,7 @@ impl SystemState {
                     self.record_edit(record);
                 }
                 if let Some(before) = layout_before {
-                    let after = self.user.workspace.layout.root().cloned();
+                    let after = self.user.workspace.layout().root().cloned();
                     if !crate::tiles::layout::same_topology(before.as_ref(), after.as_ref()) {
                         self.record_edit(crate::tiles::history::UndoRecord::SetLayout {
                             before,
@@ -426,7 +424,7 @@ impl SystemState {
                     }
                 }
                 if let Some((tile, before)) = title_before {
-                    let after = self.user.workspace.tiles[&tile].title.clone();
+                    let after = self.user.workspace.tiles()[&tile].title.clone();
                     if before != after {
                         self.record_edit(crate::tiles::history::UndoRecord::Title {
                             tile,
@@ -449,15 +447,15 @@ impl SystemState {
                     )
                 );
                 let before = message.item_edit_label().and_then(|label| {
-                    let list = self.user.workspace.tiles[&target].kind.item_list()?;
+                    let list = self.user.workspace.tiles()[&target].kind.waveform_list()?;
                     Some(Self::current_canvas_state(
                         list,
-                        self.user.workspace.item_lists.get(&list)?,
+                        self.user.workspace.item_lists().get(&list)?,
                         label.into(),
                     ))
                 });
                 let settings_before =
-                    message.settings_before(&self.user.workspace.tiles[&target].kind);
+                    message.settings_before(&self.user.workspace.tiles()[&target].kind);
                 let changed = self
                     .user
                     .workspace
@@ -468,11 +466,11 @@ impl SystemState {
                     self.record_canvas_edit(before);
                 }
                 if changed && let Some(before) = settings_before {
-                    if before.source_changed(&self.user.workspace.tiles[&target].kind) {
+                    if before.source_changed(&self.user.workspace.tiles()[&target].kind) {
                         self.attach_tile_source(target);
                     }
                     let after = before
-                        .capture_like(&self.user.workspace.tiles[&target].kind)
+                        .capture_like(&self.user.workspace.tiles()[&target].kind)
                         .expect("tile update preserves kind");
                     self.record_edit(crate::tiles::history::UndoRecord::Settings {
                         tile: target,
@@ -550,7 +548,7 @@ impl SystemState {
                     .workspace
                     .resolve_waveform(crate::tiles::TileTarget::Focused);
                 let load = if let Some(target) = target {
-                    let list = self.user.workspace.tiles[&target].kind.item_list()?;
+                    let list = self.user.workspace.tiles()[&target].kind.waveform_list()?;
                     let mut waves = self.user.waveform_edit_at(target)?;
                     let before = Self::current_canvas_state(list, waves.items, undo_msg);
                     let (load, inserted) =
@@ -568,7 +566,7 @@ impl SystemState {
                     let placement = self
                         .user
                         .workspace
-                        .layout
+                        .layout()
                         .focused()
                         .map(|id| Placement::Beside(id, Direction::Right))
                         .unwrap_or(Placement::Root);
@@ -584,20 +582,16 @@ impl SystemState {
                     .with_label("Add variables");
                     // Stage only the new resources. Neither the empty tile nor a partial
                     // insertion becomes visible if initialization fails.
-                    let id = self.workspace_runtime.allocate_tile().ok()?;
-                    let mut layout = self.user.workspace.layout.clone();
-                    layout.insert(id, placement).ok()?;
-                    layout.focus(id).ok()?;
-                    let (mut kind, list) =
+                    let (mut kind, mut lists) =
                         TileKind::create("waveform", &mut self.workspace_runtime).ok()?;
-                    let (list_id, mut items) = list?;
-                    items.default_variable_name_type = self.user.config.default_variable_name_type;
                     let TileKind::Waveform(tile) = &mut kind else {
                         unreachable!()
                     };
+                    let items = lists.get_mut(&tile.items)?;
+                    items.default_variable_name_type = self.user.config.default_variable_name_type;
                     let mut waves = crate::wave_data::WaveformEdit {
                         document: self.user.waves.as_mut()?,
-                        items: &mut items,
+                        items,
                         view: &mut tile.view,
                         peers: vec![],
                     };
@@ -612,11 +606,14 @@ impl SystemState {
                     }
                     self.user
                         .workspace
-                        .tiles
-                        .insert(id, TileEntry { title: None, kind });
-                    self.user.workspace.item_lists.insert(list_id, items);
-                    self.user.workspace.layout = layout;
-                    self.workspace_runtime.mark_workspace_initialized();
+                        .insert_prepared(
+                            &mut self.workspace_runtime,
+                            TileEntry { title: None, kind },
+                            lists,
+                            placement,
+                            true,
+                        )
+                        .ok()?;
                     if let Some(record) = before.finish(&self.user.workspace) {
                         self.record_edit(record);
                     }
@@ -647,7 +644,7 @@ impl SystemState {
                     .user
                     .workspace
                     .resolve_waveform(crate::tiles::TileTarget::Focused)?;
-                let list = self.user.workspace.tiles[&target].kind.item_list()?;
+                let list = self.user.workspace.tiles()[&target].kind.waveform_list()?;
                 let mut waves = self.user.waveform_edit_at(target)?;
                 let before = Self::current_canvas_state(list, waves.items, "Add divider".into());
                 waves.add_divider(name, vidx).ok()?;
@@ -658,7 +655,7 @@ impl SystemState {
                     .user
                     .workspace
                     .resolve_waveform(crate::tiles::TileTarget::Focused)?;
-                let list = self.user.workspace.tiles[&target].kind.item_list()?;
+                let list = self.user.workspace.tiles()[&target].kind.waveform_list()?;
                 let mut waves = self.user.waveform_edit_at(target)?;
                 let before = Self::current_canvas_state(list, waves.items, "Add timeline".into());
                 waves.add_timeline(vidx).ok()?;
@@ -918,14 +915,14 @@ impl SystemState {
                 let placement = placement
                     .filter(|placement| match placement {
                         Placement::TabAfter(anchor) | Placement::Beside(anchor, _) => {
-                            self.user.workspace.tiles.contains_key(anchor)
+                            self.user.workspace.tiles().contains_key(anchor)
                         }
                         Placement::Edge(_) | Placement::Root => true,
                     })
                     .or_else(|| {
                         self.user
                             .workspace
-                            .layout
+                            .layout()
                             .focused()
                             .map(|id| Placement::Beside(id, Direction::Right))
                     })
@@ -943,12 +940,12 @@ impl SystemState {
                     .workspace
                     .apply_command(&mut self.workspace_runtime, command)
                     .ok()?;
-                let id = self.user.workspace.layout.focused()?;
+                let id = self.user.workspace.layout().focused()?;
                 let scope = crate::wave_container::ScopeRef {
                     strs: scope.strs,
                     id: Default::default(),
                 };
-                let TileKind::Memory(tile) = &self.user.workspace.tiles[&id].kind else {
+                let TileKind::Memory(tile) = &self.user.workspace.tiles()[&id].kind else {
                     unreachable!()
                 };
                 let mut settings = tile.settings.clone();
@@ -1970,12 +1967,7 @@ impl SystemState {
                 self.translator_generation += 1;
 
                 if let Some(document) = self.user.waves.as_ref() {
-                    for items in self.user.workspace.item_lists.values_mut() {
-                        items.compute_variable_display_names(
-                            &document.inner,
-                            document.display_variable_indices,
-                        );
-                    }
+                    self.user.workspace.recompute_display_names(document);
                 }
             }
             Message::SuggestReloadWaveform => match self.autoreload_files() {

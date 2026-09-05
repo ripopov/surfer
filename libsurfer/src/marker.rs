@@ -38,9 +38,9 @@ impl crate::SystemState {
             .user
             .workspace
             .resolve_waveform(crate::tiles::TileTarget::Focused)?;
-        let list = self.user.workspace.tiles[&target].kind.item_list()?;
+        let list = self.user.workspace.tiles()[&target].kind.waveform_list()?;
         let before_markers = self.user.waves.as_ref()?.markers.clone();
-        let items = &self.user.workspace.item_lists[&list];
+        let items = &self.user.workspace.item_lists()[&list];
         let before = Self::current_canvas_state(list, items, label);
         let rows_before = items.displayed_items.len();
         let mut waves = self.user.waveform_edit_at(target)?;
@@ -51,8 +51,10 @@ impl crate::SystemState {
             .chain(before_markers.keys().copied())
             .chain(after.keys().copied())
             .find(|id| before_markers.get(id) != after.get(id));
-        let rows_changed =
-            rows_before != self.user.workspace.item_lists[&list].displayed_items.len();
+        let rows_changed = rows_before
+            != self.user.workspace.item_lists()[&list]
+                .displayed_items
+                .len();
         let id = match changed {
             Some(id) => id,
             None if rows_changed => known?,
@@ -70,56 +72,9 @@ impl crate::SystemState {
 
     pub(crate) fn remove_shared_marker(&mut self, id: u8) -> Option<()> {
         let time = self.user.waves.as_ref()?.markers.get(&id).cloned();
-        let affected = self
-            .user
-            .workspace
-            .item_lists
-            .iter()
-            .filter_map(|(list, items)| {
-                let rows = items
-                    .displayed_items
-                    .iter()
-                    .filter_map(|(row, item)| {
-                        matches!(item, DisplayedItem::Marker(marker) if marker.idx == id)
-                            .then_some(*row)
-                    })
-                    .collect::<Vec<_>>();
-                (!rows.is_empty()).then_some((*list, rows))
-            })
-            .collect::<Vec<_>>();
-        if time.is_none() && affected.is_empty() {
+        let lists = self.user.workspace.remove_marker_rows(id);
+        if time.is_none() && lists.is_empty() {
             return None;
-        }
-        let mut lists = Vec::new();
-        for (list, rows) in affected {
-            let items = self.user.workspace.item_lists.get_mut(&list).unwrap();
-            lists.push(Self::current_canvas_state(
-                list,
-                items,
-                "Remove marker".into(),
-            ));
-            let mut views = self
-                .user
-                .workspace
-                .tiles
-                .values_mut()
-                .filter_map(|entry| match &mut entry.kind {
-                    crate::tiles::kind::TileKind::Waveform(tile) if tile.items == list => {
-                        Some(&mut tile.view)
-                    }
-                    _ => None,
-                })
-                .map(|view| {
-                    let focus = view.focus_snapshot(items);
-                    (view, focus)
-                })
-                .collect::<Vec<_>>();
-            items.remove_items(&rows);
-            for (view, focus) in &mut views {
-                view.reconcile_item_focus(items, *focus);
-                view.reconcile_annotations(items);
-                view.invalidate_draw_cache();
-            }
         }
         self.user.waves.as_mut().unwrap().markers.remove(&id);
         self.record_edit(crate::tiles::history::UndoRecord::Marker { id, time, lists });

@@ -372,7 +372,7 @@ impl SystemState {
             }
         }
 
-        if !self.user.workspace.tiles.is_empty() {
+        if !self.user.workspace.tiles().is_empty() {
             let focus_ids = self.command_prompt.visible
                 && expand_command(
                     &self.command_prompt_text.borrow(),
@@ -388,7 +388,7 @@ impl SystemState {
                 .show(ui, |ui| {
                     adapter.draw(
                         ui,
-                        &self.user.workspace.layout,
+                        self.user.workspace.layout(),
                         &self.workspace_runtime,
                         &crate::tiles::kind::ApplicationPanes::new(self, focus_ids),
                         self.user.config.layout.hide_single_tab_bar,
@@ -398,11 +398,7 @@ impl SystemState {
             self.layout_adapter = Some(adapter);
             match pass {
                 Ok(pass) => {
-                    let _ = self
-                        .user
-                        .workspace
-                        .layout
-                        .set_geometry(pass.revision, pass.rects);
+                    let _ = self.user.workspace.set_geometry(pass.revision, pass.rects);
                     if let Some(edit) = pass.edit {
                         msgs.push(Message::ApplyLayoutProposal(edit));
                     }
@@ -423,7 +419,7 @@ impl SystemState {
             }
         }
 
-        if self.user.workspace.tiles.is_empty() {
+        if self.user.workspace.tiles().is_empty() {
             CentralPanel::default()
                 .frame(Frame::NONE.fill(self.user.config.theme.canvas_colors.background))
                 .show(ui, |ui| {
@@ -2170,7 +2166,7 @@ mod tile_row_cache_tests {
                     focus: true,
                 }))
                 .unwrap();
-            let id = state.user.workspace.layout.focused().unwrap();
+            let id = state.user.workspace.layout().focused().unwrap();
             let position = state
                 .user
                 .workspace
@@ -2283,7 +2279,7 @@ mod tile_row_cache_tests {
         assert_eq!(first_view.focused_item, Some(first.item_ref));
         assert!(!second.selected);
         assert_eq!(second_view.focused_item, None);
-        assert_eq!(state.user.workspace.layout.focused(), Some(ids[1]));
+        assert_eq!(state.user.workspace.layout().focused(), Some(ids[1]));
     }
 
     #[test]

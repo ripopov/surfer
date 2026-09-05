@@ -179,21 +179,21 @@ mod tests {
                 focus: true,
             }))
             .unwrap();
-        let waveform = state.user.workspace.layout.focused().unwrap();
+        let waveform = state.user.workspace.layout().focused().unwrap();
         open(&mut state, false);
         let logs = *state
             .user
             .workspace
-            .tiles
+            .tiles()
             .iter()
             .find(|(_, entry)| entry.kind.kind_name() == "logs")
             .unwrap()
             .0;
-        assert_eq!(state.user.workspace.layout.focused(), Some(waveform));
-        let revision = state.user.workspace.layout.revision();
+        assert_eq!(state.user.workspace.layout().focused(), Some(waveform));
+        let revision = state.user.workspace.layout().revision();
         open(&mut state, false);
-        assert_eq!(state.user.workspace.layout.revision(), revision);
-        assert_eq!(state.user.workspace.tiles.len(), 2);
+        assert_eq!(state.user.workspace.layout().revision(), revision);
+        assert_eq!(state.user.workspace.tiles().len(), 2);
         state
             .update(Message::Workspace(WorkspaceCommand::CreateTile {
                 kind: "logs".into(),
@@ -201,8 +201,8 @@ mod tests {
                 focus: true,
             }))
             .unwrap();
-        assert_eq!(state.user.workspace.layout.focused(), Some(logs));
-        assert_eq!(state.user.workspace.tiles.len(), 2);
+        assert_eq!(state.user.workspace.layout().focused(), Some(logs));
+        assert_eq!(state.user.workspace.tiles().len(), 2);
         state
             .update(Message::ToTile(
                 logs,
@@ -212,7 +212,7 @@ mod tests {
         let encoded = state.encode_state().unwrap();
         assert!(!encoded.contains("show_logs"));
         let restored: crate::state::UserState = crate::tiles::serde::decode(&encoded).unwrap();
-        let TileKind::Logs(tile) = &restored.workspace.tiles[&logs].kind else {
+        let TileKind::Logs(tile) = &restored.workspace.tiles()[&logs].kind else {
             panic!()
         };
         assert_eq!(tile.filter, LevelFilter::Warn);
@@ -236,16 +236,16 @@ mod tests {
                 ))
                 .is_none()
         );
-        assert_eq!(state.user.workspace.tiles.len(), 1);
+        assert_eq!(state.user.workspace.tiles().len(), 1);
         open(&mut state, true);
-        assert_ne!(state.user.workspace.layout.focused(), Some(logs));
+        assert_ne!(state.user.workspace.layout().focused(), Some(logs));
     }
 
     #[test]
     fn filter_widget_emits_a_captured_command_without_mutating_the_tile() {
         let mut state = SystemState::new_default_config().unwrap();
         open(&mut state, true);
-        let logs = state.user.workspace.layout.focused().unwrap();
+        let logs = state.user.workspace.layout().focused().unwrap();
         let ctx = egui::Context::default();
         let frame = |events, state: &SystemState| {
             let mut messages = Vec::new();
@@ -309,7 +309,7 @@ mod tests {
         assert!(
             matches!(&messages[0], Message::ToTile(id, TileMessage::Logs(LogsMessage::SetFilter(LevelFilter::Warn))) if *id == logs)
         );
-        let TileKind::Logs(tile) = &state.user.workspace.tiles[&logs].kind else {
+        let TileKind::Logs(tile) = &state.user.workspace.tiles()[&logs].kind else {
             panic!()
         };
         assert_eq!(tile.filter, LevelFilter::Trace);
@@ -323,10 +323,10 @@ mod tests {
         for message in messages {
             state.update(message).unwrap();
         }
-        let TileKind::Logs(tile) = &state.user.workspace.tiles[&logs].kind else {
+        let TileKind::Logs(tile) = &state.user.workspace.tiles()[&logs].kind else {
             panic!()
         };
         assert_eq!(tile.filter, LevelFilter::Warn);
-        assert_ne!(state.user.workspace.layout.focused(), Some(logs));
+        assert_ne!(state.user.workspace.layout().focused(), Some(logs));
     }
 }

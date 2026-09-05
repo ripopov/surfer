@@ -1,5 +1,10 @@
 //! Semantic history retains affected resources, never the whole workspace.
-use super::{TileId, kind::TileSettings, layout::LayoutNode};
+use crate::tiles::{
+    TileId,
+    kind::TileSettings,
+    layout::LayoutNode,
+    resources::{Dependencies, ResourceId},
+};
 
 pub(crate) enum UndoRecord {
     Marker {
@@ -11,8 +16,8 @@ pub(crate) enum UndoRecord {
     Resources(Box<ResourceChange>),
     Move {
         tile: TileId,
-        before: super::placement::TileLocation,
-        after: super::placement::TileLocation,
+        before: crate::tiles::placement::TileLocation,
+        after: crate::tiles::placement::TileLocation,
     },
     SetLayout {
         before: Option<LayoutNode>,
@@ -44,7 +49,7 @@ impl UndoRecord {
     }
 }
 
-use super::{ItemListId, commands::WorkspaceCommand, kind::TileEntry, workspace::Workspace};
+use crate::tiles::{ItemListId, commands::WorkspaceCommand, kind::TileEntry, workspace::Workspace};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The record owns only resources absent from the workspace. Swapping it with
@@ -100,11 +105,7 @@ impl ResourceEditStart {
             .filter(|(id, _)| !removed.contains(id))
             .map(|(_, entry)| &entry.kind)
             .collect::<Vec<_>>();
-        let keep_unknown = survivors.iter().any(|kind| kind.has_unknown_resources());
-        let referenced = survivors
-            .iter()
-            .filter_map(|kind| kind.item_list())
-            .collect::<BTreeSet<_>>();
+        let dependencies = Dependencies::union(survivors.iter().map(|kind| kind.dependencies()));
         Some(Self {
             change: ResourceChange {
                 label,
@@ -119,7 +120,7 @@ impl ResourceEditStart {
                     .item_lists
                     .iter()
                     .filter(|(id, _)| {
-                        !removed.is_empty() && !keep_unknown && !referenced.contains(id)
+                        !removed.is_empty() && !dependencies.retains(ResourceId::ItemList(**id))
                     })
                     .map(|(id, list)| (*id, list.copy_content()))
                     .collect(),
@@ -191,6 +192,7 @@ impl ResourceChange {
             .filter(|id| !self.present_lists.contains(id))
             .chain(self.absent_lists.keys())
             .copied()
+            .map(ResourceId::ItemList)
             .collect::<BTreeSet<_>>();
         if workspace
             .tiles
@@ -198,11 +200,7 @@ impl ResourceChange {
             .filter(|(id, _)| !self.present_tiles.contains(id))
             .map(|(_, tile)| tile)
             .chain(self.absent_tiles.values())
-            .any(|tile| {
-                tile.kind
-                    .item_list()
-                    .is_some_and(|id| !list_ids.contains(&id))
-            })
+            .any(|tile| tile.kind.dependencies().validate(&list_ids).is_err())
         {
             return false;
         }
@@ -250,7 +248,7 @@ impl ResourceChange {
     }
 }
 
-use super::layout::same_topology;
+use crate::tiles::layout::same_topology;
 
 /// Match surviving containers by stable child membership, independent of order.
 /// Only reconstructed containers use the shares and active tab from history.
@@ -285,7 +283,7 @@ fn retain_navigation(restored: &mut LayoutNode, current: &LayoutNode, ignored: &
         tabs: BTreeMap<Vec<TileId>, TileId>,
     }
     fn split_key(
-        dir: super::layout::SplitDir,
+        dir: crate::tiles::layout::SplitDir,
         children: &[LayoutNode],
         ignored: &BTreeSet<TileId>,
     ) -> SplitKey {
@@ -296,8 +294,8 @@ fn retain_navigation(restored: &mut LayoutNode, current: &LayoutNode, ignored: &
         groups.sort();
         (
             match dir {
-                super::layout::SplitDir::Horizontal => 0,
-                super::layout::SplitDir::Vertical => 1,
+                crate::tiles::layout::SplitDir::Horizontal => 0,
+                crate::tiles::layout::SplitDir::Vertical => 1,
             },
             groups,
         )
@@ -377,8 +375,8 @@ pub(crate) fn move_record(
     }
     Some(UndoRecord::Move {
         tile,
-        before: super::placement::TileLocation::capture(before, tile)?,
-        after: super::placement::TileLocation::capture(after, tile)?,
+        before: crate::tiles::placement::TileLocation::capture(before, tile)?,
+        after: crate::tiles::placement::TileLocation::capture(after, tile)?,
     })
 }
 
@@ -435,7 +433,7 @@ impl crate::SystemState {
                 let restored = (|| {
                     let layout = &mut self.user.workspace.layout;
                     let current = layout.root()?;
-                    let inverse = super::placement::TileLocation::capture(current, tile)?;
+                    let inverse = crate::tiles::placement::TileLocation::capture(current, tile)?;
                     let root = if redo {
                         after.restore(current)?
                     } else {
@@ -684,7 +682,7 @@ mod tests {
 
     #[test]
     fn reset_is_one_record_that_restores_tiles_lists_and_layout() {
-        use super::super::layout::same_topology;
+        use crate::tiles::layout::same_topology;
         use crate::{
             displayed_item_tree::{ItemIndex, TargetPosition},
             tile_kinds::waveform::WaveformMessage,
@@ -735,7 +733,10 @@ mod tests {
             state.user.workspace.layout.root(),
             root_before.as_ref()
         ));
-        let list = state.user.workspace.tiles[&first].kind.item_list().unwrap();
+        let list = state.user.workspace.tiles[&first]
+            .kind
+            .waveform_list()
+            .unwrap();
         assert_eq!(state.user.workspace.item_lists[&list].items_tree.len(), 1);
         state.update(Message::Redo(1)).unwrap();
         assert_eq!(state.user.workspace.tiles.len(), 1);
@@ -781,7 +782,7 @@ mod tests {
         let waveform = open(&mut state, "waveform");
         let list = state.user.workspace.tiles[&waveform]
             .kind
-            .item_list()
+            .waveform_list()
             .unwrap();
         let rows = |state: &SystemState| state.user.workspace.item_lists[&list].items_tree.len();
         let marker = |state: &SystemState, id: u8| {
@@ -961,7 +962,10 @@ mod tests {
                 }),
             ))
             .unwrap();
-        let list = state.user.workspace.tiles[&first].kind.item_list().unwrap();
+        let list = state.user.workspace.tiles[&first]
+            .kind
+            .waveform_list()
+            .unwrap();
         let row = *state.user.workspace.item_lists[&list]
             .displayed_items
             .keys()
@@ -1216,7 +1220,10 @@ mod tests {
             }))
             .unwrap();
         let second = state.user.workspace.layout.focused().unwrap();
-        let list = state.user.workspace.tiles[&first].kind.item_list().unwrap();
+        let list = state.user.workspace.tiles[&first]
+            .kind
+            .waveform_list()
+            .unwrap();
         state.user.workspace.item_lists[&list]
             .layout_cache
             .borrow_mut()
@@ -1378,7 +1385,10 @@ mod tests {
         use crate::tiles::commands::SplitMode;
         let mut state = SystemState::new_default_config().unwrap();
         let first = open(&mut state, "waveform");
-        let list = state.user.workspace.tiles[&first].kind.item_list().unwrap();
+        let list = state.user.workspace.tiles[&first]
+            .kind
+            .waveform_list()
+            .unwrap();
         state
             .user
             .workspace
@@ -1395,7 +1405,7 @@ mod tests {
             .unwrap();
         let second = state.user.workspace.layout.focused().unwrap();
         assert_eq!(
-            state.user.workspace.tiles[&second].kind.item_list(),
+            state.user.workspace.tiles[&second].kind.waveform_list(),
             Some(list)
         );
         let TileKind::Waveform(tile) =
@@ -1413,7 +1423,7 @@ mod tests {
         assert_eq!(ron::to_string(&tile.view.viewport).unwrap(), navigation);
         state.update(Message::Redo(1)).unwrap();
         assert_eq!(
-            state.user.workspace.tiles[&second].kind.item_list(),
+            state.user.workspace.tiles[&second].kind.waveform_list(),
             Some(list)
         );
         state
@@ -1446,7 +1456,7 @@ mod tests {
         assert!(
             state.user.workspace.tiles[&fresh]
                 .kind
-                .item_list()
+                .waveform_list()
                 .unwrap()
                 .0
                 > list.0
@@ -1458,7 +1468,10 @@ mod tests {
         use crate::tiles::commands::SplitMode;
         let mut state = SystemState::new_default_config().unwrap();
         let first = open(&mut state, "waveform");
-        let original = state.user.workspace.tiles[&first].kind.item_list().unwrap();
+        let original = state.user.workspace.tiles[&first]
+            .kind
+            .waveform_list()
+            .unwrap();
         state
             .update(Message::Workspace(WorkspaceCommand::SplitTile {
                 tile: first,
@@ -1469,7 +1482,7 @@ mod tests {
         let second = state.user.workspace.layout.focused().unwrap();
         let copied = state.user.workspace.tiles[&second]
             .kind
-            .item_list()
+            .waveform_list()
             .unwrap();
         assert_ne!(original, copied);
         state

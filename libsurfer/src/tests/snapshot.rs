@@ -1917,7 +1917,7 @@ fn multi_tab_state() -> (SystemState, crate::tiles::TileId, crate::tiles::TileId
     ] {
         state.update(message);
     }
-    let first = state.user.workspace.layout.focused().unwrap();
+    let first = state.user.workspace.layout().focused().unwrap();
     state.update(Message::AddVariables(vec![
         VariableRef::from_hierarchy_string("tb.clk"),
     ]));
@@ -1930,7 +1930,7 @@ fn multi_tab_state() -> (SystemState, crate::tiles::TileId, crate::tiles::TileId
         placement: Placement::TabAfter(first),
         focus: true,
     }));
-    let second = state.user.workspace.layout.focused().unwrap();
+    let second = state.user.workspace.layout().focused().unwrap();
     assert_ne!(first, second);
     state.update(Message::AddVariables(vec![
         VariableRef::from_hierarchy_string("tb.dut.counter"),
@@ -1940,7 +1940,7 @@ fn multi_tab_state() -> (SystemState, crate::tiles::TileId, crate::tiles::TileId
         title: Some("Counter".into()),
     }));
     wait_for_waves_fully_loaded(&mut state, 10);
-    assert_eq!(state.user.workspace.item_lists.len(), 2);
+    assert_eq!(state.user.workspace.item_lists().len(), 2);
     (state, first, second)
 }
 
@@ -1959,9 +1959,9 @@ snapshot_ui!(multi_tab_close_undo, || {
     state.update(Message::Workspace(
         crate::tiles::commands::WorkspaceCommand::CloseTile(second),
     ));
-    assert!(!state.user.workspace.tiles.contains_key(&second));
+    assert!(!state.user.workspace.tiles().contains_key(&second));
     state.update(Message::Undo(1));
-    assert!(state.user.workspace.tiles.contains_key(&second));
+    assert!(state.user.workspace.tiles().contains_key(&second));
     state.update(Message::Workspace(
         crate::tiles::commands::WorkspaceCommand::FocusTile(second),
     ));
@@ -2001,9 +2001,9 @@ fn multi_tab_linked_state() -> SystemState {
         dir: TileDirection::Right,
         mode: SplitMode::Linked,
     }));
-    let linked = state.user.workspace.layout.focused().unwrap();
+    let linked = state.user.workspace.layout().focused().unwrap();
     assert_ne!(linked, second);
-    assert_eq!(state.user.workspace.item_lists.len(), 2);
+    assert_eq!(state.user.workspace.item_lists().len(), 2);
     state.update(Message::Workspace(WorkspaceCommand::RenameTile {
         tile: linked,
         title: Some("Counter detail".into()),
@@ -2035,7 +2035,7 @@ fn saved_workspace_round_trip_renders_identically() {
         let restored: UserState = crate::tiles::serde::decode(&encoded).unwrap();
         let mut fresh = counter_state();
         fresh.update(Message::Workspace(WorkspaceCommand::RenameTile {
-            tile: fresh.user.workspace.layout.focused().unwrap(),
+            tile: fresh.user.workspace.layout().focused().unwrap(),
             title: Some("Replaced by the saved workspace".into()),
         }));
         fresh.update(Message::LoadState(Box::new(restored), None));
@@ -2050,7 +2050,7 @@ fn saved_workspace_round_trip_renders_identically() {
         );
         let rows = |workspace: &crate::tiles::workspace::Workspace| {
             workspace
-                .item_lists
+                .item_lists()
                 .iter()
                 .map(|(id, list)| {
                     (
@@ -2155,7 +2155,7 @@ fn overview_click_focuses_the_waveform_tile_under_the_pointer() {
         "unexpected {msgs:?}"
     );
     state.update(Message::Workspace(WorkspaceCommand::FocusTile(first)));
-    assert_eq!(state.user.workspace.layout.focused(), Some(first));
+    assert_eq!(state.user.workspace.layout().focused(), Some(first));
 }
 
 snapshot_ui!(multi_tab_independent_split, || {
@@ -2165,11 +2165,14 @@ snapshot_ui!(multi_tab_independent_split, || {
         dir: TileDirection::Down,
         mode: SplitMode::Independent,
     }));
-    let copy = state.user.workspace.layout.focused().unwrap();
-    assert_eq!(state.user.workspace.item_lists.len(), 3);
+    let copy = state.user.workspace.layout().focused().unwrap();
+    assert_eq!(state.user.workspace.item_lists().len(), 3);
     // The copy owns its list: replacing its rows leaves the original untouched.
-    let list = state.user.workspace.tiles[&copy].kind.item_list().unwrap();
-    let rows = state.user.workspace.item_lists[&list]
+    let list = state.user.workspace.tiles()[&copy]
+        .kind
+        .waveform_list()
+        .unwrap();
+    let rows = state.user.workspace.item_lists()[&list]
         .displayed_items
         .keys()
         .copied()
@@ -2215,7 +2218,7 @@ snapshot_ui!(multi_tile_every_kind, || {
     ] {
         state.update(message);
     }
-    let waveform = state.user.workspace.layout.focused().unwrap();
+    let waveform = state.user.workspace.layout().focused().unwrap();
     state.update(Message::AddVariables(vec![
         VariableRef::from_hierarchy_string("image_memory.height"),
         VariableRef::from_hierarchy_string("image_memory.width"),
@@ -2228,14 +2231,14 @@ snapshot_ui!(multi_tile_every_kind, || {
         name: Some("image_memory.mem".to_string()),
         placement: None,
     });
-    let memory = state.user.workspace.layout.focused().unwrap();
+    let memory = state.user.workspace.layout().focused().unwrap();
     // An array that this document does not contain renders an unavailable state.
     state.update(Message::OpenMemoryViewer {
         scope: ScopeRef::from_hierarchy_string("image_memory.missing_array"),
         name: Some("missing array".to_string()),
         placement: None,
     });
-    let missing = state.user.workspace.layout.focused().unwrap();
+    let missing = state.user.workspace.layout().focused().unwrap();
     state.update(Message::Workspace(WorkspaceCommand::MoveTile {
         tile: missing,
         to: Placement::Beside(memory, TileDirection::Down),
@@ -2261,7 +2264,7 @@ snapshot_ui!(multi_tile_every_kind, || {
     let annotations = *state
         .user
         .workspace
-        .tiles
+        .tiles()
         .iter()
         .find(|(_, entry)| entry.kind.kind_name() == "annotation_list")
         .unwrap()
@@ -2279,7 +2282,7 @@ snapshot_ui!(multi_tile_every_kind, || {
     let logs = *state
         .user
         .workspace
-        .tiles
+        .tiles()
         .iter()
         .find(|(_, entry)| entry.kind.kind_name() == "logs")
         .unwrap()
@@ -2293,7 +2296,7 @@ snapshot_ui!(multi_tile_every_kind, || {
     ));
     state.update(Message::Workspace(WorkspaceCommand::FocusTile(memory)));
     wait_for_waves_fully_loaded(&mut state, 10);
-    assert_eq!(state.user.workspace.tiles.len(), 7);
+    assert_eq!(state.user.workspace.tiles().len(), 7);
     state
 });
 
@@ -2310,14 +2313,17 @@ snapshot_ui!(unknown_tile_kind_preserved, || {
         crate::tiles::serde::decode(include_str!("../tiles/fixtures/future-tile.ron")).unwrap(),
     )
     .unwrap();
-    let id = state.workspace_runtime.allocate_tile().unwrap();
     state
         .user
         .workspace
-        .layout
-        .insert(id, Placement::Beside(first, TileDirection::Right))
+        .insert_prepared(
+            &mut state.workspace_runtime,
+            entry,
+            Default::default(),
+            Placement::Beside(first, TileDirection::Right),
+            false,
+        )
         .unwrap();
-    state.user.workspace.tiles.insert(id, entry);
     state.update(Message::Workspace(WorkspaceCommand::FocusTile(first)));
     // The envelope survives a save unchanged.
     let saved = state.encode_state().unwrap();
@@ -2342,7 +2348,7 @@ snapshot_ui!(workspace_reset_keeps_target_waveform, || {
         state
             .user
             .workspace
-            .tiles
+            .tiles()
             .keys()
             .copied()
             .collect::<Vec<_>>(),
@@ -2371,8 +2377,8 @@ snapshot_ui!(legacy_state_file_migrates_into_linked_tiles, || {
         VariableRef::from_hierarchy_string("tb.clk"),
         VariableRef::from_hierarchy_string("tb.dut.counter"),
     ]));
-    assert_eq!(state.user.workspace.item_lists.len(), 1);
-    assert_eq!(state.user.workspace.tiles.len(), 5);
+    assert_eq!(state.user.workspace.item_lists().len(), 1);
+    assert_eq!(state.user.workspace.tiles().len(), 5);
     wait_for_waves_fully_loaded(&mut state, 10);
     state
 });

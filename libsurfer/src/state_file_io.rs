@@ -293,28 +293,28 @@ mod tests {
         assert!(
             restored
                 .workspace
-                .tiles
+                .tiles()
                 .values()
                 .any(|tile| tile.kind.kind_name() == "logs")
         );
         assert!(
             restored
                 .workspace
-                .tiles
+                .tiles()
                 .values()
                 .any(|tile| tile.kind.kind_name() == "annotation_list")
         );
-        let order = restored.workspace.layout.tile_order();
+        let order = restored.workspace.layout().tile_order();
         assert_eq!(order.len(), 5);
         assert!(
             restored
                 .workspace
-                .tiles
+                .tiles()
                 .values()
                 .any(|tile| tile.kind.kind_name() == "transaction_details")
         );
-        assert_eq!(restored.workspace.layout.focused(), Some(order[1]));
-        assert_eq!(restored.workspace.item_lists.len(), 1);
+        assert_eq!(restored.workspace.layout().focused(), Some(order[1]));
+        assert_eq!(restored.workspace.item_lists().len(), 1);
         let (items, view) = restored.workspace.waveform_resources(order[1]).unwrap();
         assert_eq!(items.items_tree.len(), 1);
         assert_eq!(
@@ -326,7 +326,7 @@ mod tests {
         let native = ron::to_string(&restored).unwrap();
         assert!(native.contains("state_version:1"));
         let round_trip: crate::state::UserState = crate::tiles::serde::decode(&native).unwrap();
-        assert_eq!(round_trip.workspace.layout.tile_order(), order);
+        assert_eq!(round_trip.workspace.layout().tile_order(), order);
         let mut state = SystemState::new_default_config().unwrap();
         state
             .update(Message::LoadState(Box::new(round_trip), None))
@@ -336,7 +336,7 @@ mod tests {
             state.user.previous_waves.as_ref().unwrap().cursor,
             Some(45.into())
         );
-        assert_eq!(state.user.workspace.layout.tile_order(), order);
+        assert_eq!(state.user.workspace.layout().tile_order(), order);
     }
 
     #[test]
@@ -379,7 +379,7 @@ mod tests {
         let placement = state
             .user
             .workspace
-            .layout
+            .layout()
             .focused()
             .map_or(Placement::Root, Placement::TabAfter);
         state
@@ -389,7 +389,7 @@ mod tests {
                 focus: true,
             }))
             .unwrap();
-        state.user.workspace.layout.focused().unwrap()
+        state.user.workspace.layout().focused().unwrap()
     }
 
     #[test]
@@ -436,15 +436,15 @@ mod tests {
         ))
         .unwrap();
         state.update(command).unwrap();
-        let TileKind::Waveform(first_tile) = &state.user.workspace.tiles[&first].kind else {
+        let TileKind::Waveform(first_tile) = &state.user.workspace.tiles()[&first].kind else {
             panic!()
         };
-        let TileKind::Waveform(second_tile) = &state.user.workspace.tiles[&second].kind else {
+        let TileKind::Waveform(second_tile) = &state.user.workspace.tiles()[&second].kind else {
             panic!()
         };
         assert!(!first_tile.show_name_column && !first_tile.show_value_column);
         assert!(!second_tile.show_name_column && second_tile.show_value_column);
-        assert_eq!(state.user.workspace.layout.focused(), Some(second));
+        assert_eq!(state.user.workspace.layout().focused(), Some(second));
         assert!(state.user.waves.is_none());
     }
 
@@ -468,7 +468,7 @@ mod tests {
         let message = state.channels.msg_receiver.try_recv().unwrap();
         state.update(message).unwrap();
         assert_eq!(ron::to_string(&state.user.workspace).unwrap(), saved);
-        assert_eq!(state.user.workspace.layout.visible_tiles(), vec![second]);
+        assert_eq!(state.user.workspace.layout().visible_tiles(), vec![second]);
         assert!(!state.workspace_runtime.accepts(pending, Some(pending)));
         assert!(create_waveform(&mut state).0 > third.0);
     }
