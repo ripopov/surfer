@@ -75,7 +75,7 @@ Controls how time values are rendered in the UI.
 
 ## `[layout]`
 
-`hide_single_tab_bar` (default `false`) hides the workspace tab bar while exactly one tile is open.
+`hide_single_tab_bar` (default `true`) hides the workspace tab bar while exactly one tile is open.
 
 Controls the initial UI layout and waveform rendering behavior.
 

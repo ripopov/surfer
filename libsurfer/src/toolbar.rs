@@ -587,6 +587,27 @@ impl SystemState {
         use crate::tiles::{TileTarget, layout::Direction};
         let workspace = &self.user.workspace;
         let focused = TileTarget::Focused;
+        if self.user.config.layout.hide_single_tab_bar && workspace.tiles().len() <= 1 {
+            let split = workspace.split_command(focused, Direction::Right, false);
+            let enabled = split.is_some();
+            add_toolbar_button(
+                ui,
+                msgs,
+                icons::ADD_BOX_FILL,
+                "Split tile right",
+                split.map(Message::Workspace),
+                enabled,
+            );
+            add_toolbar_button(
+                ui,
+                msgs,
+                icons::CHECKBOX_INDETERMINATE_FILL,
+                "Close tile",
+                None::<Message>,
+                false,
+            );
+            return;
+        }
         for (icon, hover, command) in [
             (
                 icons::SPLIT_CELLS_HORIZONTAL,

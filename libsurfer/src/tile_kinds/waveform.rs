@@ -631,7 +631,7 @@ impl WaveformTile {
             link_vertical_scroll: false,
             show_name_column: true,
             show_value_column: true,
-            name_column_width: 220.0,
+            name_column_width: 100.0,
             value_column_width: 100.0,
         }
     }

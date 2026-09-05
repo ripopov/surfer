@@ -250,7 +250,7 @@ impl<R: PaneRenderer> Behavior<TileId> for PaneBehavior<'_, R> {
         );
         self.events
             .extend(commands.into_iter().map(PaneEvent::Command));
-        if self.focused == Some(*pane) {
+        if self.focused == Some(*pane) && !self.hide_tab_bar {
             ui.painter().rect_stroke(
                 rect,
                 0.0,
@@ -301,6 +301,9 @@ impl<R: PaneRenderer> Behavior<TileId> for PaneBehavior<'_, R> {
         id: egui_tiles::TileId,
         response: Response,
     ) -> Response {
+        if self.hide_tab_bar {
+            return response;
+        }
         if let Some(pane) = tiles.get_pane(&id) {
             self.tab_rects.insert(*pane, response.rect);
             if response.drag_started() {
@@ -654,6 +657,11 @@ mod tests {
         let multiple = frame(&ctx, &mut adapter, &layout, &runtime, &probe, vec![]);
         assert_eq!(multiple.rects[&TileId(1)], shown.rects[&TileId(1)]);
         assert_eq!(multiple.tab_rects.len(), 2);
+        layout.remove(TileId(2)).unwrap();
+        let single_again = frame(&ctx, &mut adapter, &layout, &runtime, &probe, vec![]);
+        assert!(single_again.tab_rects.is_empty());
+        assert_eq!(single_again.rects, hidden.rects);
+        assert_eq!(probe.seen.borrow()[&TileId(1)].0, body_id);
     }
 
     #[test]

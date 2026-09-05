@@ -804,7 +804,7 @@ against the pinned dependency when building the adapter):
 `all_panes_must_have_tabs: true` means every tile always sits in a tab group,
 so there is **one** rendering path whether there is one tile or ten. The only
 thing that changes for a lone tile is `tab_bar_height` (config
-`layout.hide_single_tab_bar`, default `false`). The PoC's separate
+`layout.hide_single_tab_bar`, default `true`). The PoC's separate
 `is_single_waveform` fast path is not reproduced.
 
 Tab context menu (generic part): Split Right, Split Down, Split Copy Right/Down

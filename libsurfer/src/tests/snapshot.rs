@@ -2301,7 +2301,7 @@ snapshot_ui!(multi_tile_every_kind, || {
 });
 
 snapshot_ui_with_file_and_msgs! {hide_single_tab_bar, "examples/counter.vcd", state_mods: (|state: &mut SystemState| {
-    state.user.config.layout.hide_single_tab_bar = true;
+    assert!(state.user.config.layout.hide_single_tab_bar);
 }), [
     Message::AddVariables(vec![VariableRef::from_hierarchy_string("tb.clk")]),
 ]}

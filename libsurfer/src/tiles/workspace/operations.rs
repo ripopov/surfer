@@ -54,6 +54,10 @@ impl crate::tiles::workspace::Workspace {
     pub(crate) fn update_viewports(&mut self, document: &mut crate::wave_data::WaveData) {
         if let Some(old_end) = document.old_max_timestamp.take() {
             let new_end = document.safe_max_timestamp();
+            if new_end == old_end {
+                document.cached_time_range.end = new_end;
+                return;
+            }
             let old_range = crate::wave_data::TimeRange {
                 start: document.time_range().start.clone(),
                 end: old_end,

@@ -77,3 +77,12 @@ collection to resume; undo retains and restores the resources removed by that
 operation. Opaque retention does not excuse a known tile's missing dependency.
 Unknown tiles cannot be independently copied because their references cannot
 be safely rewritten.
+
+## Single-tile presentation
+
+By default, a workspace with one tile hides its tab bar and focus outline.
+The default waveform uses 100-pixel name and value columns, matching the
+pre-tiling layout; an empty waveform shows the welcome screen. The toolbar
+keeps the compact add/remove controls until a second tile is opened. Multiple
+tiles show tab bars, focus outlines, and directional split controls. Set
+`layout.hide_single_tab_bar = false` to show tile controls even for one tile.

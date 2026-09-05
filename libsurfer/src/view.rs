@@ -372,7 +372,14 @@ impl SystemState {
             }
         }
 
-        if !self.user.workspace.tiles().is_empty() {
+        let show_welcome = self.user.workspace.tiles().is_empty()
+            || (self.user.config.layout.hide_single_tab_bar
+                && self.user.workspace.tiles().len() == 1
+                && self
+                    .user
+                    .waveform_read()
+                    .is_some_and(|waves| !waves.items.any_displayed()));
+        if !show_welcome {
             let focus_ids = self.command_prompt.visible
                 && expand_command(
                     &self.command_prompt_text.borrow(),
@@ -419,7 +426,7 @@ impl SystemState {
             }
         }
 
-        if self.user.workspace.tiles().is_empty() {
+        if show_welcome {
             CentralPanel::default()
                 .frame(Frame::NONE.fill(self.user.config.theme.canvas_colors.background))
                 .show(ui, |ui| {
