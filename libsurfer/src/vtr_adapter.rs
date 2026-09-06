@@ -239,7 +239,7 @@ fn split_range(name: &str) -> (&str, Option<wellen::VarIndex>) {
     }
 }
 
-fn timescale(exponent: i8) -> Result<wellen::Timescale, String> {
+pub(crate) fn timescale(exponent: i8) -> Result<wellen::Timescale, String> {
     use wellen::TimescaleUnit::*;
     let base = i32::from(exponent).div_euclid(3) * 3;
     let unit = match base {

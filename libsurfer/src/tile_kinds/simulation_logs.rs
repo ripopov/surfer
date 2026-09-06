@@ -346,8 +346,19 @@ pub(crate) mod native {
                     .desired_width(230.0),
             );
         });
+        let time_unit = match crate::vtr_adapter::timescale(source.timescale) {
+            Ok(scale) => {
+                let unit = crate::time::TimeUnit::from(scale.unit);
+                if scale.factor == 1 {
+                    unit.to_string()
+                } else {
+                    format!("{} {unit}", scale.factor)
+                }
+            }
+            Err(_) => format!("10^{} s", source.timescale),
+        };
         ui.horizontal_wrapped(|ui| {
-            ui.label(format!("Time (10^{} s ticks)", source.timescale));
+            ui.label(format!("Time ({time_unit})"));
             ui.add(
                 egui::TextEdit::singleline(&mut q.start)
                     .hint_text("From")
@@ -388,7 +399,7 @@ pub(crate) mod native {
         };
         ui.label(format!("{} messages", result.matches.len()));
         ui.horizontal(|ui| {
-            ui.add_sized([130.0, 20.0], egui::Label::new("TIME"));
+            ui.add_sized([130.0, 20.0], egui::Label::new(format!("TIME ({time_unit})")));
             ui.add_sized([75.0, 20.0], egui::Label::new("SEVERITY"));
             ui.label("MESSAGE");
         });
