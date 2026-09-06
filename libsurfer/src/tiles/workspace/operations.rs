@@ -113,6 +113,7 @@ impl crate::tiles::workspace::Workspace {
             | TileKind::AnnotationList(_)
             | TileKind::TransactionDetails(_)
             | TileKind::Markers(_)
+            | TileKind::SimulationLogs(_)
             | TileKind::Logs(_)
             | TileKind::Schematic(_)
             | TileKind::SourceCode(_)
@@ -156,6 +157,7 @@ impl crate::tiles::workspace::Workspace {
                 | TileKind::AnnotationList(_)
                 | TileKind::TransactionDetails(_)
                 | TileKind::Markers(_)
+                | TileKind::SimulationLogs(_)
                 | TileKind::Logs(_)
                 | TileKind::Schematic(_)
                 | TileKind::SourceCode(_)
@@ -185,6 +187,7 @@ impl crate::tiles::workspace::Workspace {
             (TileKind::FrameBuffer(_), TileMessage::FrameBuffer(_))
                 | (TileKind::Memory(_), TileMessage::Memory(_))
                 | (TileKind::AnnotationList(_), TileMessage::AnnotationList(_))
+                | (TileKind::SimulationLogs(_), TileMessage::SimulationLogs(_))
                 | (TileKind::Logs(_), TileMessage::Logs(_))
                 | (TileKind::Waveform(_), TileMessage::Waveform(_))
         )
@@ -251,6 +254,18 @@ impl crate::tiles::workspace::Workspace {
                     return Ok(false);
                 };
                 Ok(tile.update(message))
+            }
+            TileMessage::SimulationLogs(query) => {
+                let Some(TileEntry {
+                    kind: TileKind::SimulationLogs(tile),
+                    ..
+                }) = self.tiles.get_mut(&target)
+                else {
+                    return Ok(false);
+                };
+                let changed = tile.query != query;
+                tile.query = query;
+                Ok(changed)
             }
             TileMessage::Logs(message) => {
                 let Some(TileEntry {

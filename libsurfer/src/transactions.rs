@@ -410,7 +410,31 @@ fn draw_transaction_stream_variables(
             ui.with_layout(
                 Layout::top_down(Align::LEFT).with_cross_justify(true),
                 |ui| {
-                    if ui.selectable_label(false, &generator.name).clicked() {
+                    let label = &generator.name;
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let label = inner
+                        .native
+                        .as_ref()
+                        .and_then(|n| n.logs.generators.iter().find(|g| g.id == gen_id.0 as u32))
+                        .map_or(label, |g| &g.label);
+                    let response = ui.selectable_label(false, label);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if inner
+                        .native
+                        .as_ref()
+                        .is_some_and(|n| n.logs.generators.iter().any(|g| g.id == gen_id.0 as u32))
+                    {
+                        response.context_menu(|ui| {
+                            if ui.button("Open simulation logs").clicked() {
+                                msgs.push(Message::OpenSimulationLogs(
+                                    stream_ref.stream_id.0 as u32,
+                                    Some(gen_id.0 as u32),
+                                ));
+                                ui.close();
+                            }
+                        });
+                    }
+                    if response.clicked() {
                         msgs.push(Message::AddStreamOrGenerator(
                             TransactionStreamRef::new_gen(
                                 stream_ref.stream_id,
@@ -445,6 +469,19 @@ fn draw_transaction_root_variables(
             Layout::top_down(Align::LEFT).with_cross_justify(true),
             |ui| {
                 let response = ui.selectable_label(false, &stream.name);
+                #[cfg(not(target_arch = "wasm32"))]
+                if inner
+                    .native
+                    .as_ref()
+                    .is_some_and(|n| n.logs.streams.iter().any(|s| s.0 == stream.id.0 as u32))
+                {
+                    response.context_menu(|ui| {
+                        if ui.button("Open simulation logs").clicked() {
+                            msgs.push(Message::OpenSimulationLogs(stream.id.0 as u32, None));
+                            ui.close();
+                        }
+                    });
+                }
                 if response.clicked() {
                     msgs.push(Message::AddStreamOrGenerator(
                         TransactionStreamRef::new_stream(stream.id, stream.name.clone()),

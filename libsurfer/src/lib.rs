@@ -716,6 +716,56 @@ impl SystemState {
                     let _ = futures::executor::block_on(channel.send(WcpSCMessage::event(event)));
                 }
             }
+            Message::OpenSimulationLogs(stream, generator) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let source = &self
+                        .user
+                        .waves
+                        .as_ref()?
+                        .inner
+                        .as_transactions()?
+                        .native
+                        .as_ref()?
+                        .logs;
+                    if !source.streams.iter().any(|s| s.0 == stream)
+                        || generator.is_some_and(|id| {
+                            !source
+                                .generators
+                                .iter()
+                                .any(|g| g.id == id && g.stream == stream)
+                        })
+                    {
+                        return None;
+                    }
+                    self.user
+                        .workspace
+                        .apply_command(
+                            &mut self.workspace_runtime,
+                            crate::tiles::commands::WorkspaceCommand::OpenTile {
+                                kind: "simulation_logs".into(),
+                                placement: crate::tiles::layout::Placement::Edge(
+                                    crate::tiles::layout::Direction::Down,
+                                ),
+                                focus: true,
+                            },
+                        )
+                        .ok()?;
+                    let id = self.user.workspace.layout().focused()?;
+                    let crate::tiles::kind::TileKind::SimulationLogs(tile) =
+                        &mut self.user.workspace.tiles_mut().get_mut(&id)?.kind
+                    else {
+                        return None;
+                    };
+                    tile.query = crate::tile_kinds::simulation_logs::Query {
+                        stream: Some(stream),
+                        generator,
+                        ..Default::default()
+                    };
+                }
+                #[cfg(target_arch = "wasm32")]
+                let _ = (stream, generator);
+            }
             Message::OpenSchematic(instance, highlight) => {
                 let schematic_tile = self.user.workspace.tiles().iter().find_map(|(id, entry)| {
                     (entry.kind.kind_name() == crate::tiles::kind::SCHEMATIC.name).then_some(*id)

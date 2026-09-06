@@ -11,6 +11,7 @@ pub enum TileMessage {
     Memory(crate::tile_kinds::memory::MemoryMessage),
     AnnotationList(crate::tile_kinds::annotation_list::AnnotationListMessage),
     Logs(crate::tile_kinds::logs::LogsMessage),
+    SimulationLogs(crate::tile_kinds::simulation_logs::Query),
     Waveform(WaveformMessage),
 }
 
@@ -128,9 +129,11 @@ impl TileMessage {
     pub(crate) fn item_edit_label(&self) -> Option<&'static str> {
         match self {
             Self::Waveform(message) => message.item_edit_label(),
-            Self::FrameBuffer(_) | Self::Memory(_) | Self::AnnotationList(_) | Self::Logs(_) => {
-                None
-            }
+            Self::SimulationLogs(_)
+            | Self::FrameBuffer(_)
+            | Self::Memory(_)
+            | Self::AnnotationList(_)
+            | Self::Logs(_) => None,
         }
     }
 }
@@ -196,6 +199,12 @@ pub const WAVEFORM: KindDescriptor = KindDescriptor {
     singleton: false,
 };
 
+pub const SIMULATION_LOGS: KindDescriptor = KindDescriptor {
+    name: "simulation_logs",
+    payload_version: 1,
+    singleton: false,
+};
+
 pub const LOGS: KindDescriptor = KindDescriptor {
     name: "logs",
     payload_version: 1,
@@ -246,6 +255,7 @@ pub const KINDS: &[KindDescriptor] = &[
     ANNOTATION_LIST,
     SOURCE_CODE,
     SCHEMATIC,
+    SIMULATION_LOGS,
 ];
 
 #[derive(Clone)]
@@ -256,6 +266,7 @@ pub enum TileKind {
     TransactionDetails(crate::tile_kinds::transaction_details::TransactionDetailsTile),
     Markers(crate::tile_kinds::markers::MarkersTile),
     Logs(crate::tile_kinds::logs::LogsTile),
+    SimulationLogs(crate::tile_kinds::simulation_logs::SimulationLogsTile),
     Waveform(Box<WaveformTile>),
     SourceCode(crate::source_code::SourceCodeTile),
     Schematic(crate::schematic::SchematicTile),
@@ -298,6 +309,10 @@ impl TileEntry {
             TileKind::TransactionDetails(file.decode_payload()?)
         } else if file.kind == MARKERS.name && file.kind_version == MARKERS.payload_version {
             TileKind::Markers(file.decode_payload()?)
+        } else if file.kind == SIMULATION_LOGS.name
+            && file.kind_version == SIMULATION_LOGS.payload_version
+        {
+            TileKind::SimulationLogs(file.decode_payload()?)
         } else if file.kind == LOGS.name && file.kind_version == LOGS.payload_version {
             TileKind::Logs(file.decode_payload()?)
         } else if file.kind == SOURCE_CODE.name && file.kind_version == SOURCE_CODE.payload_version
@@ -348,6 +363,12 @@ impl TileEntry {
                 self.title.clone(),
                 MARKERS.name,
                 MARKERS.payload_version,
+                tile,
+            ),
+            TileKind::SimulationLogs(tile) => TileFile::encode(
+                self.title.clone(),
+                SIMULATION_LOGS.name,
+                SIMULATION_LOGS.payload_version,
                 tile,
             ),
             TileKind::Logs(tile) => {
@@ -470,6 +491,7 @@ impl TileKind {
     pub fn default_title(&self) -> String {
         match self {
             Self::Waveform(_) => "Waveform".into(),
+            Self::SimulationLogs(_) => "Simulation logs".into(),
             Self::Logs(_) => "Logs".into(),
             Self::Markers(_) => "Markers".into(),
             Self::FrameBuffer(_) => "Frame Buffer".into(),
@@ -502,6 +524,7 @@ impl TileKind {
             | Self::Memory(_)
             | Self::TransactionDetails(_)
             | Self::Markers(_)
+            | Self::SimulationLogs(_)
             | Self::Schematic(_)
             | Self::SourceCode(_)
             | Self::Unknown(_) => &[],
@@ -517,6 +540,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::SimulationLogs(_)
             | Self::Schematic(_)
             | Self::SourceCode(_)
             | Self::Unknown(_) => {}
@@ -532,6 +556,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::SimulationLogs(_)
             | Self::Schematic(_)
             | Self::SourceCode(_)
             | Self::Unknown(_) => {}
@@ -566,6 +591,9 @@ impl TileKind {
             name if name == MARKERS.name => {
                 Ok((Self::Markers(Default::default()), Default::default()))
             }
+            name if name == SIMULATION_LOGS.name => {
+                Ok((Self::SimulationLogs(Default::default()), Default::default()))
+            }
             name if name == LOGS.name => Ok((Self::Logs(Default::default()), Default::default())),
             name if name == SCHEMATIC.name => {
                 Ok((Self::Schematic(Default::default()), Default::default()))
@@ -587,6 +615,7 @@ impl TileKind {
     pub fn descriptor(&self) -> Option<&'static KindDescriptor> {
         match self {
             Self::Waveform(_) => Some(&WAVEFORM),
+            Self::SimulationLogs(_) => Some(&SIMULATION_LOGS),
             Self::Logs(_) => Some(&LOGS),
             Self::Markers(_) => Some(&MARKERS),
             Self::FrameBuffer(_) => Some(&FRAME_BUFFER),
@@ -612,6 +641,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::SimulationLogs(_)
             | Self::Schematic(_)
             | Self::SourceCode(_)
             | Self::Unknown(_) => false,
@@ -621,6 +651,7 @@ impl TileKind {
     pub fn kind_name(&self) -> &str {
         match self {
             Self::Waveform(_) => WAVEFORM.name,
+            Self::SimulationLogs(_) => SIMULATION_LOGS.name,
             Self::Logs(_) => LOGS.name,
             Self::Markers(_) => MARKERS.name,
             Self::FrameBuffer(_) => FRAME_BUFFER.name,
@@ -644,6 +675,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::SimulationLogs(_)
             | Self::Schematic(_)
             | Self::SourceCode(_)
             | Self::Unknown(_) => None,
@@ -666,6 +698,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::SimulationLogs(_)
             | Self::Schematic(_)
             | Self::SourceCode(_)
             | Self::Unknown(_) => true,
@@ -681,6 +714,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::SimulationLogs(_)
             | Self::Schematic(_)
             | Self::SourceCode(_)
             | Self::Unknown(_) => None,
@@ -801,6 +835,21 @@ impl super::render::PaneRenderer for ApplicationPanes<'_> {
                 &self.state.waveform_services(),
                 commands,
             ),
+            TileKind::SimulationLogs(tile) => {
+                let mut cx = super::view::TileCtx::new(
+                    super::view::TileReadServices {
+                        document: self.state.user.waves.as_ref(),
+                        item_lists: self.state.user.workspace.item_lists(),
+                        config: &self.state.user.config,
+                        translators: &self.state.translators,
+                        runtime: &self.state.workspace_runtime,
+                    },
+                    id,
+                    focused,
+                    commands,
+                );
+                tile.ui(ui, &mut cx);
+            }
             TileKind::Logs(tile) => {
                 let mut cx = super::view::TileCtx::new(
                     super::view::TileReadServices {
@@ -876,6 +925,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::SimulationLogs(_)
             | Self::Schematic(_)
             | Self::SourceCode(_) => Dependencies::default(),
         }
@@ -902,6 +952,7 @@ impl super::resources::ResourceOwner for TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::SimulationLogs(_)
             | Self::Schematic(_)
             | Self::SourceCode(_) => {}
         }

@@ -16,3 +16,5 @@ pub mod annotation_list;
 pub mod memory;
 
 pub mod frame_buffer;
+
+pub mod simulation_logs;

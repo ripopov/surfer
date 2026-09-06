@@ -638,6 +638,302 @@ snapshot_ui! {verilator_source_navigation, || {
 }}
 
 #[cfg(not(target_arch = "wasm32"))]
+fn simulation_logs_example(fuzzy: &str, warning_only: bool) -> SystemState {
+    simulation_logs_file("examples/simulation_logs.vtr", fuzzy, warning_only)
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn simulation_logs_file(path: &str, fuzzy: &str, warning_only: bool) -> SystemState {
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root().unwrap().join(path).try_into().unwrap(),
+            )),
+            ..Default::default()
+        });
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state.update(Message::Workspace(WorkspaceCommand::OpenTile {
+        kind: "simulation_logs".into(),
+        placement: crate::tiles::layout::Placement::Edge(TileDirection::Right),
+        focus: true,
+    }));
+    let id = state.user.workspace.layout().focused().unwrap();
+    let source = state
+        .user
+        .waves
+        .as_ref()
+        .unwrap()
+        .inner
+        .as_transactions()
+        .unwrap()
+        .native
+        .as_ref()
+        .unwrap()
+        .logs
+        .clone();
+    let stream = source
+        .streams
+        .iter()
+        .find(|s| s.1 == "simulation_log")
+        .unwrap()
+        .0;
+    let generator = warning_only.then(|| {
+        source
+            .generators
+            .iter()
+            .find(|g| g.stream == stream && g.label.starts_with("warn"))
+            .unwrap()
+            .id
+    });
+    state.update(Message::ToTile(
+        id,
+        crate::tiles::kind::TileMessage::SimulationLogs(
+            crate::tile_kinds::simulation_logs::Query {
+                stream: Some(stream),
+                generator,
+                fuzzy: fuzzy.into(),
+                ..Default::default()
+            },
+        ),
+    ));
+    let others: Vec<_> = state
+        .user
+        .workspace
+        .tiles()
+        .keys()
+        .copied()
+        .filter(|other| *other != id)
+        .collect();
+    for other in others {
+        state.update(Message::Workspace(WorkspaceCommand::CloseTile(other)));
+    }
+    state.user.show_hierarchy = Some(false);
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetMenuVisible(false));
+    state.user.show_statusbar = Some(false);
+    let context = egui::Context::default();
+    let start = std::time::Instant::now();
+    loop {
+        schematic_frame(&mut state, &context, vec![]);
+        let crate::tiles::kind::TileKind::SimulationLogs(tile) =
+            &state.user.workspace.tiles()[&id].kind
+        else {
+            panic!()
+        };
+        if tile.ready() {
+            break;
+        }
+        assert!(start.elapsed().as_secs() < 10, "log query did not complete");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    state
+}
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "Generate /tmp/simulation_logs_million.vtr with the VTR simulation_logs example first"]
+fn simulation_logs_million_benchmark() {
+    render_and_compare(&Utf8PathBuf::from("simulation_logs_all"), || {
+        for path in [
+            "examples/simulation_logs.vtr",
+            "/tmp/simulation_logs_million.vtr",
+        ] {
+            let start = std::time::Instant::now();
+            let mut state = simulation_logs_file(path, "", false);
+            let loaded = start.elapsed();
+            let context = egui::Context::default();
+            schematic_frame(&mut state, &context, vec![]);
+            let start = std::time::Instant::now();
+            for _ in 0..100 {
+                schematic_frame(&mut state, &context, vec![]);
+            }
+            let frame = start.elapsed() / 100;
+            let id = state.user.workspace.layout().focused().unwrap();
+            let crate::tiles::kind::TileKind::SimulationLogs(tile) =
+                &state.user.workspace.tiles()[&id].kind
+            else {
+                panic!()
+            };
+            assert!(tile.rendered_rows() > 0 && tile.rendered_rows() < 40);
+            assert_eq!(
+                tile.indexed_rows(),
+                if path.starts_with("/tmp") {
+                    1_010_000
+                } else {
+                    2020
+                }
+            );
+            println!(
+                "{path}: index/open={loaded:?}, frame={frame:?}, rendered_rows={}",
+                tile.rendered_rows()
+            );
+            let mut query = tile.query.clone();
+            query.fuzzy = "dmch".into();
+            state.update(Message::ToTile(
+                id,
+                crate::tiles::kind::TileMessage::SimulationLogs(query),
+            ));
+            let start = std::time::Instant::now();
+            let mut max_frame = std::time::Duration::ZERO;
+            loop {
+                let frame = std::time::Instant::now();
+                schematic_frame(&mut state, &context, vec![]);
+                max_frame = max_frame.max(frame.elapsed());
+                let crate::tiles::kind::TileKind::SimulationLogs(tile) =
+                    &state.user.workspace.tiles()[&id].kind
+                else {
+                    panic!()
+                };
+                if tile.ready() {
+                    break;
+                }
+                assert!(start.elapsed().as_secs() < 60);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            println!(
+                "{path}: fuzzy={:?}, max_frame_during_search={max_frame:?}",
+                start.elapsed()
+            );
+        }
+        simulation_logs_example("", false)
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(simulation_logs_all, || simulation_logs_example("", false));
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(simulation_logs_generator, || simulation_logs_example(
+    "", true
+));
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(simulation_logs_fuzzy, || simulation_logs_example(
+    "dmch", false
+));
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(simulation_logs_empty, || simulation_logs_example(
+    "unfindable message",
+    false
+));
+
+#[cfg(not(target_arch = "wasm32"))]
+fn simulation_logs_wait(state: &mut SystemState, context: &egui::Context) {
+    let start = std::time::Instant::now();
+    loop {
+        schematic_frame(state, context, vec![]);
+        let id = state.user.workspace.layout().focused().unwrap();
+        let crate::tiles::kind::TileKind::SimulationLogs(tile) =
+            &state.user.workspace.tiles()[&id].kind
+        else {
+            panic!()
+        };
+        if tile.ready() {
+            break;
+        }
+        assert!(start.elapsed().as_secs() < 10);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(simulation_logs_verilator, || simulation_logs_file(
+    "examples/verilator/logs_normal.vtr",
+    "",
+    false
+));
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(simulation_logs_time_cursor, || {
+    let mut state = simulation_logs_example("", false);
+    let context = egui::Context::default();
+    let output = schematic_frame(&mut state, &context, vec![]);
+    let from = schematic_label(&output, "From");
+    schematic_frame(
+        &mut state,
+        &context,
+        schematic_click(from, PointerButton::Primary),
+    );
+    schematic_frame(&mut state, &context, vec![Event::Text("100".into())]);
+    let output = schematic_frame(&mut state, &context, vec![]);
+    let to = schematic_label(&output, "To");
+    schematic_frame(
+        &mut state,
+        &context,
+        schematic_click(to, PointerButton::Primary),
+    );
+    schematic_frame(&mut state, &context, vec![Event::Text("200".into())]);
+    simulation_logs_wait(&mut state, &context);
+    let output = schematic_frame(&mut state, &context, vec![]);
+    let timestamp = schematic_label(&output, "130");
+    schematic_frame(
+        &mut state,
+        &context,
+        schematic_click(timestamp, PointerButton::Primary),
+    );
+    assert_eq!(state.user.waves.as_ref().unwrap().cursor, Some(130.into()));
+    let id = state.user.workspace.layout().focused().unwrap();
+    let crate::tiles::kind::TileKind::SimulationLogs(tile) =
+        &state.user.workspace.tiles()[&id].kind
+    else {
+        panic!()
+    };
+    assert_eq!((&tile.query.start[..], &tile.query.end[..]), ("100", "200"));
+    let clone = tile.clone();
+    assert_eq!(clone.query, tile.query);
+    assert!(!clone.ready());
+    let encoded = state.encode_state().unwrap();
+    let restored: crate::state::UserState = crate::tiles::serde::decode(&encoded).unwrap();
+    let crate::tiles::kind::TileKind::SimulationLogs(restored) =
+        &restored.workspace.tiles()[&id].kind
+    else {
+        panic!()
+    };
+    assert_eq!(restored.query, tile.query);
+    assert!(!restored.ready());
+    state
+});
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(simulation_logs_generator_menu, || {
+    let mut state = simulation_logs_example("", false);
+    let context = egui::Context::default();
+    let output = schematic_frame(&mut state, &context, vec![]);
+    let selector = schematic_label(&output, "All generators");
+    schematic_frame(
+        &mut state,
+        &context,
+        schematic_click(selector, PointerButton::Primary),
+    );
+    let output = schematic_frame(&mut state, &context, vec![]);
+    let mut output = output;
+    output.shapes.reverse(); // Popup labels are drawn after the underlying table.
+    let warning = schematic_label(&output, "warn");
+    schematic_frame(
+        &mut state,
+        &context,
+        schematic_click(warning, PointerButton::Primary),
+    );
+    simulation_logs_wait(&mut state, &context);
+    let id = state.user.workspace.layout().focused().unwrap();
+    let crate::tiles::kind::TileKind::SimulationLogs(tile) =
+        &state.user.workspace.tiles()[&id].kind
+    else {
+        panic!()
+    };
+    let source = &state.user.waves.as_ref().unwrap().inner.as_transactions().unwrap().native.as_ref().unwrap().logs;
+    assert_eq!(source.generators.iter().find(|g| Some(g.id) == tile.query.generator).unwrap().label, "warn");
+    state
+});
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(simulation_logs_without_recording, || {
+    let mut state = simulation_logs_example("", false);
+    let path = get_project_root().unwrap().join("examples/verilator/pipeline.fst");
+    state.load_from_file(path.try_into().unwrap(), LoadOptions::KeepAll).unwrap();
+    wait_for_waves_fully_loaded(&mut state, 10);
+    schematic_frame(&mut state, &egui::Context::default(), vec![]);
+    let id = state.user.workspace.layout().focused().unwrap();
+    let crate::tiles::kind::TileKind::SimulationLogs(tile) = &state.user.workspace.tiles()[&id].kind else { panic!() };
+    assert!(!tile.ready(), "old recording data must be cleared");
+    state
+});
+
+#[cfg(not(target_arch = "wasm32"))]
 fn schematic_example(name: &str, instance: &str, highlight: Option<&str>) -> SystemState {
     let mut state = verilator_example(name, "vtr");
     state.update(Message::OpenSchematic(

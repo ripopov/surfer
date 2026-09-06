@@ -2223,7 +2223,8 @@ mod view_cache_tests {
         assert_eq!(state.undo_stack[0].label(), "Add variables");
         assert!(matches!(
             &state.user.workspace.tiles()[&logs].kind,
-            TileKind::Logs(_)
+            TileKind::SimulationLogs(_)
+            | TileKind::Logs(_)
         ));
         state.update(Message::Undo(1));
         assert_eq!(state.user.workspace.layout().tile_order(), [logs]);

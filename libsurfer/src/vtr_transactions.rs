@@ -55,6 +55,7 @@ impl TransactionDemand {
 }
 
 pub(crate) struct NativeTransactions {
+    pub logs: std::sync::Arc<crate::tile_kinds::simulation_logs::native::Source>,
     reader: std::sync::Arc<std::sync::Mutex<Reader>>,
     identity: u64,
     pub desired: TransactionDemand,
@@ -66,6 +67,7 @@ impl NativeTransactions {
     pub fn new(reader: std::sync::Arc<std::sync::Mutex<Reader>>) -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         Self {
+            logs: crate::tile_kinds::simulation_logs::native::Source::new(reader.clone()),
             reader,
             identity: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             desired: Default::default(),
