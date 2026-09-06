@@ -226,6 +226,11 @@ pub const FRAME_BUFFER: KindDescriptor = KindDescriptor {
     payload_version: 1,
     singleton: false,
 };
+pub const SCHEMATIC: KindDescriptor = KindDescriptor {
+    name: "schematic",
+    payload_version: 1,
+    singleton: true,
+};
 pub const SOURCE_CODE: KindDescriptor = KindDescriptor {
     name: "source_code",
     payload_version: 1,
@@ -240,6 +245,7 @@ pub const KINDS: &[KindDescriptor] = &[
     TRANSACTION_DETAILS,
     ANNOTATION_LIST,
     SOURCE_CODE,
+    SCHEMATIC,
 ];
 
 #[derive(Clone)]
@@ -252,6 +258,7 @@ pub enum TileKind {
     Logs(crate::tile_kinds::logs::LogsTile),
     Waveform(Box<WaveformTile>),
     SourceCode(crate::source_code::SourceCodeTile),
+    Schematic(crate::schematic::SchematicTile),
     Unknown(UnknownTile),
 }
 
@@ -296,6 +303,8 @@ impl TileEntry {
         } else if file.kind == SOURCE_CODE.name && file.kind_version == SOURCE_CODE.payload_version
         {
             TileKind::SourceCode(file.decode_payload()?)
+        } else if file.kind == SCHEMATIC.name && file.kind_version == SCHEMATIC.payload_version {
+            TileKind::Schematic(file.decode_payload()?)
         } else {
             TileKind::Unknown(UnknownTile {
                 kind_name: file.kind,
@@ -354,6 +363,12 @@ impl TileEntry {
                 self.title.clone(),
                 SOURCE_CODE.name,
                 SOURCE_CODE.payload_version,
+                tile,
+            ),
+            TileKind::Schematic(tile) => TileFile::encode(
+                self.title.clone(),
+                SCHEMATIC.name,
+                SCHEMATIC.payload_version,
                 tile,
             ),
             TileKind::Unknown(tile) => Ok(TileFile {
@@ -472,6 +487,7 @@ impl TileKind {
             Self::AnnotationList(_) => "Annotations".into(),
             Self::TransactionDetails(_) => "Transaction Details".into(),
             Self::SourceCode(_) => "Source Code".into(),
+            Self::Schematic(_) => "Schematic".into(),
             Self::Unknown(tile) => format!("Unavailable: {}", tile.kind_name),
         }
     }
@@ -486,6 +502,7 @@ impl TileKind {
             | Self::Memory(_)
             | Self::TransactionDetails(_)
             | Self::Markers(_)
+            | Self::Schematic(_)
             | Self::SourceCode(_)
             | Self::Unknown(_) => &[],
         }
@@ -500,6 +517,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::Schematic(_)
             | Self::SourceCode(_)
             | Self::Unknown(_) => {}
         }
@@ -514,6 +532,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::Schematic(_)
             | Self::SourceCode(_)
             | Self::Unknown(_) => {}
         }
@@ -548,6 +567,9 @@ impl TileKind {
                 Ok((Self::Markers(Default::default()), Default::default()))
             }
             name if name == LOGS.name => Ok((Self::Logs(Default::default()), Default::default())),
+            name if name == SCHEMATIC.name => {
+                Ok((Self::Schematic(Default::default()), Default::default()))
+            }
             name if name == SOURCE_CODE.name => {
                 Ok((Self::SourceCode(Default::default()), Default::default()))
             }
@@ -572,6 +594,7 @@ impl TileKind {
             Self::AnnotationList(_) => Some(&ANNOTATION_LIST),
             Self::TransactionDetails(_) => Some(&TRANSACTION_DETAILS),
             Self::SourceCode(_) => Some(&SOURCE_CODE),
+            Self::Schematic(_) => Some(&SCHEMATIC),
             Self::Unknown(_) => None,
         }
     }
@@ -589,6 +612,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::Schematic(_)
             | Self::SourceCode(_)
             | Self::Unknown(_) => false,
         }
@@ -604,6 +628,7 @@ impl TileKind {
             Self::AnnotationList(_) => ANNOTATION_LIST.name,
             Self::TransactionDetails(_) => TRANSACTION_DETAILS.name,
             Self::SourceCode(_) => SOURCE_CODE.name,
+            Self::Schematic(_) => SCHEMATIC.name,
             Self::Unknown(tile) => &tile.kind_name,
         }
     }
@@ -619,6 +644,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::Schematic(_)
             | Self::SourceCode(_)
             | Self::Unknown(_) => None,
         }
@@ -640,6 +666,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::Schematic(_)
             | Self::SourceCode(_)
             | Self::Unknown(_) => true,
         }
@@ -654,6 +681,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::Schematic(_)
             | Self::SourceCode(_)
             | Self::Unknown(_) => None,
         }
@@ -789,6 +817,16 @@ impl super::render::PaneRenderer for ApplicationPanes<'_> {
                 tile.ui(ui, &mut cx);
             }
             TileKind::SourceCode(tile) => tile.ui(ui),
+            TileKind::Schematic(tile) => tile.ui(
+                ui,
+                self.state
+                    .user
+                    .waves
+                    .as_ref()
+                    .and_then(|w| w.inner.as_waves())
+                    .and_then(|w| w.source_index()),
+                commands,
+            ),
             TileKind::Unknown(tile) => {
                 ui.vertical_centered(|ui| {
                     ui.heading("Tile unavailable");
@@ -838,6 +876,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::Schematic(_)
             | Self::SourceCode(_) => Dependencies::default(),
         }
     }
@@ -863,6 +902,7 @@ impl super::resources::ResourceOwner for TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::Schematic(_)
             | Self::SourceCode(_) => {}
         }
         Ok(())

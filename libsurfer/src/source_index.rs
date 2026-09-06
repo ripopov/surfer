@@ -16,6 +16,12 @@ pub(crate) struct SourceLocation {
 #[derive(Clone, Debug)]
 pub(crate) struct SourceIndex {
     locations: HashMap<String, SourceLocation>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) database: std::sync::Arc<vtr_vdb::Database>,
+    #[cfg(not(target_arch = "wasm32"))]
+    base: Utf8PathBuf,
+    #[cfg(not(target_arch = "wasm32"))]
+    symbols: HashMap<String, String>,
 }
 
 impl SourceIndex {
@@ -39,6 +45,8 @@ impl SourceIndex {
         let base = path.parent().unwrap_or_else(|| Utf8Path::new("."));
         let mut locations = HashMap::new();
         let mut by_signal = HashMap::new();
+        let mut symbols = HashMap::new();
+        let mut symbols_by_signal = HashMap::new();
         let nodes: Vec<_> = reader
             .hierarchy()
             .ids()
@@ -73,15 +81,93 @@ impl SourceIndex {
                 column: symbol.source.column,
             };
             locations.insert(recorded.clone(), location.clone());
+            symbols.insert(recorded.clone(), symbol_path.clone());
+            symbols_by_signal
+                .entry(*signal)
+                .or_insert_with(|| symbol_path.clone());
             by_signal.entry(*signal).or_insert(location);
         }
         // Aliases share samples but retain their own declaration where available.
         for (path, signal) in nodes {
+            if let Some(symbol) = symbols_by_signal.get(&signal) {
+                symbols
+                    .entry(path.clone())
+                    .or_insert_with(|| symbol.clone());
+            }
             if let Some(location) = by_signal.get(&signal) {
                 locations.entry(path).or_insert_with(|| location.clone());
             }
         }
-        Ok(Self { locations })
+        Ok(Self {
+            locations,
+            database: std::sync::Arc::new(database),
+            base: base.to_owned(),
+            symbols,
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn schematic_symbol(&self, variable: &VariableRef) -> Option<(&str, &str)> {
+        let symbol = self.symbols.get(&variable.full_path_string_no_index())?;
+        Some((&self.database.symbols.get(symbol)?.owner, symbol))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn schematic_scope(&self, recorded: &str) -> Option<&str> {
+        let prefix = self
+            .database
+            .trace_binding
+            .as_ref()
+            .map_or("", |binding| binding.prefix.trim_matches('.'));
+        let path = if prefix.is_empty() {
+            recorded
+        } else if recorded == prefix {
+            self.database.top.as_str()
+        } else {
+            recorded.strip_prefix(prefix)?.strip_prefix('.')?
+        };
+        self.database
+            .instances
+            .iter()
+            .filter(|instance| {
+                path == instance.path
+                    || path
+                        .strip_prefix(&instance.path)
+                        .is_some_and(|suffix| suffix.starts_with('.'))
+            })
+            .max_by_key(|instance| instance.path.len())
+            .map(|instance| instance.path.as_str())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn recorded_scope(&self, instance: &str) -> String {
+        let prefix = self
+            .database
+            .trace_binding
+            .as_ref()
+            .map_or("", |binding| binding.prefix.trim_matches('.'));
+        if prefix.is_empty() {
+            instance.to_owned()
+        } else {
+            format!("{prefix}.{instance}")
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn design_source(&self, source: &vtr_vdb::Source) -> Option<SourceLocation> {
+        if source.file.is_empty() || source.line == 0 {
+            return None;
+        }
+        let file = Utf8PathBuf::from(&source.file);
+        Some(SourceLocation {
+            file: if file.is_absolute() {
+                file
+            } else {
+                self.base.join(file)
+            },
+            line: source.line,
+            column: source.column,
+        })
     }
 
     pub(crate) fn location(&self, variable: &VariableRef) -> Option<SourceLocation> {
@@ -103,6 +189,34 @@ pub(crate) fn sibling_candidates(trace: &Utf8Path) -> impl Iterator<Item = Utf8P
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn schematic_mapping_uses_binding_and_scope_boundaries() {
+        let trace = Utf8Path::new("../examples/verilator/pipeline.vtr");
+        let reader = vtr::Reader::open(trace).unwrap();
+        let index = SourceIndex::discover(trace, &reader).unwrap();
+        for (recorded, owner, symbol) in [
+            ("TOP.top.u0.q", "top.u0", "top.u0.q"),
+            ("TOP.q", "top", "top.q"),
+        ] {
+            assert_eq!(
+                index.schematic_symbol(&VariableRef::from_hierarchy_string(recorded)),
+                Some((owner, symbol))
+            );
+        }
+        for (recorded, expected) in [
+            ("TOP", Some("top")),
+            ("TOP.top", Some("top")),
+            ("TOP.top.u0", Some("top.u0")),
+            ("TOP.top.u0.internal", Some("top.u0")),
+            ("TOP.top.u01", Some("top")),
+            ("TOPICAL.top", None),
+            ("top.u0", None),
+        ] {
+            assert_eq!(index.schematic_scope(recorded), expected);
+        }
+        assert_eq!(index.recorded_scope("top.u0"), "TOP.top.u0");
+    }
 
     #[test]
     fn native_mapping_and_aliases_resolve_to_packaged_sources() {

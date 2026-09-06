@@ -9,7 +9,7 @@ members = [
     "translator-docs",
     "wasm_example_translator",
 ]
-exclude = [".cache"]
+exclude = [".cache", "ext/elkrs"]
 default-members = ["surfer", "surver", "libsurfer"]
 
 [workspace.package]

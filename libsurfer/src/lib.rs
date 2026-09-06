@@ -45,6 +45,7 @@ pub mod mousegestures;
 pub mod overview;
 pub mod rectangle;
 pub mod remote;
+pub(crate) mod schematic;
 pub mod server_file_window;
 pub(crate) mod source_code;
 pub(crate) mod source_index;
@@ -714,6 +715,55 @@ impl SystemState {
                 if let Some(channel) = &self.channels.wcp_s2c_sender {
                     let _ = futures::executor::block_on(channel.send(WcpSCMessage::event(event)));
                 }
+            }
+            Message::OpenSchematic(instance, highlight) => {
+                let schematic_tile = self.user.workspace.tiles().iter().find_map(|(id, entry)| {
+                    (entry.kind.kind_name() == crate::tiles::kind::SCHEMATIC.name).then_some(*id)
+                });
+                let tile = if let Some(tile) = schematic_tile {
+                    self.user
+                        .workspace
+                        .apply_command(
+                            &mut self.workspace_runtime,
+                            crate::tiles::commands::WorkspaceCommand::FocusTile(tile),
+                        )
+                        .ok()?;
+                    tile
+                } else {
+                    self.user
+                        .workspace
+                        .apply_command(
+                            &mut self.workspace_runtime,
+                            crate::tiles::commands::WorkspaceCommand::OpenTile {
+                                kind: crate::tiles::kind::SCHEMATIC.name.into(),
+                                placement: crate::tiles::layout::Placement::Edge(
+                                    crate::tiles::layout::Direction::Right,
+                                ),
+                                focus: true,
+                            },
+                        )
+                        .ok()?;
+                    self.user.workspace.layout().focused().filter(|id| {
+                        self.user.workspace.tiles()[id].kind.kind_name()
+                            == crate::tiles::kind::SCHEMATIC.name
+                    })?
+                };
+                let crate::tiles::kind::TileKind::Schematic(schematic) =
+                    &mut self.user.workspace.tiles_mut().get_mut(&tile)?.kind
+                else {
+                    return None;
+                };
+                schematic.open(instance, highlight);
+            }
+            Message::RevealSchematicHierarchy(path) => {
+                let scope = ScopeRef::from_strs(&path.split('.').collect::<Vec<_>>());
+                self.user.show_hierarchy = Some(true);
+                self.user
+                    .waves
+                    .as_mut()?
+                    .set_active_scope(Some(crate::wave_data::ScopeType::WaveScope(scope.clone())));
+                *self.scope_ref_to_expand.borrow_mut() =
+                    Some(crate::hierarchy::ScopeExpandType::ExpandSpecific(scope));
             }
             Message::OpenSource(file, line, column) => {
                 let source_tile = self.user.workspace.tiles().iter().find_map(|(id, entry)| {

@@ -637,6 +637,383 @@ snapshot_ui! {verilator_source_navigation, || {
     state
 }}
 
+#[cfg(not(target_arch = "wasm32"))]
+fn schematic_example(name: &str, instance: &str, highlight: Option<&str>) -> SystemState {
+    let mut state = verilator_example(name, "vtr");
+    state.update(Message::OpenSchematic(
+        instance.into(),
+        highlight.map(str::to_owned),
+    ));
+    let other_tiles: Vec<_> = state
+        .user
+        .workspace
+        .tiles()
+        .iter()
+        .filter_map(|(id, tile)| (tile.kind.kind_name() != "schematic").then_some(*id))
+        .collect();
+    for id in other_tiles {
+        state.update(Message::Workspace(WorkspaceCommand::CloseTile(id)));
+    }
+    state.user.show_hierarchy = Some(false);
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetMenuVisible(false));
+    state.user.show_statusbar = Some(false);
+    schematic_wait(&mut state);
+    state
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn schematic_wait(state: &mut SystemState) {
+    let ctx = egui::Context::default();
+    let deadline = std::time::Instant::now();
+    loop {
+        schematic_frame(state, &ctx, vec![]);
+        if schematic_tile(state).layout_ready() {
+            break;
+        }
+        assert!(
+            deadline.elapsed().as_secs() < 10,
+            "schematic layout did not complete"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(schematic_pipeline, || schematic_example(
+    "pipeline", "top", None
+));
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(schematic_signal_highlight, || schematic_example(
+    "pipeline",
+    "top",
+    Some("top.first")
+));
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(schematic_child_module, || schematic_example(
+    "pipeline",
+    "top.u0",
+    Some("top.u0.q")
+));
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(schematic_operators, || schematic_example(
+    "operators",
+    "top",
+    Some("top.sum")
+));
+
+#[cfg(not(target_arch = "wasm32"))]
+fn schematic_frame(
+    state: &mut SystemState,
+    context: &egui::Context,
+    events: Vec<Event>,
+) -> egui::FullOutput {
+    let mut output = context.run_ui(
+        RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, SNAPSHOT_SIZE)),
+            events,
+            ..Default::default()
+        },
+        |ui| {
+            ui.set_visuals(state.get_visuals());
+            setup_custom_font(ui.ctx());
+            for message in state.draw(ui, Some(SNAPSHOT_SIZE)) {
+                state.update(message);
+            }
+        },
+    );
+    output.textures_delta.clear();
+    output
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn schematic_click(position: Pos2, button: PointerButton) -> Vec<Event> {
+    vec![
+        Event::PointerMoved(position),
+        Event::PointerButton {
+            pos: position,
+            button,
+            pressed: true,
+            modifiers: Modifiers::default(),
+        },
+        Event::PointerButton {
+            pos: position,
+            button,
+            pressed: false,
+            modifiers: Modifiers::default(),
+        },
+    ]
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn schematic_label(output: &egui::FullOutput, label: &str) -> Pos2 {
+    fn find(shape: &epaint::Shape, label: &str) -> Option<Pos2> {
+        match shape {
+            epaint::Shape::Text(text) if text.galley.job.text == label => {
+                Some(text.pos + text.galley.rect.center().to_vec2())
+            }
+            epaint::Shape::Vec(shapes) => shapes.iter().find_map(|shape| find(shape, label)),
+            _ => None,
+        }
+    }
+    output
+        .shapes
+        .iter()
+        .find_map(|shape| find(&shape.shape, label))
+        .unwrap_or_else(|| panic!("missing label: {label}"))
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn schematic_tile(state: &SystemState) -> &crate::schematic::SchematicTile {
+    state
+        .user
+        .workspace
+        .tiles()
+        .values()
+        .find_map(|entry| match &entry.kind {
+            crate::tiles::kind::TileKind::Schematic(tile) => Some(tile),
+            _ => None,
+        })
+        .unwrap()
+}
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(schematic_selected_block, || {
+    let mut state = schematic_example("pipeline", "top", None);
+    let ctx = egui::Context::default();
+    let output = schematic_frame(&mut state, &ctx, vec![]);
+    let position = schematic_label(&output, "u0 : stage");
+    schematic_frame(
+        &mut state,
+        &ctx,
+        schematic_click(position, PointerButton::Primary),
+    );
+    state
+});
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(schematic_wire_to_source, || {
+    let mut state = schematic_example("pipeline", "top", None);
+    let ctx = egui::Context::default();
+    schematic_frame(&mut state, &ctx, vec![]);
+    let position = schematic_tile(&state).test_wire_point("top.first");
+    schematic_frame(
+        &mut state,
+        &ctx,
+        schematic_click(position, PointerButton::Secondary),
+    );
+    let output = schematic_frame(&mut state, &ctx, vec![]);
+    let target = schematic_label(&output, "Go to source");
+    schematic_frame(
+        &mut state,
+        &ctx,
+        schematic_click(target, PointerButton::Primary),
+    );
+    let source = state
+        .user
+        .workspace
+        .tiles()
+        .values()
+        .find_map(|entry| match &entry.kind {
+            crate::tiles::kind::TileKind::SourceCode(source) => Some(source),
+            _ => None,
+        })
+        .expect("wire context menu opens source");
+    assert_eq!(
+        source.file.as_ref().unwrap().file_name(),
+        Some("pipeline.sv")
+    );
+    assert!(source.line > 0);
+    state
+});
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(schematic_block_to_hierarchy, || {
+    let mut state = schematic_example("pipeline", "top", None);
+    let ctx = egui::Context::default();
+    let output = schematic_frame(&mut state, &ctx, vec![]);
+    let position = schematic_label(&output, "u0 : stage");
+    schematic_frame(
+        &mut state,
+        &ctx,
+        schematic_click(position, PointerButton::Secondary),
+    );
+    let output = schematic_frame(&mut state, &ctx, vec![]);
+    let target = schematic_label(&output, "Reveal in hierarchy");
+    schematic_frame(
+        &mut state,
+        &ctx,
+        schematic_click(target, PointerButton::Primary),
+    );
+    assert!(state.show_hierarchy());
+    assert_eq!(
+        state.user.waves.as_ref().unwrap().active_scope,
+        Some(ScopeType::WaveScope(ScopeRef::from_strs(&[
+            "TOP", "top", "u0"
+        ])))
+    );
+    state
+});
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(schematic_zoom_and_pan, || {
+    let mut state = schematic_example("pipeline", "top", Some("top.first"));
+    let ctx = egui::Context::default();
+    schematic_frame(&mut state, &ctx, vec![]);
+    let before = schematic_tile(&state).test_camera();
+    let anchor = Pos2::new(800.0, 400.0);
+    schematic_frame(
+        &mut state,
+        &ctx,
+        vec![Event::PointerMoved(anchor), Event::Zoom(1.5)],
+    );
+    let zoomed = schematic_tile(&state).test_camera();
+    assert!(zoomed.0 > before.0);
+    let from = Pos2::new(900.0, 580.0);
+    let to = Pos2::new(790.0, 540.0);
+    schematic_frame(
+        &mut state,
+        &ctx,
+        vec![
+            Event::PointerMoved(from),
+            Event::PointerButton {
+                pos: from,
+                button: PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::default(),
+            },
+        ],
+    );
+    schematic_frame(&mut state, &ctx, vec![Event::PointerMoved(to)]);
+    schematic_frame(
+        &mut state,
+        &ctx,
+        vec![Event::PointerButton {
+            pos: to,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::default(),
+        }],
+    );
+    assert_ne!(schematic_tile(&state).test_camera().1, zoomed.1);
+    state
+});
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(schematic_from_signal_menu, || {
+    let mut state = verilator_example("pipeline", "vtr");
+    state.user.show_statusbar = Some(false);
+    state.user.show_default_timeline = Some(false);
+    let ctx = egui::Context::default();
+    schematic_frame(&mut state, &ctx, vec![]);
+    schematic_frame(&mut state, &ctx, vec![]);
+    schematic_frame(
+        &mut state,
+        &ctx,
+        schematic_click(Pos2::new(45.0, 199.0), PointerButton::Secondary),
+    );
+    let output = schematic_frame(&mut state, &ctx, vec![]);
+    let target = schematic_label(&output, "Open schematic");
+    schematic_frame(
+        &mut state,
+        &ctx,
+        schematic_click(target, PointerButton::Primary),
+    );
+    assert_eq!(schematic_tile(&state).instance.as_deref(), Some("top.u0"));
+    assert_eq!(
+        schematic_tile(&state).highlight.as_deref(),
+        Some("top.u0.q")
+    );
+    schematic_wait(&mut state);
+    state
+});
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(schematic_from_hierarchy_menu, || {
+    let mut state = verilator_example("pipeline", "vtr");
+    state.update(Message::RevealSchematicHierarchy("TOP.top.u0".into()));
+    let ctx = egui::Context::default();
+    schematic_frame(&mut state, &ctx, vec![]);
+    let output = schematic_frame(&mut state, &ctx, vec![]);
+    let target = schematic_label(&output, "u0");
+    schematic_frame(
+        &mut state,
+        &ctx,
+        schematic_click(target, PointerButton::Secondary),
+    );
+    let output = schematic_frame(&mut state, &ctx, vec![]);
+    let target = schematic_label(&output, "Open schematic");
+    schematic_frame(
+        &mut state,
+        &ctx,
+        schematic_click(target, PointerButton::Primary),
+    );
+    assert_eq!(schematic_tile(&state).instance.as_deref(), Some("top.u0"));
+    assert_eq!(schematic_tile(&state).highlight, None);
+    schematic_wait(&mut state);
+    state
+});
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(schematic_drill_and_up, || {
+    let mut state = schematic_example("pipeline", "top", None);
+    let ctx = egui::Context::default();
+    let output = schematic_frame(&mut state, &ctx, vec![]);
+    let target = schematic_label(&output, "u0 : stage");
+    schematic_frame(
+        &mut state,
+        &ctx,
+        schematic_click(target, PointerButton::Primary),
+    );
+    schematic_frame(
+        &mut state,
+        &ctx,
+        schematic_click(target, PointerButton::Primary),
+    );
+    assert_eq!(schematic_tile(&state).instance.as_deref(), Some("top.u0"));
+    schematic_wait(&mut state);
+    let output = schematic_frame(&mut state, &ctx, vec![]);
+    let target = schematic_label(&output, "Up");
+    schematic_frame(
+        &mut state,
+        &ctx,
+        schematic_click(target, PointerButton::Primary),
+    );
+    assert_eq!(schematic_tile(&state).instance.as_deref(), Some("top"));
+    schematic_wait(&mut state);
+    state
+});
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui!(schematic_without_companion, || {
+    let mut state = schematic_example("pipeline", "top", Some("top.first"));
+    let path = get_project_root()
+        .unwrap()
+        .join("examples/verilator/pipeline.fst");
+    state
+        .load_from_file(path.try_into().unwrap(), LoadOptions::KeepAll)
+        .unwrap();
+    wait_for_waves_fully_loaded(&mut state, 10);
+    let ctx = egui::Context::default();
+    schematic_frame(&mut state, &ctx, vec![]);
+    assert!(
+        !schematic_tile(&state).layout_ready(),
+        "old design geometry must be cleared"
+    );
+    state
+});
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn schematic_serialization_retains_destination_and_discards_runtime() {
+    render_and_compare(Utf8Path::new("schematic_child_module"), || {
+    let state = schematic_example("pipeline", "top.u0", Some("top.u0.q"));
+    let tile = schematic_tile(&state);
+    let saved = serde_json::to_value(tile).unwrap();
+    assert_eq!(
+        saved,
+        serde_json::json!({"instance":"top.u0", "highlight":"top.u0.q"})
+    );
+    let restored: crate::schematic::SchematicTile = serde_json::from_value(saved).unwrap();
+    assert!(!restored.layout_ready());
+    assert!(!tile.clone().layout_ready());
+    state
+    });
+}
+
 snapshot_ui! {startup_screen_looks_fine, || {
     SystemState::new_default_config().unwrap().with_params(StartupParams::default())
 }}

@@ -81,6 +81,8 @@ pub enum Message {
     },
     /// Open a VDB-provided source location in the source-code tile.
     OpenSource(Utf8PathBuf, u32, u32),
+    OpenSchematic(String, Option<String>),
+    RevealSchematicHierarchy(String),
     /// Shared document commands have no waveform target.
     ToDocument(crate::tiles::commands::DocumentCommand),
     ExpandScope(ScopeExpandType),

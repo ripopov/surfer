@@ -114,6 +114,7 @@ impl crate::tiles::workspace::Workspace {
             | TileKind::TransactionDetails(_)
             | TileKind::Markers(_)
             | TileKind::Logs(_)
+            | TileKind::Schematic(_)
             | TileKind::SourceCode(_)
             | TileKind::Unknown(_) => None,
         }
@@ -156,6 +157,7 @@ impl crate::tiles::workspace::Workspace {
                 | TileKind::TransactionDetails(_)
                 | TileKind::Markers(_)
                 | TileKind::Logs(_)
+                | TileKind::Schematic(_)
                 | TileKind::SourceCode(_)
                 | TileKind::Unknown(_) => {}
             }

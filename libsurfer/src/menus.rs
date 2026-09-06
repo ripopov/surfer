@@ -847,6 +847,16 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                 }
             });
 
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some((instance, symbol)) = self
+                .source_index
+                .and_then(|index| index.schematic_symbol(&variable.variable_ref))
+                && ui.button("Open schematic").clicked()
+            {
+                msgs.push(Message::OpenSchematic(instance.into(), Some(symbol.into())));
+                ui.close();
+            }
+
             if let Some(location) = self
                 .source_index
                 .and_then(|index| index.location(&variable.variable_ref))

@@ -14,7 +14,8 @@ notify.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 vtr = { path = "../../../crates/vtr" }
-vtr-vdb = { path = "../../../crates/vtr-vdb" }
+vtr-vdb = { path = "../../../crates/vtr-vdb", default-features = false }
+elkrs = { path = "../ext/elkrs" }
 ahash = { workspace = true, default-features = false, features = ["std", "runtime-rng"] }
 directories.workspace = true
 extism = { workspace = true, optional = true }

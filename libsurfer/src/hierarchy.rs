@@ -521,6 +521,18 @@ impl SystemState {
             });
         }
         response.context_menu(|ui| {
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(instance) = wave
+                .inner
+                .as_waves()
+                .and_then(|w| w.source_index())
+                .and_then(|index| index.schematic_scope(&scope.strs().join(".")))
+                && ui.button("Open schematic").clicked()
+            {
+                msgs.push(Message::OpenSchematic(instance.into(), None));
+                ui.close();
+            }
+
             if ui.button("Add scope").clicked() {
                 msgs.push(Message::AddScope(scope.clone(), false));
             }

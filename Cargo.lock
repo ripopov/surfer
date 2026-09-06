@@ -3076,6 +3076,7 @@ dependencies = [
  "egui_plot",
  "egui_skia_renderer",
  "egui_tiles",
+ "elkrs",
  "emath",
  "enum-iterator",
  "epaint",
@@ -5932,7 +5933,6 @@ dependencies = [
 name = "vtr-vdb"
 version = "0.1.0"
 dependencies = [
- "elkrs",
  "serde",
  "serde_json",
  "vtr",
