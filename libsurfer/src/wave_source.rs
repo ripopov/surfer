@@ -651,6 +651,8 @@ impl SystemState {
                         source,
                         format,
                         TransactionContainer {
+                            locations: Default::default(),
+                            indexes: Default::default(),
                             #[cfg(not(target_arch = "wasm32"))]
                             native: None,
                             inner: ftr,
@@ -689,6 +691,8 @@ impl SystemState {
                         source,
                         WaveFormat::Ftr,
                         TransactionContainer {
+                            locations: Default::default(),
+                            indexes: Default::default(),
                             #[cfg(not(target_arch = "wasm32"))]
                             native: None,
                             inner: ftr,

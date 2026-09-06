@@ -125,38 +125,46 @@ impl crate::tile_kinds::waveform::WaveformView {
         let Some(inner) = document.and_then(|document| document.inner.as_transactions()) else {
             return false;
         };
-        let mut transactions = items
-            .items_tree
-            .iter_visible()
-            .filter_map(|node| match items.displayed_items.get(&node.item_ref) {
-                Some(DisplayedItem::Stream(stream)) => Some(&stream.transaction_stream_ref),
-                _ => None,
-            })
-            .flat_map(|stream| match stream.gen_id {
-                Some(generator) => inner.get_transactions_from_generator(generator),
-                None => inner.get_transactions_from_stream(stream.stream_id),
-            })
-            .collect_vec();
-        transactions.sort_unstable_by_key(|id| id.0);
-        transactions.dedup();
-        if transactions.is_empty() {
-            return false;
+        use num::ToPrimitive;
+        let anchor = match &self.focused_transaction {
+            Some(focused) => {
+                let Some(tx) = inner.get_transaction(focused) else {
+                    return false;
+                };
+                let Some(time) = tx.get_start_time().to_u64() else {
+                    return false;
+                };
+                Some((time, focused.id.0 as u64))
+            }
+            None => None,
+        };
+        let mut candidate: Option<crate::transaction_index::Span> = None;
+        for node in items.items_tree.iter_visible() {
+            let Some(DisplayedItem::Stream(stream)) = items.displayed_items.get(&node.item_ref) else {
+                continue;
+            };
+            let Some(index) = inner.track_index(&stream.transaction_stream_ref) else {
+                continue;
+            };
+            let Some(span) = index.neighbor(anchor, next) else {
+                continue;
+            };
+            let replace = candidate.is_none_or(|current| {
+                if next || anchor.is_none() {
+                    (span.begin, span.id) < (current.begin, current.id)
+                } else {
+                    (span.begin, span.id) > (current.begin, current.id)
+                }
+            });
+            if replace {
+                candidate = Some(span);
+            }
         }
-        let index = self.focused_transaction.as_ref().map_or(0, |focused| {
-            transactions.iter().position(|id| *id == focused.id).map_or(
-                if next { transactions.len() - 1 } else { 0 },
-                |index| {
-                    if next {
-                        (index + 1).min(transactions.len() - 1)
-                    } else {
-                        index.saturating_sub(1)
-                    }
-                },
-            )
-        });
-        self.focus_transaction(Some(TransactionRef {
-            id: transactions[index],
-        }))
+        candidate.is_some_and(|span| {
+            self.focus_transaction(Some(TransactionRef {
+                id: ftr_parser::types::TransactionId(span.id as usize),
+            }))
+        })
     }
 }
 

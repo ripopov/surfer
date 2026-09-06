@@ -45,6 +45,7 @@ use crate::{
 /// Immutable inputs for one canvas. The item list may be shared by other views,
 /// while the viewport and transaction focus belong to the requesting view.
 pub(crate) struct CanvasSource<'a> {
+    pub scroll_offset: f32,
     pub tile_id: crate::tiles::TileId,
     pub interaction: &'a crate::tile_kinds::waveform::WaveformInteraction,
     pub document: &'a WaveData,
@@ -79,6 +80,7 @@ impl<'a> CanvasView<'a> {
     ) -> Self {
         Self {
             source: CanvasSource {
+                scroll_offset: view.scroll_offset,
                 tile_id,
                 interaction: &view.interaction,
                 document,
@@ -179,6 +181,7 @@ pub struct TxDrawingCommands {
     max: Pos2,
     gen_ref: TransactionStreamRef, // makes it easier to later access the actual Transaction object
     events: Vec<TxEventMarker>,
+    count: usize,
 }
 
 struct TxEventMarker {
@@ -478,8 +481,18 @@ fn variable_digital_draw_commands(
 pub(crate) struct WaveDrawCache {
     commands: Option<CachedDrawData>,
     rect: Option<Rect>,
+    scroll_offset: Option<f32>,
+    pub(crate) payloads: Vec<u64>,
     #[cfg(test)]
     pub(crate) builds: usize,
+}
+
+impl WaveDrawCache {
+    pub(crate) fn invalidate(&mut self) {
+        self.commands = None;
+        self.rect = None;
+        // Keep the last bounded request until the next frame computes its replacement.
+    }
 }
 
 impl SystemState {
@@ -821,6 +834,94 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
         for displayed_stream in displayed_streams {
             let tx_stream_ref = &displayed_stream.transaction_stream_ref;
 
+            let container = waves.inner.as_transactions().unwrap();
+            if let Some(index) = container.track_index(tx_stream_ref) {
+                let line_height = self.config.layout.transactions_line_height;
+                let layout = items.layout_cache.borrow();
+                let top = layout
+                    .infos
+                    .iter()
+                    .find_map(|info| match info {
+                        ItemDrawingInfo::Stream(stream)
+                            if &stream.transaction_stream_ref == tx_stream_ref =>
+                        {
+                            Some(stream.top)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(0.0)
+                    + self.default_timeline_offset()
+                    - source.scroll_offset;
+                let first_row = ((-top / line_height).floor().max(0.0)) as usize;
+                let last_row = (((cfg.canvas_size.y - top) / line_height).ceil().max(0.0)) as usize;
+                let left = viewport.left_edge_time(range);
+                let right = viewport.right_edge_time(range);
+                if right < BigInt::from(0) || left > BigInt::from(u64::MAX) {
+                    stream_to_displayed_txs.insert(tx_stream_ref.clone(), Vec::new());
+                    continue;
+                }
+                let begin = left.to_u64().unwrap_or(0);
+                let end = right.to_u64().unwrap_or(u64::MAX);
+                let samples = index.query(
+                    first_row..last_row,
+                    begin,
+                    end,
+                    cfg.canvas_size.x.ceil().max(1.0) as usize,
+                );
+                let mut displayed = Vec::with_capacity(samples.len());
+                for sample in samples {
+                    let id = ftr_parser::types::TransactionId(sample.representative.id as usize);
+                    let tx_ref = TransactionRef { id };
+                    let generator_id =
+                        ftr_parser::types::GeneratorId(sample.representative.generator as usize);
+                    let Some(generator) = container.get_generator(generator_id) else {
+                        continue;
+                    };
+                    let min = Pos2::new(
+                        viewport.pixel_from_time(&sample.begin.into(), cfg.canvas_size.x - 1.0, range),
+                        line_height * sample.row as f32 + 4.0,
+                    );
+                    let max = Pos2::new(
+                        viewport.pixel_from_time(&sample.end.into(), cfg.canvas_size.x - 1.0, range),
+                        line_height * (sample.row + 1) as f32 - 4.0,
+                    );
+                    let events = if sample.count == 1 {
+                        container
+                            .vtr_details(id)
+                            .map(|details| {
+                                transaction_event_markers(
+                                    &details.events,
+                                    sample.begin,
+                                    sample.end,
+                                    viewport,
+                                    range,
+                                    cfg.canvas_size.x - 1.0,
+                                )
+                            })
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+                    draw_commands.insert(
+                        (tx_stream_ref.clone(), tx_ref.clone()),
+                        TxDrawingCommands {
+                            min,
+                            max,
+                            events,
+                            count: sample.count,
+                            gen_ref: TransactionStreamRef::new_gen(
+                                tx_stream_ref.stream_id,
+                                generator_id,
+                                generator.name.clone(),
+                            ),
+                        },
+                    );
+                    displayed.push(tx_ref);
+                }
+                stream_to_displayed_txs.insert(tx_stream_ref.clone(), displayed);
+                continue;
+            }
+
             let mut generators: Vec<&TxGenerator> = vec![];
             let mut displayed_transactions = vec![];
 
@@ -853,9 +954,16 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                 );
             }
 
-            let packet_rows = waves.inner.as_transactions().unwrap().native.as_ref().map(|_| {
-                crate::transactions::packet_rows(generators.iter().flat_map(|g| g.transactions.iter()))
-            });
+            let packet_rows = waves
+                .inner
+                .as_transactions()
+                .unwrap()
+                .is_native()
+                .then(|| {
+                    crate::transactions::packet_rows(
+                        generators.iter().flat_map(|g| g.transactions.iter()),
+                    )
+                });
             for generator in generators {
                 // find first visible transaction
                 let first_visible_transaction_index = if packet_rows.is_some() {
@@ -913,24 +1021,34 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                     last_px = max_px;
 
                     displayed_transactions.push(TransactionRef { id: curr_tx_id });
-                    let row = packet_rows.as_ref().map_or(tx.row, |rows| rows[&curr_tx_id]);
+                    let row = packet_rows
+                        .as_ref()
+                        .map_or(tx.row, |rows| rows[&curr_tx_id]);
                     let min = Pos2::new(min_px, cfg.line_height * row as f32 + 4.0);
                     let max = Pos2::new(max_px, cfg.line_height * (row + 1) as f32 - 4.0);
 
                     let tx_ref = TransactionRef { id: curr_tx_id };
                     draw_commands.insert(
-                        tx_ref,
+                        (tx_stream_ref.clone(), tx_ref),
                         TxDrawingCommands {
+                            count: 1,
                             min,
                             max,
-                            events: waves.inner.as_transactions()
+                            events: waves
+                                .inner
+                                .as_transactions()
                                 .and_then(|t| t.vtr_details(curr_tx_id))
-                                .map(|details| transaction_event_markers(
-                                    &details.events,
-                                    start_time.to_u64().unwrap_or(0),
-                                    end_time.to_u64().unwrap_or(u64::MAX),
-                                    viewport, range, cfg.canvas_size.x - 1.0,
-                                )).unwrap_or_default(),
+                                .map(|details| {
+                                    transaction_event_markers(
+                                        &details.events,
+                                        start_time.to_u64().unwrap_or(0),
+                                        end_time.to_u64().unwrap_or(u64::MAX),
+                                        viewport,
+                                        range,
+                                        cfg.canvas_size.x - 1.0,
+                                    )
+                                })
+                                .unwrap_or_default(),
                             gen_ref: TransactionStreamRef::new_gen(
                                 tx_stream_ref.stream_id,
                                 generator.id,
@@ -943,6 +1061,11 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
             stream_to_displayed_txs.insert(tx_stream_ref.clone(), displayed_transactions);
         }
 
+        if new_focused_tx.is_none() {
+            new_focused_tx = focused_tx_ref
+                .as_ref()
+                .and_then(|tx| waves.inner.as_transactions()?.get_transaction(tx));
+        }
         if let Some(focused_tx) = new_focused_tx {
             for rel in &focused_tx.inc_relations {
                 inc_relation_tx_ids.push(TransactionRef {
@@ -1012,10 +1135,21 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
             ),
             DataContainer::Empty => return,
         };
-        if cache.commands.is_none() || Some(response.rect) != cache.rect {
+        if cache.commands.is_none() || Some(response.rect) != cache.rect || cache.scroll_offset != Some(source.scroll_offset) {
             let commands = self.generate_draw_commands(source, &cfg, msgs);
+            let transaction_commands = match &commands {
+                Some(CachedDrawData::Transactions(data)) => Some(data),
+                Some(CachedDrawData::Combined(data)) => Some(&data.transaction),
+                _ => None,
+            };
+            cache.payloads = transaction_commands.into_iter().flat_map(|data| data.draw_commands.iter())
+                .filter(|(_, command)| command.count == 1)
+                .map(|((_, tx), _)| tx.id.0 as u64).collect();
+            cache.payloads.sort_unstable();
+            cache.payloads.dedup();
             cache.commands = commands;
             cache.rect = Some(response.rect);
+            cache.scroll_offset = Some(source.scroll_offset);
             #[cfg(test)]
             {
                 cache.builds += 1;
@@ -1586,7 +1720,7 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                         stream_to_displayed_txs.get(&stream.transaction_stream_ref)
                     {
                         for tx_ref in tx_refs {
-                            if let Some(tx_draw_command) = draw_commands.get(tx_ref) {
+                            if let Some(tx_draw_command) = draw_commands.get(&(stream.transaction_stream_ref.clone(), tx_ref.clone())) {
                                 let mut min = tx_draw_command.min;
                                 let mut max = tx_draw_command.max;
 
@@ -1643,13 +1777,15 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                                             .collect()
                                     })
                                     .unwrap_or_default();
-                                response = handle_transaction_tooltip(
+                                response = if tx_draw_command.count > 1 {
+                                    response.on_hover_text(format!("{} transactions in this screen interval. Zoom in to inspect individual transactions. Clicking selects the final transaction.", tx_draw_command.count))
+                                } else { handle_transaction_tooltip(
                                     response,
                                     waves,
                                     &tx_draw_command.gen_ref,
                                     tx_ref,
                                     &hovered_events,
-                                );
+                                ) };
 
                                 if response.clicked() {
                                     msgs.push(Message::FocusTransaction(Some(tx_ref.clone()), tile_id));
@@ -2245,6 +2381,97 @@ mod view_cache_tests {
         output.textures_delta.clear();
     }
 
+    #[tokio::test]
+    async fn transaction_stream_and_generator_keep_independent_stable_geometry() {
+        use ftr_parser::types::{GeneratorId, StreamId, TransactionId};
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("overlap.vtr");
+        let mut writer = vtr::Writer::create(&path).unwrap();
+        let stream = writer.add_stream(None, "packets", "CHI");
+        let a = writer.add_generator(stream, "a");
+        let b = writer.add_generator(stream, "b");
+        let first = writer.begin_tx(a, 0).unwrap();
+        let second = writer.begin_tx(b, 10).unwrap();
+        writer.end_tx(second, 20, vtr::TxStatus::Ok).unwrap();
+        writer.end_tx(first, 100, vtr::TxStatus::Ok).unwrap();
+        writer.close().unwrap();
+        let mut state = SystemState::new_default_config()
+            .unwrap()
+            .with_params(StartupParams {
+                waves: Some(WaveSource::File(path.try_into().unwrap())),
+                ..Default::default()
+            });
+        settle(&mut state).await;
+        let stream_ref =
+            TransactionStreamRef::new_stream(StreamId(stream.0 as usize), "packets".into());
+        let generator_ref = TransactionStreamRef::new_gen(
+            StreamId(stream.0 as usize),
+            GeneratorId(b.0 as usize),
+            "b".into(),
+        );
+        state.update(Message::AddStreamOrGenerator(stream_ref.clone()));
+        state.update(Message::AddStreamOrGenerator(generator_ref.clone()));
+        settle(&mut state).await;
+        state.user.waves.as_mut().unwrap().refresh_time_range(false);
+        let draw = |state: &SystemState| {
+            let waves = state.user.waveform_read().unwrap();
+            let view = CanvasView::new(waves.document, waves.items, waves.view, tile_id(state, 0));
+            let Some(CachedDrawData::Transactions(data)) = state
+                .waveform_services()
+                .generate_transaction_draw_commands(
+                    &view.source,
+                    &DrawConfig::new(Vec2::new(1000.0, 500.0), 30.0, 12.0),
+                )
+            else {
+                panic!()
+            };
+            data
+        };
+        let before = draw(&state);
+        let reference = TransactionRef {
+            id: TransactionId(second as usize),
+        };
+        let stream_key = (stream_ref.clone(), reference.clone());
+        let generator_key = (generator_ref.clone(), reference.clone());
+        assert_eq!(before.draw_commands.len(), 3);
+        assert!(before.draw_commands[&stream_key].min.y > before.draw_commands[&generator_key].min.y);
+        {
+            let waves = state.user.waveform_edit().unwrap();
+            waves
+                .view
+                .viewport
+                .zoom_to_range(&12.into(), &18.into(), waves.document.time_range());
+        }
+        let after = draw(&state);
+        assert_eq!(
+            before.draw_commands[&stream_key].min.y,
+            after.draw_commands[&stream_key].min.y
+        );
+        assert_eq!(
+            before.draw_commands[&generator_key].min.y,
+            after.draw_commands[&generator_key].min.y
+        );
+        let long = (
+            stream_ref,
+            TransactionRef {
+                id: TransactionId(first as usize),
+            },
+        );
+        assert!(
+            after.draw_commands.contains_key(&long),
+            "long interval spanning the window remains visible"
+        );
+        {
+            let waves = state.user.waveform_edit().unwrap();
+            waves.view.viewport.curr_left = crate::viewport::Relative(-0.3);
+            waves.view.viewport.curr_right = crate::viewport::Relative(-0.1);
+        }
+        assert!(
+            draw(&state).draw_commands.is_empty(),
+            "a viewport before time zero does not wrap to u64::MAX"
+        );
+    }
+
     async fn loaded_counter() -> SystemState {
         let mut state = SystemState::new_default_config()
             .unwrap()
@@ -2442,6 +2669,7 @@ mod view_cache_tests {
             let Some(CachedDrawData::Waves(data)) =
                 state.waveform_services().generate_draw_commands(
                     &CanvasSource {
+                        scroll_offset: 0.0,
                         tile_id: crate::tiles::TileId(1),
                         interaction: &Default::default(),
                         document: waves.document,
@@ -2510,6 +2738,7 @@ mod view_cache_tests {
                         state.waveform_services().draw_waveform_body(
                             &CanvasView {
                                 source: CanvasSource {
+                                    scroll_offset: 0.0,
                                     tile_id: crate::tiles::TileId(index as u64 + 1),
                                     interaction: &Default::default(),
                                     document: waves.document,

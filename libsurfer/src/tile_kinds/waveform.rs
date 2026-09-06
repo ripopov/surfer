@@ -481,7 +481,7 @@ impl WaveformView {
     }
 
     pub(crate) fn invalidate_draw_cache(&self) {
-        *self.draw_cache.borrow_mut() = WaveDrawCache::default();
+        self.draw_cache.borrow_mut().invalidate();
     }
 
     pub(crate) fn reconcile_annotations(&mut self, items: &crate::item_list::ItemList) {

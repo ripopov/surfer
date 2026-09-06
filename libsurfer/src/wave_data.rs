@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use eyre::{Result, WrapErr as _};
 use num::bigint::ToBigInt as _;
-use num::{BigInt, BigUint, One, ToPrimitive, Zero};
+use num::{BigInt, One, ToPrimitive, Zero};
 use serde::{Deserialize, Serialize};
 use surfer_translation_types::{TranslationPreference, Translator, VariableValue};
 use tracing::{error, info, warn};
@@ -14,7 +14,6 @@ use crate::displayed_item::{
 };
 use crate::displayed_item_tree::{DisplayedItemTree, ItemIndex, TargetPosition, VisibleItemIndex};
 use crate::transaction_container::{StreamScopeRef, TransactionStreamRef};
-use crate::transactions::calculate_rows_of_stream;
 use crate::translation::{DynTranslator, TranslatorList, VariableInfoExt};
 use crate::variable_name_type::VariableNameType;
 use crate::viewport::Viewport;
@@ -548,11 +547,7 @@ impl WaveformEdit<'_> {
             }
         }
 
-        let mut last_times_on_row = vec![(BigUint::ZERO, BigUint::ZERO)];
-        let Some(generator) = transactions.get_generator(gen_id) else {
-            return Ok(());
-        };
-        calculate_rows_of_stream(&generator.transactions, &mut last_times_on_row);
+        let row_count = transactions.track_index(&gen_ref).map_or(1, |index| index.row_count().max(1));
 
         let new_gen = DisplayedItem::Stream(DisplayedStream {
             display_name: gen_ref.name.clone(),
@@ -560,7 +555,7 @@ impl WaveformEdit<'_> {
             color: None,
             background_color: None,
             manual_name: None,
-            rows: last_times_on_row.len(),
+            rows: row_count,
         });
 
         self.insert_item(new_gen, None, true)?;
@@ -598,33 +593,15 @@ impl WaveformEdit<'_> {
             }
         }
 
-        let stream = self
-            .document
-            .inner
-            .as_transactions()
-            .unwrap()
-            .get_stream(stream_ref.stream_id)
-            .unwrap();
-        let mut last_times_on_row = vec![(BigUint::ZERO, BigUint::ZERO)];
-
-        for gen_id in &stream.generators {
-            let generator = self
-                .document
-                .inner
-                .as_transactions()
-                .unwrap()
-                .get_generator(*gen_id)
-                .unwrap();
-            calculate_rows_of_stream(&generator.transactions, &mut last_times_on_row);
-        }
-
+        let row_count = self.document.inner.as_transactions().unwrap().track_index(&stream_ref)
+            .map_or(1, |index| index.row_count().max(1));
         let new_stream = DisplayedItem::Stream(DisplayedStream {
             display_name: stream_ref.name.clone(),
             transaction_stream_ref: stream_ref,
             color: None,
             background_color: None,
             manual_name: None,
-            rows: last_times_on_row.len(),
+            rows: row_count,
         });
 
         self.insert_item(new_stream, None, true)?;

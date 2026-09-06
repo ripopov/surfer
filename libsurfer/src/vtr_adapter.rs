@@ -358,6 +358,20 @@ mod tests {
             camino::Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/combined.vtr");
         state.update(Message::LoadFile(path, LoadOptions::Clear));
         async fn wait(state: &mut SystemState) {
+            // Model the visible singleton request published by a rendered canvas.
+            let visible = state.user.workspace.layout().visible_tiles();
+            for id in visible {
+                if let Some(crate::tiles::kind::TileKind::Waveform(tile)) = state
+                    .user
+                    .workspace
+                    .tiles_mut()
+                    .get_mut(&id)
+                    .map(|entry| &mut entry.kind)
+                {
+                    tile.view.draw_cache.borrow_mut().payloads = vec![1];
+                }
+            }
+            state.handle_async_messages();
             let start = std::time::Instant::now();
             while !state.waves_fully_loaded() {
                 state.handle_async_messages();

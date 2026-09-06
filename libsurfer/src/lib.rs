@@ -63,6 +63,7 @@ pub mod toolbar;
 pub mod tooltips;
 pub mod trace_style;
 pub mod transaction_container;
+mod transaction_index;
 pub mod transactions;
 pub mod translation;
 pub mod util;
@@ -255,7 +256,7 @@ struct CachedWaveDrawData {
 }
 
 struct CachedTransactionDrawData {
-    pub draw_commands: HashMap<TransactionRef, TxDrawingCommands>,
+    pub draw_commands: HashMap<(TransactionStreamRef, TransactionRef), TxDrawingCommands>,
     pub stream_to_displayed_txs: HashMap<TransactionStreamRef, Vec<TransactionRef>>,
     pub inc_relation_tx_ids: Vec<TransactionRef>,
     pub out_relation_tx_ids: Vec<TransactionRef>,
@@ -449,6 +450,7 @@ impl SystemState {
             };
             match &tile.kind {
                 TileKind::Waveform(tile) => {
+                    demand.payloads.extend(tile.view.draw_cache.borrow().payloads.iter().copied());
                     let Some(list) = workspace.item_lists().get(&tile.items) else {
                         continue;
                     };

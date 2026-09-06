@@ -624,6 +624,10 @@ impl Workspace {
                 if let crate::displayed_item::DisplayedItem::Stream(stream) = item {
                     let mut rows = vec![(num::BigUint::ZERO, num::BigUint::ZERO)];
                     let reference = &stream.transaction_stream_ref;
+                    if let Some(index) = transactions.track_index(reference) {
+                        stream.rows = index.row_count().max(1);
+                        continue;
+                    }
                     if let Some(id) = reference.gen_id {
                         if let Some(generator) = transactions.get_generator(id) {
                             crate::transactions::calculate_rows_of_stream(

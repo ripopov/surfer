@@ -53,7 +53,8 @@ cargo test -p libsurfer --lib vtr_chi_noc_packet_streams
 The generator reads the resulting file back and validates packet counts,
 single-flit attributes, every timed hop and per-stream peak concurrency.
 The example test validates the committed artifact; the PNG regression in
-`libsurfer/src/tests/snapshot.rs` renders two complete streams over the sparse
-burst. The full 64-packet burst remains in the same file for stress browsing.
+`libsurfer/src/tests/snapshot.rs` renders the 64-packet burst in two complete streams on a tall canvas with
+compact row spacing. Rows now stay fixed across time windows; the sparse burst
+therefore leaves rows empty that are occupied during the stress burst.
 The generator uses existing VTR hierarchy, transactions, attributes and events;
 no format or public API changes are required.

@@ -15,13 +15,8 @@ fn find_transaction<'a>(
     gen_ref: &TransactionStreamRef,
     tx_ref: &TransactionRef,
 ) -> Option<&'a Transaction> {
-    let txs = waves.inner.as_transactions()?;
-    let gen_id = gen_ref.gen_id?;
-    let generator = txs.get_generator(gen_id)?;
-    generator
-        .transactions
-        .iter()
-        .find(|transaction| transaction.get_tx_id() == tx_ref.id)
+    let transaction = waves.inner.as_transactions()?.get_transaction(tx_ref)?;
+    (Some(transaction.get_gen_id()) == gen_ref.gen_id).then_some(transaction)
 }
 
 #[must_use]

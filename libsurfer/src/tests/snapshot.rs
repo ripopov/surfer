@@ -161,6 +161,32 @@ pub(crate) fn render_and_compare_inner(
     // disable the default timeline
     state.user.show_default_timeline = Some(!state.show_default_timeline());
 
+    if state
+        .user
+        .waves
+        .as_ref()
+        .and_then(|w| w.inner.as_transactions())
+        .is_some_and(|t| t.is_native())
+    {
+        let context = egui::Context::default();
+        for _ in 0..3 {
+            let mut output = context.run_ui(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
+                    ..Default::default()
+                },
+                |ui| {
+                    setup_custom_font(ui.ctx());
+                    for message in state.draw(ui, Some(size)) {
+                        state.update(message);
+                    }
+                },
+            );
+            output.textures_delta.clear();
+            state.handle_async_messages();
+            wait_for_waves_fully_loaded(&mut state, 10);
+        }
+    }
     let size_i = (size.x as i32, size.y as i32);
 
     let mut surface = create_surface(size_i);
@@ -178,6 +204,18 @@ pub(crate) fn render_and_compare_inner(
                 if matches!(msg, Message::BuildAnalogCache { .. }) {
                     state.update(msg);
                 }
+            }
+            // Match the app's frame pump: screen samples request native payloads
+            // after geometry is known, so settle that bounded work before capture.
+            if state
+                .user
+                .waves
+                .as_ref()
+                .and_then(|w| w.inner.as_transactions())
+                .is_some_and(|t| t.is_native())
+            {
+                state.handle_async_messages();
+                wait_for_waves_fully_loaded(&mut state, 10);
             }
             // Wait for analog cache builds to complete
             while !state.analog_caches_ready() {
@@ -1400,7 +1438,29 @@ fn chi_noc_example() -> SystemState {
     state
 }
 
-snapshot_ui!(vtr_chi_noc_packet_streams, chi_noc_example);
+#[test]
+fn vtr_chi_noc_packet_streams() {
+    render_and_compare_inner(
+        &Utf8PathBuf::from("vtr_chi_noc_packet_streams"),
+        || {
+            let mut state = chi_noc_example();
+            state.user.config.layout.transactions_line_height = 12.0;
+            {
+                let waves = state.user.waveform_edit().unwrap();
+                waves.view.viewport.zoom_to_range(
+                    &400.into(),
+                    &640.into(),
+                    waves.document.time_range(),
+                );
+            }
+            state.invalidate_draw_commands();
+            state
+        },
+        Vec2::new(1280.0, 1600.0),
+        false,
+        0.99999,
+    );
+}
 
 #[test]
 fn vtr_event_marker_hover_and_click() {
@@ -1417,6 +1477,8 @@ fn vtr_event_marker_hover_and_click() {
                 style.interaction.tooltip_grace_time = 0.0;
             });
             schematic_frame(&mut state, &context, vec![]);
+            state.handle_async_messages();
+            wait_for_waves_fully_loaded(&mut state, 10);
             let output = schematic_frame(&mut state, &context, vec![]);
             // Find an actual painted dot, avoiding assumptions about canvas offsets.
             let marker = output

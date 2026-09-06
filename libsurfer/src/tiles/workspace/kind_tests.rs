@@ -339,6 +339,8 @@ fn transaction_navigation_is_local_and_deduplicates_displayed_generators() {
         WaveSource::Data,
         WaveFormat::Ftr,
         TransactionContainer {
+            locations: Default::default(),
+                            indexes: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             native: None,
             inner,

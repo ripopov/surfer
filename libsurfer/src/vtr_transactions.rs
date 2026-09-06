@@ -4,6 +4,9 @@
 //! This adapter preserves VTR's stream/generator grouping, attributes and
 //! relations at that boundary while the native VTR reader remains read-only.
 
+use crate::transaction_index::{Span, TrackIndex, TrackKey};
+use std::sync::Arc;
+
 use crate::transaction_container::{
     TransactionContainer, VtrTransactionDetails, VtrTransactionEvent, VtrTransactionRelation,
     VtrTransactionStage,
@@ -22,10 +25,18 @@ use vtr::{NodeData, Reader, TxQuery, Value};
 pub(crate) struct TransactionDemand {
     pub windows: Vec<(u32, u64, u64)>,
     pub pinned: Vec<u64>,
+    pub payloads: Vec<u64>,
 }
 
 impl TransactionDemand {
     pub fn normalize(&mut self) {
+        // Track geometry is independent of time; payload demand comes from screen samples.
+        for (_, start, end) in &mut self.windows {
+            *start = 0;
+            *end = u64::MAX;
+        }
+        self.payloads.sort_unstable();
+        self.payloads.dedup();
         self.windows.sort_unstable();
         let mut merged: Vec<(u32, u64, u64)> = Vec::new();
         for (generator, start, end) in self.windows.drain(..) {
@@ -42,19 +53,10 @@ impl TransactionDemand {
         self.pinned.sort_unstable();
         self.pinned.dedup();
     }
-
-    fn contains(&self, tx: &FtrTransaction) -> bool {
-        use num::ToPrimitive;
-        self.pinned.contains(&(tx.event.tx_id.0 as u64))
-            || self.windows.iter().any(|(generator, start, end)| {
-                tx.event.gen_id.0 == *generator as usize
-                    && tx.event.start_time.to_u64().unwrap_or(u64::MAX) <= *end
-                    && tx.event.end_time.to_u64().unwrap_or(u64::MAX) >= *start
-            })
-    }
 }
 
 pub(crate) struct NativeTransactions {
+    pub tracks: HashMap<TrackKey, Arc<TrackIndex>>,
     pub logs: std::sync::Arc<crate::tile_kinds::simulation_logs::native::Source>,
     reader: std::sync::Arc<std::sync::Mutex<Reader>>,
     identity: u64,
@@ -67,6 +69,7 @@ impl NativeTransactions {
     pub fn new(reader: std::sync::Arc<std::sync::Mutex<Reader>>) -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         Self {
+            tracks: HashMap::new(),
             logs: crate::tile_kinds::simulation_logs::native::Source::new(reader.clone()),
             reader,
             identity: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
@@ -78,33 +81,79 @@ impl NativeTransactions {
 }
 
 pub(crate) struct TransactionLoad {
+    tracks: HashMap<TrackKey, Arc<TrackIndex>>,
     reader: std::sync::Arc<std::sync::Mutex<Reader>>,
     identity: u64,
     demand: TransactionDemand,
 }
 
 pub struct TransactionLoadResult {
+    tracks: HashMap<TrackKey, Arc<TrackIndex>>,
     identity: u64,
     demand: TransactionDemand,
     data: Result<Option<TransactionContainer>, String>,
 }
 
 impl TransactionLoad {
-    pub fn run(self) -> TransactionLoadResult {
-        let queries: Vec<_> = self
-            .demand
-            .windows
-            .iter()
-            .map(|(generator, start, end)| TxQuery {
-                generator: Some(vtr::NodeId(*generator)),
-                window: Some((*start, *end)),
-                ..Default::default()
-            })
-            .collect();
+    pub fn run(mut self) -> TransactionLoadResult {
         let mut reader = self.reader.lock().unwrap();
-        let data = from_reader(&reader, &queries, &self.demand.pinned);
+        // Geometry belongs to complete tracks, not viewport payload batches.
+        // Reuse these immutable indexes when windows change or a result is stale.
+        let data = (|| {
+            for &(generator, _, _) in &self.demand.windows {
+                let Some(stream) = reader.generator_stream(vtr::NodeId(generator)) else {
+                    continue;
+                };
+                let key = TrackKey {
+                    stream: stream.0,
+                    generator: None,
+                };
+                if self.tracks.contains_key(&key) {
+                    continue;
+                }
+                let mut spans = Vec::new();
+                reader
+                    .visit_transactions(
+                        &TxQuery {
+                            stream: Some(stream),
+                            ..Default::default()
+                        },
+                        |tx| {
+                            spans.push(Span {
+                                id: tx.id,
+                                begin: tx.begin,
+                                end: tx.end,
+                                generator: tx.generator.0,
+                            });
+                            true
+                        },
+                    )
+                    .map_err(|e| e.to_string())?;
+                let mut generators: HashMap<u32, Vec<Span>> = HashMap::new();
+                for span in &spans {
+                    generators.entry(span.generator).or_default().push(*span);
+                }
+                self.tracks.insert(key, Arc::new(TrackIndex::new(spans)));
+                for (generator, spans) in generators {
+                    self.tracks.insert(
+                        TrackKey {
+                            stream: stream.0,
+                            generator: Some(generator),
+                        },
+                        Arc::new(TrackIndex::new(spans)),
+                    );
+                }
+                reader.clear_cache();
+            }
+            let mut ids = self.demand.payloads.clone();
+            ids.extend(self.demand.pinned.iter().copied());
+            ids.sort_unstable();
+            ids.dedup();
+            from_reader(&reader, &[], &ids)
+        })();
         reader.clear_cache();
         TransactionLoadResult {
+            tracks: self.tracks,
             identity: self.identity,
             demand: self.demand,
             data,
@@ -119,24 +168,18 @@ impl TransactionContainer {
     ) -> Option<TransactionLoad> {
         let native = self.native.as_mut()?;
         demand.normalize();
-        if demand != native.desired {
-            native.desired = demand;
+        native.desired = demand;
+        if native.desired.windows.is_empty()
+            && native.desired.pinned.is_empty()
+            && native.desired.payloads.is_empty()
+        {
             for generator in self.inner.tx_generators.values_mut() {
-                generator
-                    .transactions
-                    .retain(|tx| native.desired.contains(tx));
+                generator.transactions.clear();
             }
-            let ids: std::collections::HashSet<_> = self
-                .inner
-                .tx_generators
-                .values()
-                .flat_map(|g| g.transactions.iter().map(|t| t.event.tx_id))
-                .collect();
             if let Some(details) = &mut self.vtr_details {
-                details.retain(|id, _| ids.contains(id));
+                details.clear();
             }
-        }
-        if native.desired.windows.is_empty() && native.desired.pinned.is_empty() {
+            self.locations.get_mut().unwrap().clear();
             native.loaded = native.desired.clone();
             return None;
         }
@@ -145,6 +188,7 @@ impl TransactionContainer {
         }
         native.in_flight = true;
         Some(TransactionLoad {
+            tracks: native.tracks.clone(),
             reader: native.reader.clone(),
             identity: native.identity,
             demand: native.desired.clone(),
@@ -159,6 +203,7 @@ impl TransactionContainer {
             return false;
         }
         native.in_flight = false;
+        native.tracks.extend(result.tracks);
         if native.desired != result.demand {
             return false;
         }
@@ -167,6 +212,7 @@ impl TransactionContainer {
         match result.data {
             Ok(Some(data)) => {
                 self.inner = data.inner;
+                self.locations = data.locations;
                 self.vtr_details = data.vtr_details;
                 true
             }
@@ -314,6 +360,13 @@ pub(crate) fn from_reader(
         });
     }
 
+    // Transaction IDs and file order need not follow simulation time.
+    for generator in generators.values_mut() {
+        generator
+            .transactions
+            .sort_by_key(|tx| (tx.get_start_time(), tx.get_tx_id().0));
+    }
+
     let mut tx_locations = HashMap::new();
     for (generator_id, generator) in &generators {
         for (index, tx) in generator.transactions.iter().enumerate() {
@@ -423,6 +476,8 @@ pub(crate) fn from_reader(
     ftr.tx_streams = streams;
     ftr.tx_generators = generators;
     Ok(Some(TransactionContainer {
+        locations: std::sync::Mutex::new(tx_locations),
+        indexes: Default::default(),
         inner: ftr,
         vtr_details: Some(vtr_details),
         native: None,
@@ -527,6 +582,7 @@ mod tests {
         let demand = TransactionDemand {
             windows: vec![(generator.0 as u32, 2, 2)],
             pinned: vec![],
+            payloads: vec![1],
         };
         let load = container
             .retain_native_transactions(demand.clone())
@@ -544,6 +600,7 @@ mod tests {
         let pin = TransactionDemand {
             windows: vec![],
             pinned: vec![first.0 as u64],
+            payloads: vec![],
         };
         let load = container.retain_native_transactions(pin).unwrap();
         assert!(container.on_native_transactions_loaded(load.run()));
@@ -559,6 +616,7 @@ mod tests {
             .retain_native_transactions(TransactionDemand {
                 windows: vec![(generator.0 as u32, 0, 100)],
                 pinned: vec![],
+                payloads: vec![],
             })
             .unwrap();
         container.retain_native_transactions(Default::default());
@@ -582,16 +640,114 @@ mod tests {
     }
 
     #[test]
+    fn complete_track_geometry_is_reused_and_payloads_are_screen_selected() {
+        let loaded =
+            crate::vtr_adapter::load(camino::Utf8Path::new("../examples/chi_noc.vtr")).unwrap();
+        let mut container = loaded.transactions.unwrap();
+        let generator = container
+            .inner
+            .tx_generators
+            .values()
+            .find(|g| g.name == "ReadShared")
+            .unwrap();
+        let key = TrackKey {
+            stream: generator.stream_id.0 as u32,
+            generator: None,
+        };
+        let generator_id = generator.id.0 as u32;
+        let demand = TransactionDemand {
+            windows: vec![(generator_id, 0, 260)],
+            ..Default::default()
+        };
+        let load = container
+            .retain_native_transactions(demand.clone())
+            .unwrap();
+        assert!(container.on_native_transactions_loaded(load.run()));
+        assert!(
+            container.vtr_details.as_ref().unwrap().is_empty(),
+            "indexing does not materialize rich viewer payloads"
+        );
+        let index = container.native.as_ref().unwrap().tracks[&key].clone();
+        assert_eq!(index.row_count(), 64);
+        let samples = index.query(0..4, 400, 600, 1000);
+        assert_eq!(samples.len(), 4);
+        let payloads: Vec<_> = samples.iter().map(|s| s.representative.id).collect();
+        let load = container
+            .retain_native_transactions(TransactionDemand {
+                payloads: payloads.clone(),
+                ..demand.clone()
+            })
+            .unwrap();
+        assert!(container.on_native_transactions_loaded(load.run()));
+        assert_eq!(container.vtr_details.as_ref().unwrap().len(), 4);
+        assert!(Arc::ptr_eq(
+            &index,
+            &container.native.as_ref().unwrap().tracks[&key]
+        ));
+        assert!(
+            container
+                .retain_native_transactions(TransactionDemand {
+                    windows: vec![(generator_id, 500, 700)],
+                    payloads,
+                    ..Default::default()
+                })
+                .is_none(),
+            "panning does not rescan the source when screen payloads are unchanged"
+        );
+        for sample in index.query(0..4, 450, 550, 1000) {
+            assert_eq!(
+                sample.row,
+                samples
+                    .iter()
+                    .find(|s| s.representative.id == sample.representative.id)
+                    .unwrap()
+                    .row
+            );
+        }
+    }
+
+    #[test]
+    fn transactions_are_sorted_by_time_even_when_ids_are_not() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("unordered.vtr");
+        let mut writer = vtr::Writer::create(&path).unwrap();
+        let stream = writer.add_stream(None, "packets", "CHI");
+        let generator = writer.add_generator(stream, "packet");
+        for (begin, end) in [(100, 110), (10, 200), (20, 25), (20, 30)] {
+            let tx = writer.begin_tx(generator, begin).unwrap();
+            writer.end_tx(tx, end, vtr::TxStatus::Ok).unwrap();
+        }
+        writer.close().unwrap();
+        let container = to_ftr(&path).unwrap().unwrap();
+        let transactions =
+            &container.inner.tx_generators[&GeneratorId(generator.0 as usize)].transactions;
+        assert_eq!(
+            transactions
+                .iter()
+                .map(|tx| tx.get_tx_id().0)
+                .collect::<Vec<_>>(),
+            [2, 3, 4, 1]
+        );
+        assert_eq!(transactions[0].get_end_time(), 200u32.into());
+    }
+
+    #[test]
     fn chi_noc_overlapping_packets_have_distinct_canvas_rows() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/chi_noc.vtr");
         let container = to_ftr(&path).unwrap().unwrap();
         for stream in container.inner.tx_streams.values() {
-            let assignments = crate::transactions::packet_rows(stream.generators.iter()
-                .flat_map(|id| container.inner.tx_generators[id].transactions.iter()));
+            let assignments = crate::transactions::packet_rows(
+                stream
+                    .generators
+                    .iter()
+                    .flat_map(|id| container.inner.tx_generators[id].transactions.iter()),
+            );
             let mut rows: HashMap<usize, Vec<_>> = HashMap::new();
             for id in &stream.generators {
                 for tx in &container.inner.tx_generators[id].transactions {
-                    rows.entry(assignments[&tx.get_tx_id()]).or_default().push((tx.get_start_time(), tx.get_end_time()));
+                    rows.entry(assignments[&tx.get_tx_id()])
+                        .or_default()
+                        .push((tx.get_start_time(), tx.get_end_time()));
                 }
             }
             assert_eq!(rows.len(), 64);

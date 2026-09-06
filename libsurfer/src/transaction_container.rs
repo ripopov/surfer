@@ -11,6 +11,13 @@ use std::hash::{Hash, Hasher};
 use std::ops::Not;
 
 pub struct TransactionContainer {
+    pub(crate) locations: std::sync::Mutex<HashMap<TransactionId, (GeneratorId, usize)>>,
+    pub(crate) indexes: std::sync::Mutex<
+        HashMap<
+            crate::transaction_index::TrackKey,
+            std::sync::Arc<crate::transaction_index::TrackIndex>,
+        >,
+    >,
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) native: Option<crate::vtr_transactions::NativeTransactions>,
     pub inner: FTR,
@@ -55,6 +62,55 @@ pub(crate) struct VtrTransactionRelation {
 }
 
 impl TransactionContainer {
+    pub(crate) fn track_index(
+        &self,
+        reference: &TransactionStreamRef,
+    ) -> Option<std::sync::Arc<crate::transaction_index::TrackIndex>> {
+        use crate::transaction_index::{Span, TrackIndex};
+        use num::ToPrimitive;
+        let key = reference.into();
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(native) = &self.native {
+            return native.tracks.get(&key).cloned();
+        }
+        if let Some(index) = self.indexes.lock().unwrap().get(&key) {
+            return Some(index.clone());
+        }
+        let stream = self.get_stream(reference.stream_id)?;
+        if !stream.transactions_loaded {
+            return None;
+        }
+        let generators: Vec<_> = if let Some(generator) = reference.gen_id {
+            vec![generator]
+        } else {
+            stream.generators.clone()
+        };
+        {
+            let mut locations = self.locations.lock().unwrap();
+            for generator in generators.iter().filter_map(|id| self.get_generator(*id)) {
+                for (position, tx) in generator.transactions.iter().enumerate() {
+                    locations.insert(tx.get_tx_id(), (generator.id, position));
+                }
+            }
+        }
+        let spans: Option<Vec<_>> = generators
+            .iter()
+            .filter_map(|id| self.get_generator(*id))
+            .flat_map(|g| &g.transactions)
+            .map(|tx| {
+                Some(Span {
+                    id: tx.get_tx_id().0 as u64,
+                    generator: tx.get_gen_id().0 as u32,
+                    begin: tx.get_start_time().to_u64()?,
+                    end: tx.get_end_time().to_u64()?,
+                })
+            })
+            .collect();
+        let index = std::sync::Arc::new(TrackIndex::new(spans?));
+        self.indexes.lock().unwrap().insert(key, index.clone());
+        Some(index)
+    }
+
     pub(crate) fn is_native(&self) -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -88,6 +144,15 @@ impl TransactionContainer {
 
     #[must_use]
     pub fn get_transaction(&self, transaction_ref: &TransactionRef) -> Option<&Transaction> {
+        if let Some((generator, position)) = self
+            .locations
+            .lock()
+            .unwrap()
+            .get(&transaction_ref.id)
+            .copied()
+        {
+            return self.get_generator(generator)?.transactions.get(position);
+        }
         self.inner.tx_generators.values().find_map(|g| {
             g.transactions
                 .iter()
