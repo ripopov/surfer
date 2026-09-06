@@ -565,6 +565,89 @@ pub enum WorkspaceError {
 }
 
 impl Workspace {
+    pub(crate) fn evict_hidden_native_runtime(
+        &mut self,
+    ) -> std::collections::HashSet<crate::wave_container::AnalogCacheKey> {
+        use crate::tiles::kind::TileKind;
+        let visible: std::collections::HashSet<_> =
+            self.layout.visible_tiles().into_iter().collect();
+        let lists: std::collections::HashSet<_> = self
+            .tiles
+            .iter()
+            .filter(|(id, _)| visible.contains(id))
+            .filter_map(|(_, tile)| tile.kind.waveform_list())
+            .collect();
+        for (id, tile) in &mut self.tiles {
+            if !visible.contains(id) {
+                match &mut tile.kind {
+                    TileKind::Waveform(tile) => tile.view.invalidate_draw_cache(),
+                    TileKind::Memory(tile) => tile.reset_runtime(),
+                    TileKind::FrameBuffer(tile) => tile.reset_runtime(),
+                    _ => {}
+                }
+            }
+        }
+        let mut retained = std::collections::HashSet::new();
+        for (id, list) in &mut self.item_lists {
+            let items: std::collections::HashSet<_> = if lists.contains(id) {
+                list.items_tree
+                    .iter_visible()
+                    .map(|node| node.item_ref)
+                    .collect()
+            } else {
+                Default::default()
+            };
+            for (id, item) in &mut list.displayed_items {
+                if let crate::displayed_item::DisplayedItem::Variable(variable) = item
+                    && let Some(analog) = &mut variable.analog
+                {
+                    if items.contains(id) {
+                        if let Some(cache) = &analog.cache {
+                            retained.insert(cache.cache_key.clone());
+                        }
+                    } else {
+                        analog.cache = None;
+                    }
+                }
+            }
+        }
+        retained
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn refresh_transaction_rows(
+        &mut self,
+        transactions: &crate::transaction_container::TransactionContainer,
+    ) {
+        for list in self.item_lists.values_mut() {
+            for item in list.displayed_items.values_mut() {
+                if let crate::displayed_item::DisplayedItem::Stream(stream) = item {
+                    let mut rows = vec![(num::BigUint::ZERO, num::BigUint::ZERO)];
+                    let reference = &stream.transaction_stream_ref;
+                    if let Some(id) = reference.gen_id {
+                        if let Some(generator) = transactions.get_generator(id) {
+                            crate::transactions::calculate_rows_of_stream(
+                                &generator.transactions,
+                                &mut rows,
+                            );
+                        }
+                    } else if let Some(stream) = transactions.get_stream(reference.stream_id) {
+                        for id in &stream.generators {
+                            if let Some(generator) = transactions.get_generator(*id) {
+                                crate::transactions::calculate_rows_of_stream(
+                                    &generator.transactions,
+                                    &mut rows,
+                                );
+                            }
+                        }
+                    }
+                    stream.rows = rows.len();
+                }
+            }
+            *list.layout_cache.borrow_mut() = Default::default();
+        }
+    }
+
     pub fn layout(&self) -> &Layout {
         &self.layout
     }

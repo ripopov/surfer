@@ -345,6 +345,187 @@ impl SystemState {
     }
 
     pub fn update(&mut self, message: Message) -> Option<()> {
+        let result = self.apply_message(message);
+        if self
+            .user
+            .waves
+            .as_ref()
+            .is_some_and(|w| w.format == WaveFormat::Vtr)
+        {
+            let retained = self.user.workspace.evict_hidden_native_runtime();
+            if let Some(document) = &mut self.user.waves {
+                document
+                    .inflight_caches
+                    .retain(|key, _| retained.contains(key));
+            }
+        }
+        self.reconcile_native_signals();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.reconcile_native_transactions();
+        result
+    }
+
+    fn reconcile_native_signals(&mut self) {
+        let Some(document) = self.user.waves.as_mut() else {
+            return;
+        };
+        let Some(container) = document.inner.as_waves_mut() else {
+            return;
+        };
+        if !matches!(container, WaveContainer::Wellen(waves) if waves.native_backend) {
+            return;
+        }
+        let workspace = &self.user.workspace;
+        let mut variables = Vec::new();
+        for id in workspace.layout().visible_tiles() {
+            let Some(tile) = workspace.tiles().get(&id) else {
+                continue;
+            };
+            if let Some(list) = tile
+                .kind
+                .waveform_list()
+                .and_then(|id| workspace.item_lists().get(&id))
+            {
+                variables.extend(list.items_tree.iter_visible().filter_map(|node| {
+                    match list.displayed_items.get(&node.item_ref) {
+                        Some(crate::displayed_item::DisplayedItem::Variable(v)) => {
+                            Some(v.variable_ref.clone())
+                        }
+                        _ => None,
+                    }
+                }));
+            }
+            match &tile.kind {
+                crate::tiles::kind::TileKind::Memory(tile) => {
+                    if let Some(scope) = &tile.settings.scope {
+                        variables.extend(container.variables_in_scope(scope));
+                    }
+                }
+                crate::tiles::kind::TileKind::FrameBuffer(tile) => match &tile.state.content {
+                    Some(crate::frame_buffer::FrameBufferContent::Variable(variable)) => {
+                        variables.push(variable.clone())
+                    }
+                    Some(crate::frame_buffer::FrameBufferContent::Array { scope_ref, levels })
+                        if !levels.is_empty() =>
+                    {
+                        if let Some(refs) = crate::frame_buffer::resolve_leaf_scopes_and_variables(
+                            container, scope_ref, levels,
+                        ) {
+                            variables.extend(refs);
+                        }
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        let WaveContainer::Wellen(waves) = container else {
+            return;
+        };
+        if let Some(cmd) = waves.retain_native_variables(&variables) {
+            self.load_variables(cmd);
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn reconcile_native_transactions(&mut self) {
+        use crate::tiles::kind::TileKind;
+        use num::ToPrimitive;
+        let Some(document) = self.user.waves.as_ref() else {
+            return;
+        };
+        let Some(transactions) = document.inner.as_transactions() else {
+            return;
+        };
+        if !transactions.is_native() {
+            return;
+        }
+        let mut demand = crate::vtr_transactions::TransactionDemand::default();
+        let workspace = &self.user.workspace;
+        for id in workspace.layout().visible_tiles() {
+            let Some(tile) = workspace.tiles().get(&id) else {
+                continue;
+            };
+            match &tile.kind {
+                TileKind::Waveform(tile) => {
+                    let Some(list) = workspace.item_lists().get(&tile.items) else {
+                        continue;
+                    };
+                    let start = tile
+                        .view
+                        .viewport
+                        .left_edge_time(document.time_range())
+                        .to_u64()
+                        .unwrap_or(0);
+                    let end = tile
+                        .view
+                        .viewport
+                        .right_edge_time(document.time_range())
+                        .to_u64()
+                        .unwrap_or(0);
+                    for node in list.items_tree.iter_visible() {
+                        if let Some(crate::displayed_item::DisplayedItem::Stream(stream)) =
+                            list.displayed_items.get(&node.item_ref)
+                        {
+                            let reference = &stream.transaction_stream_ref;
+                            if let Some(generator) = reference.gen_id {
+                                demand.windows.push((generator.0 as u32, start, end));
+                            } else if let Some(stream) =
+                                transactions.get_stream(reference.stream_id)
+                            {
+                                demand.windows.extend(
+                                    stream.generators.iter().map(|g| (g.0 as u32, start, end)),
+                                );
+                            }
+                        }
+                    }
+                }
+                TileKind::TransactionDetails(_) => {
+                    if let Some(reference) = self
+                        .user
+                        .waveform_read()
+                        .and_then(|w| w.view.focused_transaction.as_ref())
+                    {
+                        demand.pinned.push(reference.id.0 as u64);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let transactions = self
+            .user
+            .waves
+            .as_mut()
+            .unwrap()
+            .inner
+            .as_transactions_mut()
+            .unwrap();
+        demand.normalize();
+        let changed = transactions
+            .native
+            .as_ref()
+            .is_some_and(|native| native.desired != demand);
+        let load = transactions.retain_native_transactions(demand);
+        if changed {
+            self.user.workspace.refresh_transaction_rows(transactions);
+            self.invalidate_draw_commands();
+        }
+        if let Some(load) = load {
+            let sender = self.channels.msg_sender.clone();
+            let context = self.context.clone();
+            crate::async_util::perform_work(move || {
+                crate::channels::checked_send(
+                    &sender,
+                    Message::NativeTransactionsLoaded(load.run()),
+                );
+                if let Some(context) = context {
+                    context.request_repaint();
+                }
+            });
+        }
+    }
+
+    fn apply_message(&mut self, message: Message) -> Option<()> {
         if tracing::enabled!(tracing::Level::TRACE)
             && !matches!(message, Message::CommandPromptUpdate { .. })
         {
@@ -1731,7 +1912,7 @@ impl SystemState {
                         self.update(Message::WaveBodyLoaded(
                             start,
                             source,
-                            crate::wellen::BodyResult::Local(loaded.body),
+                            crate::wellen::BodyResult::Vtr(loaded.body),
                         ));
                     }
                     HeaderResult::LocalFile(header) => {
@@ -1839,13 +2020,37 @@ impl SystemState {
                     self.load_variables(cmd);
                 }
             }
-            Message::SignalsLoaded(start, res) => {
-                info!("Loaded {} variables in {:?}", res.len(), start.elapsed());
-                let waves = self
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::NativeTransactionsLoaded(result) => {
+                if let Some(transactions) = self
                     .user
                     .waves
                     .as_mut()
-                    .expect("Waves should be loaded at this point!");
+                    .and_then(|w| w.inner.as_transactions_mut())
+                    && transactions.on_native_transactions_loaded(result)
+                {
+                    self.user.workspace.refresh_transaction_rows(transactions);
+                    self.invalidate_draw_commands();
+                }
+                if self.pending_document.is_none()
+                    && self
+                        .user
+                        .waves
+                        .as_ref()
+                        .is_some_and(|w| w.inner.is_fully_loaded())
+                    && self.progress_tracker.as_ref().is_some_and(|progress| {
+                        matches!(
+                            progress.progress,
+                            crate::wave_source::LoadProgressStatus::LoadingVariables(_)
+                        )
+                    })
+                {
+                    self.progress_tracker = None;
+                }
+            }
+            Message::SignalsLoaded(start, res) => {
+                info!("Loaded {} variables in {:?}", res.len(), start.elapsed());
+                let waves = self.user.waves.as_mut()?;
                 match waves.inner.as_waves_mut()?.on_signals_loaded(res) {
                     Err(err) => error!("{err:?}"),
                     Ok(Some(cmd)) => self.load_variables(cmd),
@@ -2825,7 +3030,12 @@ impl SystemState {
             Message::AnalogCacheBuilt { entry, result } => {
                 OUTSTANDING_TRANSACTIONS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 // Remove from in-flight registry (may already be gone if generation changed)
-                if let Some(waves) = self.user.waves.as_mut() {
+                if let Some(waves) = self.user.waves.as_mut()
+                    && waves
+                        .inflight_caches
+                        .get(&entry.cache_key)
+                        .is_some_and(|current| Arc::ptr_eq(current, &entry))
+                {
                     waves.inflight_caches.remove(&entry.cache_key);
                 }
                 match result {

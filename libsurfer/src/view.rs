@@ -213,6 +213,9 @@ impl eframe::App for SystemState {
             waves.tick();
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
+        self.reconcile_native_transactions();
+
         if viewport_is_moving {
             self.invalidate_draw_commands();
             ui.request_repaint();
@@ -266,6 +269,11 @@ pub(crate) struct VariableFieldRow {
 
 impl SystemState {
     pub(crate) fn draw(&mut self, ui: &mut Ui, window_size: Option<Vec2>) -> Vec<Message> {
+        if let Some(crate::wave_container::WaveContainer::Wellen(waves)) =
+            self.user.waves.as_ref().and_then(|w| w.inner.as_waves())
+        {
+            waves.begin_native_frame();
+        }
         let max_width = ui.available_size().x;
         let max_height = ui.available_size().y;
 
@@ -467,6 +475,15 @@ impl SystemState {
             self.handle_pressed_keys(ui, &mut msgs);
         }
 
+        if let Some(crate::wave_container::WaveContainer::Wellen(waves)) = self
+            .user
+            .waves
+            .as_mut()
+            .and_then(|w| w.inner.as_waves_mut())
+        {
+            waves.finish_native_frame();
+        }
+        self.reconcile_native_signals();
         msgs
     }
 

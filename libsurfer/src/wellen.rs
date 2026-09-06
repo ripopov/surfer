@@ -42,6 +42,17 @@ pub struct WellenContainer {
     #[debug(skip)]
     source: Option<SignalSource>,
     pub(crate) source_index: Option<Arc<crate::source_index::SourceIndex>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    #[debug(skip)]
+    native: Option<crate::vtr_adapter::NativeSource>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) native_signals: HashMap<SignalRef, vtr::SignalData>,
+    pub(crate) native_backend: bool,
+    native_demand: HashSet<SignalRef>,
+    native_loading: HashSet<SignalRef>,
+    native_failed: HashSet<SignalRef>,
+    native_parameter_queries: std::sync::Mutex<HashSet<SignalRef>>,
+    native_parameter_visible: HashSet<SignalRef>,
     unique_id: u64,
     body_loaded: bool,
 }
@@ -66,6 +77,8 @@ pub enum HeaderResult {
 }
 
 pub enum BodyResult {
+    #[cfg(not(target_arch = "wasm32"))]
+    Vtr(crate::vtr_adapter::NativeSource),
     /// Result of locally parsing the body of a waveform file with wellen.
     Local(wellen::viewers::BodyResult),
     /// Result of querying a remote surfer server (which has used wellen).
@@ -73,6 +86,8 @@ pub enum BodyResult {
 }
 
 pub enum LoadSignalPayload {
+    #[cfg(not(target_arch = "wasm32"))]
+    Vtr(crate::vtr_adapter::NativeSource),
     Local(SignalSource, std::sync::Arc<Hierarchy>),
     Remote(String, usize),
 }
@@ -85,6 +100,10 @@ impl LoadSignalsCmd {
 }
 
 pub struct LoadSignalsResult {
+    #[cfg(not(target_arch = "wasm32"))]
+    native: Option<crate::vtr_adapter::NativeSource>,
+    #[cfg(not(target_arch = "wasm32"))]
+    native_signals: Vec<(SignalRef, vtr::SignalData)>,
     source: Option<SignalSource>,
     server: Option<String>,
     signals: Vec<Signal>,
@@ -92,9 +111,29 @@ pub struct LoadSignalsResult {
 }
 
 impl LoadSignalsResult {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn native(
+        source: crate::vtr_adapter::NativeSource,
+        signals: Vec<(SignalRef, vtr::SignalData)>,
+        from_unique_id: u64,
+    ) -> Self {
+        Self {
+            native: Some(source),
+            native_signals: signals,
+            source: None,
+            server: None,
+            signals: Vec::new(),
+            from_unique_id,
+        }
+    }
+
     #[must_use]
     pub fn local(source: SignalSource, signals: Vec<Signal>, from_unique_id: u64) -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            native: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            native_signals: Vec::new(),
             source: Some(source),
             server: None,
             signals,
@@ -105,6 +144,10 @@ impl LoadSignalsResult {
     #[must_use]
     pub fn remote(server: String, signals: Vec<Signal>, from_unique_id: u64) -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            native: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            native_signals: Vec::new(),
             source: None,
             server: Some(server),
             signals,
@@ -114,12 +157,16 @@ impl LoadSignalsResult {
 
     #[must_use]
     pub fn len(&self) -> usize {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.native.is_some() {
+            return self.native_signals.len();
+        }
         self.signals.len()
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.signals.is_empty()
+        self.len() == 0
     }
 }
 
@@ -189,6 +236,16 @@ impl WellenContainer {
             time_table: Arc::new(vec![]),
             source: None,
             source_index: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            native: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            native_signals: HashMap::new(),
+            native_backend: false,
+            native_demand: HashSet::new(),
+            native_loading: HashSet::new(),
+            native_failed: HashSet::new(),
+            native_parameter_queries: Default::default(),
+            native_parameter_visible: Default::default(),
             unique_id,
             body_loaded: false,
         }
@@ -203,6 +260,13 @@ impl WellenContainer {
             bail!("Did we just parse the body twice? That should not happen!");
         }
         match body {
+            #[cfg(not(target_arch = "wasm32"))]
+            BodyResult::Vtr(source) => {
+                self.time_table = Arc::new(source.time_range());
+                self.native = Some(source);
+                self.native_backend = true;
+            }
+
             BodyResult::Local(body) => {
                 if self.server.is_some() {
                     bail!(
@@ -259,6 +323,10 @@ impl WellenContainer {
 
     #[must_use]
     pub fn is_fully_loaded(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.native_backend {
+            return self.native.is_some() && self.signals_to_be_loaded.is_empty();
+        }
         (self.source.is_some() || self.server.is_some()) && self.signals_to_be_loaded.is_empty()
     }
 
@@ -489,6 +557,9 @@ impl WellenContainer {
     }
 
     pub fn load_all_params(&mut self) -> Result<Option<LoadSignalsCmd>> {
+        if self.native_backend {
+            return Ok(None);
+        }
         let h = &self.hierarchy;
         let params = h
             .all_vars()
@@ -502,6 +573,30 @@ impl WellenContainer {
     pub fn on_signals_loaded(&mut self, res: LoadSignalsResult) -> Result<Option<LoadSignalsCmd>> {
         // check to see if this command came from our container, or from a previous file that was open
         if res.from_unique_id == self.unique_id {
+            #[cfg(not(target_arch = "wasm32"))]
+            if self.native_backend {
+                self.native = res.native;
+                let returned: HashSet<_> = res
+                    .native_signals
+                    .iter()
+                    .map(|(reference, _)| *reference)
+                    .collect();
+                self.native_failed
+                    .extend(self.native_loading.drain().filter(|reference| {
+                        self.native_demand.contains(reference) && !returned.contains(reference)
+                    }));
+                self.native_signals.extend(
+                    res.native_signals
+                        .into_iter()
+                        .filter(|(r, _)| self.native_demand.contains(r)),
+                );
+                self.signals_to_be_loaded.retain(|r| {
+                    self.native_demand.contains(r)
+                        && !self.native_signals.contains_key(r)
+                        && !self.native_failed.contains(r)
+                });
+                return Ok(self.load_signals(&[]));
+            }
             // return source or server
             debug_assert!(self.source.is_none());
             debug_assert!(self.server.is_none());
@@ -518,11 +613,51 @@ impl WellenContainer {
         Ok(self.load_signals(&[]))
     }
 
+    pub(crate) fn begin_native_frame(&self) {
+        self.native_parameter_queries.lock().unwrap().clear();
+    }
+
+    pub(crate) fn finish_native_frame(&mut self) {
+        self.native_parameter_visible =
+            std::mem::take(self.native_parameter_queries.get_mut().unwrap());
+    }
+
+    pub(crate) fn retain_native_variables(
+        &mut self,
+        variables: &[VariableRef],
+    ) -> Option<LoadSignalsCmd> {
+        if !self.native_backend {
+            return None;
+        }
+        self.native_demand = variables
+            .iter()
+            .filter_map(|v| self.signal_ref(v).ok())
+            .chain(self.native_parameter_visible.iter().copied())
+            .collect();
+        self.native_failed
+            .retain(|r| self.native_demand.contains(r));
+        #[cfg(not(target_arch = "wasm32"))]
+        self.native_signals
+            .retain(|r, _| self.native_demand.contains(r));
+        self.signals_to_be_loaded
+            .retain(|r| self.native_demand.contains(r));
+        let refs: Vec<_> = self.native_demand.iter().copied().collect();
+        self.load_signals(&refs)
+    }
+
     fn load_signals(&mut self, ids: &[SignalRef]) -> Option<LoadSignalsCmd> {
+        if self.native_backend {
+            self.native_demand.extend(ids);
+        }
+
         // make sure that we do not load signals that have already been loaded
         let filtered_ids = ids
             .iter()
-            .filter(|id| !self.signals.contains_key(id) && !self.signals_to_be_loaded.contains(id))
+            .filter(|id| {
+                !self.is_signal_loaded(**id)
+                    && !self.signals_to_be_loaded.contains(id)
+                    && !self.native_failed.contains(id)
+            })
             .copied()
             .collect::<Vec<_>>();
 
@@ -537,6 +672,18 @@ impl WellenContainer {
             return None; // it only makes sense to load signals after we have loaded the body
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.native_backend {
+            let source = self.native.take()?;
+            let mut signals: Vec<_> = self.signals_to_be_loaded.drain().collect();
+            signals.sort();
+            self.native_loading = signals.iter().copied().collect();
+            return Some(LoadSignalsCmd {
+                signals,
+                from_unique_id: self.unique_id,
+                payload: LoadSignalPayload::Vtr(source),
+            });
+        }
         // we remove the server name in order to ensure that we do not load the same signal twice
         if let Some(server) = std::mem::take(&mut self.server) {
             let Some(file_index) = self.remote_file_index else {
@@ -590,6 +737,31 @@ impl WellenContainer {
         let var_ref = self.get_var_ref(variable)?;
         // map variable to variable ref
         let signal_ref = h[var_ref].signal_ref();
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.native_backend {
+            if h[var_ref].var_type().is_parameter() {
+                self.native_parameter_queries
+                    .lock()
+                    .unwrap()
+                    .insert(signal_ref);
+            }
+            return Ok(self.native_signals.get(&signal_ref).map(|signal| {
+                let time = time.to_u64().unwrap_or(u64::MAX);
+                let index = signal.index_at(time);
+                QueryResult {
+                    current: index.map(|i| {
+                        (
+                            signal.times()[i].into(),
+                            crate::vtr_adapter::convert_value(signal.get(i)),
+                        )
+                    }),
+                    next: signal
+                        .times()
+                        .get(index.map_or(0, |i| i + 1))
+                        .map(|t| (*t).into()),
+                }
+            }));
+        }
         let Some(sig) = self.signals.get(&signal_ref) else {
             // if the signal has not been loaded yet, we return an empty result
             return Ok(None);
@@ -774,6 +946,15 @@ impl WellenContainer {
     }
 
     pub fn signal_accessor(&self, signal_ref: SignalRef) -> Result<WellenSignalAccessor> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.native_backend {
+            return self
+                .native_signals
+                .get(&signal_ref)
+                .cloned()
+                .map(WellenSignalAccessor::Native)
+                .ok_or_else(|| anyhow!("Signal not loaded"));
+        }
         let signal = self
             .signals
             .get(&signal_ref)
@@ -794,32 +975,53 @@ impl WellenContainer {
     /// Check if a signal is already loaded (data available)
     #[must_use]
     pub fn is_signal_loaded(&self, signal_ref: SignalRef) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.native_backend {
+            return self.native_signals.contains_key(&signal_ref);
+        }
         self.signals.contains_key(&signal_ref)
     }
 }
 
 /// Wellen-specific accessor for iterating through signal changes in a time range
-pub struct WellenSignalAccessor {
-    signal: Arc<Signal>,
-    time_table: Arc<TimeTable>,
+pub enum WellenSignalAccessor {
+    Wellen {
+        signal: Arc<Signal>,
+        time_table: Arc<TimeTable>,
+    },
+    #[cfg(not(target_arch = "wasm32"))]
+    Native(vtr::SignalData),
 }
 
 impl WellenSignalAccessor {
     /// Create a new `WellenSignalAccessor` from Arc pointers
     #[must_use]
     pub fn new(signal: Arc<Signal>, time_table: Arc<TimeTable>) -> Self {
-        Self { signal, time_table }
+        Self::Wellen { signal, time_table }
     }
 
     /// Iterator over signal changes as (`time_u64`, value) pairs
     pub fn iter_changes(
         &self,
     ) -> Box<dyn Iterator<Item = (u64, surfer_translation_types::VariableValue)> + '_> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Self::Native(signal) = self {
+            return Box::new(
+                signal
+                    .times()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| (*t, crate::vtr_adapter::convert_value(signal.get(i)))),
+            );
+        }
+        let Self::Wellen { signal, time_table } = self else {
+            unreachable!()
+        };
         Box::new(
-            self.signal
+            signal
                 .iter_changes()
                 .filter_map(|(time_idx, signal_value)| {
-                    let time_u64 = *self.time_table.get(time_idx as usize)?;
+                    let time_u64 = *time_table.get(time_idx as usize)?;
                     let var_value = convert_variable_value(signal_value);
                     Some((time_u64, var_value))
                 }),

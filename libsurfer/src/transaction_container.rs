@@ -11,6 +11,8 @@ use std::hash::{Hash, Hasher};
 use std::ops::Not;
 
 pub struct TransactionContainer {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) native: Option<crate::vtr_transactions::NativeTransactions>,
     pub inner: FTR,
     pub(crate) vtr_details: Option<HashMap<TransactionId, VtrTransactionDetails>>,
 }
@@ -53,6 +55,17 @@ pub(crate) struct VtrTransactionRelation {
 }
 
 impl TransactionContainer {
+    pub(crate) fn is_native(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.native.is_some()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            false
+        }
+    }
+
     #[must_use]
     pub fn get_streams(&self) -> Vec<&TxStream> {
         self.inner.tx_streams.values().collect()
@@ -203,7 +216,11 @@ impl TransactionContainer {
 
     #[must_use]
     pub fn is_fully_loaded(&self) -> bool {
-        true // for now
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(native) = &self.native {
+            return !native.in_flight && native.loaded == native.desired;
+        }
+        true
     }
 }
 

@@ -8,13 +8,13 @@ use vtr::{NodeData, NodeId, Reader, SignalId, SignalKind};
 
 pub struct LoadedVtr {
     pub hierarchy: wellen::Hierarchy,
-    pub body: wellen::viewers::BodyResult,
+    pub body: NativeSource,
     pub(crate) source_index: Option<crate::source_index::SourceIndex>,
     pub transactions: Option<crate::transaction_container::TransactionContainer>,
 }
 
 pub(crate) fn load(path: &Utf8Path) -> Result<LoadedVtr, String> {
-    let reader = Reader::open(path).map_err(|error| error.to_string())?;
+    let mut reader = Reader::open(path).map_err(|error| error.to_string())?;
     let mut builder = wellen::HierarchyBuilder::new(
         timescale(reader.meta().timescale)?,
         Some(&reader.meta().writer),
@@ -25,35 +25,112 @@ pub(crate) fn load(path: &Utf8Path) -> Result<LoadedVtr, String> {
         declare(&reader, root, &mut builder, &mut signals)?;
     }
     let hierarchy = builder.finish();
-    let mut encoder = wellen::Encoder::new(&hierarchy);
-    if let Some((start, end)) = reader.time_range() {
-        encoder.time_change(start);
-        reader
-            .for_each_change(start, end, |time, signal, value| {
-                let Some(reference) = signals.get(&signal) else {
-                    return;
-                };
-                encoder.time_change(time);
-                let ascii = value.to_ascii();
-                let value = match reader.signal_kind(signal).expect("declared signal") {
-                    SignalKind::Bits { width: 1, .. } => ascii,
-                    SignalKind::Bits { .. } => format!("b{ascii}"),
-                    SignalKind::Real => format!("r{ascii}"),
-                    SignalKind::VarLen => format!("s{ascii}"),
-                };
-                encoder.vcd_value_change(*reference, value.as_bytes());
-            })
-            .map_err(|error| error.to_string())?;
-        // A quiet tail is still part of the recorded time range.
-        encoder.time_change(end);
+    let source_index = crate::source_index::SourceIndex::discover(path, &reader);
+    let mut transactions = crate::vtr_transactions::from_reader(&reader, &[], &[])?;
+    reader.clear_cache();
+    let reader = std::sync::Arc::new(std::sync::Mutex::new(reader));
+    if let Some(transactions) = &mut transactions {
+        transactions.native = Some(crate::vtr_transactions::NativeTransactions::new(
+            reader.clone(),
+        ));
     }
-    let (source, time_table) = encoder.finish();
     Ok(LoadedVtr {
         hierarchy,
-        body: wellen::viewers::BodyResult { source, time_table },
-        source_index: crate::source_index::SourceIndex::discover(path, &reader),
-        transactions: crate::vtr_transactions::from_reader(&reader)?,
+        body: NativeSource {
+            reader,
+            signals: signals
+                .into_iter()
+                .map(|(id, reference)| (reference, id))
+                .collect(),
+        },
+        source_index,
+        transactions,
     })
+}
+
+/// Mapped recording plus canonical signal identities; no retained histories.
+pub struct NativeSource {
+    pub(crate) reader: std::sync::Arc<std::sync::Mutex<Reader>>,
+    signals: HashMap<wellen::SignalRef, SignalId>,
+}
+
+impl NativeSource {
+    pub fn time_range(&self) -> Vec<u64> {
+        self.reader
+            .lock()
+            .unwrap()
+            .time_range()
+            .map_or_else(Vec::new, |(start, end)| vec![start, end])
+    }
+
+    pub fn load(
+        &mut self,
+        refs: &[wellen::SignalRef],
+    ) -> Result<Vec<(wellen::SignalRef, vtr::SignalData)>, String> {
+        let ids: Vec<_> = refs.iter().map(|r| self.signals[r]).collect();
+        let mut reader = self.reader.lock().unwrap();
+        let result = reader.load_signals(&ids).map_err(|e| e.to_string());
+        // Release transient decoded pieces even when the query fails.
+        reader.clear_cache();
+        result.map(|data| refs.iter().copied().zip(data).collect())
+    }
+}
+
+pub(crate) fn convert_value(
+    value: vtr::SignalValue<'_>,
+) -> surfer_translation_types::VariableValue {
+    use surfer_translation_types::VariableValue;
+    match value {
+        vtr::SignalValue::Real(value) => VariableValue::BigUint(value.to_bits().into()),
+        vtr::SignalValue::Bits { .. } => {
+            let ascii = value.to_ascii();
+            num::BigUint::parse_bytes(ascii.as_bytes(), 2)
+                .map(VariableValue::BigUint)
+                .unwrap_or(VariableValue::String(ascii))
+        }
+        vtr::SignalValue::VarLen(value) => {
+            VariableValue::String(String::from_utf8_lossy(value).into_owned())
+        }
+    }
+}
+
+/// Conversion is restricted to explicit FST export and format-parity tests.
+/// Native viewing keeps histories in their original immutable representation.
+pub(crate) fn export_body(
+    hierarchy: &wellen::Hierarchy,
+    histories: &[(wellen::SignalRef, vtr::SignalData)],
+    range: &[u64],
+) -> wellen::viewers::BodyResult {
+    let mut encoder = wellen::Encoder::new(hierarchy);
+    let mut changes = std::collections::BinaryHeap::new();
+    for (index, (_, signal)) in histories.iter().enumerate() {
+        if let Some(time) = signal.times().first() {
+            changes.push(std::cmp::Reverse((*time, index, 0usize)));
+        }
+    }
+    if let Some(start) = range.first() {
+        encoder.time_change(*start);
+    }
+    while let Some(std::cmp::Reverse((time, index, offset))) = changes.pop() {
+        let (reference, signal) = &histories[index];
+        encoder.time_change(time);
+        let ascii = signal.get(offset).to_ascii();
+        let token = match signal.kind() {
+            SignalKind::Bits { width: 1, .. } => ascii,
+            SignalKind::Bits { .. } => format!("b{ascii}"),
+            SignalKind::Real => format!("r{ascii}"),
+            SignalKind::VarLen => format!("s{ascii}"),
+        };
+        encoder.vcd_value_change(*reference, token.as_bytes());
+        if let Some(next) = signal.times().get(offset + 1) {
+            changes.push(std::cmp::Reverse((*next, index, offset + 1)));
+        }
+    }
+    if let Some(end) = range.last() {
+        encoder.time_change(*end);
+    }
+    let (source, time_table) = encoder.finish();
+    wellen::viewers::BodyResult { source, time_table }
 }
 
 fn declare(
@@ -263,11 +340,162 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    #[tokio::test]
+    async fn closing_shared_views_evicts_data_and_undo_reloads_it() {
+        use crate::{
+            Message, SystemState,
+            tiles::{
+                commands::{SplitMode, WorkspaceCommand},
+                layout::Direction,
+            },
+            transaction_container::TransactionStreamRef,
+            wave_container::{VariableRef, VariableRefExt, WaveContainer},
+            wave_source::LoadOptions,
+        };
+        use ftr_parser::types::{GeneratorId, StreamId};
+        let mut state = SystemState::new_default_config().unwrap();
+        let path =
+            camino::Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../examples/combined.vtr");
+        state.update(Message::LoadFile(path, LoadOptions::Clear));
+        async fn wait(state: &mut SystemState) {
+            let start = std::time::Instant::now();
+            while !state.waves_fully_loaded() {
+                state.handle_async_messages();
+                state.handle_batch_commands();
+                assert!(start.elapsed().as_secs() < 10);
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+        }
+        wait(&mut state).await;
+        state.update(Message::AddVariables(vec![
+            VariableRef::from_hierarchy_string("top.count"),
+        ]));
+        state.update(Message::AddStreamOrGenerator(
+            TransactionStreamRef::new_gen(StreamId(2), GeneratorId(3), "issue".into()),
+        ));
+        wait(&mut state).await;
+        let counts = |state: &SystemState| {
+            let document = state.user.waves.as_ref().unwrap();
+            let WaveContainer::Wellen(waves) = document.inner.as_waves().unwrap() else {
+                panic!();
+            };
+            let transactions = document.inner.as_transactions().unwrap();
+            (
+                waves.native_signals.len(),
+                transactions
+                    .inner
+                    .tx_generators
+                    .values()
+                    .map(|g| g.transactions.len())
+                    .sum::<usize>(),
+            )
+        };
+        let loaded = counts(&state);
+        assert_eq!(loaded.0, 1);
+        assert!(loaded.1 > 0);
+        let first = state.user.workspace.layout().visible_tiles()[0];
+        state.update(Message::Workspace(WorkspaceCommand::SplitTile {
+            tile: first,
+            dir: Direction::Right,
+            mode: SplitMode::Linked,
+        }));
+        let second = state.user.workspace.layout().focused().unwrap();
+        state.update(Message::Workspace(WorkspaceCommand::CloseTile(first)));
+        wait(&mut state).await;
+        assert_eq!(counts(&state), loaded);
+        state.update(Message::Workspace(WorkspaceCommand::CloseTile(second)));
+        wait(&mut state).await;
+        assert_eq!(counts(&state), (0, 0));
+        state.update(Message::Undo(1));
+        wait(&mut state).await;
+        assert_eq!(counts(&state), loaded);
+    }
+
+    #[test]
+    fn native_loading_and_eviction_follow_canonical_demand() {
+        use crate::wellen::{BodyResult, LoadSignalPayload, LoadSignalsResult, WellenContainer};
+        let loaded = load(Utf8Path::new("../examples/verilator/pipeline.vtr")).unwrap();
+        let mut container = WellenContainer::new(std::sync::Arc::new(loaded.hierarchy), None, None);
+        assert!(
+            container
+                .add_body(BodyResult::Vtr(loaded.body))
+                .unwrap()
+                .is_none()
+        );
+        assert!(container.native_signals.is_empty());
+        assert!(container.signals.is_empty());
+        let vars = container.variables();
+        let first = vars[0].clone();
+        let first_id = container.signal_ref(&first).unwrap();
+        let second = vars
+            .iter()
+            .find(|v| container.signal_ref(v).unwrap() != first_id)
+            .unwrap()
+            .clone();
+        let run = |cmd: crate::wellen::LoadSignalsCmd| {
+            let (refs, identity, payload) = cmd.destruct();
+            let LoadSignalPayload::Vtr(mut source) = payload else {
+                panic!("native source expected");
+            };
+            let data = source.load(&refs).unwrap();
+            LoadSignalsResult::native(source, data, identity)
+        };
+        let cmd = container
+            .retain_native_variables(&[first.clone(), first.clone()])
+            .unwrap();
+        container.on_signals_loaded(run(cmd)).unwrap();
+        assert_eq!(container.native_signals.len(), 1);
+        let owned = container.signal_accessor(first_id).unwrap();
+        let expected: Vec<_> = owned.iter_changes().collect();
+        assert!(
+            container
+                .retain_native_variables(std::slice::from_ref(&first))
+                .is_none()
+        );
+        let cmd = container.retain_native_variables(&[second]).unwrap();
+        assert!(container.native_signals.is_empty());
+        assert!(container.retain_native_variables(&[]).is_none());
+        // A completed background load cannot resurrect a removed signal.
+        assert!(container.on_signals_loaded(run(cmd)).unwrap().is_none());
+        assert!(container.native_signals.is_empty());
+        assert_eq!(owned.iter_changes().collect::<Vec<_>>(), expected);
+        let cmd = container.retain_native_variables(&[first]).unwrap();
+        container.on_signals_loaded(run(cmd)).unwrap();
+        assert_eq!(
+            container
+                .signal_accessor(first_id)
+                .unwrap()
+                .iter_changes()
+                .collect::<Vec<_>>(),
+            expected
+        );
+        container.retain_native_variables(&[]);
+        let cmd = container.retain_native_variables(&vars[..1]).unwrap();
+        let (_, identity, payload) = cmd.destruct();
+        let LoadSignalPayload::Vtr(source) = payload else {
+            panic!();
+        };
+        assert!(
+            container
+                .on_signals_loaded(LoadSignalsResult::native(source, vec![], identity))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            container.retain_native_variables(&vars[..1]).is_none(),
+            "failed loads must not retry in a tight loop"
+        );
+        container.retain_native_variables(&[]);
+        let retry = container.retain_native_variables(&vars[..1]).unwrap();
+        container.on_signals_loaded(run(retry)).unwrap();
+        assert!(container.is_signal_loaded(first_id));
+    }
+
     #[test]
     fn verilator_examples_match_fst_metadata_and_every_change() {
         for name in ["pipeline", "operators"] {
             let path = format!("../examples/verilator/{name}");
-            let vtr = load(Utf8Path::new(&format!("{path}.vtr"))).unwrap();
+            let mut vtr = load(Utf8Path::new(&format!("{path}.vtr"))).unwrap();
             let fst = wellen::viewers::read_header_from_file(
                 format!("{path}.fst"),
                 &surver::WELLEN_SURFER_DEFAULT_OPTIONS,
@@ -329,8 +557,11 @@ mod tests {
                     body.time_table.last().copied(),
                 )
             };
+            let refs: Vec<_> = vtr.hierarchy.signals().collect();
+            let data = vtr.body.load(&refs).unwrap();
+            let body = export_body(&vtr.hierarchy, &data, &vtr.body.time_range());
             assert_eq!(
-                inspect(&vtr.hierarchy, vtr.body),
+                inspect(&vtr.hierarchy, body),
                 inspect(&fst.hierarchy, fst_body),
                 "{name}"
             );

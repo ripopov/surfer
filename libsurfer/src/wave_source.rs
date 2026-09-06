@@ -651,6 +651,8 @@ impl SystemState {
                         source,
                         format,
                         TransactionContainer {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            native: None,
                             inner: ftr,
                             vtr_details: None,
                         },
@@ -687,6 +689,8 @@ impl SystemState {
                         source,
                         WaveFormat::Ftr,
                         TransactionContainer {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            native: None,
                             inner: ftr,
                             vtr_details: None,
                         },
@@ -905,6 +909,26 @@ impl SystemState {
         let sender = self.channels.msg_sender.clone();
         let max_url_length = self.user.config.max_url_length;
         match payload {
+            #[cfg(not(target_arch = "wasm32"))]
+            LoadSignalPayload::Vtr(mut source) => {
+                perform_work(move || {
+                    let loaded = match source.load(&signals) {
+                        Ok(data) => data,
+                        Err(error) => {
+                            error!("Failed to load VTR signals: {error}");
+                            Vec::new()
+                        }
+                    };
+                    checked_send(
+                        &sender,
+                        Message::SignalsLoaded(
+                            start,
+                            LoadSignalsResult::native(source, loaded, from_unique_id),
+                        ),
+                    );
+                });
+            }
+
             LoadSignalPayload::Local(mut source, hierarchy) => {
                 let pool = Self::get_thread_pool();
 

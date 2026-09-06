@@ -537,7 +537,7 @@ impl WaveformEdit<'_> {
             };
             generator.transactions.is_empty()
         };
-        if is_empty {
+        if is_empty && !transactions.is_native() {
             info!("(Generator {gen_id}) Loading transactions into memory!");
             match transactions
                 .inner

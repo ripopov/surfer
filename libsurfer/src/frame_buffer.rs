@@ -593,7 +593,7 @@ fn build_variable_frame_buffer_cache(
     })
 }
 
-fn resolve_leaf_scopes_and_variables(
+pub(crate) fn resolve_leaf_scopes_and_variables(
     wave_container: &WaveContainer,
     scope_ref: &ScopeRef,
     levels: &[ArrayLevel],

@@ -300,18 +300,44 @@ impl WellenContainer {
         }
 
         let mut signals = AHashMap::with_capacity(seen.len());
-        for var_ref in &seen {
-            let signal_ref = h[*var_ref].signal_ref();
-            if signals.contains_key(&signal_ref) {
-                continue;
+        let mut time_table = Arc::clone(&self.time_table);
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.native_backend {
+            let refs: AHashSet<_> = seen.iter().map(|v| h[*v].signal_ref()).collect();
+            let histories = refs
+                .iter()
+                .map(|r| {
+                    self.native_signals
+                        .get(r)
+                        .cloned()
+                        .map(|data| (*r, data))
+                        .ok_or_else(|| eyre::eyre!("Signal selected for export is not loaded"))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let mut body = crate::vtr_adapter::export_body(h, &histories, &time_table);
+            let refs: Vec<_> = refs.into_iter().collect();
+            signals.extend(
+                body.source
+                    .load_signals(&refs, h, false)
+                    .into_iter()
+                    .map(|s| (s.signal_ref(), Arc::new(s))),
+            );
+            time_table = Arc::new(body.time_table);
+        }
+        if !self.native_backend {
+            for var_ref in &seen {
+                let signal_ref = h[*var_ref].signal_ref();
+                if signals.contains_key(&signal_ref) {
+                    continue;
+                }
+                let signal = self.signals.get(&signal_ref).cloned().ok_or_else(|| {
+                    eyre::eyre!(
+                        "Signal for variable '{}' is not loaded",
+                        h[*var_ref].name(h)
+                    )
+                })?;
+                signals.insert(signal_ref, signal);
             }
-            let signal = self.signals.get(&signal_ref).cloned().ok_or_else(|| {
-                eyre::eyre!(
-                    "Signal for variable '{}' is not loaded",
-                    h[*var_ref].name(h)
-                )
-            })?;
-            signals.insert(signal_ref, signal);
         }
 
         let timescale = h
@@ -328,22 +354,16 @@ impl WellenContainer {
             }
             .multiplier_digits(),
         );
-        let time_scale_shift = common_power_of_ten(&self.time_table);
+        let time_scale_shift = common_power_of_ten(&time_table);
         let time_scale_divisor = 10u128.pow(time_scale_shift);
         let timescale_exponent = base_exponent
             .saturating_add(factor_digits as i8)
             .saturating_add(time_scale_shift as i8);
-        let start_time = scale_time(
-            self.time_table.first().copied().unwrap_or(0),
-            time_scale_divisor,
-        );
-        let end_time = scale_time(
-            self.time_table.last().copied().unwrap_or(0),
-            time_scale_divisor,
-        );
+        let start_time = scale_time(time_table.first().copied().unwrap_or(0), time_scale_divisor);
+        let end_time = scale_time(time_table.last().copied().unwrap_or(0), time_scale_divisor);
         Ok(FstExportData {
             hierarchy: Arc::clone(&self.hierarchy),
-            time_table: Arc::clone(&self.time_table),
+            time_table: Arc::clone(&time_table),
             root,
             signals,
             version: h.version().to_string(),

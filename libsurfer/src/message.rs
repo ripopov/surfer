@@ -226,6 +226,9 @@ pub enum Message {
     ),
     #[serde(skip)]
     SignalsLoaded(web_time::Instant, #[debug(skip)] LoadSignalsResult),
+    #[cfg(not(target_arch = "wasm32"))]
+    #[serde(skip)]
+    NativeTransactionsLoaded(#[debug(skip)] crate::vtr_transactions::TransactionLoadResult),
     #[serde(skip)]
     TransactionStreamsLoaded(
         WaveSource,
