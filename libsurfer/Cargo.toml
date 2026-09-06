@@ -128,3 +128,7 @@ test-log.workspace = true
 [[example]]
 name = "generate_vtr_examples"
 path = "../examples/generate_vtr_examples.rs"
+
+[[example]]
+name = "generate_chi_noc"
+path = "../examples/generate_chi_noc.rs"

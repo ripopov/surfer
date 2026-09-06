@@ -178,6 +178,50 @@ pub struct TxDrawingCommands {
     min: Pos2,
     max: Pos2,
     gen_ref: TransactionStreamRef, // makes it easier to later access the actual Transaction object
+    events: Vec<TxEventMarker>,
+}
+
+struct TxEventMarker {
+    x: f32,
+    indices: Vec<usize>,
+}
+
+// Keep event identities in the document; cache only visible positions and indices.
+// Events sharing a screen pixel form one marker without losing hover details.
+fn transaction_event_markers(
+    events: &[crate::transaction_container::VtrTransactionEvent],
+    begin: u64,
+    end: u64,
+    viewport: &Viewport,
+    range: &TimeRange,
+    width: f32,
+) -> Vec<TxEventMarker> {
+    let mut positions: Vec<_> = events
+        .iter()
+        .enumerate()
+        .filter_map(|(index, event)| {
+            if event.time < begin || event.time > end {
+                return None;
+            }
+            let x = viewport.pixel_from_time(&BigInt::from(event.time), width, range);
+            (x.is_finite() && x >= 0.0 && x <= width).then_some((x, index))
+        })
+        .collect();
+    positions.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    let mut markers: Vec<TxEventMarker> = Vec::new();
+    for (x, index) in positions {
+        if let Some(last) = markers.last_mut()
+            && last.x.round() == x.round()
+        {
+            last.indices.push(index);
+        } else {
+            markers.push(TxEventMarker {
+                x,
+                indices: vec![index],
+            });
+        }
+    }
+    markers
 }
 
 pub(crate) struct VariableDrawCommands {
@@ -809,16 +853,24 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                 );
             }
 
+            let packet_rows = waves.inner.as_transactions().unwrap().native.as_ref().map(|_| {
+                crate::transactions::packet_rows(generators.iter().flat_map(|g| g.transactions.iter()))
+            });
             for generator in generators {
                 // find first visible transaction
-                let first_visible_transaction_index =
+                let first_visible_transaction_index = if packet_rows.is_some() {
+                    // Native demand already selects the time window. Overlapping
+                    // packet end times need not be sorted, so cannot be searched.
+                    0
+                } else {
                     match generator.transactions.binary_search_by_key(
                         &first_visible_timestamp,
                         ftr_parser::types::Transaction::get_end_time,
                     ) {
                         Ok(i) | Err(i) => i,
                     }
-                    .saturating_sub(1);
+                    .saturating_sub(1)
+                };
                 let transactions = generator
                     .transactions
                     .iter()
@@ -861,8 +913,9 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                     last_px = max_px;
 
                     displayed_transactions.push(TransactionRef { id: curr_tx_id });
-                    let min = Pos2::new(min_px, cfg.line_height * tx.row as f32 + 4.0);
-                    let max = Pos2::new(max_px, cfg.line_height * (tx.row + 1) as f32 - 4.0);
+                    let row = packet_rows.as_ref().map_or(tx.row, |rows| rows[&curr_tx_id]);
+                    let min = Pos2::new(min_px, cfg.line_height * row as f32 + 4.0);
+                    let max = Pos2::new(max_px, cfg.line_height * (row + 1) as f32 - 4.0);
 
                     let tx_ref = TransactionRef { id: curr_tx_id };
                     draw_commands.insert(
@@ -870,6 +923,14 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                         TxDrawingCommands {
                             min,
                             max,
+                            events: waves.inner.as_transactions()
+                                .and_then(|t| t.vtr_details(curr_tx_id))
+                                .map(|details| transaction_event_markers(
+                                    &details.events,
+                                    start_time.to_u64().unwrap_or(0),
+                                    end_time.to_u64().unwrap_or(u64::MAX),
+                                    viewport, range, cfg.canvas_size.x - 1.0,
+                                )).unwrap_or_default(),
                             gen_ref: TransactionStreamRef::new_gen(
                                 tx_stream_ref.stream_id,
                                 generator.id,
@@ -1556,24 +1617,45 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                                 }
 
                                 let transaction_rect = Rect { min, max };
+                                let mut response = ui.allocate_rect(
+                                    if tx_draw_command.events.is_empty() {
+                                        transaction_rect
+                                    } else {
+                                        transaction_rect.expand(3.0)
+                                    },
+                                    Sense::click(),
+                                );
+
+                                let hovered_events: Vec<_> = ui
+                                    .input(|input| input.pointer.hover_pos())
+                                    .map(|pointer| {
+                                        tx_draw_command
+                                            .events
+                                            .iter()
+                                            .filter(|event| {
+                                                let center = (ctx.to_screen)(
+                                                    event.x,
+                                                    y_offset + f32::midpoint(tx_draw_command.min.y, tx_draw_command.max.y),
+                                                );
+                                                center.distance(pointer) <= 6.0
+                                            })
+                                            .flat_map(|event| event.indices.iter().copied())
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                response = handle_transaction_tooltip(
+                                    response,
+                                    waves,
+                                    &tx_draw_command.gen_ref,
+                                    tx_ref,
+                                    &hovered_events,
+                                );
+
+                                if response.clicked() {
+                                    msgs.push(Message::FocusTransaction(Some(tx_ref.clone()), tile_id));
+                                }
+
                                 if (max.x - min.x) > 1.0 {
-                                    let mut response =
-                                        ui.allocate_rect(transaction_rect, Sense::click());
-
-                                    response = handle_transaction_tooltip(
-                                        response,
-                                        waves,
-                                        &tx_draw_command.gen_ref,
-                                        tx_ref,
-                                    );
-
-                                    if response.clicked() {
-                                        msgs.push(Message::FocusTransaction(
-                                            Some(tx_ref.clone()),
-                                            tile_id,
-                                        ));
-                                    }
-
                                     let tx_fill_color = if is_transaction_focused {
                                         // Complementary color for focused transaction
                                         Color32::from_rgb(
@@ -1605,6 +1687,13 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                                         stroke,
                                         epaint::StrokeKind::Middle,
                                     );
+                                }
+                                // Hollow dots remain legible on custom and focused bar colors.
+                                // Do not clamp offscreen event times onto the viewport edges.
+                                for event in &tx_draw_command.events {
+                                    let center = (ctx.to_screen)(event.x, y_offset + f32::midpoint(tx_draw_command.min.y, tx_draw_command.max.y));
+                                    ctx.painter.circle_filled(center, 3.0, self.config.theme.canvas_colors.background);
+                                    ctx.painter.circle_stroke(center, 3.0, Stroke::new(1.0, self.config.theme.foreground));
                                 }
                             }
                         }
@@ -3435,4 +3524,34 @@ mod view_cache_tests {
         add_viewport(&mut state);
         assert_eq!(views(&state)[2].draw_cache.borrow().builds, 0);
     }
+}
+
+#[test]
+fn vtr_event_markers_clip_and_group_without_losing_event_identity() {
+    use crate::transaction_container::VtrTransactionEvent;
+    let events: Vec<_> = [100, 100, 101, 150, 200, 99, 201]
+        .into_iter()
+        .map(|time| VtrTransactionEvent {
+            time,
+            name: "hop".into(),
+            attrs: vec![],
+        })
+        .collect();
+    let range = TimeRange {
+        start: 100.into(),
+        end: 200.into(),
+    };
+    let markers = transaction_event_markers(&events, 0, 1000, &Viewport::default(), &range, 10.0);
+    assert_eq!(markers.len(), 3);
+    assert_eq!(markers[0].indices, [0, 1, 2]);
+    assert_eq!(markers[1].indices, [3]);
+    assert_eq!(markers[2].indices, [4]);
+    assert_eq!(
+        markers.iter().map(|m| m.x).collect::<Vec<_>>(),
+        [0.0, 5.0, 10.0]
+    );
+    let bounded = transaction_event_markers(&events, 150, 200, &Viewport::default(), &range, 10.0);
+    assert_eq!(bounded.len(), 2);
+    assert_eq!(bounded[0].indices, [3]);
+    assert!(transaction_event_markers(&[], 0, 1000, &Viewport::default(), &range, 10.0).is_empty());
 }

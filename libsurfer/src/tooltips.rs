@@ -76,7 +76,28 @@ pub(crate) fn handle_transaction_tooltip(
     waves: &WaveData,
     gen_ref: &TransactionStreamRef,
     tx_ref: &TransactionRef,
+    hovered_events: &[usize],
 ) -> Response {
+    if !hovered_events.is_empty() {
+        return response.on_hover_ui(|ui| {
+            ui.set_max_width(ui.spacing().tooltip_width);
+            if let Some(transactions) = waves.inner.as_transactions()
+                && let Some(details) = transactions.vtr_details(tx_ref.id)
+            {
+                ui.label(format!("tx#{} · Events", tx_ref.id.0));
+                for &index in hovered_events {
+                    if let Some(event) = details.events.get(index) {
+                        ui.separator();
+                        ui.strong(&event.name);
+                        ui.label(format!("{} {}", event.time, transactions.inner.time_scale));
+                        for (key, value) in &event.attrs {
+                            ui.label(format!("{key}: {value}"));
+                        }
+                    }
+                }
+            }
+        });
+    }
     response
         .on_hover_ui(|ui| {
             if let Some(tx) = find_transaction(waves, gen_ref, tx_ref) {

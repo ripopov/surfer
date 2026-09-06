@@ -1362,6 +1362,106 @@ snapshot_ui! {vtr_waveform_and_transaction_render_together, || {
     state
 }}
 
+fn chi_noc_example() -> SystemState {
+    let path = get_project_root().unwrap().join("examples/chi_noc.vtr");
+    let reader = vtr::Reader::open(&path).unwrap();
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(path.try_into().unwrap())),
+            ..Default::default()
+        });
+    wait_for_waves_fully_loaded(&mut state, 10);
+    for controller in ["RNF0", "HNF0"] {
+        let stream = reader.find_node(&["chi_noc", controller, "tx"]).unwrap();
+        state.update(Message::AddStreamOrGenerator(
+            TransactionStreamRef::new_stream(
+                StreamId(stream.0 as usize),
+                format!("{controller}.tx"),
+            ),
+        ));
+    }
+    {
+        let waves = state.user.waveform_edit().unwrap();
+        waves.document.refresh_time_range(false);
+        waves.view.viewport.zoom_to_range(
+            &BigInt::from(0),
+            &BigInt::from(260),
+            waves.document.time_range(),
+        );
+    }
+    state.reconcile_native_transactions();
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state.invalidate_draw_commands();
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state
+}
+
+snapshot_ui!(vtr_chi_noc_packet_streams, chi_noc_example);
+
+#[test]
+fn vtr_event_marker_hover_and_click() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        tokio::task::spawn_blocking(|| {
+            let mut state = chi_noc_example();
+            let context = egui::Context::default();
+            context.style_mut_of(egui::Theme::Dark, |style| {
+                style.interaction.tooltip_delay = 0.0;
+                style.interaction.tooltip_grace_time = 0.0;
+            });
+            schematic_frame(&mut state, &context, vec![]);
+            let output = schematic_frame(&mut state, &context, vec![]);
+            // Find an actual painted dot, avoiding assumptions about canvas offsets.
+            let marker = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    epaint::Shape::Circle(circle)
+                        if circle.radius == 3.0 && circle.center.x > 300.0 =>
+                    {
+                        Some(circle.center)
+                    }
+                    _ => None,
+                })
+                .expect("event marker is painted");
+            schematic_frame(&mut state, &context, vec![Event::PointerMoved(marker)]);
+            let mut output = schematic_frame(&mut state, &context, vec![]);
+            for _ in 0..3 {
+                output = schematic_frame(&mut state, &context, vec![]);
+            }
+            schematic_label(&output, "router_1");
+            schematic_label(&output, "50 ns");
+            schematic_label(&output, "hop: 1");
+            schematic_frame(
+                &mut state,
+                &context,
+                schematic_click(marker, PointerButton::Primary),
+            );
+            assert_eq!(
+                state
+                    .user
+                    .waveform_read()
+                    .unwrap()
+                    .view
+                    .focused_transaction
+                    .as_ref()
+                    .unwrap()
+                    .id,
+                TransactionId(1)
+            );
+        })
+        .await
+        .unwrap();
+    });
+}
+
 snapshot_ui!(menu_can_be_hidden, || {
     let mut state = SystemState::new_default_config()
         .unwrap()

@@ -582,6 +582,27 @@ mod tests {
     }
 
     #[test]
+    fn chi_noc_overlapping_packets_have_distinct_canvas_rows() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/chi_noc.vtr");
+        let container = to_ftr(&path).unwrap().unwrap();
+        for stream in container.inner.tx_streams.values() {
+            let assignments = crate::transactions::packet_rows(stream.generators.iter()
+                .flat_map(|id| container.inner.tx_generators[id].transactions.iter()));
+            let mut rows: HashMap<usize, Vec<_>> = HashMap::new();
+            for id in &stream.generators {
+                for tx in &container.inner.tx_generators[id].transactions {
+                    rows.entry(assignments[&tx.get_tx_id()]).or_default().push((tx.get_start_time(), tx.get_end_time()));
+                }
+            }
+            assert_eq!(rows.len(), 64);
+            for intervals in rows.values_mut() {
+                intervals.sort();
+                assert!(intervals.windows(2).all(|pair| pair[0].1 <= pair[1].0));
+            }
+        }
+    }
+
+    #[test]
     fn exports_vtr_transactions_for_the_existing_transaction_view() {
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/transactions.vtr");

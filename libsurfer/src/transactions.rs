@@ -294,6 +294,28 @@ pub(crate) fn draw_vtr_transaction_details(ui: &mut Ui, details: &VtrTransaction
     }
 }
 
+/// Pack immutable packet lifetimes for the specific stream/generator being drawn.
+/// Row placement belongs to the view: the same packet can occur in both views.
+pub(crate) fn packet_rows<'a>(
+    transactions: impl Iterator<Item = &'a Transaction>,
+) -> std::collections::HashMap<ftr_parser::types::TransactionId, usize> {
+    let mut ordered: Vec<_> = transactions.collect();
+    ordered.sort_by_key(|tx| (tx.get_start_time(), tx.get_tx_id().0));
+    let mut ends = Vec::new();
+    let mut rows = std::collections::HashMap::new();
+    for tx in ordered {
+        let start = tx.get_start_time();
+        let row = ends.iter().position(|end| *end <= start).unwrap_or(ends.len());
+        if row == ends.len() {
+            ends.push(tx.get_end_time());
+        } else {
+            ends[row] = tx.get_end_time();
+        }
+        rows.insert(tx.get_tx_id(), row);
+    }
+    rows
+}
+
 pub fn calculate_rows_of_stream(
     transactions: &[Transaction],
     last_times_on_row: &mut Vec<(BigUint, BigUint)>,

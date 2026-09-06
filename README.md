@@ -199,3 +199,8 @@ As an indication of the status of the project, here is an incomplete list of sup
 ## License
 
 Surfer is licensed under the [EUPL-1.2 license](LICENSE-EUPL-1.2.txt).
+
+### CHI NoC transaction example
+
+[The CHI NoC fixture](examples/chi_noc.md) contains single-flit packets with timed
+router hops and up to 64 concurrent packets per RN-F, HN-F and RN-I controller.
