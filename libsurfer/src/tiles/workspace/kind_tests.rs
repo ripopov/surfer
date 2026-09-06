@@ -338,7 +338,10 @@ fn transaction_navigation_is_local_and_deduplicates_displayed_generators() {
     state.on_transaction_streams_loaded(
         WaveSource::Data,
         WaveFormat::Ftr,
-        TransactionContainer { inner },
+        TransactionContainer {
+            inner,
+            vtr_details: None,
+        },
         LoadOptions::Clear,
     );
     let document = state.user.waves.as_ref().unwrap();

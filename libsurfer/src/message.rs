@@ -79,6 +79,8 @@ pub enum Message {
         action: crate::tiles::commands::WcpVariableAction,
         variable: String,
     },
+    /// Open a VDB-provided source location in the source-code tile.
+    OpenSource(Utf8PathBuf, u32, u32),
     /// Shared document commands have no waveform target.
     ToDocument(crate::tiles::commands::DocumentCommand),
     ExpandScope(ScopeExpandType),

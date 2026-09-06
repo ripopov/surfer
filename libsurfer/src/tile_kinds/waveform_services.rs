@@ -31,6 +31,7 @@ pub(crate) struct WaveformReadServices<'a> {
         &'a std::collections::HashSet<(crate::wave_container::VariableRef, String)>,
     pub variable_name_info_cache: &'a std::cell::RefCell<crate::system_state::VariableInfoCache>,
     pub wcp_capabilities: Option<&'a crate::WcpClientCapabilities>,
+    pub source_index: Option<&'a crate::source_index::SourceIndex>,
     #[cfg(feature = "performance_plot")]
     pub timing: &'a std::cell::RefCell<crate::benchmark::Timing>,
 }
@@ -61,6 +62,12 @@ impl SystemState {
                 .wcp_greeted_signal
                 .load(std::sync::atomic::Ordering::Relaxed)
                 .then_some(&self.wcp_client_capabilities),
+            source_index: self
+                .user
+                .waves
+                .as_ref()
+                .and_then(|document| document.inner.as_waves())
+                .and_then(|waves| waves.source_index()),
             #[cfg(feature = "performance_plot")]
             timing: &self.timing,
         }

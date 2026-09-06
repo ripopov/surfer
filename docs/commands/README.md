@@ -409,6 +409,10 @@ recently focused waveform tile. Layout commands work without a loaded file.
   is shared with linked views of the same items. Offered only while a waveform
   tile is focused.
 
+The ``source_code`` tile is a singleton view opened from a signal's context
+menu when a VDB sidecar provides source metadata. Its file and line anchor are
+stored in the workspace; source text remains outside the waveform document.
+
 * ``logs_filter off|error|warn|info|debug|trace``, ``annotation_list_comments on|off``
 
   Settings offered while the logs or annotation tile is focused.

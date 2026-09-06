@@ -3,12 +3,17 @@ use crate::transaction_container::{StreamScopeRef, TransactionContainer, Transac
 use crate::wave_container::{MetaData, SimulationStatus, VariableRef, WaveContainer};
 use crate::wave_data::ScopeType;
 use crate::wave_data::ScopeType::{StreamScope, WaveScope};
+use itertools::Itertools;
 use num::BigUint;
 
 #[allow(clippy::large_enum_variant)]
 pub enum DataContainer {
     Waves(WaveContainer),
     Transactions(TransactionContainer),
+    Combined {
+        waves: WaveContainer,
+        transactions: TransactionContainer,
+    },
     Empty,
 }
 
@@ -53,6 +58,7 @@ impl DataContainer {
         match self {
             DataContainer::Waves(w) => Some(w),
             DataContainer::Transactions(_) => None,
+            DataContainer::Combined { waves, .. } => Some(waves),
             DataContainer::Empty => None,
         }
     }
@@ -61,6 +67,7 @@ impl DataContainer {
         match self {
             DataContainer::Waves(w) => Some(w),
             DataContainer::Transactions(_) => None,
+            DataContainer::Combined { waves, .. } => Some(waves),
             DataContainer::Empty => None,
         }
     }
@@ -70,6 +77,7 @@ impl DataContainer {
         match self {
             DataContainer::Waves(_) => None,
             DataContainer::Transactions(t) => Some(t),
+            DataContainer::Combined { transactions, .. } => Some(transactions),
             DataContainer::Empty => None,
         }
     }
@@ -78,6 +86,7 @@ impl DataContainer {
         match self {
             DataContainer::Waves(_) => None,
             DataContainer::Transactions(t) => Some(t),
+            DataContainer::Combined { transactions, .. } => Some(transactions),
             DataContainer::Empty => None,
         }
     }
@@ -87,6 +96,7 @@ impl DataContainer {
         match self {
             DataContainer::Waves(_) => true,
             DataContainer::Transactions(_) => false,
+            DataContainer::Combined { .. } => true,
             DataContainer::Empty => false,
         }
     }
@@ -96,6 +106,7 @@ impl DataContainer {
         match self {
             DataContainer::Waves(_) => false,
             DataContainer::Transactions(_) => true,
+            DataContainer::Combined { .. } => true,
             DataContainer::Empty => false,
         }
     }
@@ -105,6 +116,14 @@ impl DataContainer {
         match self {
             DataContainer::Waves(w) => w.max_timestamp(),
             DataContainer::Transactions(t) => t.max_timestamp(),
+            DataContainer::Combined {
+                waves,
+                transactions,
+            } => waves
+                .max_timestamp()
+                .into_iter()
+                .chain(transactions.max_timestamp())
+                .max(),
             DataContainer::Empty => None,
         }
     }
@@ -113,6 +132,7 @@ impl DataContainer {
         match self {
             DataContainer::Waves(w) => w.min_timestamp(),
             DataContainer::Transactions(_) => None,
+            DataContainer::Combined { waves, .. } => waves.min_timestamp(),
             DataContainer::Empty => None,
         }
     }
@@ -130,6 +150,15 @@ impl DataContainer {
             DataContainer::Transactions(_) => {
                 vec![ScopeType::StreamScope(StreamScopeRef::Root)]
             }
+            DataContainer::Combined { waves, .. } => {
+                let mut scopes = waves
+                    .root_scopes()
+                    .iter()
+                    .map(|s| ScopeType::WaveScope(s.clone()))
+                    .collect_vec();
+                scopes.push(ScopeType::StreamScope(StreamScopeRef::Root));
+                scopes
+            }
             DataContainer::Empty => vec![],
         }
     }
@@ -141,6 +170,10 @@ impl DataContainer {
             (DataContainer::Transactions(transactions), StreamScope(scope)) => {
                 transactions.stream_scope_exists(scope)
             }
+            (DataContainer::Combined { waves, .. }, WaveScope(scope)) => waves.scope_exists(scope),
+            (DataContainer::Combined { transactions, .. }, StreamScope(scope)) => {
+                transactions.stream_scope_exists(scope)
+            }
             (_, _) => false,
         }
     }
@@ -150,6 +183,14 @@ impl DataContainer {
         match self {
             DataContainer::Waves(w) => w.scope_names(),
             DataContainer::Transactions(t) => t.stream_names(),
+            DataContainer::Combined {
+                waves,
+                transactions,
+            } => waves
+                .scope_names()
+                .into_iter()
+                .chain(transactions.stream_names())
+                .collect(),
             DataContainer::Empty => vec![],
         }
     }
@@ -159,6 +200,7 @@ impl DataContainer {
         match self {
             DataContainer::Waves(w) => w.array_names(),
             DataContainer::Transactions(_) => vec![],
+            DataContainer::Combined { waves, .. } => waves.array_names(),
             DataContainer::Empty => vec![],
         }
     }
@@ -168,6 +210,14 @@ impl DataContainer {
         match self {
             DataContainer::Waves(w) => w.variable_names(),
             DataContainer::Transactions(t) => t.generator_names(),
+            DataContainer::Combined {
+                waves,
+                transactions,
+            } => waves
+                .variable_names()
+                .into_iter()
+                .chain(transactions.generator_names())
+                .collect(),
             DataContainer::Empty => vec![],
         }
     }
@@ -189,6 +239,16 @@ impl DataContainer {
                     .map(|g| VariableType::Generator(g.clone()))
                     .collect()
             }
+            (DataContainer::Combined { waves, .. }, WaveScope(s)) => waves
+                .variables_in_scope(s)
+                .iter()
+                .map(|v| VariableType::Variable(v.clone()))
+                .collect(),
+            (DataContainer::Combined { transactions, .. }, StreamScope(s)) => transactions
+                .generators_in_stream(s)
+                .iter()
+                .map(|g| VariableType::Generator(g.clone()))
+                .collect(),
             _ => panic!("Container and Scope are of incompatible types"),
         }
     }
@@ -198,6 +258,7 @@ impl DataContainer {
         match self {
             DataContainer::Waves(w) => w.metadata(),
             DataContainer::Transactions(t) => t.metadata(),
+            DataContainer::Combined { waves, .. } => waves.metadata(),
             DataContainer::Empty => MetaData {
                 date: None,
                 version: None,
@@ -214,6 +275,10 @@ impl DataContainer {
         match self {
             DataContainer::Waves(w) => w.body_loaded(),
             DataContainer::Transactions(t) => t.body_loaded(),
+            DataContainer::Combined {
+                waves,
+                transactions,
+            } => waves.body_loaded() && transactions.body_loaded(),
             DataContainer::Empty => true,
         }
     }
@@ -223,6 +288,10 @@ impl DataContainer {
         match self {
             DataContainer::Waves(w) => w.is_fully_loaded(),
             DataContainer::Transactions(t) => t.is_fully_loaded(),
+            DataContainer::Combined {
+                waves,
+                transactions,
+            } => waves.is_fully_loaded() && transactions.is_fully_loaded(),
             DataContainer::Empty => true,
         }
     }
@@ -232,6 +301,7 @@ impl DataContainer {
         match self {
             DataContainer::Waves(w) => w.simulation_status(),
             DataContainer::Transactions(_) => None,
+            DataContainer::Combined { waves, .. } => waves.simulation_status(),
             DataContainer::Empty => None,
         }
     }

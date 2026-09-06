@@ -41,6 +41,7 @@ pub struct WellenContainer {
     pub(crate) time_table: Arc<TimeTable>,
     #[debug(skip)]
     source: Option<SignalSource>,
+    pub(crate) source_index: Option<Arc<crate::source_index::SourceIndex>>,
     unique_id: u64,
     body_loaded: bool,
 }
@@ -54,6 +55,8 @@ pub struct LoadSignalsCmd {
 }
 
 pub enum HeaderResult {
+    #[cfg(not(target_arch = "wasm32"))]
+    Vtr(Box<crate::vtr_adapter::LoadedVtr>),
     /// Result of locally parsing the header of a waveform file with wellen from a file.
     LocalFile(Box<wellen::viewers::HeaderResult<std::io::BufReader<std::fs::File>>>),
     /// Result of locally parsing the header of a waveform file with wellen from bytes.
@@ -185,12 +188,12 @@ impl WellenContainer {
             signals_to_be_loaded: HashSet::new(),
             time_table: Arc::new(vec![]),
             source: None,
+            source_index: None,
             unique_id,
             body_loaded: false,
         }
     }
 
-    #[must_use]
     pub fn body_loaded(&self) -> bool {
         self.body_loaded
     }

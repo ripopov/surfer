@@ -1602,6 +1602,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
+name = "elkrs"
+version = "0.1.1"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "emath"
 version = "0.36.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3118,6 +3127,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "vergen-gitcl",
+ "vtr",
+ "vtr-vdb",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-tracing",
@@ -4883,6 +4894,7 @@ version = "1.0.148"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3084b546a1dd6289475996f182a22aba973866ea8e8b02c51d9f46b1336a22da"
 dependencies = [
+ "indexmap",
  "itoa",
  "memchr",
  "serde",
@@ -5904,6 +5916,27 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vtr"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "lz4_flex 0.11.6",
+ "memmap2",
+ "thiserror 2.0.18",
+ "zstd",
+]
+
+[[package]]
+name = "vtr-vdb"
+version = "0.1.0"
+dependencies = [
+ "elkrs",
+ "serde",
+ "serde_json",
+ "vtr",
+]
 
 [[package]]
 name = "walkdir"

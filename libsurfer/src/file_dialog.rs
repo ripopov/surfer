@@ -50,8 +50,8 @@ pub(crate) struct FileFilter {
 }
 
 static WAVEFORM_FILE_FILTER: FileFilter = FileFilter {
-    name: "Waveform/Transaction-files (*.vcd, *.fst, *.ghw, *.ftr)",
-    extensions: &["vcd", "fst", "ghw", TRANSACTIONS_FILE_EXTENSION],
+    name: "Waveform/Transaction-files (*.vcd, *.fst, *.ghw, *.ftr, *.vtr)",
+    extensions: &["vcd", "fst", "ghw", TRANSACTIONS_FILE_EXTENSION, "vtr"],
 };
 
 static COMMAND_FILE_FILTER: FileFilter = FileFilter {

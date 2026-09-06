@@ -488,8 +488,205 @@ fn render_readme_screenshot() {
     );
 }
 
+fn verilator_example(name: &str, format: &str) -> SystemState {
+    let mut state = SystemState::new_default_config()
+        .unwrap()
+        .with_params(StartupParams {
+            waves: Some(WaveSource::File(
+                get_project_root()
+                    .unwrap()
+                    .join(format!("examples/verilator/{name}.{format}"))
+                    .try_into()
+                    .unwrap(),
+            )),
+            ..Default::default()
+        });
+    wait_for_waves_fully_loaded(&mut state, 10);
+    let signals = match name {
+        "pipeline" => vec![
+            "clk", "rst_n", "en", "sel", "a", "b", "mux", "first", "q", "u0.q", "u1.q",
+        ],
+        _ => vec![
+            "clk",
+            "a",
+            "b",
+            "index",
+            "sum",
+            "difference",
+            "product",
+            "shift_s",
+            "selected",
+            "enum_value",
+            "array_value",
+            "replicated",
+        ],
+    };
+    state.update(Message::AddVariables(
+        signals
+            .into_iter()
+            .map(|name| VariableRef::from_hierarchy_string(&format!("TOP.top.{name}")))
+            .collect(),
+    ));
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state.update(Message::ToDocument(DocumentCommand::CursorSet(26.into())));
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state
+}
+
+#[test]
+fn verilator_pipeline_fst_snapshot() {
+    render_and_compare(Utf8Path::new("verilator_pipeline"), || {
+        verilator_example("pipeline", "fst")
+    });
+}
+
+#[test]
+fn verilator_pipeline_vtr_snapshot() {
+    render_and_compare(Utf8Path::new("verilator_pipeline"), || {
+        verilator_example("pipeline", "vtr")
+    });
+}
+
+#[test]
+fn verilator_operators_fst_snapshot() {
+    render_and_compare(Utf8Path::new("verilator_operators"), || {
+        verilator_example("operators", "fst")
+    });
+}
+
+#[test]
+fn verilator_operators_vtr_snapshot() {
+    render_and_compare(Utf8Path::new("verilator_operators"), || {
+        verilator_example("operators", "vtr")
+    });
+}
+
+#[test]
+fn verilator_document_replacement_keeps_source_attachment_with_its_trace() {
+    render_and_compare(Utf8Path::new("verilator_pipeline"), || {
+        let mut state = verilator_example("pipeline", "vtr");
+        assert!(state.waveform_services().source_index.is_some());
+        let root = get_project_root().unwrap().join("examples/verilator");
+        state
+            .load_from_file(
+                root.join("pipeline.fst").try_into().unwrap(),
+                LoadOptions::KeepAll,
+            )
+            .unwrap();
+        wait_for_waves_fully_loaded(&mut state, 10);
+        assert!(state.waveform_services().source_index.is_none());
+        let path: Utf8PathBuf = root.join("pipeline.vtr").try_into().unwrap();
+        state
+            .load_from_dropped_bytes(Some(path.clone()), std::fs::read(&path).unwrap())
+            .unwrap();
+        wait_for_waves_fully_loaded(&mut state, 10);
+        assert!(state.waveform_services().source_index.is_some());
+        // Restore the same displayed variables after a drop replaces the document.
+        verilator_example("pipeline", "vtr")
+    });
+}
+
+snapshot_ui! {verilator_source_navigation, || {
+    let mut state = verilator_example("pipeline", "vtr");
+    state.user.show_statusbar = Some(false);
+    state.user.show_default_timeline = Some(false);
+    let ctx = egui::Context::default();
+    let frame = |state: &mut SystemState, events| {
+    let mut output = ctx.run_ui(RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, SNAPSHOT_SIZE)),
+        events,
+        ..Default::default()
+    }, |ui| {
+        ui.set_visuals(state.get_visuals());
+        setup_custom_font(ui.ctx());
+        let messages = state.draw(ui, Some(SNAPSHOT_SIZE));
+        for message in messages { state.update(message); }
+    });
+    output.textures_delta.clear();
+    output
+    };
+    let click = |pos, button| vec![
+        Event::PointerMoved(pos),
+        Event::PointerButton { pos, button, pressed: true, modifiers: Modifiers::default() },
+        Event::PointerButton { pos, button, pressed: false, modifiers: Modifiers::default() },
+    ];
+    frame(&mut state, vec![]);
+    frame(&mut state, vec![]);
+    // Right-click the first-stage output row, then find the actual menu label.
+    frame(&mut state, click(Pos2::new(45.0, 199.0), PointerButton::Secondary));
+    let output = frame(&mut state, vec![]);
+    fn label_position(shape: &epaint::Shape) -> Option<Pos2> {
+        match shape {
+            epaint::Shape::Text(text) if text.galley.job.text == "Go to source" =>
+                Some(text.pos + text.galley.rect.center().to_vec2()),
+            epaint::Shape::Vec(shapes) => shapes.iter().find_map(label_position),
+            _ => None,
+        }
+    }
+    let target = output.shapes.iter().find_map(|shape| label_position(&shape.shape))
+        .expect("signal context menu must offer Go to source");
+    frame(&mut state, click(target, PointerButton::Primary));
+    let source = state.user.workspace.tiles().values().find_map(|tile| {
+        if let crate::tiles::kind::TileKind::SourceCode(source) = &tile.kind { Some(source) } else { None }
+    }).expect("context-menu click opens source tile");
+    assert_eq!(source.line, 2);
+    assert_eq!(source.file.as_ref().unwrap().file_name(), Some("pipeline.sv"));
+    state
+}}
+
 snapshot_ui! {startup_screen_looks_fine, || {
     SystemState::new_default_config().unwrap().with_params(StartupParams::default())
+}}
+
+snapshot_ui! {source_code_tile_renders_systemverilog, || {
+    let mut state = SystemState::new_default_config().unwrap();
+    state.update(Message::OpenSource(
+        get_project_root().unwrap().join("examples/source_tile_demo.sv").try_into().unwrap(),
+        6,
+        3,
+    ));
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state
+}}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui! {vtr_waveform_and_transaction_render_together, || {
+    let path = get_project_root().unwrap().join("examples/combined.vtr");
+
+
+    let mut state = SystemState::new_default_config().unwrap().with_params(StartupParams {
+        waves: Some(WaveSource::File(path.try_into().unwrap())),
+        ..Default::default()
+    });
+    let load_start = std::time::Instant::now();
+    loop {
+        state.handle_async_messages();
+        state.handle_batch_commands();
+        if state.waves_fully_loaded() {
+            break;
+        }
+        assert!(load_start.elapsed().as_secs() < 10, "VTR snapshot load timed out");
+    }
+    state.update(Message::AddVariables(vec![VariableRef::from_hierarchy_string("top.count")]));
+    state.update(Message::AddStreamOrGenerator(TransactionStreamRef::new_gen(
+        StreamId(2),
+        GeneratorId(3),
+        "issue".into(),
+    )));
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state.update(Message::FocusTransaction(
+        Some(TransactionRef { id: TransactionId(1) }),
+        TileId(1),
+    ));
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state
 }}
 
 snapshot_ui!(menu_can_be_hidden, || {

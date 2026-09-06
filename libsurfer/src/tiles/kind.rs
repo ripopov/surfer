@@ -226,6 +226,11 @@ pub const FRAME_BUFFER: KindDescriptor = KindDescriptor {
     payload_version: 1,
     singleton: false,
 };
+pub const SOURCE_CODE: KindDescriptor = KindDescriptor {
+    name: "source_code",
+    payload_version: 1,
+    singleton: true,
+};
 pub const KINDS: &[KindDescriptor] = &[
     FRAME_BUFFER,
     MEMORY,
@@ -234,6 +239,7 @@ pub const KINDS: &[KindDescriptor] = &[
     MARKERS,
     TRANSACTION_DETAILS,
     ANNOTATION_LIST,
+    SOURCE_CODE,
 ];
 
 #[derive(Clone)]
@@ -245,6 +251,7 @@ pub enum TileKind {
     Markers(crate::tile_kinds::markers::MarkersTile),
     Logs(crate::tile_kinds::logs::LogsTile),
     Waveform(Box<WaveformTile>),
+    SourceCode(crate::source_code::SourceCodeTile),
     Unknown(UnknownTile),
 }
 
@@ -286,6 +293,9 @@ impl TileEntry {
             TileKind::Markers(file.decode_payload()?)
         } else if file.kind == LOGS.name && file.kind_version == LOGS.payload_version {
             TileKind::Logs(file.decode_payload()?)
+        } else if file.kind == SOURCE_CODE.name && file.kind_version == SOURCE_CODE.payload_version
+        {
+            TileKind::SourceCode(file.decode_payload()?)
         } else {
             TileKind::Unknown(UnknownTile {
                 kind_name: file.kind,
@@ -339,6 +349,12 @@ impl TileEntry {
                 WAVEFORM.name,
                 WAVEFORM.payload_version,
                 &WaveformTileFile::from(tile.as_ref()),
+            ),
+            TileKind::SourceCode(tile) => TileFile::encode(
+                self.title.clone(),
+                SOURCE_CODE.name,
+                SOURCE_CODE.payload_version,
+                tile,
             ),
             TileKind::Unknown(tile) => Ok(TileFile {
                 title: self.title.clone(),
@@ -455,6 +471,7 @@ impl TileKind {
                 .map_or_else(|| "Memory".into(), |name| format!("Memory: {name}")),
             Self::AnnotationList(_) => "Annotations".into(),
             Self::TransactionDetails(_) => "Transaction Details".into(),
+            Self::SourceCode(_) => "Source Code".into(),
             Self::Unknown(tile) => format!("Unavailable: {}", tile.kind_name),
         }
     }
@@ -469,6 +486,7 @@ impl TileKind {
             | Self::Memory(_)
             | Self::TransactionDetails(_)
             | Self::Markers(_)
+            | Self::SourceCode(_)
             | Self::Unknown(_) => &[],
         }
     }
@@ -482,6 +500,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::SourceCode(_)
             | Self::Unknown(_) => {}
         }
     }
@@ -495,6 +514,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::SourceCode(_)
             | Self::Unknown(_) => {}
         }
     }
@@ -528,6 +548,9 @@ impl TileKind {
                 Ok((Self::Markers(Default::default()), Default::default()))
             }
             name if name == LOGS.name => Ok((Self::Logs(Default::default()), Default::default())),
+            name if name == SOURCE_CODE.name => {
+                Ok((Self::SourceCode(Default::default()), Default::default()))
+            }
             name if name == WAVEFORM.name => {
                 let id = runtime.allocate_list()?;
                 Ok((
@@ -548,6 +571,7 @@ impl TileKind {
             Self::Memory(_) => Some(&MEMORY),
             Self::AnnotationList(_) => Some(&ANNOTATION_LIST),
             Self::TransactionDetails(_) => Some(&TRANSACTION_DETAILS),
+            Self::SourceCode(_) => Some(&SOURCE_CODE),
             Self::Unknown(_) => None,
         }
     }
@@ -565,6 +589,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::SourceCode(_)
             | Self::Unknown(_) => false,
         }
     }
@@ -578,6 +603,7 @@ impl TileKind {
             Self::Memory(_) => MEMORY.name,
             Self::AnnotationList(_) => ANNOTATION_LIST.name,
             Self::TransactionDetails(_) => TRANSACTION_DETAILS.name,
+            Self::SourceCode(_) => SOURCE_CODE.name,
             Self::Unknown(tile) => &tile.kind_name,
         }
     }
@@ -593,6 +619,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::SourceCode(_)
             | Self::Unknown(_) => None,
         }
     }
@@ -613,6 +640,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::SourceCode(_)
             | Self::Unknown(_) => true,
         }
     }
@@ -626,6 +654,7 @@ impl TileKind {
             | Self::TransactionDetails(_)
             | Self::Markers(_)
             | Self::Logs(_)
+            | Self::SourceCode(_)
             | Self::Unknown(_) => None,
         }
     }
@@ -759,6 +788,7 @@ impl super::render::PaneRenderer for ApplicationPanes<'_> {
                 );
                 tile.ui(ui, &mut cx);
             }
+            TileKind::SourceCode(tile) => tile.ui(ui),
             TileKind::Unknown(tile) => {
                 ui.vertical_centered(|ui| {
                     ui.heading("Tile unavailable");
@@ -807,7 +837,8 @@ impl TileKind {
             | Self::AnnotationList(_)
             | Self::TransactionDetails(_)
             | Self::Markers(_)
-            | Self::Logs(_) => Dependencies::default(),
+            | Self::Logs(_)
+            | Self::SourceCode(_) => Dependencies::default(),
         }
     }
 }
@@ -831,7 +862,8 @@ impl super::resources::ResourceOwner for TileKind {
             | Self::AnnotationList(_)
             | Self::TransactionDetails(_)
             | Self::Markers(_)
-            | Self::Logs(_) => {}
+            | Self::Logs(_)
+            | Self::SourceCode(_) => {}
         }
         Ok(())
     }

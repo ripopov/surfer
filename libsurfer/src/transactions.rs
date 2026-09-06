@@ -8,6 +8,7 @@ use num::BigUint;
 
 use crate::displayed_item::DisplayedItem;
 use crate::message::Message;
+use crate::transaction_container::VtrTransactionDetails;
 use crate::transaction_container::{StreamScopeRef, TransactionContainer};
 use crate::transaction_container::{TransactionRef, TransactionStreamRef};
 use crate::wave_data::ScopeType;
@@ -234,6 +235,63 @@ pub(crate) fn draw_focused_transaction_details(
                 });
         },
     );
+}
+
+pub(crate) fn draw_vtr_transaction_details(ui: &mut Ui, details: &VtrTransactionDetails) {
+    ui.separator();
+    ui.heading("VTR metadata");
+    ui.label(format!("Status: {}", details.status));
+    ui.label(format!("Kind: {}", details.kind));
+    if let Some(parent) = details.parent {
+        ui.label(format!("Parent transaction: {parent}"));
+    }
+
+    if !details.stages.is_empty() {
+        ui.collapsing("Stages", |ui| {
+            for stage in &details.stages {
+                let end = stage
+                    .end
+                    .map_or_else(|| "open".to_owned(), |end| end.to_string());
+                ui.label(format!(
+                    "{} [{}] {}–{}",
+                    stage.name, stage.lane, stage.begin, end
+                ));
+                for (name, value) in &stage.attrs {
+                    ui.label(format!("  {name}: {value}"));
+                }
+            }
+        });
+    }
+    if !details.events.is_empty() {
+        ui.collapsing("Events", |ui| {
+            for event in &details.events {
+                ui.label(format!("{} @ {}", event.name, event.time));
+                for (name, value) in &event.attrs {
+                    ui.label(format!("  {name}: {value}"));
+                }
+            }
+        });
+    }
+    if details
+        .relations
+        .iter()
+        .any(|relation| !relation.attrs.is_empty())
+    {
+        ui.collapsing("Relation attributes", |ui| {
+            for relation in &details.relations {
+                if relation.attrs.is_empty() {
+                    continue;
+                }
+                ui.label(format!(
+                    "{}: {} → {}",
+                    relation.name, relation.source, relation.target
+                ));
+                for (name, value) in &relation.attrs {
+                    ui.label(format!("  {name}: {value}"));
+                }
+            }
+        });
+    }
 }
 
 pub fn calculate_rows_of_stream(

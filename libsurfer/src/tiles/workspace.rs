@@ -571,6 +571,10 @@ impl Workspace {
     pub fn tiles(&self) -> &BTreeMap<TileId, TileEntry> {
         &self.tiles
     }
+
+    pub(crate) fn tiles_mut(&mut self) -> &mut BTreeMap<TileId, TileEntry> {
+        &mut self.tiles
+    }
     pub fn item_lists(&self) -> &BTreeMap<ItemListId, ItemList> {
         &self.item_lists
     }

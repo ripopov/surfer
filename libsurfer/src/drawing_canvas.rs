@@ -18,7 +18,7 @@ use surfer_translation_types::{
 };
 use tracing::{error, warn};
 
-use crate::CachedDrawData::TransactionDrawData;
+use crate::CachedDrawData::Transactions;
 use crate::analog_renderer::{AnalogDrawingCommand, variable_analog_draw_commands};
 use crate::clock_highlighting::draw_clock_edge_marks;
 use crate::config::{FocusHighlight, SurferTheme};
@@ -38,8 +38,8 @@ use crate::viewport::Viewport;
 use crate::wave_container::{QueryResult, VariableRefExt};
 use crate::wave_data::{TimeRange, WaveData};
 use crate::{
-    CachedDrawData, CachedTransactionDrawData, CachedWaveDrawData, Message, SystemState,
-    displayed_item::DisplayedItem,
+    CachedCombinedDrawData, CachedDrawData, CachedTransactionDrawData, CachedWaveDrawData, Message,
+    SystemState, displayed_item::DisplayedItem,
 };
 
 /// Immutable inputs for one canvas. The item list may be shared by other views,
@@ -606,6 +606,22 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
         let result = match source.document.inner {
             DataContainer::Waves(_) => self.generate_wave_draw_commands(source, cfg, msgs),
             DataContainer::Transactions(_) => self.generate_transaction_draw_commands(source, cfg),
+            DataContainer::Combined { .. } => {
+                let Some(CachedDrawData::Waves(wave)) =
+                    self.generate_wave_draw_commands(source, cfg, msgs)
+                else {
+                    return None;
+                };
+                let Some(CachedDrawData::Transactions(transaction)) =
+                    self.generate_transaction_draw_commands(source, cfg)
+                else {
+                    return None;
+                };
+                Some(CachedDrawData::Combined(CachedCombinedDrawData {
+                    wave,
+                    transaction,
+                }))
+            }
             DataContainer::Empty => None,
         };
         #[cfg(feature = "performance_plot")]
@@ -712,7 +728,7 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
 
         let ticks = self.get_ticks_for_viewport(waves, viewport, cfg);
 
-        Some(CachedDrawData::WaveDrawData(CachedWaveDrawData {
+        Some(CachedDrawData::Waves(CachedWaveDrawData {
             draw_commands,
             clock_edges,
             ticks,
@@ -877,7 +893,7 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
             }
         }
 
-        Some(TransactionDrawData(CachedTransactionDrawData {
+        Some(Transactions(CachedTransactionDrawData {
             draw_commands,
             stream_to_displayed_txs,
             inc_relation_tx_ids,
@@ -926,6 +942,11 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
             DataContainer::Transactions(_) => DrawConfig::new(
                 Vec2::new(frame_width, frame_height),
                 self.config.layout.transactions_line_height,
+                self.config.layout.waveforms_text_size,
+            ),
+            DataContainer::Combined { .. } => DrawConfig::new(
+                Vec2::new(frame_width, frame_height),
+                self.config.layout.waveforms_line_height,
                 self.config.layout.waveforms_text_size,
             ),
             DataContainer::Empty => return,
@@ -1108,12 +1129,24 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
         self.timing.borrow_mut().start("Wave drawing");
 
         match &cache.commands {
-            Some(CachedDrawData::WaveDrawData(draw_data)) => {
+            Some(CachedDrawData::Waves(draw_data)) => {
                 self.draw_wave_data(source, draw_data, row_offset, &mut ctx);
             }
-            Some(CachedDrawData::TransactionDrawData(draw_data)) => {
+            Some(CachedDrawData::Transactions(draw_data)) => {
                 self.draw_transaction_data(
                     source, draw_data, ui, msgs, row_offset, &mut ctx, tile_id,
+                );
+            }
+            Some(CachedDrawData::Combined(draw_data)) => {
+                self.draw_wave_data(source, &draw_data.wave, row_offset, &mut ctx);
+                self.draw_transaction_data(
+                    source,
+                    &draw_data.transaction,
+                    ui,
+                    msgs,
+                    row_offset,
+                    &mut ctx,
+                    tile_id,
                 );
             }
             None => {}
@@ -2316,7 +2349,7 @@ mod view_cache_tests {
         let cfg = DrawConfig::new(Vec2::new(400.0, 300.0), 20.0, 12.0);
         let generate = |items: &ItemList, viewport: &Viewport| {
             let mut messages = Vec::new();
-            let Some(CachedDrawData::WaveDrawData(data)) =
+            let Some(CachedDrawData::Waves(data)) =
                 state.waveform_services().generate_draw_commands(
                     &CanvasSource {
                         tile_id: crate::tiles::TileId(1),

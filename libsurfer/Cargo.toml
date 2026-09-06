@@ -6,13 +6,15 @@ license.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 build = "build.rs"
-description = "Waveform viewer for VCD, FST, and GHW"
+description = "Waveform and transaction viewer for VCD, FST, GHW, and VTR"
 repository.workspace = true
 
 [target.'cfg(all(not(windows), not(target_arch = "wasm32")))'.dependencies]
 notify.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+vtr = { path = "../../../crates/vtr" }
+vtr-vdb = { path = "../../../crates/vtr-vdb" }
 ahash = { workspace = true, default-features = false, features = ["std", "runtime-rng"] }
 directories.workspace = true
 extism = { workspace = true, optional = true }
@@ -121,3 +123,7 @@ image-compare.workspace = true
 port_check.workspace = true
 project-root.workspace = true
 test-log.workspace = true
+
+[[example]]
+name = "generate_vtr_examples"
+path = "../examples/generate_vtr_examples.rs"

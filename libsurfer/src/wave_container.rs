@@ -307,9 +307,23 @@ pub enum WaveContainer {
 }
 
 impl WaveContainer {
+    pub(crate) fn source_index(&self) -> Option<&crate::source_index::SourceIndex> {
+        match self {
+            Self::Wellen(waves) => waves.source_index.as_deref(),
+            _ => None,
+        }
+    }
+
     #[must_use]
     pub fn new_waveform(hierarchy: std::sync::Arc<wellen::Hierarchy>) -> Self {
         WaveContainer::Wellen(Box::new(WellenContainer::new(hierarchy, None, None)))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn attach_source_index(&mut self, index: Option<crate::source_index::SourceIndex>) {
+        if let Self::Wellen(waves) = self {
+            waves.source_index = index.map(std::sync::Arc::new);
+        }
     }
 
     #[must_use]

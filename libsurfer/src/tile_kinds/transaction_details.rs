@@ -26,6 +26,9 @@ impl TransactionDetailsTile {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
         egui::ScrollArea::both().show(ui, |ui| {
             crate::transactions::draw_focused_transaction_details(ui, transactions, transaction);
+            if let Some(details) = transactions.vtr_details(reference.id) {
+                crate::transactions::draw_vtr_transaction_details(ui, details);
+            }
         });
     }
 }

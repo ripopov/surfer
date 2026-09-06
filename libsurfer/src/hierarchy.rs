@@ -374,7 +374,11 @@ impl SystemState {
         // Phase 2: Draw using the cached rows.
         if let Some(waves) = &self.user.waves {
             match &waves.inner {
-                DataContainer::Waves(wave_container) => {
+                DataContainer::Waves(wave_container)
+                | DataContainer::Combined {
+                    waves: wave_container,
+                    ..
+                } => {
                     // Clone the Rc (O(1)) to get an owned handle usable inside the closure.
                     let variable_rows = self
                         .all_variable_rows_cache

@@ -5,12 +5,51 @@ use ftr_parser::types::{
 };
 use num::BigUint;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::ops::Not;
 
 pub struct TransactionContainer {
     pub inner: FTR,
+    pub(crate) vtr_details: Option<HashMap<TransactionId, VtrTransactionDetails>>,
+}
+
+/// VTR fields that have no representation in the legacy FTR transaction type.
+/// They stay attached to the immutable document for the inspector and future
+/// native pipeline rendering.
+#[derive(Clone, Debug)]
+pub(crate) struct VtrTransactionDetails {
+    pub status: String,
+    pub kind: String,
+    pub parent: Option<TransactionId>,
+    pub events: Vec<VtrTransactionEvent>,
+    pub stages: Vec<VtrTransactionStage>,
+    pub relations: Vec<VtrTransactionRelation>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct VtrTransactionEvent {
+    pub time: u64,
+    pub name: String,
+    pub attrs: Vec<(String, String)>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct VtrTransactionStage {
+    pub name: String,
+    pub lane: String,
+    pub begin: u64,
+    pub end: Option<u64>,
+    pub attrs: Vec<(String, String)>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct VtrTransactionRelation {
+    pub name: String,
+    pub source: TransactionId,
+    pub target: TransactionId,
+    pub attrs: Vec<(String, String)>,
 }
 
 impl TransactionContainer {
@@ -41,6 +80,11 @@ impl TransactionContainer {
                 .iter()
                 .find(|tx| tx.get_tx_id() == transaction_ref.id)
         })
+    }
+
+    #[must_use]
+    pub(crate) fn vtr_details(&self, id: TransactionId) -> Option<&VtrTransactionDetails> {
+        self.vtr_details.as_ref()?.get(&id)
     }
 
     #[must_use]

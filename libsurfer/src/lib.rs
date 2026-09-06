@@ -46,6 +46,8 @@ pub mod overview;
 pub mod rectangle;
 pub mod remote;
 pub mod server_file_window;
+pub(crate) mod source_code;
+pub(crate) mod source_index;
 pub mod state;
 pub mod state_file_io;
 pub mod state_util;
@@ -70,6 +72,10 @@ pub mod variable_meta;
 pub mod variable_name_type;
 pub mod view;
 pub mod viewport;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod vtr_adapter;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod vtr_transactions;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_api;
 #[cfg(target_arch = "wasm32")]
@@ -236,8 +242,9 @@ pub enum ColorSpecifier {
 }
 
 enum CachedDrawData {
-    WaveDrawData(CachedWaveDrawData),
-    TransactionDrawData(CachedTransactionDrawData),
+    Waves(CachedWaveDrawData),
+    Transactions(CachedTransactionDrawData),
+    Combined(CachedCombinedDrawData),
 }
 
 struct CachedWaveDrawData {
@@ -251,6 +258,11 @@ struct CachedTransactionDrawData {
     pub stream_to_displayed_txs: HashMap<TransactionStreamRef, Vec<TransactionRef>>,
     pub inc_relation_tx_ids: Vec<TransactionRef>,
     pub out_relation_tx_ids: Vec<TransactionRef>,
+}
+
+struct CachedCombinedDrawData {
+    pub wave: CachedWaveDrawData,
+    pub transaction: CachedTransactionDrawData,
 }
 
 pub struct Channels {
@@ -521,6 +533,45 @@ impl SystemState {
                 if let Some(channel) = &self.channels.wcp_s2c_sender {
                     let _ = futures::executor::block_on(channel.send(WcpSCMessage::event(event)));
                 }
+            }
+            Message::OpenSource(file, line, column) => {
+                let source_tile = self.user.workspace.tiles().iter().find_map(|(id, entry)| {
+                    (entry.kind.kind_name() == crate::tiles::kind::SOURCE_CODE.name).then_some(*id)
+                });
+                let tile = if let Some(tile) = source_tile {
+                    self.user
+                        .workspace
+                        .apply_command(
+                            &mut self.workspace_runtime,
+                            crate::tiles::commands::WorkspaceCommand::FocusTile(tile),
+                        )
+                        .ok()?;
+                    tile
+                } else {
+                    self.user
+                        .workspace
+                        .apply_command(
+                            &mut self.workspace_runtime,
+                            crate::tiles::commands::WorkspaceCommand::OpenTile {
+                                kind: crate::tiles::kind::SOURCE_CODE.name.into(),
+                                placement: crate::tiles::layout::Placement::Edge(
+                                    crate::tiles::layout::Direction::Right,
+                                ),
+                                focus: true,
+                            },
+                        )
+                        .ok()?;
+                    self.user.workspace.layout().focused().filter(|id| {
+                        self.user.workspace.tiles()[id].kind.kind_name()
+                            == crate::tiles::kind::SOURCE_CODE.name
+                    })?
+                };
+                let crate::tiles::kind::TileKind::SourceCode(source) =
+                    &mut self.user.workspace.tiles_mut().get_mut(&tile)?.kind
+                else {
+                    return None;
+                };
+                source.open(crate::source_index::SourceLocation { file, line, column });
             }
             Message::ToDocument(command) => {
                 self.user.waves.as_mut()?.apply_command(command)?;
@@ -1666,6 +1717,23 @@ impl SystemState {
                     start.elapsed()
                 );
                 match header {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    HeaderResult::Vtr(loaded) => {
+                        let mut new_waves = WaveContainer::new_waveform(Arc::new(loaded.hierarchy));
+                        new_waves.attach_source_index(loaded.source_index);
+                        self.pending_document = Some(crate::wave_source::PendingDocument {
+                            source: source.clone(),
+                            format: WaveFormat::Vtr,
+                            waves: new_waves,
+                            transactions: loaded.transactions,
+                            options: load_options,
+                        });
+                        self.update(Message::WaveBodyLoaded(
+                            start,
+                            source,
+                            crate::wellen::BodyResult::Local(loaded.body),
+                        ));
+                    }
                     HeaderResult::LocalFile(header) => {
                         // Stage the hierarchy until its matching body succeeds.
                         let shared_hierarchy = Arc::new(header.hierarchy);
@@ -1674,6 +1742,7 @@ impl SystemState {
                             source: source.clone(),
                             format: convert_format(header.file_format),
                             waves: new_waves,
+                            transactions: None,
                             options: load_options,
                         });
                         // start parsing of the body
@@ -1687,6 +1756,7 @@ impl SystemState {
                             source: source.clone(),
                             format: convert_format(header.file_format),
                             waves: new_waves,
+                            transactions: None,
                             options: load_options,
                         });
                         // start parsing of the body
@@ -1703,6 +1773,7 @@ impl SystemState {
                             source: source.clone(),
                             format: convert_format(file_format),
                             waves: new_waves,
+                            transactions: None,
                             options: load_options,
                         });
                         // body is already being parsed on the server, we need to request the time table though
@@ -1738,6 +1809,7 @@ impl SystemState {
                     pending.source,
                     pending.format,
                     pending.waves,
+                    pending.transactions,
                     pending.options,
                 );
 
@@ -1798,7 +1870,7 @@ impl SystemState {
                 self.invalidate_draw_commands();
             }
             Message::WavesLoaded(filename, format, new_waves, load_options) => {
-                self.on_waves_loaded(filename, format, *new_waves, load_options);
+                self.on_waves_loaded(filename, format, *new_waves, None, load_options);
                 // here, the body and thus the number of timestamps is already loaded!
                 let enable_time_offset = self.enable_time_offset();
                 let waves = self

@@ -847,6 +847,18 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                 }
             });
 
+            if let Some(location) = self
+                .source_index
+                .and_then(|index| index.location(&variable.variable_ref))
+                && ui.button("Go to source").clicked()
+            {
+                msgs.push(Message::OpenSource(
+                    location.file,
+                    location.line,
+                    location.column,
+                ));
+            }
+
             if let Some(capabilities) = self.wcp_capabilities {
                 use crate::tiles::commands::WcpVariableAction;
                 for (enabled, label, action) in [

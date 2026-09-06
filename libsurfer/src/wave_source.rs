@@ -61,6 +61,7 @@ pub(crate) struct PendingDocument {
     pub source: WaveSource,
     pub format: WaveFormat,
     pub waves: WaveContainer,
+    pub transactions: Option<TransactionContainer>,
     pub options: LoadOptions,
 }
 
@@ -208,6 +209,7 @@ pub enum WaveFormat {
     Ghw,
     CxxRtl,
     Ftr,
+    Vtr,
 }
 
 impl Display for WaveFormat {
@@ -218,6 +220,7 @@ impl Display for WaveFormat {
             WaveFormat::Ghw => write!(f, "GHW"),
             WaveFormat::CxxRtl => write!(f, "CXXRTL"),
             WaveFormat::Ftr => write!(f, "FTR"),
+            WaveFormat::Vtr => write!(f, "VTR"),
         }
     }
 }
@@ -287,10 +290,51 @@ impl SystemState {
                 TRANSACTIONS_FILE_EXTENSION => {
                     self.load_transactions_from_file(filename, load_options)
                 }
+                #[cfg(not(target_arch = "wasm32"))]
+                "vtr" => self.load_vtr_from_file(filename, load_options),
+                #[cfg(target_arch = "wasm32")]
+                "vtr" => {
+                    error!("VTR files are not supported in WASM builds");
+                    Ok(())
+                }
                 _ => self.load_wave_from_file(filename, load_options),
             },
             _ => self.load_wave_from_file(filename, load_options),
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn load_vtr_from_file(
+        &mut self,
+        filename: Utf8PathBuf,
+        load_options: LoadOptions,
+    ) -> Result<()> {
+        let request = self.begin_document_load();
+        let source = WaveSource::File(filename.clone());
+        let source_copy = source.clone();
+        let sender = self.channels.msg_sender.clone();
+        perform_work(move || match crate::vtr_adapter::load(&filename) {
+            Ok(loaded) => checked_send(
+                &sender,
+                Message::DocumentLoadResult(
+                    request,
+                    Box::new(Message::WaveHeaderLoaded(
+                        Instant::now(),
+                        source,
+                        load_options,
+                        HeaderResult::Vtr(Box::new(loaded)),
+                    )),
+                ),
+            ),
+            Err(error) => {
+                error!("Failed to read VTR waveform: {error}");
+                checked_send(&sender, Message::DocumentLoadFailed(request));
+            }
+        });
+        self.progress_tracker = Some(LoadProgress::new(LoadProgressStatus::ReadingHeader(
+            source_copy,
+        )));
+        Ok(())
     }
 
     pub fn load_from_bytes(
@@ -418,6 +462,13 @@ impl SystemState {
         path: Option<Utf8PathBuf>,
         bytes: Vec<u8>,
     ) -> Result<()> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(path) = path
+            .as_ref()
+            .filter(|path| path.extension() == Some("vtr") && path.is_file())
+        {
+            return self.load_from_file(path.clone(), LoadOptions::Clear);
+        }
         if bytes.is_empty() {
             return Err(anyhow!("Dropped an empty file"));
         }
@@ -599,7 +650,10 @@ impl SystemState {
                     Box::new(Message::TransactionStreamsLoaded(
                         source,
                         format,
-                        TransactionContainer { inner: ftr },
+                        TransactionContainer {
+                            inner: ftr,
+                            vtr_details: None,
+                        },
                         load_options,
                     )),
                 ),
@@ -632,7 +686,10 @@ impl SystemState {
                     Box::new(Message::TransactionStreamsLoaded(
                         source,
                         WaveFormat::Ftr,
-                        TransactionContainer { inner: ftr },
+                        TransactionContainer {
+                            inner: ftr,
+                            vtr_details: None,
+                        },
                         load_options,
                     )),
                 ),
@@ -953,6 +1010,7 @@ mod load_request_tests {
             WaveSource::Url("active-document".into()),
             WaveFormat::Vcd,
             WaveContainer::Empty,
+            None,
             LoadOptions::Clear,
         );
         let tile = state.user.workspace.layout().focused().unwrap();

@@ -547,17 +547,20 @@ impl SystemState {
         filename: WaveSource,
         format: WaveFormat,
         new_waves: WaveContainer,
+        transactions: Option<TransactionContainer>,
         load_options: LoadOptions,
     ) {
         for translator in self.translators.all_translators() {
             translator.set_wave_source(Some(filename.into_translation_type()));
         }
-        self.install_document(
-            DataContainer::Waves(new_waves),
-            filename,
-            format,
-            load_options,
-        );
+        let inner = match transactions {
+            Some(transactions) => DataContainer::Combined {
+                waves: new_waves,
+                transactions,
+            },
+            None => DataContainer::Waves(new_waves),
+        };
+        self.install_document(inner, filename, format, load_options);
     }
 
     pub(crate) fn on_transaction_streams_loaded(
