@@ -47,6 +47,8 @@ pub mod rectangle;
 pub mod remote;
 pub(crate) mod schematic;
 pub mod server_file_window;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod slang;
 pub(crate) mod source_code;
 pub(crate) mod source_index;
 pub mod state;
@@ -450,7 +452,9 @@ impl SystemState {
             };
             match &tile.kind {
                 TileKind::Waveform(tile) => {
-                    demand.payloads.extend(tile.view.draw_cache.borrow().payloads.iter().copied());
+                    demand
+                        .payloads
+                        .extend(tile.view.draw_cache.borrow().payloads.iter().copied());
                     let Some(list) = workspace.item_lists().get(&tile.items) else {
                         continue;
                     };
@@ -817,7 +821,57 @@ impl SystemState {
                 *self.scope_ref_to_expand.borrow_mut() =
                     Some(crate::hierarchy::ScopeExpandType::ExpandSpecific(scope));
             }
-            Message::OpenSource(file, line, column) => {
+            Message::SourceInstance(instance) => {
+                let tile =
+                    self.user.workspace.tiles_mut().values_mut().find_map(
+                        |entry| match &mut entry.kind {
+                            crate::tiles::kind::TileKind::SourceCode(source) => Some(source),
+                            _ => None,
+                        },
+                    )?;
+                tile.set_instance(instance);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::SourceActivate {
+                at,
+                token,
+                class,
+                intent,
+            } => {
+                self.slang.as_ref()?.activate(at, token, class, intent);
+            }
+            #[cfg(target_arch = "wasm32")]
+            Message::SourceActivate { .. } => {}
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::Slang(event) => {
+                let mut follow_ups = Vec::new();
+                {
+                    let client = self.slang.as_ref()?;
+                    let index = self
+                        .user
+                        .waves
+                        .as_ref()
+                        .and_then(|w| w.inner.as_waves())
+                        .and_then(|w| w.source_index());
+                    match index {
+                        Some(index) => client.handle(event, index, &mut follow_ups),
+                        None => {
+                            client.handle(event, &crate::slang::client::NoDesign, &mut follow_ups)
+                        }
+                    }
+                }
+                for message in follow_ups {
+                    self.update(message);
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
+            Message::Slang(_) => {}
+            Message::OpenSource {
+                file,
+                line,
+                column,
+                instance,
+            } => {
                 let source_tile = self.user.workspace.tiles().iter().find_map(|(id, entry)| {
                     (entry.kind.kind_name() == crate::tiles::kind::SOURCE_CODE.name).then_some(*id)
                 });
@@ -854,7 +908,10 @@ impl SystemState {
                 else {
                     return None;
                 };
-                source.open(crate::source_index::SourceLocation { file, line, column });
+                source.open(
+                    crate::source_index::SourceLocation { file, line, column },
+                    instance,
+                );
             }
             Message::ToDocument(command) => {
                 self.user.waves.as_mut()?.apply_command(command)?;
@@ -2003,6 +2060,7 @@ impl SystemState {
                     #[cfg(not(target_arch = "wasm32"))]
                     HeaderResult::Vtr(loaded) => {
                         let mut new_waves = WaveContainer::new_waveform(Arc::new(loaded.hierarchy));
+                        self.start_slang(loaded.source_index.as_ref());
                         new_waves.attach_source_index(loaded.source_index);
                         self.pending_document = Some(crate::wave_source::PendingDocument {
                             source: source.clone(),

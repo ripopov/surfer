@@ -126,7 +126,10 @@ impl Default for TimeRange {
     }
 }
 
-fn select_preferred_translator(var: &VariableMeta, translators: &TranslatorList) -> String {
+pub(crate) fn select_preferred_translator(
+    var: &VariableMeta,
+    translators: &TranslatorList,
+) -> String {
     let mut preferred: Vec<_> = translators
         .all_translators()
         .iter()
@@ -547,7 +550,9 @@ impl WaveformEdit<'_> {
             }
         }
 
-        let row_count = transactions.track_index(&gen_ref).map_or(1, |index| index.row_count().max(1));
+        let row_count = transactions
+            .track_index(&gen_ref)
+            .map_or(1, |index| index.row_count().max(1));
 
         let new_gen = DisplayedItem::Stream(DisplayedStream {
             display_name: gen_ref.name.clone(),
@@ -593,7 +598,12 @@ impl WaveformEdit<'_> {
             }
         }
 
-        let row_count = self.document.inner.as_transactions().unwrap().track_index(&stream_ref)
+        let row_count = self
+            .document
+            .inner
+            .as_transactions()
+            .unwrap()
+            .track_index(&stream_ref)
             .map_or(1, |index| index.row_count().max(1));
         let new_stream = DisplayedItem::Stream(DisplayedStream {
             display_name: stream_ref.name.clone(),

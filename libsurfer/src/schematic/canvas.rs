@@ -464,7 +464,24 @@ pub(super) fn draw(
                 .clicked()
             {
                 if let Some(source) = source {
-                    msgs.push(Message::OpenSource(source.file, source.line, source.column));
+                    let owner = match selection {
+                        Selection::Block(id) => scene.netlist.blocks[*id]
+                            .child
+                            .as_deref()
+                            .unwrap_or(instance),
+                        Selection::Net(symbol) => index
+                            .database
+                            .symbols
+                            .get(symbol)
+                            .map_or(instance.as_str(), |s| &s.owner),
+                        Selection::Wire(_) => instance,
+                    };
+                    msgs.push(Message::OpenSource {
+                        file: source.file,
+                        line: source.line,
+                        column: source.column,
+                        instance: Some(owner.to_owned()),
+                    });
                 }
                 ui.close();
             }

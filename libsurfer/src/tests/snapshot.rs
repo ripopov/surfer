@@ -629,6 +629,7 @@ fn verilator_document_replacement_keeps_source_attachment_with_its_trace() {
 
 snapshot_ui! {verilator_source_navigation, || {
     let mut state = verilator_example("pipeline", "vtr");
+    super::slang::install_replay(&mut state, "pipeline");
     state.user.show_statusbar = Some(false);
     state.user.show_default_timeline = Some(false);
     let ctx = egui::Context::default();
@@ -953,20 +954,47 @@ snapshot_ui!(simulation_logs_generator_menu, || {
     else {
         panic!()
     };
-    let source = &state.user.waves.as_ref().unwrap().inner.as_transactions().unwrap().native.as_ref().unwrap().logs;
-    assert_eq!(source.generators.iter().find(|g| Some(g.id) == tile.query.generator).unwrap().label, "warn");
+    let source = &state
+        .user
+        .waves
+        .as_ref()
+        .unwrap()
+        .inner
+        .as_transactions()
+        .unwrap()
+        .native
+        .as_ref()
+        .unwrap()
+        .logs;
+    assert_eq!(
+        source
+            .generators
+            .iter()
+            .find(|g| Some(g.id) == tile.query.generator)
+            .unwrap()
+            .label,
+        "warn"
+    );
     state
 });
 
 #[cfg(not(target_arch = "wasm32"))]
 snapshot_ui!(simulation_logs_without_recording, || {
     let mut state = simulation_logs_example("", false);
-    let path = get_project_root().unwrap().join("examples/verilator/pipeline.fst");
-    state.load_from_file(path.try_into().unwrap(), LoadOptions::KeepAll).unwrap();
+    let path = get_project_root()
+        .unwrap()
+        .join("examples/verilator/pipeline.fst");
+    state
+        .load_from_file(path.try_into().unwrap(), LoadOptions::KeepAll)
+        .unwrap();
     wait_for_waves_fully_loaded(&mut state, 10);
     schematic_frame(&mut state, &egui::Context::default(), vec![]);
     let id = state.user.workspace.layout().focused().unwrap();
-    let crate::tiles::kind::TileKind::SimulationLogs(tile) = &state.user.workspace.tiles()[&id].kind else { panic!() };
+    let crate::tiles::kind::TileKind::SimulationLogs(tile) =
+        &state.user.workspace.tiles()[&id].kind
+    else {
+        panic!()
+    };
     assert!(!tile.ready(), "old recording data must be cleared");
     state
 });
@@ -1334,17 +1362,17 @@ snapshot_ui!(schematic_without_companion, || {
 #[test]
 fn schematic_serialization_retains_destination_and_discards_runtime() {
     render_and_compare(Utf8Path::new("schematic_child_module"), || {
-    let state = schematic_example("pipeline", "top.u0", Some("top.u0.q"));
-    let tile = schematic_tile(&state);
-    let saved = serde_json::to_value(tile).unwrap();
-    assert_eq!(
-        saved,
-        serde_json::json!({"instance":"top.u0", "highlight":"top.u0.q"})
-    );
-    let restored: crate::schematic::SchematicTile = serde_json::from_value(saved).unwrap();
-    assert!(!restored.layout_ready());
-    assert!(!tile.clone().layout_ready());
-    state
+        let state = schematic_example("pipeline", "top.u0", Some("top.u0.q"));
+        let tile = schematic_tile(&state);
+        let saved = serde_json::to_value(tile).unwrap();
+        assert_eq!(
+            saved,
+            serde_json::json!({"instance":"top.u0", "highlight":"top.u0.q"})
+        );
+        let restored: crate::schematic::SchematicTile = serde_json::from_value(saved).unwrap();
+        assert!(!restored.layout_ready());
+        assert!(!tile.clone().layout_ready());
+        state
     });
 }
 
@@ -1354,11 +1382,12 @@ snapshot_ui! {startup_screen_looks_fine, || {
 
 snapshot_ui! {source_code_tile_renders_systemverilog, || {
     let mut state = SystemState::new_default_config().unwrap();
-    state.update(Message::OpenSource(
-        get_project_root().unwrap().join("examples/source_tile_demo.sv").try_into().unwrap(),
-        6,
-        3,
-    ));
+    state.update(Message::OpenSource {
+        file: get_project_root().unwrap().join("examples/source_tile_demo.sv").try_into().unwrap(),
+        line: 6,
+        column: 3,
+        instance: None,
+    });
     state.update(Message::SetMenuVisible(false));
     state.update(Message::SetSidePanelVisible(false));
     state.update(Message::SetToolbarVisible(false));
@@ -5466,3 +5495,219 @@ fn theme_menu_radio_button() {
 
     compare_with_snapshot(&Utf8PathBuf::from("theme_menu_radio_button"), &new);
 }
+
+// ---------------------------------------------------------------------------
+// Source tile with a replayed slang-server session (see `tests::slang`).
+// ---------------------------------------------------------------------------
+
+#[cfg(not(target_arch = "wasm32"))]
+fn slang_features(steps: usize) -> (SystemState, egui::Context) {
+    use super::slang::{Step, apply_step, install_replay, load_example, scenario, settle};
+    let mut state = load_example("features");
+    state.update(Message::AddVariables(
+        [
+            "clk",
+            "rst_n",
+            "en",
+            "mode",
+            "out",
+            "state",
+            "g_lane[0].u.count",
+            "g_lane[1].u.count",
+        ]
+        .into_iter()
+        .map(|name| VariableRef::from_hierarchy_string(&format!("TOP.top.{name}")))
+        .collect(),
+    ));
+    wait_for_waves_fully_loaded(&mut state, 10);
+    state.update(Message::ToDocument(DocumentCommand::CursorSet(26.into())));
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.user.show_statusbar = Some(false);
+    state.user.show_default_timeline = Some(false);
+    let replay = install_replay(&mut state, "features");
+    let context = egui::Context::default();
+    // Hover steps only matter for the recording; the pointer drives hovers here.
+    let steps = scenario("features")
+        .into_iter()
+        .filter(|step| !matches!(step, Step::Hover { .. }))
+        .take(steps);
+    for step in steps {
+        apply_step(&mut state, &step);
+        // Let the tile issue its requests and apply the replayed answers.
+        settle(&mut state, &context, 3);
+    }
+    settle(&mut state, &context, 3);
+    assert!(
+        replay.unmatched().is_empty(),
+        "requests without a recorded answer: {:?}",
+        replay.unmatched()
+    );
+    // The snapshot renderer uses its own context, so re-arm the scroll to the target.
+    let reopen = Message::OpenSource {
+        file: super::slang::current_file(&state),
+        line: super::slang::current_line(&state),
+        column: 1,
+        instance: super::slang::current_instance(&state),
+    };
+    state.update(reopen);
+    (state, context)
+}
+
+/// Screen position of the token at `char_index` (gutter included) on the line whose text
+/// ends with `line_text`, from the shapes of the last frame.
+#[cfg(not(target_arch = "wasm32"))]
+fn source_token_position(output: &egui::FullOutput, line_text: &str, char_index: usize) -> Pos2 {
+    fn find(shape: &epaint::Shape, line_text: &str, char_index: usize) -> Option<Pos2> {
+        match shape {
+            epaint::Shape::Text(text) if text.galley.job.text.ends_with(line_text) => {
+                let rect = text
+                    .galley
+                    .pos_from_cursor(egui::text::CCursor::new(char_index));
+                Some(text.pos + rect.center().to_vec2() + emath::vec2(3.0, 0.0))
+            }
+            epaint::Shape::Vec(shapes) => {
+                shapes.iter().find_map(|s| find(s, line_text, char_index))
+            }
+            _ => None,
+        }
+    }
+    output
+        .shapes
+        .iter()
+        .find_map(|shape| find(&shape.shape, line_text, char_index))
+        .unwrap_or_else(|| panic!("line {line_text:?} is not drawn"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui! {slang_source_highlighting_in_instance, || {
+    let (state, _) = slang_features(1);
+    let source = state.user.workspace.tiles().values().find_map(|tile| {
+        if let crate::tiles::kind::TileKind::SourceCode(source) = &tile.kind { Some(source) } else { None }
+    }).expect("source tile open");
+    assert_eq!(source.instance.as_deref(), Some("top.g_lane[1].u"));
+    assert_eq!(source.line, 28);
+    let tokens = state.slang.as_ref().unwrap().tokens(source.file.as_ref().unwrap()).expect("tokens replayed");
+    assert!(tokens.len() > 400, "features.sv classifies every token");
+    state
+}}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui! {slang_source_instance_switch_dims_other_branch, || {
+    let (state, _) = slang_features(2);
+    assert_eq!(super::slang::current_instance(&state).as_deref(), Some("top.g_lane[0].u"));
+    state
+}}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn slang_source_hover_shows_values_at_cursor() {
+    // Tooltips need pointer events and a persistent context, so this test renders
+    // through the skia backend directly instead of `snapshot_ui!`.
+    let _runtime = super::slang::enter_runtime();
+    let (mut state, context) = slang_features(2);
+    let file = super::slang::current_file(&state);
+    let text = std::fs::read_to_string(&file).unwrap();
+    let line = super::slang::line_of(&text, "count != LIMIT") as usize;
+    let line_text = text.lines().nth(line).unwrap();
+    let column = line_text.find("count").unwrap();
+    let open = || Message::OpenSource {
+        file: file.clone(),
+        line: line as u32 + 1,
+        column: 1,
+        instance: Some("top.g_lane[0].u".into()),
+    };
+    // Locate the token in a scratch context; the backend below lays out identically.
+    state.update(open());
+    schematic_frame(&mut state, &context, vec![]);
+    schematic_frame(&mut state, &context, vec![]);
+    let output = schematic_frame(&mut state, &context, vec![]);
+    let target = source_token_position(&output, line_text, 7 + column);
+
+    let screen_rect = Rect::from_min_size(Pos2::ZERO, SNAPSHOT_SIZE);
+    let mut surface = create_surface((SNAPSHOT_WIDTH as i32, SNAPSHOT_HEIGHT as i32));
+    surface.canvas().clear(egui_skia_renderer::Color::BLACK);
+    let mut backend = EguiSkia::new(1.0);
+    state.update(open());
+    for frame in 0..8 {
+        let events = if frame >= 2 {
+            vec![Event::PointerMoved(target)]
+        } else {
+            vec![]
+        };
+        backend.run(
+            RawInput {
+                screen_rect: Some(screen_rect),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                ui.ctx().all_styles_mut(|style| {
+                    style.interaction.tooltip_delay = 0.0;
+                    style.interaction.show_tooltips_only_when_still = false;
+                });
+                ui.set_visuals(state.get_visuals());
+                setup_custom_font(ui.ctx());
+                for message in state.draw(ui, Some(SNAPSHOT_SIZE)) {
+                    state.update(message);
+                }
+            },
+        );
+        state.handle_async_messages();
+    }
+    backend.paint(surface.canvas());
+    let data = surface
+        .image_snapshot()
+        .encode(None, EncodedImageFormat::PNG, None)
+        .expect("Failed to encode image");
+    let new = image::load_from_memory(&data).expect("Failed to decode png");
+    compare_with_snapshot(
+        &Utf8PathBuf::from("slang_source_hover_shows_values_at_cursor"),
+        &new,
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui! {slang_source_alt_click_adds_signals, || {
+    let count = |state: &SystemState| {
+        state.user.workspace.item_lists().values().map(|list| list.displayed_items.len()).sum::<usize>()
+    };
+    let before = count(&slang_features(3).0);
+    let (state, _) = slang_features(5);
+    assert_eq!(count(&state), before + 3, "count of both lanes and state were added");
+    state
+}}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui! {slang_source_ctrl_click_instance_opens_module, || {
+    let (state, _) = slang_features(6);
+    assert_eq!(super::slang::current_line(&state), 24, "counter declaration");
+    assert_eq!(super::slang::current_instance(&state).as_deref(), Some("top.g_lane[0].u"));
+    state
+}}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui! {slang_source_ctrl_click_function_navigates, || {
+    let (state, _) = slang_features(7);
+    assert_eq!(super::slang::current_line(&state), 12, "inc_tag declaration");
+    assert_eq!(super::slang::current_instance(&state), None);
+    state
+}}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui! {slang_source_ctrl_click_interface_member, || {
+    let (state, _) = slang_features(8);
+    assert_eq!(super::slang::current_line(&state), 19, "bus_if.data declaration");
+    assert_eq!(super::slang::current_instance(&state).as_deref(), Some("top.bus"));
+    state
+}}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui! {slang_source_ctrl_click_module_name, || {
+    let (state, _) = slang_features(9);
+    assert_eq!(super::slang::current_line(&state), 24, "counter declaration");
+    assert_eq!(super::slang::current_instance(&state).as_deref(), Some("top.g_lane[0].u"));
+    state
+}}

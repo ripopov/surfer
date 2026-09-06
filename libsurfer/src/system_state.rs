@@ -62,6 +62,13 @@ pub struct SystemState {
     pub(crate) wcp_greeted_signal: Arc<AtomicBool>,
     pub(crate) wcp_client_capabilities: WcpClientCapabilities,
 
+    /// Language server session for the loaded design's sources, when one could be started.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) slang: Option<crate::slang::SlangClient>,
+    /// Why no language server is running, for the source tile header.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) slang_error: Option<String>,
+
     /// The draw commands for every variable currently selected
     // For performance reasons, these need caching so we have them in a RefCell for interior
     // mutability
@@ -151,6 +158,10 @@ impl SystemState {
             wcp_running_signal: Arc::new(AtomicBool::new(false)),
             wcp_greeted_signal: Arc::new(AtomicBool::new(false)),
             wcp_client_capabilities: WcpClientCapabilities::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            slang: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            slang_error: None,
             batch_messages: VecDeque::new(),
             batch_messages_completed: false,
             url: RefCell::new(String::new()),

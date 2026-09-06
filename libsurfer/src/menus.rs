@@ -862,11 +862,17 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                 .and_then(|index| index.location(&variable.variable_ref))
                 && ui.button("Go to source").clicked()
             {
-                msgs.push(Message::OpenSource(
-                    location.file,
-                    location.line,
-                    location.column,
-                ));
+                let instance = self
+                    .source_index
+                    .and_then(|index| index.schematic_symbol(&variable.variable_ref))
+                    .map(|(owner, _)| owner.to_owned());
+                msgs.push(Message::OpenSource {
+                    file: location.file,
+                    line: location.line,
+                    column: location.column,
+                    instance,
+                });
+                ui.close();
             }
 
             if let Some(capabilities) = self.wcp_capabilities {

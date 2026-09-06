@@ -865,7 +865,7 @@ impl super::render::PaneRenderer for ApplicationPanes<'_> {
                 );
                 tile.ui(ui, &mut cx);
             }
-            TileKind::SourceCode(tile) => tile.ui(ui),
+            TileKind::SourceCode(tile) => tile.ui(ui, self.state, commands),
             TileKind::Schematic(tile) => tile.ui(
                 ui,
                 self.state

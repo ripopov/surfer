@@ -175,6 +175,127 @@ impl SourceIndex {
             .get(&variable.full_path_string_no_index())
             .cloned()
     }
+
+    /// Directory of the companion file; relative source paths resolve against it.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn base(&self) -> &Utf8Path {
+        &self.base
+    }
+
+    /// Recorded waveform paths of one elaborated symbol path. Struct fields and array
+    /// elements are recorded under the aggregate's name, so trailing selections are
+    /// dropped until a binding matches and any recorded element of that aggregate counts.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn recorded_paths(&self, design_path: &str) -> Vec<String> {
+        let recorded_name = |symbol: &str| -> Option<String> {
+            match &self.database.trace_binding {
+                Some(binding) => binding.signals.get(symbol).cloned(),
+                None => Some(symbol.to_owned()),
+            }
+        };
+        let mut candidate = design_path.to_owned();
+        loop {
+            if let Some(recorded) = recorded_name(&candidate) {
+                if self.locations.contains_key(&recorded) {
+                    return vec![recorded];
+                }
+                // Unpacked arrays are recorded element-wise as `name[i]`.
+                let mut elements: Vec<_> = self
+                    .locations
+                    .keys()
+                    .filter(|path| {
+                        path.strip_prefix(recorded.as_str())
+                            .is_some_and(|rest| rest.starts_with('['))
+                    })
+                    .cloned()
+                    .collect();
+                if !elements.is_empty() {
+                    elements.sort();
+                    return elements;
+                }
+            }
+            let Some(cut) = candidate.rfind(['.', '[']) else {
+                return Vec::new();
+            };
+            candidate.truncate(cut);
+            if candidate.is_empty() {
+                return Vec::new();
+            }
+        }
+    }
+
+    /// The innermost design instance whose path prefixes `design_path`.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn owner_of(&self, design_path: &str) -> Option<&vtr_vdb::Instance> {
+        self.database
+            .instances
+            .iter()
+            .filter(|instance| {
+                design_path == instance.path
+                    || design_path
+                        .strip_prefix(instance.path.as_str())
+                        .is_some_and(|rest| rest.starts_with(['.', '[']))
+            })
+            .max_by_key(|instance| instance.path.len())
+    }
+
+    /// Instances of the same module as `instance`, for switching the viewed context.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn sibling_instances(&self, instance: &str) -> Vec<String> {
+        let Some(definition) = self
+            .database
+            .instances
+            .iter()
+            .find(|i| i.path == instance)
+            .map(|i| i.definition.as_str())
+        else {
+            return Vec::new();
+        };
+        self.database
+            .instances
+            .iter()
+            .filter(|i| i.definition == definition)
+            .map(|i| i.path.clone())
+            .collect()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl crate::slang::Resolver for SourceIndex {
+    fn recorded_signals(&self, paths: &[String]) -> Vec<String> {
+        let mut recorded: Vec<String> = paths
+            .iter()
+            .flat_map(|path| self.recorded_paths(path))
+            .collect();
+        recorded.dedup();
+        recorded
+    }
+
+    fn owner_instance(&self, paths: &[String]) -> Option<String> {
+        paths
+            .iter()
+            .find_map(|path| self.owner_of(path))
+            .map(|instance| instance.path.clone())
+    }
+
+    fn instance_definition(&self, paths: &[String]) -> Option<(String, String)> {
+        paths.iter().find_map(|path| {
+            self.database
+                .instances
+                .iter()
+                .find(|instance| &instance.path == path)
+                .map(|instance| (instance.path.clone(), instance.definition.clone()))
+        })
+    }
+
+    fn instances_of_module(&self, name: &str) -> Vec<String> {
+        self.database
+            .instances
+            .iter()
+            .filter(|instance| instance.definition == name)
+            .map(|instance| instance.path.clone())
+            .collect()
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

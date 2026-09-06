@@ -55,6 +55,29 @@ highlight_background = "#37485E"
 focus_highlight_line_width_multiplier = 1.5
 focus_highlight_brightness_shift = 0.25
 
+[source]
+keyword = "#c586c0"
+comment = "#6a9955"
+number = "#b5cea8"
+string = "#ce9178"
+operator = "#d4d4d4"
+macro_ = "#569cd6"
+variable = "#9cdcfe"
+input = "#7fc8ff"
+output = "#ffb86c"
+inout = "#ffd866"
+clock = "#f4c2f4"
+parameter = "#4fc1ff"
+enum_member = "#4fc1ff"
+type_ = "#4ec9b0"
+module = "#4ec9b0"
+instance = "#dcdcaa"
+function = "#dcdcaa"
+property = "#9cdcfe"
+inactive = "#6b6b6b"
+target_line = "#264f78"
+inactive_background = "#2a2a2a"
+
 [colors]
 Green = "#6a9955"
 Red = "#f44747"

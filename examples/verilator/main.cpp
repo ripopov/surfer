@@ -39,6 +39,10 @@ int main(int argc, char** argv) {
         top.wide[0] = 0x12345678;
         top.wide[1] = 0xabcdef01;
         top.wide[2] = 0xdeadbeef;
+#elif defined(VDB_FEATURES)
+        top.rst_n = t >= 2;
+        top.en = t < 24;
+        top.mode = t < 8 ? 0 : t < 20 ? 1 : 2;
 #elif defined(VDB_OPERATORS)
         top.a = t < 12 ? 0x79 : 3;
         top.b = 3;

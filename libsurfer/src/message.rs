@@ -79,8 +79,27 @@ pub enum Message {
         action: crate::tiles::commands::WcpVariableAction,
         variable: String,
     },
-    /// Open a VDB-provided source location in the source-code tile.
-    OpenSource(Utf8PathBuf, u32, u32),
+    /// Open a source location (one-based line and column) in the source-code tile,
+    /// viewed in the context of a design instance when one is known.
+    OpenSource {
+        file: Utf8PathBuf,
+        line: u32,
+        column: u32,
+        instance: Option<String>,
+    },
+    /// Change the design instance the source-code tile is viewed in.
+    SourceInstance(Option<String>),
+    /// A click on a token of the source-code tile that needs the language server.
+    #[serde(skip)]
+    SourceActivate {
+        at: crate::slang::Location,
+        token: String,
+        class: crate::slang::TokenClass,
+        intent: crate::slang::Intent,
+    },
+    /// A message from the language server session.
+    #[serde(skip)]
+    Slang(crate::slang::Event),
     OpenSchematic(String, Option<String>),
     OpenSimulationLogs(u32, Option<u32>),
     RevealSchematicHierarchy(String),

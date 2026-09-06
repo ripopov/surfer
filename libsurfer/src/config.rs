@@ -163,6 +163,9 @@ pub struct SurferConfig {
     pub plugin: PluginConfig,
     /// WCP Configuration
     pub wcp: WcpConfig,
+    /// Language server used by the source-code tile
+    #[serde(default)]
+    pub slang: SlangConfig,
     /// HTTP Server Configuration
     pub server: SurverConfig,
     /// Animation time for UI elements in seconds
@@ -603,6 +606,9 @@ pub struct SurferTheme {
     /// Color used for constant variables (parameters)
     pub variable_event: Color32,
 
+    /// Colors of the source-code tile
+    pub source: SourceColors,
+
     /// Opacity with which variable backgrounds are drawn. 0 is fully transparent and 1 is fully
     /// opaque.
     #[serde(deserialize_with = "deserialize_unit_interval_f32")]
@@ -1000,6 +1006,56 @@ pub(crate) fn get_luminance(color: Color32) -> f32 {
         + 0.0722 * gamma_correction(color.b())
 }
 
+/// Token colors of the source-code tile, keyed by the classes the language server reports.
+#[derive(Debug, Deserialize, Clone)]
+pub struct SourceColors {
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub keyword: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub comment: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub number: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub string: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub operator: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub macro_: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub variable: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub input: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub output: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub inout: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub clock: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub parameter: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub enum_member: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub type_: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub module: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub instance: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub function: Color32,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub property: Color32,
+    /// Text of generate blocks the viewed instance does not instantiate
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub inactive: Color32,
+    /// Background of the navigation target line
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub target_line: Color32,
+    /// Background of an inactive generate block
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub inactive_background: Color32,
+}
+
 impl SurferTheme {
     #[must_use]
     pub fn get_color(&self, color: &str) -> Option<Color32> {
@@ -1171,6 +1227,26 @@ pub struct ThemeColorTriple {
 pub struct PluginConfig {
     /// Maximum memory in MiB available to each WASM translator plugin
     pub max_memory_mib: u64,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
+pub struct SlangConfig {
+    /// Start `slang-server` automatically when a VTR recording with a VDB elaboration record
+    /// is opened
+    pub autostart: bool,
+    /// Executable to run; a bare name is searched on `PATH`. The `SURFER_SLANG_SERVER`
+    /// environment variable overrides it.
+    pub server: String,
+}
+
+impl Default for SlangConfig {
+    fn default() -> Self {
+        Self {
+            autostart: true,
+            server: "slang-server".to_owned(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
