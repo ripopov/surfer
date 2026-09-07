@@ -15,20 +15,16 @@ record the same design with the same stimulus for waveform parity tests.
   selected per instance (`top.g_lane[0].u` wraps, `top.g_lane[1].u` saturates
   at `FEAT_SAT_LIMIT`), a case statement, and `include/features_defs.svh`
   reached through `+incdir+include` with `+define+FEAT_SAT_LIMIT=200`. It is the
-  design the language-server tests use.
-
-`<name>.slang.json` are recorded `slang-server` sessions for the source tile's
-tests, replayed without a server. Regenerate them after changing a design, the
-recorded scenarios (`libsurfer/src/tests/slang.rs`) or the pinned server:
-`SURFER_SLANG_SERVER=<binary> cargo test -p libsurfer --lib record_slang_sessions -- --ignored`.
+  design the source tile's highlighting and navigation tests use.
 
 `main.cpp` drives all simulations for timestamps 0 through 30. These are native
 simulator recordings, not traces assembled by a test writer. Source filenames
 are relative to this directory so navigation works after moving the checkout.
 The VDB producer manifest also records the compiler's installed standard files;
 those are not needed to navigate these example modules. Its `elaboration` record
-names the design files, include directory and defines the simulator used, which
-is what starts `slang-server` for the source tile.
+names the design files, include directory and defines the simulator used, and
+its `source_index` section, written by `verilator_vdb_index` at verilation, is
+what colors and resolves every token in the source tile.
 
 To regenerate inside the parent VTR checkout, first build its release C API and
 the pinned Verilator integration, then run `python3 examples/verilator/generate.py`

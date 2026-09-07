@@ -107,12 +107,6 @@ primary_button_drag_behavior= "Cursor"
 autostart = false
 address = "127.0.0.1:54321"
 
-[slang]
-# Start slang-server for the sources of a VTR recording that has a VDB elaboration record
-autostart = true
-# Executable to run; a bare name is searched on PATH. SURFER_SLANG_SERVER overrides it.
-server = "slang-server"
-
 [plugin]
 # Maximum memory in MiB available to each WASM translator plugin
 max_memory_mib = 10

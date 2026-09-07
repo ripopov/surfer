@@ -1,10 +1,19 @@
 //! Immutable, validated design metadata attached to one waveform document.
+//!
+//! Two views of one VDB companion live here. The attachment maps recorded signals
+//! to elaborated symbols and their declarations. The static source index, written
+//! by the simulator build, classifies every token of every design file; joining a
+//! token's declaration location to the same location in the attachment gives the
+//! elaborated symbols it denotes, in whichever instance the file is viewed.
+
+pub(crate) mod tokens;
 
 use crate::wave_container::{VariableRef, VariableRefExt};
-#[cfg(not(target_arch = "wasm32"))]
-use camino::Utf8Path;
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+pub(crate) use tokens::{FileTokens, Modifiers, Span, TokenClass};
+use vtr_vdb::{InactiveRange, IndexLocation};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceLocation {
@@ -13,15 +22,26 @@ pub(crate) struct SourceLocation {
     pub column: u32,
 }
 
+/// What the design database declares at one source location.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Declared {
+    /// Elaborated symbol paths declared here, one per instance of the module.
+    pub symbols: Vec<String>,
+    /// Elaborated instance paths whose name is declared here.
+    pub instances: Vec<String>,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct SourceIndex {
     locations: HashMap<String, SourceLocation>,
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) database: std::sync::Arc<vtr_vdb::Database>,
-    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) database: Arc<vtr_vdb::Database>,
     base: Utf8PathBuf,
-    #[cfg(not(target_arch = "wasm32"))]
     symbols: HashMap<String, String>,
+    /// Static index: legend, indexed files by absolute path, declarations by location.
+    legend: tokens::Legend,
+    files: HashMap<Utf8PathBuf, usize>,
+    declared: HashMap<IndexLocation, Declared>,
+    tokens: Arc<Mutex<HashMap<usize, Arc<FileTokens>>>>,
 }
 
 impl SourceIndex {
@@ -70,13 +90,8 @@ impl SourceIndex {
             let Some(signal) = signals.get(recorded) else {
                 continue;
             };
-            let file = Utf8PathBuf::from(&symbol.source.file);
             let location = SourceLocation {
-                file: if file.is_absolute() {
-                    file
-                } else {
-                    base.join(file)
-                },
+                file: absolute(base, &symbol.source.file),
                 line: symbol.source.line,
                 column: symbol.source.column,
             };
@@ -98,21 +113,157 @@ impl SourceIndex {
                 locations.entry(path).or_insert_with(|| location.clone());
             }
         }
+        let (legend, files, declared) = Self::static_index(&database, base);
         Ok(Self {
             locations,
-            database: std::sync::Arc::new(database),
+            database: Arc::new(database),
             base: base.to_owned(),
             symbols,
+            legend,
+            files,
+            declared,
+            tokens: Arc::default(),
         })
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    /// Resolves the legend, the indexed files and the declaration join of the static
+    /// source index; an absent index leaves every file plain.
+    fn static_index(
+        database: &vtr_vdb::Database,
+        base: &Utf8Path,
+    ) -> (
+        tokens::Legend,
+        HashMap<Utf8PathBuf, usize>,
+        HashMap<IndexLocation, Declared>,
+    ) {
+        let Some(index) = &database.source_index else {
+            return Default::default();
+        };
+        let legend = tokens::Legend::new(&index.classes, &index.modifiers);
+        let files = index
+            .files
+            .iter()
+            .enumerate()
+            .map(|(number, file)| (absolute(base, &file.path), number))
+            .collect();
+        let mut declared: HashMap<IndexLocation, Declared> = HashMap::new();
+        let locate = |source: &vtr_vdb::Source| {
+            index.file_index(&source.file).map(|file| IndexLocation {
+                file: file as u32,
+                line: source.line,
+                column: source.column,
+            })
+        };
+        for (path, symbol) in &database.symbols {
+            if let Some(at) = locate(&symbol.source) {
+                declared.entry(at).or_default().symbols.push(path.clone());
+            }
+        }
+        for instance in &database.instances {
+            if let Some(at) = locate(&instance.source) {
+                declared
+                    .entry(at)
+                    .or_default()
+                    .instances
+                    .push(instance.path.clone());
+            }
+        }
+        (legend, files, declared)
+    }
+
+    /// Frontend that produced the static index, when the VDB carries one.
+    pub(crate) fn producer(&self) -> Option<&str> {
+        self.database
+            .source_index
+            .as_ref()
+            .map(|index| index.producer.as_str())
+    }
+
+    /// Number of the indexed file at `file`, an absolute path.
+    fn file_number(&self, file: &Utf8Path) -> Option<usize> {
+        self.files
+            .get(file)
+            .or_else(|| self.files.get(&normalize(file)))
+            .copied()
+    }
+
+    /// Classified tokens of `file`, decoded once per design.
+    pub(crate) fn file_tokens(&self, file: &Utf8Path) -> Option<Arc<FileTokens>> {
+        let number = self.file_number(file)?;
+        let mut cache = self.tokens.lock().unwrap();
+        if let Some(tokens) = cache.get(&number) {
+            return Some(tokens.clone());
+        }
+        let indexed = self.database.source_index.as_ref()?.files.get(number)?;
+        let tokens = Arc::new(FileTokens::new(indexed, &self.legend));
+        cache.insert(number, tokens.clone());
+        Some(tokens)
+    }
+
+    /// Generate blocks of `file` that `instance` leaves uninstantiated.
+    pub(crate) fn inactive_ranges(&self, file: &Utf8Path, instance: &str) -> Vec<InactiveRange> {
+        let Some(number) = self.file_number(file) else {
+            return Vec::new();
+        };
+        self.database
+            .source_index
+            .as_ref()
+            .map(|index| {
+                index
+                    .inactive_ranges(instance)
+                    .into_iter()
+                    .filter(|range| range.file as usize == number)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Symbols and instances the design declares at an index location.
+    pub(crate) fn declared(&self, at: IndexLocation) -> Option<&Declared> {
+        self.declared.get(&at)
+    }
+
+    /// An index location as a file to open.
+    pub(crate) fn location_of(&self, at: IndexLocation) -> Option<SourceLocation> {
+        let index = self.database.source_index.as_ref()?;
+        let file = index.files.get(at.file as usize)?;
+        Some(SourceLocation {
+            file: absolute(&self.base, &file.path),
+            line: at.line,
+            column: at.column,
+        })
+    }
+
+    /// Declaration of the module, interface or package called `name`.
+    pub(crate) fn definition(&self, name: &str) -> Option<SourceLocation> {
+        let at = self.database.source_index.as_ref()?.definition(name)?;
+        self.location_of(at)
+    }
+
+    /// Module name of an elaborated instance.
+    pub(crate) fn instance_definition(&self, instance: &str) -> Option<&str> {
+        self.database
+            .instances
+            .iter()
+            .find(|i| i.path == instance)
+            .map(|i| i.definition.as_str())
+    }
+
+    /// Elaborated instances of the module or interface called `name`, in design order.
+    pub(crate) fn instances_of_module(&self, name: &str) -> Vec<String> {
+        self.database
+            .instances
+            .iter()
+            .filter(|instance| instance.definition == name)
+            .map(|instance| instance.path.clone())
+            .collect()
+    }
+
     pub(crate) fn schematic_symbol(&self, variable: &VariableRef) -> Option<(&str, &str)> {
         let symbol = self.symbols.get(&variable.full_path_string_no_index())?;
         Some((&self.database.symbols.get(symbol)?.owner, symbol))
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn schematic_scope(&self, recorded: &str) -> Option<&str> {
         let prefix = self
             .database
@@ -139,7 +290,6 @@ impl SourceIndex {
             .map(|instance| instance.path.as_str())
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn recorded_scope(&self, instance: &str) -> String {
         let prefix = self
             .database
@@ -153,18 +303,12 @@ impl SourceIndex {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn design_source(&self, source: &vtr_vdb::Source) -> Option<SourceLocation> {
         if source.file.is_empty() || source.line == 0 {
             return None;
         }
-        let file = Utf8PathBuf::from(&source.file);
         Some(SourceLocation {
-            file: if file.is_absolute() {
-                file
-            } else {
-                self.base.join(file)
-            },
+            file: absolute(&self.base, &source.file),
             line: source.line,
             column: source.column,
         })
@@ -176,16 +320,9 @@ impl SourceIndex {
             .cloned()
     }
 
-    /// Directory of the companion file; relative source paths resolve against it.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn base(&self) -> &Utf8Path {
-        &self.base
-    }
-
     /// Recorded waveform paths of one elaborated symbol path. Struct fields and array
     /// elements are recorded under the aggregate's name, so trailing selections are
     /// dropped until a binding matches and any recorded element of that aggregate counts.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn recorded_paths(&self, design_path: &str) -> Vec<String> {
         let recorded_name = |symbol: &str| -> Option<String> {
             match &self.database.trace_binding {
@@ -225,7 +362,6 @@ impl SourceIndex {
     }
 
     /// The innermost design instance whose path prefixes `design_path`.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn owner_of(&self, design_path: &str) -> Option<&vtr_vdb::Instance> {
         self.database
             .instances
@@ -240,7 +376,6 @@ impl SourceIndex {
     }
 
     /// Instances of the same module as `instance`, for switching the viewed context.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn sibling_instances(&self, instance: &str) -> Vec<String> {
         let Some(definition) = self
             .database
@@ -261,50 +396,39 @@ impl SourceIndex {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl crate::slang::Resolver for SourceIndex {
-    fn recorded_signals(&self, paths: &[String]) -> Vec<String> {
-        let mut recorded: Vec<String> = paths
-            .iter()
-            .flat_map(|path| self.recorded_paths(path))
-            .collect();
-        recorded.dedup();
-        recorded
-    }
-
-    fn owner_instance(&self, paths: &[String]) -> Option<String> {
-        paths
-            .iter()
-            .find_map(|path| self.owner_of(path))
-            .map(|instance| instance.path.clone())
-    }
-
-    fn instance_definition(&self, paths: &[String]) -> Option<(String, String)> {
-        paths.iter().find_map(|path| {
-            self.database
-                .instances
-                .iter()
-                .find(|instance| &instance.path == path)
-                .map(|instance| (instance.path.clone(), instance.definition.clone()))
-        })
-    }
-
-    fn instances_of_module(&self, name: &str) -> Vec<String> {
-        self.database
-            .instances
-            .iter()
-            .filter(|instance| instance.definition == name)
-            .map(|instance| instance.path.clone())
-            .collect()
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn sibling_candidates(trace: &Utf8Path) -> impl Iterator<Item = Utf8PathBuf> {
     [
         trace.with_extension("vdb"),
         trace.with_extension("vdb.json"),
     ]
     .into_iter()
+}
+
+/// Where a path recorded relative to the companion lives on disk.
+fn absolute(base: &Utf8Path, path: &str) -> Utf8PathBuf {
+    let path = Utf8PathBuf::from(path);
+    if path.is_absolute() {
+        path
+    } else {
+        base.join(path)
+    }
+}
+
+/// Removes `.` and `..` components without touching the filesystem.
+fn normalize(path: &Utf8Path) -> Utf8PathBuf {
+    let mut out = Utf8PathBuf::new();
+    for component in path.components() {
+        match component {
+            camino::Utf8Component::CurDir => {}
+            camino::Utf8Component::ParentDir => {
+                if !out.pop() {
+                    out.push("..");
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

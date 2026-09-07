@@ -42,7 +42,7 @@ use crate::{
 /// Default snapshot size
 const SNAPSHOT_WIDTH: f32 = 1280.0;
 const SNAPSHOT_HEIGHT: f32 = 720.0;
-const SNAPSHOT_SIZE: Vec2 = Vec2::new(SNAPSHOT_WIDTH, SNAPSHOT_HEIGHT);
+pub(crate) const SNAPSHOT_SIZE: Vec2 = Vec2::new(SNAPSHOT_WIDTH, SNAPSHOT_HEIGHT);
 
 fn print_image(img: &DynamicImage) {
     if std::io::stdout().is_terminal() {
@@ -629,7 +629,6 @@ fn verilator_document_replacement_keeps_source_attachment_with_its_trace() {
 
 snapshot_ui! {verilator_source_navigation, || {
     let mut state = verilator_example("pipeline", "vtr");
-    super::slang::install_replay(&mut state, "pipeline");
     state.user.show_statusbar = Some(false);
     state.user.show_default_timeline = Some(false);
     let ctx = egui::Context::default();
@@ -5497,12 +5496,14 @@ fn theme_menu_radio_button() {
 }
 
 // ---------------------------------------------------------------------------
-// Source tile with a replayed slang-server session (see `tests::slang`).
+// Source tile fed by the VDB source index (see `tests::source`).
 // ---------------------------------------------------------------------------
 
+/// The features example with a cursor at 26, chrome hidden and `features.sv` opened at
+/// the `count` declaration in the saturating lane.
 #[cfg(not(target_arch = "wasm32"))]
-fn slang_features(steps: usize) -> (SystemState, egui::Context) {
-    use super::slang::{Step, apply_step, install_replay, load_example, scenario, settle};
+fn features_source() -> (SystemState, egui::Context) {
+    use super::source::{load_example, open, source_file};
     let mut state = load_example("features");
     state.update(Message::AddVariables(
         [
@@ -5527,104 +5528,82 @@ fn slang_features(steps: usize) -> (SystemState, egui::Context) {
     state.update(Message::SetOverviewVisible(false));
     state.user.show_statusbar = Some(false);
     state.user.show_default_timeline = Some(false);
-    let replay = install_replay(&mut state, "features");
-    let context = egui::Context::default();
-    // Hover steps only matter for the recording; the pointer drives hovers here.
-    let steps = scenario("features")
-        .into_iter()
-        .filter(|step| !matches!(step, Step::Hover { .. }))
-        .take(steps);
-    for step in steps {
-        apply_step(&mut state, &step);
-        // Let the tile issue its requests and apply the replayed answers.
-        settle(&mut state, &context, 3);
-    }
-    settle(&mut state, &context, 3);
-    assert!(
-        replay.unmatched().is_empty(),
-        "requests without a recorded answer: {:?}",
-        replay.unmatched()
+    open(
+        &mut state,
+        &source_file("features"),
+        28,
+        Some("top.g_lane[1].u"),
     );
-    // The snapshot renderer uses its own context, so re-arm the scroll to the target.
-    let reopen = Message::OpenSource {
-        file: super::slang::current_file(&state),
-        line: super::slang::current_line(&state),
-        column: 1,
-        instance: super::slang::current_instance(&state),
-    };
-    state.update(reopen);
+    (state, egui::Context::default())
+}
+
+/// The features example viewed in `top` after visiting both lanes, as a user
+/// navigating the hierarchy would leave it.
+#[cfg(not(target_arch = "wasm32"))]
+fn features_in_top() -> (SystemState, egui::Context) {
+    let (mut state, context) = features_source();
+    state.update(Message::SourceInstance(Some("top.g_lane[0].u".into())));
+    state.update(Message::SourceInstance(Some("top".into())));
     (state, context)
 }
 
-/// Screen position of the token at `char_index` (gutter included) on the line whose text
-/// ends with `line_text`, from the shapes of the last frame.
 #[cfg(not(target_arch = "wasm32"))]
-fn source_token_position(output: &egui::FullOutput, line_text: &str, char_index: usize) -> Pos2 {
-    fn find(shape: &epaint::Shape, line_text: &str, char_index: usize) -> Option<Pos2> {
-        match shape {
-            epaint::Shape::Text(text) if text.galley.job.text.ends_with(line_text) => {
-                let rect = text
-                    .galley
-                    .pos_from_cursor(egui::text::CCursor::new(char_index));
-                Some(text.pos + rect.center().to_vec2() + emath::vec2(3.0, 0.0))
-            }
-            epaint::Shape::Vec(shapes) => {
-                shapes.iter().find_map(|s| find(s, line_text, char_index))
-            }
-            _ => None,
-        }
-    }
-    output
-        .shapes
-        .iter()
-        .find_map(|shape| find(&shape.shape, line_text, char_index))
-        .unwrap_or_else(|| panic!("line {line_text:?} is not drawn"))
+fn displayed_items(state: &SystemState) -> usize {
+    state
+        .user
+        .workspace
+        .item_lists()
+        .values()
+        .map(|list| list.displayed_items.len())
+        .sum()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-snapshot_ui! {slang_source_highlighting_in_instance, || {
-    let (state, _) = slang_features(1);
-    let source = state.user.workspace.tiles().values().find_map(|tile| {
-        if let crate::tiles::kind::TileKind::SourceCode(source) = &tile.kind { Some(source) } else { None }
-    }).expect("source tile open");
-    assert_eq!(source.instance.as_deref(), Some("top.g_lane[1].u"));
-    assert_eq!(source.line, 28);
-    let tokens = state.slang.as_ref().unwrap().tokens(source.file.as_ref().unwrap()).expect("tokens replayed");
+snapshot_ui! {source_highlighting_in_instance, || {
+    let (state, _) = features_source();
+    assert_eq!(super::source::current_instance(&state).as_deref(), Some("top.g_lane[1].u"));
+    assert_eq!(super::source::current_line(&state), 28);
+    let index = state.user.waves.as_ref().unwrap().inner.as_waves().unwrap().source_index().unwrap();
+    let tokens = index.file_tokens(&super::source::current_file(&state)).expect("features.sv is indexed");
     assert!(tokens.len() > 400, "features.sv classifies every token");
+    assert_eq!(index.producer().map(|p| p.starts_with("slang ")), Some(true));
     state
 }}
 
 #[cfg(not(target_arch = "wasm32"))]
-snapshot_ui! {slang_source_instance_switch_dims_other_branch, || {
-    let (state, _) = slang_features(2);
-    assert_eq!(super::slang::current_instance(&state).as_deref(), Some("top.g_lane[0].u"));
+snapshot_ui! {source_instance_switch_dims_other_branch, || {
+    let (mut state, _) = features_source();
+    state.update(Message::SourceInstance(Some("top.g_lane[0].u".into())));
+    assert_eq!(super::source::current_instance(&state).as_deref(), Some("top.g_lane[0].u"));
     state
 }}
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn slang_source_hover_shows_values_at_cursor() {
+fn source_hover_shows_values_at_cursor() {
+    use super::source::{frame, line_of, source_token_position, token_column};
     // Tooltips need pointer events and a persistent context, so this test renders
     // through the skia backend directly instead of `snapshot_ui!`.
-    let _runtime = super::slang::enter_runtime();
-    let (mut state, context) = slang_features(2);
-    let file = super::slang::current_file(&state);
+    let _runtime = super::source::enter_runtime();
+    let (mut state, context) = features_source();
+    state.update(Message::SourceInstance(Some("top.g_lane[0].u".into())));
+    let file = super::source::current_file(&state);
     let text = std::fs::read_to_string(&file).unwrap();
-    let line = super::slang::line_of(&text, "count != LIMIT") as usize;
-    let line_text = text.lines().nth(line).unwrap();
-    let column = line_text.find("count").unwrap();
+    let line = line_of(&text, "count != LIMIT");
+    let line_text = text.lines().nth(line as usize).unwrap();
+    let column = token_column(line_text, "count", 0);
     let open = || Message::OpenSource {
         file: file.clone(),
-        line: line as u32 + 1,
+        line: line + 1,
         column: 1,
         instance: Some("top.g_lane[0].u".into()),
     };
     // Locate the token in a scratch context; the backend below lays out identically.
     state.update(open());
-    schematic_frame(&mut state, &context, vec![]);
-    schematic_frame(&mut state, &context, vec![]);
-    let output = schematic_frame(&mut state, &context, vec![]);
-    let target = source_token_position(&output, line_text, 7 + column);
+    frame(&mut state, &context, vec![], Modifiers::NONE);
+    frame(&mut state, &context, vec![], Modifiers::NONE);
+    let output = frame(&mut state, &context, vec![], Modifiers::NONE);
+    let target = source_token_position(&output, line_text, crate::source_code::GUTTER + column);
 
     let screen_rect = Rect::from_min_size(Pos2::ZERO, SNAPSHOT_SIZE);
     let mut surface = create_surface((SNAPSHOT_WIDTH as i32, SNAPSHOT_HEIGHT as i32));
@@ -5664,50 +5643,54 @@ fn slang_source_hover_shows_values_at_cursor() {
         .expect("Failed to encode image");
     let new = image::load_from_memory(&data).expect("Failed to decode png");
     compare_with_snapshot(
-        &Utf8PathBuf::from("slang_source_hover_shows_values_at_cursor"),
+        &Utf8PathBuf::from("source_hover_shows_values_at_cursor"),
         &new,
     );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-snapshot_ui! {slang_source_alt_click_adds_signals, || {
-    let count = |state: &SystemState| {
-        state.user.workspace.item_lists().values().map(|list| list.displayed_items.len()).sum::<usize>()
-    };
-    let before = count(&slang_features(3).0);
-    let (state, _) = slang_features(5);
-    assert_eq!(count(&state), before + 3, "count of both lanes and state were added");
+snapshot_ui! {source_alt_click_adds_signals, || {
+    use super::source::click_token;
+    let (mut state, context) = features_in_top();
+    let before = displayed_items(&state);
+    click_token(&mut state, &context, "else if (en) count <= count + 1'b1;", "count", 0, Modifiers::ALT);
+    click_token(&mut state, &context, "2'd1: state <= RUN;", "state", 0, Modifiers::ALT);
+    assert_eq!(displayed_items(&state), before + 3, "count of both lanes and state were added");
     state
 }}
 
 #[cfg(not(target_arch = "wasm32"))]
-snapshot_ui! {slang_source_ctrl_click_instance_opens_module, || {
-    let (state, _) = slang_features(6);
-    assert_eq!(super::slang::current_line(&state), 24, "counter declaration");
-    assert_eq!(super::slang::current_instance(&state).as_deref(), Some("top.g_lane[0].u"));
+snapshot_ui! {source_ctrl_click_instance_opens_module, || {
+    let (mut state, context) = features_in_top();
+    super::source::click_token(&mut state, &context, "counter #(.W(8), .WRAP(i == 0)) u(", "u", 0, Modifiers::COMMAND);
+    assert_eq!(super::source::current_line(&state), 24, "counter declaration");
+    assert_eq!(super::source::current_instance(&state).as_deref(), Some("top.g_lane[0].u"));
     state
 }}
 
 #[cfg(not(target_arch = "wasm32"))]
-snapshot_ui! {slang_source_ctrl_click_function_navigates, || {
-    let (state, _) = slang_features(7);
-    assert_eq!(super::slang::current_line(&state), 12, "inc_tag declaration");
-    assert_eq!(super::slang::current_instance(&state), None);
+snapshot_ui! {source_ctrl_click_function_navigates, || {
+    let (mut state, context) = features_in_top();
+    super::source::click_token(&mut state, &context, "pkt.tag   = inc_tag(", "inc_tag", 0, Modifiers::COMMAND);
+    assert_eq!(super::source::current_line(&state), 12, "inc_tag declaration");
+    assert_eq!(super::source::current_instance(&state), None);
     state
 }}
 
 #[cfg(not(target_arch = "wasm32"))]
-snapshot_ui! {slang_source_ctrl_click_interface_member, || {
-    let (state, _) = slang_features(8);
-    assert_eq!(super::slang::current_line(&state), 19, "bus_if.data declaration");
-    assert_eq!(super::slang::current_instance(&state).as_deref(), Some("top.bus"));
+snapshot_ui! {source_ctrl_click_interface_member, || {
+    let (mut state, context) = features_in_top();
+    super::source::click_token(&mut state, &context, "bus.data  = lane_count[1];", "data", 0, Modifiers::COMMAND);
+    assert_eq!(super::source::current_line(&state), 19, "bus_if.data declaration");
+    assert_eq!(super::source::current_instance(&state).as_deref(), Some("top.bus"));
     state
 }}
 
 #[cfg(not(target_arch = "wasm32"))]
-snapshot_ui! {slang_source_ctrl_click_module_name, || {
-    let (state, _) = slang_features(9);
-    assert_eq!(super::slang::current_line(&state), 24, "counter declaration");
-    assert_eq!(super::slang::current_instance(&state).as_deref(), Some("top.g_lane[0].u"));
+snapshot_ui! {source_ctrl_click_module_name, || {
+    let (mut state, context) = features_in_top();
+    super::source::click_token(&mut state, &context, "counter #(.W(8), .WRAP(i == 0)) u(", "counter", 0, Modifiers::COMMAND);
+    assert_eq!(super::source::current_line(&state), 24, "counter declaration");
+    assert_eq!(super::source::current_instance(&state).as_deref(), Some("top.g_lane[0].u"));
     state
 }}

@@ -48,7 +48,6 @@ pub mod remote;
 pub(crate) mod schematic;
 pub mod server_file_window;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod slang;
 pub(crate) mod source_code;
 pub(crate) mod source_index;
 pub mod state;
@@ -831,41 +830,6 @@ impl SystemState {
                     )?;
                 tile.set_instance(instance);
             }
-            #[cfg(not(target_arch = "wasm32"))]
-            Message::SourceActivate {
-                at,
-                token,
-                class,
-                intent,
-            } => {
-                self.slang.as_ref()?.activate(at, token, class, intent);
-            }
-            #[cfg(target_arch = "wasm32")]
-            Message::SourceActivate { .. } => {}
-            #[cfg(not(target_arch = "wasm32"))]
-            Message::Slang(event) => {
-                let mut follow_ups = Vec::new();
-                {
-                    let client = self.slang.as_ref()?;
-                    let index = self
-                        .user
-                        .waves
-                        .as_ref()
-                        .and_then(|w| w.inner.as_waves())
-                        .and_then(|w| w.source_index());
-                    match index {
-                        Some(index) => client.handle(event, index, &mut follow_ups),
-                        None => {
-                            client.handle(event, &crate::slang::client::NoDesign, &mut follow_ups)
-                        }
-                    }
-                }
-                for message in follow_ups {
-                    self.update(message);
-                }
-            }
-            #[cfg(target_arch = "wasm32")]
-            Message::Slang(_) => {}
             Message::OpenSource {
                 file,
                 line,
@@ -2060,7 +2024,6 @@ impl SystemState {
                     #[cfg(not(target_arch = "wasm32"))]
                     HeaderResult::Vtr(loaded) => {
                         let mut new_waves = WaveContainer::new_waveform(Arc::new(loaded.hierarchy));
-                        self.start_slang(loaded.source_index.as_ref());
                         new_waves.attach_source_index(loaded.source_index);
                         self.pending_document = Some(crate::wave_source::PendingDocument {
                             source: source.clone(),

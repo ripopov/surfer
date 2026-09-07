@@ -89,17 +89,6 @@ pub enum Message {
     },
     /// Change the design instance the source-code tile is viewed in.
     SourceInstance(Option<String>),
-    /// A click on a token of the source-code tile that needs the language server.
-    #[serde(skip)]
-    SourceActivate {
-        at: crate::slang::Location,
-        token: String,
-        class: crate::slang::TokenClass,
-        intent: crate::slang::Intent,
-    },
-    /// A message from the language server session.
-    #[serde(skip)]
-    Slang(crate::slang::Event),
     OpenSchematic(String, Option<String>),
     OpenSimulationLogs(u32, Option<u32>),
     RevealSchematicHierarchy(String),

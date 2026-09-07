@@ -412,9 +412,10 @@ recently focused waveform tile. Layout commands work without a loaded file.
 The ``source_code`` tile is a singleton view opened from a signal's context
 menu when a VDB sidecar provides source metadata. Its file, line anchor and
 viewed design instance are stored in the workspace; source text remains outside
-the waveform document. When the sidecar carries an elaboration record, Surfer
-starts ``slang-server`` for accurate highlighting, hover values, ctrl-click
-navigation and alt-click adding of signals (see ``docs/html/source-code.html``).
+the waveform document. When the sidecar carries a ``source_index`` section,
+written by the simulator build, the tile shows accurate highlighting, hover
+values, ctrl-click navigation and alt-click adding of signals without starting
+any process (see ``docs/html/source-code.html``).
 
 * ``logs_filter off|error|warn|info|debug|trace``, ``annotation_list_comments on|off``
 

@@ -1,10 +1,12 @@
 //! Source-code tile.
 //!
 //! The tile shows one file in the context of one elaborated design instance. Token
-//! classes come from the language server ([`crate::slang`]); which recorded signal a
-//! token denotes, and its value at the cursor, come from the VDB attachment and the
-//! loaded recording. Hover a symbol for its value, ctrl-click to navigate, alt-click
-//! to add it to the waveform.
+//! classes, declarations and the generate blocks an instance leaves uninstantiated
+//! come from the static source index of the VDB companion ([`crate::source_index`]);
+//! which recorded signal a token denotes, and its value at the cursor, come from the
+//! same attachment and the loaded recording. Nothing is computed outside this
+//! process: hover a symbol for its value, ctrl-click to navigate, alt-click to add it
+//! to the waveform.
 
 use camino::Utf8PathBuf;
 use egui::text::{LayoutJob, TextFormat};
@@ -16,11 +18,12 @@ use std::{
 };
 
 use crate::message::Message;
-use crate::source_index::SourceLocation;
+use crate::source_index::{FileTokens, Modifiers, SourceIndex, SourceLocation, Span, TokenClass};
 use crate::system_state::SystemState;
 
 const FONT_SIZE: f32 = 13.0;
-const GUTTER: usize = 7;
+/// Characters of line number and padding before the source text of each line.
+pub(crate) const GUTTER: usize = 7;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -43,6 +46,15 @@ pub struct SourceCodeTile {
 struct SourceDocument {
     file: Utf8PathBuf,
     text: Result<Arc<str>, String>,
+}
+
+/// What a modified click on a symbol token asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Intent {
+    /// Ctrl-click: open the declaration, or the module of an instance.
+    Navigate,
+    /// Alt-click: add the recorded signals of the symbol to the waveform.
+    AddToWaveform,
 }
 
 impl SourceCodeTile {
@@ -99,8 +111,8 @@ impl SourceCodeTile {
         };
         let scroll_to_target = self.last_target.replace(Some((self.line, self.column)))
             != Some((self.line, self.column));
-        let session = Session::new(self, state, file, contents.clone());
-        self.header(ui, state, file, &session, commands);
+        let view = View::new(self, state, file);
+        self.header(ui, state, file, &view, commands);
         ui.separator();
         ui.style_mut().wrap_mode = Some(TextWrapMode::Extend);
         let theme = &state.user.config.theme;
@@ -112,8 +124,8 @@ impl SourceCodeTile {
             .show(ui, |ui| {
                 for (index, text) in contents.lines().enumerate() {
                     let line = index as u32;
-                    let spans = session.spans(line);
-                    let line_inactive = session.line_inactive(line, text.len() as u32);
+                    let spans = view.spans(line);
+                    let line_inactive = view.line_inactive(line, text.len() as u32);
                     let mut job = LayoutJob::default();
                     job.append(
                         &format!("{:>5}  ", index + 1),
@@ -130,7 +142,7 @@ impl SourceCodeTile {
                         ui.visuals().text_color()
                     };
                     let mut at = 0usize;
-                    for span in &spans {
+                    for span in spans {
                         let start = (span.start as usize).min(text.len());
                         let end = (span.end as usize).min(text.len());
                         if start < at || end <= start {
@@ -139,7 +151,7 @@ impl SourceCodeTile {
                         if at < start {
                             append(&mut job, &text[at..start], &font, normal);
                         }
-                        let color = if line_inactive || session.inactive(line, span.start, span.end)
+                        let color = if line_inactive || view.inactive(line, span.start, span.end)
                         {
                             theme.source.inactive
                         } else {
@@ -182,10 +194,9 @@ impl SourceCodeTile {
                     if char_index < GUTTER {
                         continue;
                     }
-                    let byte = byte as u32;
                     let Some(span) = spans
                         .iter()
-                        .find(|span| span.start <= byte && byte < span.end)
+                        .find(|span| span.start <= byte as u32 && (byte as u32) < span.end)
                         .copied()
                     else {
                         continue;
@@ -193,11 +204,7 @@ impl SourceCodeTile {
                     if !span.class.is_symbol() {
                         continue;
                     }
-                    let at = crate::slang::Location {
-                        file: file.clone(),
-                        line,
-                        character: span.start,
-                    };
+                    let token = &text[span.start as usize..span.end as usize];
                     let activate = modifiers.command || modifiers.alt;
                     if activate {
                         let from = galley.pos_from_cursor(egui::text::CCursor::new(
@@ -216,21 +223,18 @@ impl SourceCodeTile {
                         );
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         if response.clicked() {
-                            commands.push(Message::SourceActivate {
-                                at,
-                                token: text[span.start as usize..span.end as usize].to_owned(),
-                                class: span.class,
-                                intent: if modifiers.alt {
-                                    crate::slang::Intent::AddToWaveform
-                                } else {
-                                    crate::slang::Intent::Navigate
-                                },
-                            });
+                            let intent = if modifiers.alt {
+                                Intent::AddToWaveform
+                            } else {
+                                Intent::Navigate
+                            };
+                            if let Err(notice) = view.activate(&span, token, intent, commands) {
+                                self.notices.borrow_mut().push(notice);
+                            }
                         }
                     } else if state.show_tooltip() {
-                        let token = &text[span.start as usize..span.end as usize];
                         response.on_hover_ui_at_pointer(|ui| {
-                            session.hover_ui(ui, token, &span, &at);
+                            view.hover_ui(ui, token, &span);
                         });
                     }
                 }
@@ -242,7 +246,7 @@ impl SourceCodeTile {
         ui: &mut Ui,
         state: &SystemState,
         file: &Utf8PathBuf,
-        session: &Session,
+        view: &View,
         commands: &mut Vec<Message>,
     ) {
         ui.horizontal(|ui| {
@@ -255,7 +259,7 @@ impl SourceCodeTile {
             if self.line > 0 {
                 ui.label(format!(":{}:{}", self.line, self.column));
             }
-            let siblings = session.sibling_instances();
+            let siblings = view.sibling_instances();
             if let Some(instance) = &self.instance {
                 ui.separator();
                 if siblings.len() > 1 {
@@ -282,16 +286,14 @@ impl SourceCodeTile {
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let status = session.status(state);
+                let status = view.status(state);
                 let mut notices = self.notices.borrow_mut();
-                notices.extend(session.take_notices());
                 if notices.len() > 3 {
                     let drop = notices.len() - 3;
                     notices.drain(..drop);
                 }
-                let notice = notices.last().cloned();
                 let label = ui.label(RichText::new(status.text).color(status.color).small());
-                if let Some(notice) = notice {
+                if let Some(notice) = notices.last() {
                     label.on_hover_text(notice.clone());
                     ui.label(RichText::new(notice).small().weak());
                 }
@@ -320,12 +322,7 @@ fn byte_to_char(text: &str, byte: usize) -> usize {
     text[..byte.min(text.len())].chars().count()
 }
 
-fn span_color(
-    colors: &crate::config::SourceColors,
-    span: &crate::slang::Span,
-    normal: Color32,
-) -> Color32 {
-    use crate::slang::{Modifiers, TokenClass};
+fn span_color(colors: &crate::config::SourceColors, span: &Span, normal: Color32) -> Color32 {
     match span.class {
         TokenClass::Keyword => colors.keyword,
         TokenClass::Comment => colors.comment,
@@ -362,46 +359,29 @@ struct StatusLine {
     color: Color32,
 }
 
-/// Everything the draw loop needs from the language server and the design for one frame.
-struct Session<'a> {
-    #[cfg(not(target_arch = "wasm32"))]
-    client: Option<&'a crate::slang::SlangClient>,
-    #[cfg(not(target_arch = "wasm32"))]
-    index: Option<&'a crate::source_index::SourceIndex>,
-    #[cfg(not(target_arch = "wasm32"))]
-    tokens: Option<Arc<crate::slang::LineTokens>>,
-    #[cfg(not(target_arch = "wasm32"))]
-    inactive: Option<Arc<Vec<crate::slang::Range>>>,
+/// Everything the draw loop needs from the design for one file and one frame.
+struct View<'a> {
+    index: Option<&'a SourceIndex>,
+    tokens: Option<Arc<FileTokens>>,
+    inactive: Vec<vtr_vdb::InactiveRange>,
     state: &'a SystemState,
     instance: Option<String>,
 }
 
-impl<'a> Session<'a> {
-    #[cfg(not(target_arch = "wasm32"))]
-    fn new(
-        tile: &SourceCodeTile,
-        state: &'a SystemState,
-        file: &Utf8PathBuf,
-        text: Arc<str>,
-    ) -> Self {
-        let client = state.slang.as_ref();
-        if let Some(client) = client {
-            client.open_document(file, text);
-        }
-        let tokens = client.and_then(|client| client.tokens(file));
-        let inactive = client.and_then(|client| {
-            tile.instance
-                .as_deref()
-                .and_then(|instance| client.inactive_ranges(file, instance))
-        });
+impl<'a> View<'a> {
+    fn new(tile: &SourceCodeTile, state: &'a SystemState, file: &Utf8PathBuf) -> Self {
         let index = state
             .user
             .waves
             .as_ref()
             .and_then(|w| w.inner.as_waves())
             .and_then(|w| w.source_index());
+        let tokens = index.and_then(|index| index.file_tokens(file));
+        let inactive = index
+            .zip(tile.instance.as_deref())
+            .map(|(index, instance)| index.inactive_ranges(file, instance))
+            .unwrap_or_default();
         Self {
-            client,
             index,
             tokens,
             inactive,
@@ -410,30 +390,15 @@ impl<'a> Session<'a> {
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
-    fn new(tile: &SourceCodeTile, state: &'a SystemState, _: &Utf8PathBuf, _: Arc<str>) -> Self {
-        Self {
-            state,
-            instance: tile.instance.clone(),
-        }
-    }
-
-    fn spans(&self, line: u32) -> Vec<crate::slang::Span> {
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(tokens) = &self.tokens {
-            return tokens.line(line).to_vec();
-        }
-        let _ = line;
-        Vec::new()
+    fn spans(&self, line: u32) -> &[Span] {
+        self.tokens.as_ref().map_or(&[], |tokens| tokens.line(line))
     }
 
     fn inactive(&self, line: u32, start: u32, end: u32) -> bool {
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(ranges) = &self.inactive {
-            return ranges.iter().any(|range| range.covers(line, start, end));
-        }
-        let _ = (line, start, end);
-        false
+        // Ranges are one-based; the tile counts lines from zero.
+        self.inactive
+            .iter()
+            .any(|range| range.covers(line + 1, start + 1, end + 1))
     }
 
     /// Whether the whole line (after leading whitespace) lies in an inactive block.
@@ -442,71 +407,154 @@ impl<'a> Session<'a> {
     }
 
     fn sibling_instances(&self) -> Vec<String> {
-        #[cfg(not(target_arch = "wasm32"))]
-        if let (Some(index), Some(instance)) = (&self.index, &self.instance) {
-            return index.sibling_instances(instance);
+        match (self.index, &self.instance) {
+            (Some(index), Some(instance)) => index.sibling_instances(instance),
+            _ => Vec::new(),
         }
-        Vec::new()
-    }
-
-    fn take_notices(&self) -> Vec<String> {
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(client) = self.client {
-            return client.take_messages();
-        }
-        Vec::new()
     }
 
     fn status(&self, state: &SystemState) -> StatusLine {
         let theme = &state.user.config.theme;
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            if let Some(client) = self.client {
-                let color = match client.phase() {
-                    crate::slang::Phase::Ready => theme.accent_info.foreground,
-                    crate::slang::Phase::Failed(_) => theme.accent_error.foreground,
-                    _ => theme.accent_warn.foreground,
-                };
-                return StatusLine {
-                    text: client.status(),
-                    color,
-                };
-            }
-            if let Some(error) = &state.slang_error {
-                return StatusLine {
-                    text: error.clone(),
-                    color: theme.accent_warn.foreground,
-                };
-            }
-        }
-        StatusLine {
-            text: "no language server".to_owned(),
-            color: theme.alt_text_color,
+        match (self.index, &self.tokens) {
+            (Some(index), Some(tokens)) => StatusLine {
+                text: format!(
+                    "{} tokens indexed by {}",
+                    tokens.len(),
+                    index.producer().unwrap_or("unknown")
+                ),
+                color: theme.accent_info.foreground,
+            },
+            (Some(index), None) => StatusLine {
+                text: if index.producer().is_some() {
+                    "file not in the source index".to_owned()
+                } else {
+                    "VDB has no source index".to_owned()
+                },
+                color: theme.accent_warn.foreground,
+            },
+            (None, _) => StatusLine {
+                text: "no design database".to_owned(),
+                color: theme.alt_text_color,
+            },
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
-    fn hover_ui(
-        &self,
-        ui: &mut Ui,
-        token: &str,
-        _: &crate::slang::Span,
-        _: &crate::slang::Location,
-    ) {
-        ui.monospace(token);
+    /// Elaborated symbol paths declared where `span` points, those under the viewed
+    /// instance first when any are.
+    fn symbols_of(&self, span: &Span) -> Vec<String> {
+        self.in_context(self.declared(span).map_or(&[], |d| d.symbols.as_slice()))
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    fn hover_ui(
+    fn instances_of(&self, span: &Span) -> Vec<String> {
+        self.in_context(self.declared(span).map_or(&[], |d| d.instances.as_slice()))
+    }
+
+    fn declared(&self, span: &Span) -> Option<&crate::source_index::Declared> {
+        self.index?.declared(span.declaration?)
+    }
+
+    fn in_context(&self, paths: &[String]) -> Vec<String> {
+        let under_instance = |path: &String| {
+            self.instance.as_deref().is_some_and(|instance| {
+                path.strip_prefix(instance)
+                    .is_some_and(|rest| rest.starts_with(['.', '[']))
+            })
+        };
+        let inside: Vec<String> = paths
+            .iter()
+            .filter(|p| under_instance(p))
+            .cloned()
+            .collect();
+        if inside.is_empty() {
+            paths.to_vec()
+        } else {
+            inside
+        }
+    }
+
+    /// Performs a modified click. Errors are notices for the tile header.
+    fn activate(
         &self,
-        ui: &mut Ui,
+        span: &Span,
         token: &str,
-        span: &crate::slang::Span,
-        at: &crate::slang::Location,
-    ) {
-        use crate::slang::Modifiers;
+        intent: Intent,
+        commands: &mut Vec<Message>,
+    ) -> Result<(), String> {
+        let index = self.index.ok_or("no design database attached")?;
+        match intent {
+            Intent::AddToWaveform => {
+                let symbols = self.symbols_of(span);
+                let signals: Vec<String> = symbols
+                    .iter()
+                    .flat_map(|path| index.recorded_paths(path))
+                    .collect();
+                if signals.is_empty() {
+                    return Err(if symbols.is_empty() {
+                        "no design symbol at this token".to_owned()
+                    } else {
+                        format!("{} is not recorded in the trace", symbols.join(", "))
+                    });
+                }
+                commands.push(Message::AddVariables(
+                    signals
+                        .iter()
+                        .map(|path| {
+                            crate::wave_container::VariableRefExt::from_hierarchy_string(path)
+                        })
+                        .collect(),
+                ));
+                Ok(())
+            }
+            Intent::Navigate => {
+                let open =
+                    |location: SourceLocation, instance: Option<String>| Message::OpenSource {
+                        file: location.file,
+                        line: location.line,
+                        column: location.column,
+                        instance,
+                    };
+                let instances = self.instances_of(span);
+                if let (TokenClass::Instance, Some(instance)) = (span.class, instances.first()) {
+                    // An instance name opens its module, viewed in that instance.
+                    let module = index
+                        .instance_definition(instance)
+                        .ok_or("instance is not part of the elaborated design")?;
+                    let location = index
+                        .definition(module)
+                        .ok_or_else(|| format!("module {module} is not indexed"))?;
+                    commands.push(open(location, Some(instance.clone())));
+                    return Ok(());
+                }
+                if matches!(
+                    span.class,
+                    TokenClass::Module | TokenClass::Interface | TokenClass::Package
+                ) {
+                    // A module or interface name has no owner; view it in its first instance.
+                    let location = index
+                        .definition(token)
+                        .ok_or_else(|| format!("{token} is not declared in the indexed sources"))?;
+                    let instance = index.instances_of_module(token).into_iter().next();
+                    commands.push(open(location, instance));
+                    return Ok(());
+                }
+                let declaration = span
+                    .declaration
+                    .and_then(|at| index.location_of(at))
+                    .ok_or("no declaration found for this token")?;
+                let owner = self
+                    .symbols_of(span)
+                    .iter()
+                    .find_map(|path| index.owner_of(path))
+                    .map(|instance| instance.path.clone());
+                commands.push(open(declaration, owner));
+                Ok(())
+            }
+        }
+    }
+
+    fn hover_ui(&self, ui: &mut Ui, token: &str, span: &Span) {
         ui.set_max_width(ui.spacing().tooltip_width.max(320.0));
-        let mut kind = format!("{:?}", span.class).to_lowercase();
+        let mut kind = span.class.label().to_owned();
         for (modifier, name) in [
             (Modifiers::INPUT, "input"),
             (Modifiers::OUTPUT, "output"),
@@ -522,43 +570,38 @@ impl<'a> Session<'a> {
             ui.label(RichText::new(token).strong().monospace());
             ui.label(RichText::new(kind).weak());
         });
-        let Some(client) = self.client else {
+        let Some(index) = self.index else {
+            ui.label(RichText::new("no design database attached").weak());
             return;
         };
-        let Some(info) = client.hover(at) else {
-            ui.label(RichText::new("resolving…").weak());
-            ui.ctx().request_repaint();
-            return;
-        };
-        if !info.is_ready() {
-            ui.label(RichText::new("resolving…").weak());
-            ui.ctx().request_repaint();
+        let symbols = self.symbols_of(span);
+        let instances = self.instances_of(span);
+        if let Some(first) = symbols
+            .first()
+            .and_then(|path| index.database.symbols.get(path))
+        {
+            ui.label(
+                RichText::new(format!("{} in {}", first.ty.text, first.owner))
+                    .monospace()
+                    .small(),
+            );
         }
-        if let Some(markdown) = &info.markdown {
-            for line in hover_lines(markdown) {
-                ui.label(RichText::new(line).monospace().small());
-            }
-        }
-        if info.paths.is_empty() {
-            if info.is_ready() {
+        if symbols.is_empty() {
+            if let Some(instance) = instances.first() {
+                let module = index.instance_definition(instance).unwrap_or("?");
+                ui.label(
+                    RichText::new(format!("{module} {}", instances.join(", ")))
+                        .monospace()
+                        .small(),
+                );
+            } else if matches!(span.class, TokenClass::Module | TokenClass::Interface) {
+                let count = index.instances_of_module(token).len();
+                ui.label(RichText::new(format!("{count} instances")).weak());
+            } else {
                 ui.label(RichText::new("not part of the elaborated design").weak());
             }
             return;
         }
-        let context: Vec<&String> = self
-            .instance
-            .as_ref()
-            .map(|instance| {
-                info.paths
-                    .iter()
-                    .filter(|path| {
-                        path.strip_prefix(instance.as_str())
-                            .is_some_and(|rest| rest.starts_with(['.', '[']))
-                    })
-                    .collect()
-            })
-            .filter(|paths: &Vec<&String>| !paths.is_empty())
-            .unwrap_or_else(|| info.paths.iter().collect());
         let cursor = self
             .state
             .user
@@ -570,13 +613,13 @@ impl<'a> Session<'a> {
             .num_columns(2)
             .spacing([12.0, 2.0])
             .show(ui, |ui| {
-                for path in context.iter().take(8) {
+                for path in symbols.iter().take(8) {
                     ui.label(RichText::new(path.as_str()).monospace());
                     ui.label(RichText::new(self.value_text(path, cursor.as_ref())).monospace());
                     ui.end_row();
                 }
-                if context.len() > 8 {
-                    ui.label(RichText::new(format!("… {} more", context.len() - 8)).weak());
+                if symbols.len() > 8 {
+                    ui.label(RichText::new(format!("… {} more", symbols.len() - 8)).weak());
                     ui.end_row();
                 }
             });
@@ -584,11 +627,10 @@ impl<'a> Session<'a> {
 
     /// Value of an elaborated symbol at the cursor, formatted by the preferred translator,
     /// falling back to the elaborated constant for parameters.
-    #[cfg(not(target_arch = "wasm32"))]
     fn value_text(&self, design_path: &str, cursor: Option<&num::BigUint>) -> String {
         use crate::translation::TranslationResultExt;
         use crate::wave_container::{VariableRef, VariableRefExt};
-        let Some(index) = &self.index else {
+        let Some(index) = self.index else {
             return "no design attached".to_owned();
         };
         let recorded = index.recorded_paths(design_path);
@@ -656,43 +698,6 @@ impl<'a> Session<'a> {
     }
 }
 
-/// Reduces the server's markdown hover to its informative plain-text lines.
-fn hover_lines(markdown: &str) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut in_code = false;
-    for raw in markdown.lines() {
-        let line = raw.trim();
-        if line.starts_with("```") {
-            in_code = !in_code;
-            continue;
-        }
-        if in_code || line.is_empty() || line == "---" {
-            continue;
-        }
-        let cleaned = line.replace("**", "").replace('`', "");
-        // Drop markdown links, keeping their text.
-        let mut text = String::new();
-        let mut rest = cleaned.as_str();
-        while let Some(open) = rest.find('[') {
-            text.push_str(&rest[..open]);
-            let Some(close) = rest[open..].find("](") else {
-                text.push_str(&rest[open..]);
-                rest = "";
-                break;
-            };
-            text.push_str(&rest[open + 1..open + close]);
-            let after = &rest[open + close + 2..];
-            rest = after.find(')').map_or("", |end| &after[end + 1..]);
-        }
-        text.push_str(rest);
-        let text = text.trim_end_matches("  ").trim().to_owned();
-        if !text.is_empty() && lines.len() < 4 {
-            lines.push(text);
-        }
-    }
-    lines
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -741,19 +746,6 @@ mod tests {
         assert_eq!(tile.instance, None);
         tile.set_instance(Some("top.u0".into()));
         assert_eq!(tile.instance.as_deref(), Some("top.u0"));
-    }
-
-    #[test]
-    fn hover_markdown_is_reduced_to_plain_lines() {
-        let markdown = "**Input Net** `en` in `stage`  \nType: [logic](<file:///x.sv#L1,2>)  \n\n\n---\n\n````systemverilog\nen\n````\n\n---\n\nDriven via port from `stage u0` at [pipeline.sv:1:55](<file:///p.sv#L1,55>)  ";
-        assert_eq!(
-            hover_lines(markdown),
-            vec![
-                "Input Net en in stage".to_string(),
-                "Type: logic".to_string(),
-                "Driven via port from stage u0 at pipeline.sv:1:55".to_string(),
-            ]
-        );
     }
 
     #[test]

@@ -163,9 +163,6 @@ pub struct SurferConfig {
     pub plugin: PluginConfig,
     /// WCP Configuration
     pub wcp: WcpConfig,
-    /// Language server used by the source-code tile
-    #[serde(default)]
-    pub slang: SlangConfig,
     /// HTTP Server Configuration
     pub server: SurverConfig,
     /// Animation time for UI elements in seconds
@@ -1006,7 +1003,7 @@ pub(crate) fn get_luminance(color: Color32) -> f32 {
         + 0.0722 * gamma_correction(color.b())
 }
 
-/// Token colors of the source-code tile, keyed by the classes the language server reports.
+/// Token colors of the source-code tile, keyed by the classes of the VDB source index.
 #[derive(Debug, Deserialize, Clone)]
 pub struct SourceColors {
     #[serde(deserialize_with = "deserialize_hex_color")]
@@ -1227,26 +1224,6 @@ pub struct ThemeColorTriple {
 pub struct PluginConfig {
     /// Maximum memory in MiB available to each WASM translator plugin
     pub max_memory_mib: u64,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-#[serde(default)]
-pub struct SlangConfig {
-    /// Start `slang-server` automatically when a VTR recording with a VDB elaboration record
-    /// is opened
-    pub autostart: bool,
-    /// Executable to run; a bare name is searched on `PATH`. The `SURFER_SLANG_SERVER`
-    /// environment variable overrides it.
-    pub server: String,
-}
-
-impl Default for SlangConfig {
-    fn default() -> Self {
-        Self {
-            autostart: true,
-            server: "slang-server".to_owned(),
-        }
-    }
 }
 
 #[derive(Debug, Deserialize)]
