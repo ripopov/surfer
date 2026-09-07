@@ -399,7 +399,10 @@ pub(crate) mod native {
         };
         ui.label(format!("{} messages", result.matches.len()));
         ui.horizontal(|ui| {
-            ui.add_sized([130.0, 20.0], egui::Label::new(format!("TIME ({time_unit})")));
+            ui.add_sized(
+                [130.0, 20.0],
+                egui::Label::new(format!("TIME ({time_unit})")),
+            );
             ui.add_sized([75.0, 20.0], egui::Label::new("SEVERITY"));
             ui.label("MESSAGE");
         });

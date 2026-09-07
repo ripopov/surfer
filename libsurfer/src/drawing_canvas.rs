@@ -878,11 +878,19 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                         continue;
                     };
                     let min = Pos2::new(
-                        viewport.pixel_from_time(&sample.begin.into(), cfg.canvas_size.x - 1.0, range),
+                        viewport.pixel_from_time(
+                            &sample.begin.into(),
+                            cfg.canvas_size.x - 1.0,
+                            range,
+                        ),
                         line_height * sample.row as f32 + 4.0,
                     );
                     let max = Pos2::new(
-                        viewport.pixel_from_time(&sample.end.into(), cfg.canvas_size.x - 1.0, range),
+                        viewport.pixel_from_time(
+                            &sample.end.into(),
+                            cfg.canvas_size.x - 1.0,
+                            range,
+                        ),
                         line_height * (sample.row + 1) as f32 - 4.0,
                     );
                     let events = if sample.count == 1 {
@@ -954,16 +962,11 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                 );
             }
 
-            let packet_rows = waves
-                .inner
-                .as_transactions()
-                .unwrap()
-                .is_native()
-                .then(|| {
-                    crate::transactions::packet_rows(
-                        generators.iter().flat_map(|g| g.transactions.iter()),
-                    )
-                });
+            let packet_rows = waves.inner.as_transactions().unwrap().is_native().then(|| {
+                crate::transactions::packet_rows(
+                    generators.iter().flat_map(|g| g.transactions.iter()),
+                )
+            });
             for generator in generators {
                 // find first visible transaction
                 let first_visible_transaction_index = if packet_rows.is_some() {
@@ -1135,16 +1138,22 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
             ),
             DataContainer::Empty => return,
         };
-        if cache.commands.is_none() || Some(response.rect) != cache.rect || cache.scroll_offset != Some(source.scroll_offset) {
+        if cache.commands.is_none()
+            || Some(response.rect) != cache.rect
+            || cache.scroll_offset != Some(source.scroll_offset)
+        {
             let commands = self.generate_draw_commands(source, &cfg, msgs);
             let transaction_commands = match &commands {
                 Some(CachedDrawData::Transactions(data)) => Some(data),
                 Some(CachedDrawData::Combined(data)) => Some(&data.transaction),
                 _ => None,
             };
-            cache.payloads = transaction_commands.into_iter().flat_map(|data| data.draw_commands.iter())
+            cache.payloads = transaction_commands
+                .into_iter()
+                .flat_map(|data| data.draw_commands.iter())
                 .filter(|(_, command)| command.count == 1)
-                .map(|((_, tx), _)| tx.id.0 as u64).collect();
+                .map(|((_, tx), _)| tx.id.0 as u64)
+                .collect();
             cache.payloads.sort_unstable();
             cache.payloads.dedup();
             cache.commands = commands;
@@ -1720,7 +1729,9 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                         stream_to_displayed_txs.get(&stream.transaction_stream_ref)
                     {
                         for tx_ref in tx_refs {
-                            if let Some(tx_draw_command) = draw_commands.get(&(stream.transaction_stream_ref.clone(), tx_ref.clone())) {
+                            if let Some(tx_draw_command) = draw_commands
+                                .get(&(stream.transaction_stream_ref.clone(), tx_ref.clone()))
+                            {
                                 let mut min = tx_draw_command.min;
                                 let mut max = tx_draw_command.max;
 
@@ -1769,7 +1780,11 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                                             .filter(|event| {
                                                 let center = (ctx.to_screen)(
                                                     event.x,
-                                                    y_offset + f32::midpoint(tx_draw_command.min.y, tx_draw_command.max.y),
+                                                    y_offset
+                                                        + f32::midpoint(
+                                                            tx_draw_command.min.y,
+                                                            tx_draw_command.max.y,
+                                                        ),
                                                 );
                                                 center.distance(pointer) <= 6.0
                                             })
@@ -1779,16 +1794,21 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                                     .unwrap_or_default();
                                 response = if tx_draw_command.count > 1 {
                                     response.on_hover_text(format!("{} transactions in this screen interval. Zoom in to inspect individual transactions. Clicking selects the final transaction.", tx_draw_command.count))
-                                } else { handle_transaction_tooltip(
-                                    response,
-                                    waves,
-                                    &tx_draw_command.gen_ref,
-                                    tx_ref,
-                                    &hovered_events,
-                                ) };
+                                } else {
+                                    handle_transaction_tooltip(
+                                        response,
+                                        waves,
+                                        &tx_draw_command.gen_ref,
+                                        tx_ref,
+                                        &hovered_events,
+                                    )
+                                };
 
                                 if response.clicked() {
-                                    msgs.push(Message::FocusTransaction(Some(tx_ref.clone()), tile_id));
+                                    msgs.push(Message::FocusTransaction(
+                                        Some(tx_ref.clone()),
+                                        tile_id,
+                                    ));
                                 }
 
                                 if (max.x - min.x) > 1.0 {
@@ -1827,9 +1847,24 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                                 // Hollow dots remain legible on custom and focused bar colors.
                                 // Do not clamp offscreen event times onto the viewport edges.
                                 for event in &tx_draw_command.events {
-                                    let center = (ctx.to_screen)(event.x, y_offset + f32::midpoint(tx_draw_command.min.y, tx_draw_command.max.y));
-                                    ctx.painter.circle_filled(center, 3.0, self.config.theme.canvas_colors.background);
-                                    ctx.painter.circle_stroke(center, 3.0, Stroke::new(1.0, self.config.theme.foreground));
+                                    let center = (ctx.to_screen)(
+                                        event.x,
+                                        y_offset
+                                            + f32::midpoint(
+                                                tx_draw_command.min.y,
+                                                tx_draw_command.max.y,
+                                            ),
+                                    );
+                                    ctx.painter.circle_filled(
+                                        center,
+                                        3.0,
+                                        self.config.theme.canvas_colors.background,
+                                    );
+                                    ctx.painter.circle_stroke(
+                                        center,
+                                        3.0,
+                                        Stroke::new(1.0, self.config.theme.foreground),
+                                    );
                                 }
                             }
                         }
@@ -2434,7 +2469,9 @@ mod view_cache_tests {
         let stream_key = (stream_ref.clone(), reference.clone());
         let generator_key = (generator_ref.clone(), reference.clone());
         assert_eq!(before.draw_commands.len(), 3);
-        assert!(before.draw_commands[&stream_key].min.y > before.draw_commands[&generator_key].min.y);
+        assert!(
+            before.draw_commands[&stream_key].min.y > before.draw_commands[&generator_key].min.y
+        );
         {
             let waves = state.user.waveform_edit().unwrap();
             waves
@@ -2539,8 +2576,7 @@ mod view_cache_tests {
         assert_eq!(state.undo_stack[0].label(), "Add variables");
         assert!(matches!(
             &state.user.workspace.tiles()[&logs].kind,
-            TileKind::SimulationLogs(_)
-            | TileKind::Logs(_)
+            TileKind::SimulationLogs(_) | TileKind::Logs(_)
         ));
         state.update(Message::Undo(1));
         assert_eq!(state.user.workspace.layout().tile_order(), [logs]);

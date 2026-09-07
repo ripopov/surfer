@@ -140,7 +140,8 @@ impl crate::tile_kinds::waveform::WaveformView {
         };
         let mut candidate: Option<crate::transaction_index::Span> = None;
         for node in items.items_tree.iter_visible() {
-            let Some(DisplayedItem::Stream(stream)) = items.displayed_items.get(&node.item_ref) else {
+            let Some(DisplayedItem::Stream(stream)) = items.displayed_items.get(&node.item_ref)
+            else {
                 continue;
             };
             let Some(index) = inner.track_index(&stream.transaction_stream_ref) else {
@@ -313,7 +314,10 @@ pub(crate) fn packet_rows<'a>(
     let mut rows = std::collections::HashMap::new();
     for tx in ordered {
         let start = tx.get_start_time();
-        let row = ends.iter().position(|end| *end <= start).unwrap_or(ends.len());
+        let row = ends
+            .iter()
+            .position(|end| *end <= start)
+            .unwrap_or(ends.len());
         if row == ends.len() {
             ends.push(tx.get_end_time());
         } else {
