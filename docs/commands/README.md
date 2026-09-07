@@ -410,12 +410,20 @@ recently focused waveform tile. Layout commands work without a loaded file.
   tile is focused.
 
 The ``source_code`` tile is a singleton view opened from a signal's context
-menu when a VDB sidecar provides source metadata. Its file, line anchor and
-viewed design instance are stored in the workspace; source text remains outside
-the waveform document. When the sidecar carries a ``source_index`` section,
-written by the simulator build, the tile shows accurate highlighting, hover
-values, ctrl-click navigation and alt-click adding of signals without starting
-any process (see ``docs/html/source-code.html``).
+menu when a VDB sidecar provides source metadata. Its file, line anchor, viewed
+design instance and value layout are stored in the workspace; source text
+remains outside the waveform document. When the sidecar carries a
+``source_index`` section, written by the simulator build, the tile shows
+accurate highlighting, the value of every referenced signal at the cursor,
+ctrl-click navigation and alt-click adding of signals without starting any
+process (see ``docs/html/source-code.html``).
+
+* ``source_values trailing|inline``
+
+  Where the source tile draws cursor values: after the code of each line, or as
+  chips after each identifier. Offered while a source tile is focused; the
+  header of the tile has the same switch, and ``[source] values_layout`` in the
+  config sets the default.
 
 * ``logs_filter off|error|warn|info|debug|trace``, ``annotation_list_comments on|off``
 

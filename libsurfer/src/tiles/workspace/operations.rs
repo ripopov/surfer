@@ -190,6 +190,7 @@ impl crate::tiles::workspace::Workspace {
                 | (TileKind::SimulationLogs(_), TileMessage::SimulationLogs(_))
                 | (TileKind::Logs(_), TileMessage::Logs(_))
                 | (TileKind::Waveform(_), TileMessage::Waveform(_))
+                | (TileKind::SourceCode(_), TileMessage::SourceCode(_))
         )
         .then_some(target)
     }
@@ -270,6 +271,16 @@ impl crate::tiles::workspace::Workspace {
             TileMessage::Logs(message) => {
                 let Some(TileEntry {
                     kind: TileKind::Logs(tile),
+                    ..
+                }) = self.tiles.get_mut(&target)
+                else {
+                    return Ok(false);
+                };
+                Ok(tile.update(message))
+            }
+            TileMessage::SourceCode(message) => {
+                let Some(TileEntry {
+                    kind: TileKind::SourceCode(tile),
                     ..
                 }) = self.tiles.get_mut(&target)
                 else {

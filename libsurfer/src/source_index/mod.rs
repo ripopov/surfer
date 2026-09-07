@@ -41,6 +41,9 @@ pub(crate) struct SourceIndex {
     legend: tokens::Legend,
     files: HashMap<Utf8PathBuf, usize>,
     declared: HashMap<IndexLocation, Declared>,
+    /// Declaration locations per file and line, for joins that survive the column
+    /// shift a macro expansion causes in the simulator's coordinates.
+    declared_on_line: HashMap<(u32, u32), Vec<IndexLocation>>,
     tokens: Arc<Mutex<HashMap<usize, Arc<FileTokens>>>>,
 }
 
@@ -87,7 +90,11 @@ impl SourceIndex {
                 },
                 None => symbol_path,
             };
-            let Some(signal) = signals.get(recorded) else {
+            // Verilator records unpacked array elements inside a scope named after
+            // the array, while its binding spells them as plain elements.
+            let Some((recorded, signal)) = signals.get_key_value(recorded).or_else(|| {
+                array_scope_spelling(recorded).and_then(|alt| signals.get_key_value(&alt))
+            }) else {
                 continue;
             };
             let location = SourceLocation {
@@ -102,6 +109,37 @@ impl SourceIndex {
                 .or_insert_with(|| symbol_path.clone());
             by_signal.entry(*signal).or_insert(location);
         }
+        // Elements of unpacked arrays are bound individually but declared as one
+        // aggregate symbol; they take the aggregate's declaration.
+        if let Some(binding) = &database.trace_binding {
+            for (symbol_path, recorded) in &binding.signals {
+                if symbols.contains_key(recorded) {
+                    continue;
+                }
+                let Some((aggregate, _)) = symbol_path.rsplit_once('[') else {
+                    continue;
+                };
+                let Some(symbol) = database.symbols.get(aggregate) else {
+                    continue;
+                };
+                let Some((recorded, signal)) = signals.get_key_value(recorded).or_else(|| {
+                    array_scope_spelling(recorded).and_then(|alt| signals.get_key_value(&alt))
+                }) else {
+                    continue;
+                };
+                let location = SourceLocation {
+                    file: absolute(base, &symbol.source.file),
+                    line: symbol.source.line,
+                    column: symbol.source.column,
+                };
+                locations.insert(recorded.clone(), location.clone());
+                symbols.insert(recorded.clone(), aggregate.to_owned());
+                symbols_by_signal
+                    .entry(*signal)
+                    .or_insert_with(|| aggregate.to_owned());
+                by_signal.entry(*signal).or_insert(location);
+            }
+        }
         // Aliases share samples but retain their own declaration where available.
         for (path, signal) in nodes {
             if let Some(symbol) = symbols_by_signal.get(&signal) {
@@ -114,8 +152,16 @@ impl SourceIndex {
             }
         }
         let (legend, files, declared) = Self::static_index(&database, base);
+        let mut declared_on_line: HashMap<(u32, u32), Vec<IndexLocation>> = HashMap::new();
+        for at in declared.keys() {
+            declared_on_line
+                .entry((at.file, at.line))
+                .or_default()
+                .push(*at);
+        }
         Ok(Self {
             locations,
+            declared_on_line,
             database: Arc::new(database),
             base: base.to_owned(),
             symbols,
@@ -219,8 +265,30 @@ impl SourceIndex {
     }
 
     /// Symbols and instances the design declares at an index location.
-    pub(crate) fn declared(&self, at: IndexLocation) -> Option<&Declared> {
-        self.declared.get(&at)
+    /// Symbols and instances declared at `at`, falling back to a declaration of
+    /// `name` on the same line: the simulator counts columns after macro expansion,
+    /// the index before.
+    pub(crate) fn declared_named(&self, at: IndexLocation, name: &str) -> Option<&Declared> {
+        if let Some(found) = self.declared.get(&at) {
+            return Some(found);
+        }
+        let leaf = |path: &str| {
+            path.rsplit('.')
+                .next()
+                .and_then(|tail| tail.split('[').next())
+                == Some(name)
+        };
+        self.declared_on_line
+            .get(&(at.file, at.line))?
+            .iter()
+            .filter_map(|location| self.declared.get(location))
+            .find(|declared| {
+                declared
+                    .symbols
+                    .iter()
+                    .chain(&declared.instances)
+                    .any(|path| leaf(path))
+            })
     }
 
     /// An index location as a file to open.
@@ -324,32 +392,47 @@ impl SourceIndex {
     /// elements are recorded under the aggregate's name, so trailing selections are
     /// dropped until a binding matches and any recorded element of that aggregate counts.
     pub(crate) fn recorded_paths(&self, design_path: &str) -> Vec<String> {
-        let recorded_name = |symbol: &str| -> Option<String> {
-            match &self.database.trace_binding {
-                Some(binding) => binding.signals.get(symbol).cloned(),
-                None => Some(symbol.to_owned()),
+        let binding = self.database.trace_binding.as_ref();
+        // The recorded name of a symbol, as the loaded hierarchy spells it.
+        let recorded_key = |recorded: &str| -> Option<String> {
+            if self.locations.contains_key(recorded) {
+                return Some(recorded.to_owned());
             }
+            let alt = array_scope_spelling(recorded)?;
+            self.locations.contains_key(&alt).then_some(alt)
         };
         let mut candidate = design_path.to_owned();
         loop {
-            if let Some(recorded) = recorded_name(&candidate) {
-                if self.locations.contains_key(&recorded) {
-                    return vec![recorded];
-                }
-                // Unpacked arrays are recorded element-wise as `name[i]`.
-                let mut elements: Vec<_> = self
+            let recorded = match binding {
+                Some(binding) => binding.signals.get(&candidate).cloned(),
+                None => Some(candidate.clone()),
+            };
+            if let Some(recorded) = recorded.as_deref().and_then(recorded_key) {
+                return vec![recorded];
+            }
+            // Unpacked arrays are recorded element-wise as `name[i]`.
+            let is_element = |path: &str| {
+                path.strip_prefix(candidate.as_str())
+                    .is_some_and(|rest| rest.starts_with('['))
+            };
+            let mut elements: Vec<String> = match binding {
+                Some(binding) => binding
+                    .signals
+                    .iter()
+                    .filter(|(symbol, _)| is_element(symbol))
+                    .filter_map(|(_, recorded)| recorded_key(recorded))
+                    .collect(),
+                None => self
                     .locations
                     .keys()
-                    .filter(|path| {
-                        path.strip_prefix(recorded.as_str())
-                            .is_some_and(|rest| rest.starts_with('['))
-                    })
+                    .filter(|path| is_element(path))
                     .cloned()
-                    .collect();
-                if !elements.is_empty() {
-                    elements.sort();
-                    return elements;
-                }
+                    .collect(),
+            };
+            if !elements.is_empty() {
+                elements.sort();
+                elements.dedup();
+                return elements;
             }
             let Some(cut) = candidate.rfind(['.', '[']) else {
                 return Vec::new();
@@ -402,6 +485,14 @@ pub(crate) fn sibling_candidates(trace: &Utf8Path) -> impl Iterator<Item = Utf8P
         trace.with_extension("vdb.json"),
     ]
     .into_iter()
+}
+
+/// `a.b.name[i]` as `a.b.name.name[i]`, the way Verilator's trace nests the elements
+/// of an unpacked array in a scope named after the array.
+fn array_scope_spelling(recorded: &str) -> Option<String> {
+    let (parent, element) = recorded.rsplit_once('.')?;
+    let name = element.split_once('[')?.0;
+    Some(format!("{parent}.{name}.{element}"))
 }
 
 /// Where a path recorded relative to the companion lives on disk.

@@ -67,6 +67,10 @@ pub struct SystemState {
     // mutability
     pub(crate) variable_name_info_cache: RefCell<VariableInfoCache>,
 
+    /// Signals the source tile asked a non-native recording to load, so the request
+    /// is repeated only when the file, instance or design changes.
+    pub(crate) source_signals_requested: Vec<crate::wave_container::VariableRef>,
+
     /// Monotonically increasing counter incremented when translators reload, to invalidate
     /// the `all_variable_rows_cache` when name info changes without a waveform reload.
     pub(crate) translator_generation: u64,
@@ -156,6 +160,7 @@ impl SystemState {
             url: RefCell::new(String::new()),
             command_prompt_text: RefCell::new(String::new()),
             variable_name_info_cache: RefCell::new(AHashMap::new()),
+            source_signals_requested: Vec::new(),
             translator_generation: 0,
             layout_adapter: None,
             workspace_runtime: Default::default(),

@@ -149,7 +149,7 @@ use crate::transaction_container::{TransactionRef, TransactionStreamRef};
 use crate::translation::{AnyTranslator, all_translators};
 use crate::variable_filter::{VariableIOFilterType, VariableNameFilterType};
 use crate::viewport::Viewport;
-use crate::wave_container::{ScopeRefExt, VariableRefExt, WaveContainer};
+use crate::wave_container::{ScopeRefExt, VariableRef, VariableRefExt, WaveContainer};
 
 use crate::wave_source::{LoadOptions, WaveFormat, WaveSource};
 use crate::wellen::{HeaderResult, convert_format};
@@ -368,7 +368,24 @@ impl SystemState {
         result
     }
 
+    /// Recorded signals the visible source tiles show values for.
+    fn source_tile_signals(&self) -> Vec<VariableRef> {
+        let workspace = &self.user.workspace;
+        workspace
+            .layout()
+            .visible_tiles()
+            .into_iter()
+            .filter_map(|id| workspace.tiles().get(&id))
+            .filter_map(|tile| match &tile.kind {
+                crate::tiles::kind::TileKind::SourceCode(tile) => Some(tile.demanded_signals(self)),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
     fn reconcile_native_signals(&mut self) {
+        let source_signals = self.source_tile_signals();
         let Some(document) = self.user.waves.as_mut() else {
             return;
         };
@@ -376,10 +393,18 @@ impl SystemState {
             return;
         };
         if !matches!(container, WaveContainer::Wellen(waves) if waves.native_backend) {
+            // Other recordings keep everything they load; ask once per new set.
+            if source_signals != self.source_signals_requested {
+                let load = container.load_variables(source_signals.iter());
+                self.source_signals_requested = source_signals;
+                if let Ok(Some(load)) = load {
+                    self.load_variables(load);
+                }
+            }
             return;
         }
         let workspace = &self.user.workspace;
-        let mut variables = Vec::new();
+        let mut variables = source_signals;
         for id in workspace.layout().visible_tiles() {
             let Some(tile) = workspace.tiles().get(&id) else {
                 continue;

@@ -533,8 +533,15 @@ impl WellenContainer {
                 let h = &self.hierarchy;
                 let index = r.index.as_ref().map(|i| wellen::VarIndex::new(*i, *i));
 
-                let Some(var) = h.lookup_var_with_index(r.path.strs(), r.name.clone(), &index)
-                else {
+                let found = h
+                    .lookup_var_with_index(r.path.strs(), r.name.clone(), &index)
+                    .or_else(|| {
+                        // Verilator names unpacked array elements `name[i]` and keeps the
+                        // packed range as the index; a `name[i]` path is then the plain name.
+                        let element = format!("{}[{}]", r.name, r.index?);
+                        h.lookup_var_with_index(r.path.strs(), element, &None)
+                    });
+                let Some(var) = found else {
                     bail!("Failed to find variable: {r:?}");
                 };
                 Ok(var)

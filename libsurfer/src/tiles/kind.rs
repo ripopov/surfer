@@ -13,6 +13,7 @@ pub enum TileMessage {
     Logs(crate::tile_kinds::logs::LogsMessage),
     SimulationLogs(crate::tile_kinds::simulation_logs::Query),
     Waveform(WaveformMessage),
+    SourceCode(crate::source_code::SourceCodeMessage),
 }
 
 /// Each variant contains only semantic settings owned by its kind.
@@ -133,7 +134,8 @@ impl TileMessage {
             | Self::FrameBuffer(_)
             | Self::Memory(_)
             | Self::AnnotationList(_)
-            | Self::Logs(_) => None,
+            | Self::Logs(_)
+            | Self::SourceCode(_) => None,
         }
     }
 }
@@ -475,6 +477,22 @@ const LOGS_COMMANDS: &[KindCommand] = &[KindCommand {
     },
 }];
 
+const SOURCE_CODE_COMMANDS: &[KindCommand] = &[KindCommand {
+    name: "source_values",
+    suggestions: &["trailing", "inline"],
+    parse: |word| {
+        use crate::config::ValuesLayout;
+        let layout = match word {
+            "trailing" => ValuesLayout::Trailing,
+            "inline" => ValuesLayout::Inline,
+            _ => return None,
+        };
+        Some(TileMessage::SourceCode(
+            crate::source_code::SourceCodeMessage::ValuesLayout(layout),
+        ))
+    },
+}];
+
 const ANNOTATION_LIST_COMMANDS: &[KindCommand] = &[KindCommand {
     name: "annotation_list_comments",
     suggestions: &["on", "off"],
@@ -526,8 +544,8 @@ impl TileKind {
             | Self::Markers(_)
             | Self::SimulationLogs(_)
             | Self::Schematic(_)
-            | Self::SourceCode(_)
             | Self::Unknown(_) => &[],
+            Self::SourceCode(_) => SOURCE_CODE_COMMANDS,
         }
     }
 
@@ -865,7 +883,7 @@ impl super::render::PaneRenderer for ApplicationPanes<'_> {
                 );
                 tile.ui(ui, &mut cx);
             }
-            TileKind::SourceCode(tile) => tile.ui(ui, self.state, commands),
+            TileKind::SourceCode(tile) => tile.ui(ui, id, self.state, commands),
             TileKind::Schematic(tile) => tile.ui(
                 ui,
                 self.state

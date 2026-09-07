@@ -216,6 +216,13 @@ impl FileTokens {
     pub fn len(&self) -> usize {
         self.count
     }
+
+    /// Every line with tokens, in no particular order.
+    pub fn lines(&self) -> impl Iterator<Item = (u32, &[Span])> {
+        self.lines
+            .iter()
+            .map(|(line, spans)| (*line, spans.as_slice()))
+    }
 }
 
 #[cfg(test)]

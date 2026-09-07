@@ -1522,6 +1522,29 @@ mod tests {
     }
 
     #[test]
+    fn source_tile_offers_the_values_layout_command() {
+        use crate::config::ValuesLayout;
+        use crate::source_code::SourceCodeMessage;
+        let (mut state, waveform, _) = workspace_state();
+        assert!(parse(&state, "source_values inline").is_none());
+        state
+            .update(Message::OpenSource {
+                file: "design.sv".into(),
+                line: 1,
+                column: 1,
+                instance: None,
+            })
+            .unwrap();
+        let source = state.user.workspace.layout().focused().unwrap();
+        assert_ne!(source, waveform);
+        assert!(matches!(
+            parse(&state, "source_values inline"),
+            Some(Message::ToTile(id, TileMessage::SourceCode(SourceCodeMessage::ValuesLayout(ValuesLayout::Inline)))) if id == source
+        ));
+        assert!(parse(&state, "source_values sideways").is_none());
+    }
+
+    #[test]
     fn prompt_capture_keeps_its_target_while_focus_moves_and_scripts_use_the_live_one() {
         let (mut state, waveform, logs) = workspace_state();
         state

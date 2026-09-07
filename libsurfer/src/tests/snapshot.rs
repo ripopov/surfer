@@ -161,13 +161,22 @@ pub(crate) fn render_and_compare_inner(
     // disable the default timeline
     state.user.show_default_timeline = Some(!state.show_default_timeline());
 
-    if state
-        .user
-        .waves
-        .as_ref()
-        .and_then(|w| w.inner.as_transactions())
-        .is_some_and(|t| t.is_native())
-    {
+    // Native transactions and source tiles request their data while drawing, so
+    // a few frames must run and settle before the capture.
+    let settles_while_drawing =
+        |state: &SystemState| {
+            state
+                .user
+                .waves
+                .as_ref()
+                .and_then(|w| w.inner.as_transactions())
+                .is_some_and(|t| t.is_native())
+                || (state.user.waves.is_some()
+                    && state.user.workspace.tiles().values().any(|tile| {
+                        matches!(tile.kind, crate::tiles::kind::TileKind::SourceCode(_))
+                    }))
+        };
+    if settles_while_drawing(&state) {
         let context = egui::Context::default();
         for _ in 0..3 {
             let mut output = context.run_ui(
@@ -185,6 +194,11 @@ pub(crate) fn render_and_compare_inner(
             output.textures_delta.clear();
             state.handle_async_messages();
             wait_for_waves_fully_loaded(&mut state, 10);
+        }
+        for tile in state.user.workspace.tiles().values() {
+            if let crate::tiles::kind::TileKind::SourceCode(tile) = &tile.kind {
+                tile.rearm_scroll();
+            }
         }
     }
     let size_i = (size.x as i32, size.y as i32);
@@ -207,13 +221,7 @@ pub(crate) fn render_and_compare_inner(
             }
             // Match the app's frame pump: screen samples request native payloads
             // after geometry is known, so settle that bounded work before capture.
-            if state
-                .user
-                .waves
-                .as_ref()
-                .and_then(|w| w.inner.as_transactions())
-                .is_some_and(|t| t.is_native())
-            {
+            if settles_while_drawing(&state) {
                 state.handle_async_messages();
                 wait_for_waves_fully_loaded(&mut state, 10);
             }
@@ -5534,7 +5542,9 @@ fn features_source() -> (SystemState, egui::Context) {
         28,
         Some("top.g_lane[1].u"),
     );
-    (state, egui::Context::default())
+    let context = egui::Context::default();
+    super::source::settle(&mut state, &context);
+    (state, context)
 }
 
 /// The features example viewed in `top` after visiting both lanes, as a user
@@ -5544,6 +5554,7 @@ fn features_in_top() -> (SystemState, egui::Context) {
     let (mut state, context) = features_source();
     state.update(Message::SourceInstance(Some("top.g_lane[0].u".into())));
     state.update(Message::SourceInstance(Some("top".into())));
+    super::source::settle(&mut state, &context);
     (state, context)
 }
 
@@ -5581,7 +5592,7 @@ snapshot_ui! {source_instance_switch_dims_other_branch, || {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn source_hover_shows_values_at_cursor() {
-    use super::source::{frame, line_of, source_token_position, token_column};
+    use super::source::{frame, line_of, source_token_position};
     // Tooltips need pointer events and a persistent context, so this test renders
     // through the skia backend directly instead of `snapshot_ui!`.
     let _runtime = super::source::enter_runtime();
@@ -5590,8 +5601,6 @@ fn source_hover_shows_values_at_cursor() {
     let file = super::source::current_file(&state);
     let text = std::fs::read_to_string(&file).unwrap();
     let line = line_of(&text, "count != LIMIT");
-    let line_text = text.lines().nth(line as usize).unwrap();
-    let column = token_column(line_text, "count", 0);
     let open = || Message::OpenSource {
         file: file.clone(),
         line: line + 1,
@@ -5603,7 +5612,7 @@ fn source_hover_shows_values_at_cursor() {
     frame(&mut state, &context, vec![], Modifiers::NONE);
     frame(&mut state, &context, vec![], Modifiers::NONE);
     let output = frame(&mut state, &context, vec![], Modifiers::NONE);
-    let target = source_token_position(&output, line_text, crate::source_code::GUTTER + column);
+    let target = source_token_position(&output, line, "count", 0);
 
     let screen_rect = Rect::from_min_size(Pos2::ZERO, SNAPSHOT_SIZE);
     let mut surface = create_surface((SNAPSHOT_WIDTH as i32, SNAPSHOT_HEIGHT as i32));
@@ -5692,5 +5701,157 @@ snapshot_ui! {source_ctrl_click_module_name, || {
     super::source::click_token(&mut state, &context, "counter #(.W(8), .WRAP(i == 0)) u(", "counter", 0, Modifiers::COMMAND);
     assert_eq!(super::source::current_line(&state), 24, "counter declaration");
     assert_eq!(super::source::current_instance(&state).as_deref(), Some("top.g_lane[0].u"));
+    state
+}}
+
+// Cursor values shown inline. The features example is sampled at 26, where the
+// saturating lane holds 2 and `en` has dropped; see examples/verilator/README.md.
+
+#[cfg(not(target_arch = "wasm32"))]
+fn set_values_layout(state: &mut SystemState, layout: crate::config::ValuesLayout) {
+    let id = super::source::source_tile_id(state);
+    state.update(Message::ToTile(
+        id,
+        crate::tiles::kind::TileMessage::SourceCode(
+            crate::source_code::SourceCodeMessage::ValuesLayout(layout),
+        ),
+    ));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui! {source_values_trailing_at_cursor, || {
+    use crate::source_code::values::ValueState::Normal;
+    let (state, _) = features_source();
+    let shown = |needle| super::source::values_on(&state, needle);
+    assert_eq!(
+        shown("else if (en && count != LIMIT) count <= count + 1'b1;"),
+        vec![
+            ("en".to_owned(), "0".to_owned(), Normal),
+            ("count".to_owned(), "02".to_owned(), Normal),
+            ("LIMIT".to_owned(), "c8".to_owned(), Normal),
+        ],
+        "one value per signal, parameters from the VDB"
+    );
+    assert_eq!(
+        shown("module counter #(parameter int W"),
+        vec![("W".to_owned(), "8".to_owned(), Normal), ("WRAP".to_owned(), "0".to_owned(), Normal)]
+    );
+    let port = shown("input  logic         clk,");
+    assert!(port.iter().any(|(name, text, _)| name == "clk" && text == "1"), "{port:?}");
+    assert_eq!(super::source::source_tile(&state).values_layout, None, "the config decides until the tile is switched");
+    state
+}}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui! {source_values_inline_chips, || {
+    let (mut state, _) = features_source();
+    set_values_layout(&mut state, crate::config::ValuesLayout::Inline);
+    assert_eq!(super::source::source_tile(&state).values_layout, Some(crate::config::ValuesLayout::Inline));
+    state
+}}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui! {source_values_inline_from_config, || {
+    let (mut state, _) = features_source();
+    state.user.config.source.values_layout = crate::config::ValuesLayout::Inline;
+    assert_eq!(super::source::source_tile(&state).values_layout, None);
+    state
+}}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui! {source_value_changed_at_cursor, || {
+    use crate::source_code::values::ValueState::{Changed, Normal};
+    let (mut state, _) = features_source();
+    // At 15 the wrapping lane counts to 2 on the clock edge.
+    state.update(Message::ToDocument(DocumentCommand::CursorSet(15.into())));
+    state.update(Message::SourceInstance(Some("top.g_lane[0].u".into())));
+    let file = super::source::current_file(&state);
+    super::source::open(&mut state, &file, 34, Some("top.g_lane[0].u"));
+    super::source::settle(&mut state, &egui::Context::default());
+    assert_eq!(
+        super::source::values_on(&state, "else if (en) count <= count + 1'b1;"),
+        vec![("en".to_owned(), "1".to_owned(), Normal), ("count".to_owned(), "02".to_owned(), Changed)]
+    );
+    state
+}}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui! {source_value_unknown_in_four_state_trace, || {
+    use crate::source_code::values::ValueState::Unknown;
+    let trace = super::source::four_state_features();
+    let mut state = super::source::load_trace(trace.clone());
+    state.update(Message::ToDocument(DocumentCommand::CursorSet(7.into())));
+    state.update(Message::SetMenuVisible(false));
+    state.update(Message::SetSidePanelVisible(false));
+    state.update(Message::SetToolbarVisible(false));
+    state.update(Message::SetOverviewVisible(false));
+    state.user.show_statusbar = Some(false);
+    state.user.show_default_timeline = Some(false);
+    super::source::open(&mut state, &trace.with_extension("sv"), 34, Some("top.g_lane[0].u"));
+    super::source::settle(&mut state, &egui::Context::default());
+    let shown = super::source::values_on(&state, "else if (en) count <= count + 1'b1;");
+    let count = shown.iter().find(|(name, _, _)| name == "count").expect("count has a value");
+    assert_eq!(count.2, Unknown, "{shown:?}");
+    assert!(count.1.contains('x'), "{shown:?}");
+    state
+}}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui! {source_values_toggle_in_header, || {
+    use super::source::{click_at, frame, label_position};
+    let (mut state, context) = features_source();
+    frame(&mut state, &context, vec![], Modifiers::NONE);
+    let output = frame(&mut state, &context, vec![], Modifiers::NONE);
+    click_at(&mut state, &context, label_position(&output, "Inline"), Modifiers::NONE);
+    assert_eq!(super::source::source_tile(&state).values_layout, Some(crate::config::ValuesLayout::Inline));
+    let output = frame(&mut state, &context, vec![], Modifiers::NONE);
+    click_at(&mut state, &context, label_position(&output, "Trailing"), Modifiers::NONE);
+    assert_eq!(super::source::source_tile(&state).values_layout, Some(crate::config::ValuesLayout::Trailing));
+    let output = frame(&mut state, &context, vec![], Modifiers::NONE);
+    click_at(&mut state, &context, label_position(&output, "Inline"), Modifiers::NONE);
+    let (file, line, instance) = (
+        super::source::current_file(&state),
+        super::source::current_line(&state),
+        super::source::current_instance(&state),
+    );
+    super::source::open(&mut state, &file, line, instance.as_deref());
+    state
+}}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui! {source_values_skip_inactive_branch, || {
+    let (mut state, _) = features_source();
+    state.update(Message::SourceInstance(Some("top.g_lane[0].u".into())));
+    assert!(
+        super::source::values_on(&state, "else if (en && count != LIMIT) count <= count + 1'b1;").is_empty(),
+        "the saturating branch is not instantiated in lane 0"
+    );
+    assert!(!super::source::values_on(&state, "else if (en) count <= count + 1'b1;").is_empty());
+    state
+}}
+
+#[cfg(not(target_arch = "wasm32"))]
+snapshot_ui! {source_values_in_top_show_members_and_arrays, || {
+    use crate::source_code::values::ValueState::Normal;
+    let (mut state, _) = features_in_top();
+    let file = super::source::current_file(&state);
+    super::source::open(&mut state, &file, 80, Some("top"));
+    let shown = |needle| super::source::values_on(&state, needle);
+    assert_eq!(
+        shown("bus.data  = lane_count[1];"),
+        vec![
+            ("bus.data".to_owned(), "02".to_owned(), Normal),
+            ("lane_count[1]".to_owned(), "02".to_owned(), Normal),
+        ]
+    );
+    assert_eq!(
+        shown("pkt.tag   = inc_tag("),
+        vec![
+            ("pkt.tag".to_owned(), "3".to_owned(), Normal),
+            ("lane_count[0]".to_owned(), "02".to_owned(), Normal),
+        ],
+        "the member, not the aggregate; the element selected by a constant index"
+    );
+    assert!(shown("case (mode)").iter().any(|(name, text, _)| name == "mode" && text == "2"));
     state
 }}

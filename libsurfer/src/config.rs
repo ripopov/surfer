@@ -136,9 +136,30 @@ pub enum FocusHighlight {
     LineWidthAndBrightnessShift,
 }
 
+/// Where the source tile draws cursor values.
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum ValuesLayout {
+    /// After the code of each line, aligned to a column when the code is short
+    Trailing,
+    /// As a chip right after the first use of each identifier on the line
+    Inline,
+}
+
+/// Source-code tile settings
+#[derive(Debug, Deserialize, Clone)]
+pub struct SourceConfig {
+    /// How cursor values are shown
+    pub values_layout: ValuesLayout,
+    /// Column where trailing values start when the code ends earlier
+    pub values_column: u32,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SurferConfig {
     pub layout: SurferLayout,
+    /// Source-code tile settings
+    pub source: SourceConfig,
     #[serde(deserialize_with = "deserialize_theme")]
     pub theme: SurferTheme,
     /// Mouse gesture configurations.
@@ -1051,6 +1072,15 @@ pub struct SourceColors {
     /// Background of an inactive generate block
     #[serde(deserialize_with = "deserialize_hex_color")]
     pub inactive_background: Color32,
+    /// Cursor values shown inline; used by no token class
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub value: Color32,
+    /// A value whose signal changed at the cursor
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub value_changed: Color32,
+    /// A value with undefined or high-impedance bits
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub value_unknown: Color32,
 }
 
 impl SurferTheme {

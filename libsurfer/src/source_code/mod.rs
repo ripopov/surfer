@@ -125,6 +125,13 @@ impl SourceCodeTile {
         self.instance = instance;
     }
 
+    /// Scrolls to the target line again on the next frame, for renderers that
+    /// draw preparatory frames in another context.
+    #[cfg(test)]
+    pub(crate) fn rearm_scroll(&self) {
+        self.last_target.set(None);
+    }
+
     /// Applies a setting; true when something changed.
     pub(crate) fn update(&mut self, message: SourceCodeMessage) -> bool {
         match message {

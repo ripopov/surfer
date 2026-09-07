@@ -15,7 +15,11 @@ record the same design with the same stimulus for waveform parity tests.
   selected per instance (`top.g_lane[0].u` wraps, `top.g_lane[1].u` saturates
   at `FEAT_SAT_LIMIT`), a case statement, and `include/features_defs.svh`
   reached through `+incdir+include` with `+define+FEAT_SAT_LIMIT=200`. It is the
-  design the source tile's highlighting and navigation tests use.
+  design the source tile's highlighting, navigation and value tests use: at
+  time 26 the saturating lane holds 2 while `en` has dropped and `state` is
+  `DONE`; at 15 the wrapping lane has just counted to 2. Verilator records
+  two-state values only, so the test for undefined values writes a four-state
+  twin of this recording under `target/` beside copies of the VDB and sources.
 
 `main.cpp` drives all simulations for timestamps 0 through 30. These are native
 simulator recordings, not traces assembled by a test writer. Source filenames

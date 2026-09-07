@@ -97,6 +97,13 @@ northwest = "ZoomToFit"
 southeast = "GoToEnd"
 southwest = "GoToStart"
 
+[source]
+# Where the source tile shows cursor values: "trailing" after the code of each
+# line, or "inline" as chips after each identifier.
+values_layout = "trailing"
+# Column where trailing values start when the code of a line ends earlier.
+values_column = 60
+
 [behavior]
 keep_during_reload = true
 file_history_size = 10
