@@ -178,3 +178,25 @@ CARGO_PROFILE_RELEASE_DEBUG=true ca flamegraph -- examples/picorv32.vcd -c perfo
 
 See [Tiling state and resource ownership](tiling.md) for workspace mutation,
 resource dependencies, persistence, and undo/redo boundaries.
+
+## Application logo
+
+The Aurora master is [`surfer/assets/logo-small.svg`](../../surfer/assets/logo-small.svg).
+The native window and custom title bar share its generated 256 px PNG; browser
+and server use the same multi-resolution ICO; the VS Code extension uses a
+350 px PNG. `logo.png` is the 512 px general-purpose export.
+
+After editing the SVG, install librsvg's `rsvg-convert` (Debian/Ubuntu:
+`librsvg2-bin`) and run from the repository root:
+
+```sh
+python3 scripts/generate_icons.py
+python3 scripts/generate_icons.py --check
+cargo build --locked -p surfer -p surver
+```
+
+Commit the SVG and regenerated assets together. Generated assets are checked in,
+so ordinary native, Trunk, and extension builds do not require an SVG renderer.
+The check compares renderer output byte-for-byte; use the same librsvg version
+when checking reproducibility. See [Appearance](../html/appearance.html#application-logo)
+for the asset flow and previews.

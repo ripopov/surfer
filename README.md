@@ -1,5 +1,7 @@
 # Surfer
 
+<img src="surfer/assets/logo-small.svg" alt="Surfer Ultra Aurora logo" width="128" height="128">
+
 ![Pipeline status](https://gitlab.com/surfer-project/surfer/badges/main/pipeline.svg)
 ![License](https://img.shields.io/gitlab/license/surfer-project%2Fsurfer)
 ![Code coverage](https://gitlab.com/surfer-project/surfer/badges/main/coverage.svg)
