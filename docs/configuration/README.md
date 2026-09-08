@@ -46,7 +46,7 @@ To find the Unicode code point for an icon, search the [egui-remixicon source](h
 
 #### Scope Icons
 
-Scope icons appear next to hierarchy items like modules, functions, and packages. Add a `[scope_icons]` section to your theme file:
+Scope and variable icons are enabled by default. Set `layout.show_hierarchy_icons = false` to hide them. Scope icons appear next to hierarchy items like modules, functions, and packages. Add a `[scope_icons]` section to your theme file:
 
 ```toml
 [scope_icons]

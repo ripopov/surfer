@@ -1,7 +1,7 @@
 default_variable_name_type = "Unique"
 default_clock_highlight_type = "Line"
 snap_distance = 6
-theme = ""
+theme = "Atlas Dark"
 undo_stack_size = 50
 autoreload_files = "Ask"
 autoload_sibling_state_files = "Ask"
@@ -29,7 +29,7 @@ show_variable_indices = true
 show_variable_direction = true
 show_default_timeline = true
 show_empty_scopes = false
-show_hierarchy_icons = false
+show_hierarchy_icons = true
 parameter_display_location = "Scopes"
 window_width = 1920
 window_height = 1080

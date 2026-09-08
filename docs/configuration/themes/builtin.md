@@ -65,5 +65,5 @@ Catppuccin Mocha, Monokai, and Dracula are also bundled. Their widget palettes
 come from the local egui-table demo, with additional waveform and source colors
 adapted for Surfer. Preview all eight in the
 [appearance chapter](../../html/appearance.html). Select a theme in the native
-window header or in Settings → Theme. Set `theme = "Atlas Dark"` in the config
-file to make it the startup preference. Loading a saved workspace preserves the current theme.
+window header or in Settings → Theme. Atlas Dark is the default startup theme; set `theme` in the config
+file to choose another startup preference. Loading a saved workspace preserves the current theme.

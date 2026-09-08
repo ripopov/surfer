@@ -52,7 +52,7 @@ On native builds, configuration is loaded in this order, with later sources over
 | `default_variable_name_type` | `"Unique"` | `Local`, `Unique`, `Global` | Default signal name display style. |
 | `default_clock_highlight_type` | `"Line"` | `Line`, `Cycle`, `None` | Default clock highlighting mode. |
 | `snap_distance` | `6` | non-negative number | Cursor snap distance in pixels. |
-| `theme` | `""` | theme name | Theme to load. Leave empty to use the built-in default theme. |
+| `theme` | `"Atlas Dark"` | theme name | Startup theme. An explicit empty string selects the legacy base palette. |
 | `undo_stack_size` | `50` | integer | Maximum number of undo steps to keep. |
 | `autoreload_files` | `"Ask"` | `Always`, `Never`, `Ask` | What to do when loaded waveform files change on disk. |
 | `autoload_sibling_state_files` | `"Ask"` | `Always`, `Never`, `Ask` | Whether matching state files should be loaded automatically. |
@@ -93,7 +93,7 @@ Controls the initial UI layout and waveform rendering behavior.
 | `show_variable_direction` | `true` | boolean | Show direction icons or indicators for variables. |
 | `show_default_timeline` | `true` | boolean | Add a timeline row by default. |
 | `show_empty_scopes` | `false` | boolean | Show scopes that contain no visible items. |
-| `show_hierarchy_icons` | `false` | boolean | Show scope and variable icons in the hierarchy. |
+| `show_hierarchy_icons` | `true` | boolean | Show scope and variable icons in the hierarchy. |
 | `parameter_display_location` | `"Scopes"` | `Variables`, `Scopes`, `Tooltips`, `None` | Where parameter values are displayed in the hierarchy UI. |
 | `window_width` | `1920` | integer | Initial window width in pixels. |
 | `window_height` | `1080` | integer | Initial window height in pixels. |
