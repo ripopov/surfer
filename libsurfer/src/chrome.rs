@@ -110,29 +110,34 @@ pub fn header(
             }
 
             let p = ui.painter();
-            let mark =
-                Rect::from_center_size(pos2(rect.left() + 29.0, rect.center().y), vec2(24.0, 24.0));
+            let pixels_per_point = p.pixels_per_point();
+            let icon_pixels = (24.0 * pixels_per_point).round().max(1.0) as u32;
+            let icon_points = icon_pixels as f32 / pixels_per_point;
+            let origin =
+                pos2(rect.left() + 29.0, rect.center().y) - vec2(icon_points, icon_points) * 0.5;
+            let origin = pos2(
+                (origin.x * pixels_per_point).round() / pixels_per_point,
+                (origin.y * pixels_per_point).round() / pixels_per_point,
+            );
+            let mark = Rect::from_min_size(origin, vec2(icon_points, icon_points));
             let icon_id = egui::Id::new("surfer-header-icon");
-            let icon = ui
+            let cached = ui
                 .ctx()
-                .data(|data| data.get_temp::<egui::TextureHandle>(icon_id));
-            let icon = icon.unwrap_or_else(|| {
-                let icon = eframe::icon_data::from_png_bytes(include_bytes!(
-                    "../../surfer/assets/com.gitlab.surferproject.surfer.png"
-                ))
-                .expect("bundled Surfer icon must be a valid PNG");
-                let texture = ui.ctx().load_texture(
-                    "surfer-header-icon",
-                    egui::ColorImage::from_rgba_unmultiplied(
-                        [icon.width as usize, icon.height as usize],
-                        &icon.rgba,
-                    ),
-                    egui::TextureOptions::LINEAR,
-                );
-                ui.ctx()
-                    .data_mut(|data| data.insert_temp(icon_id, texture.clone()));
-                texture
-            });
+                .data(|data| data.get_temp::<(u32, egui::TextureHandle)>(icon_id));
+            let icon = cached
+                .filter(|(size, _)| *size == icon_pixels)
+                .map(|(_, texture)| texture)
+                .unwrap_or_else(|| {
+                    let texture = ui.ctx().load_texture(
+                        "surfer-header-icon",
+                        header_icon_image(icon_pixels),
+                        egui::TextureOptions::LINEAR,
+                    );
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(icon_id, (icon_pixels, texture.clone()));
+                    });
+                    texture
+                });
             p.image(
                 icon.id(),
                 mark,
@@ -184,6 +189,37 @@ pub fn header(
                 ui.visuals().widgets.noninteractive.bg_stroke,
             );
         });
+}
+
+/// Prefilter at the actual display resolution instead of asking the GPU to
+/// shrink a large texture using only four samples per destination pixel.
+fn header_icon_image(pixels: u32) -> egui::ColorImage {
+    let source = eframe::icon_data::from_png_bytes(include_bytes!("../../surfer/assets/logo.png"))
+        .expect("bundled Surfer icon must be a valid PNG");
+    let source = egui::ColorImage::from_rgba_unmultiplied(
+        [source.width as usize, source.height as usize],
+        &source.rgba,
+    );
+    // Filter premultiplied channels so transparent corners do not acquire a
+    // dark fringe. egui textures use the same premultiplied representation.
+    let rgba = source
+        .pixels
+        .iter()
+        .flat_map(|color| color.to_array())
+        .collect();
+    let source = image::RgbaImage::from_raw(source.size[0] as u32, source.size[1] as u32, rgba)
+        .expect("decoded icon dimensions match its pixel buffer");
+    let resized = image::imageops::resize(
+        &source,
+        pixels,
+        pixels,
+        image::imageops::FilterType::Lanczos3,
+    );
+    let colors = resized
+        .pixels()
+        .map(|pixel| Color32::from_rgba_premultiplied(pixel[0], pixel[1], pixel[2], pixel[3]))
+        .collect();
+    egui::ColorImage::new([pixels as usize, pixels as usize], colors)
 }
 
 fn toggle_maximized(ctx: &egui::Context) {

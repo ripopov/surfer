@@ -182,9 +182,11 @@ resource dependencies, persistence, and undo/redo boundaries.
 ## Application logo
 
 The Aurora master is [`surfer/assets/logo-small.svg`](../../surfer/assets/logo-small.svg).
-The native window and custom title bar share its generated 256 px PNG; browser
-and server use the same multi-resolution ICO; the VS Code extension uses a
-350 px PNG. `logo.png` is the 512 px general-purpose export.
+The native window uses its generated 256 px PNG; the custom title bar downsamples
+the 512 px `logo.png` to its physical display size with a premultiplied-alpha
+Lanczos filter. The header caches that texture until the display scale changes
+and aligns it to physical pixels. Browser and server use the same multi-resolution
+ICO; the VS Code extension uses a 350 px PNG.
 
 After editing the SVG, install librsvg's `rsvg-convert` (Debian/Ubuntu:
 `librsvg2-bin`) and run from the repository root:
