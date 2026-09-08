@@ -110,19 +110,35 @@ pub fn header(
             }
 
             let p = ui.painter();
-            let accent = ui.visuals().selection.stroke.color;
             let mark =
                 Rect::from_center_size(pos2(rect.left() + 29.0, rect.center().y), vec2(24.0, 24.0));
-            p.rect_filled(mark, 7.0, ui.visuals().selection.bg_fill);
-            for (offset, height) in [(6.0, 8.0), (12.0, 15.0), (18.0, 11.0)] {
-                p.line_segment(
-                    [
-                        pos2(mark.left() + offset, mark.bottom() - 6.0),
-                        pos2(mark.left() + offset, mark.bottom() - 6.0 - height),
-                    ],
-                    Stroke::new(2.0, accent),
+            let icon_id = egui::Id::new("surfer-header-icon");
+            let icon = ui
+                .ctx()
+                .data(|data| data.get_temp::<egui::TextureHandle>(icon_id));
+            let icon = icon.unwrap_or_else(|| {
+                let icon = eframe::icon_data::from_png_bytes(include_bytes!(
+                    "../../surfer/assets/com.gitlab.surferproject.surfer.png"
+                ))
+                .expect("bundled Surfer icon must be a valid PNG");
+                let texture = ui.ctx().load_texture(
+                    "surfer-header-icon",
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [icon.width as usize, icon.height as usize],
+                        &icon.rgba,
+                    ),
+                    egui::TextureOptions::LINEAR,
                 );
-            }
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(icon_id, texture.clone()));
+                texture
+            });
+            p.image(
+                icon.id(),
+                mark,
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
             p.text(
                 pos2(rect.left() + 48.0, rect.center().y),
                 Align2::LEFT_CENTER,
