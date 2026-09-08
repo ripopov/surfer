@@ -2308,6 +2308,7 @@ impl SystemState {
                 );
             }
             Message::HideCommandPrompt => {
+                self.restore_prompt_theme();
                 *self.command_prompt_text.borrow_mut() = String::new();
                 self.command_prompt.suggestions = vec![];
                 self.command_prompt.selected = self.command_prompt.previous_commands.len();
@@ -2559,6 +2560,7 @@ impl SystemState {
                 );
             }
             Message::CommandPromptClear => {
+                self.restore_prompt_theme();
                 *self.command_prompt_text.borrow_mut() = String::new();
                 self.command_prompt.suggestions = vec![];
                 // self.command_prompt.selected = self.command_prompt.previous_commands.len();
@@ -2581,6 +2583,7 @@ impl SystemState {
                     } else {
                         0
                     });
+                self.preview_prompt_theme();
             }
             Message::CommandPromptPushPrevious(cmd) => {
                 let len = cmd.len();
@@ -2690,6 +2693,7 @@ impl SystemState {
                         .unwrap_or(self.command_prompt.selected)
                         .saturating_sub(1),
                 );
+                self.preview_prompt_theme();
             }
             Message::SelectNextCommand => {
                 self.command_prompt.new_selection = Some(
@@ -2699,6 +2703,7 @@ impl SystemState {
                         .saturating_add(1)
                         .min(self.command_prompt.suggestions.len().saturating_sub(1)),
                 );
+                self.preview_prompt_theme();
             }
             Message::SetHierarchyStyle(style) => self.user.hierarchy_style = Some(style),
             Message::SetArrowKeyBindings(bindings) => {
@@ -3206,6 +3211,9 @@ impl SystemState {
                 let theme = SurferTheme::new(theme_name)
                     .with_context(|| "Failed to set theme")
                     .ok()?;
+                // An explicit choice commits any command-prompt preview. UI messages
+                // are popped in reverse order, so prompt cleanup can follow this.
+                self.command_prompt.original_theme = None;
                 self.user.config.theme = theme;
                 self.apply_theme_visuals();
                 self.invalidate_draw_commands();

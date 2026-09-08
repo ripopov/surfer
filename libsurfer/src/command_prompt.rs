@@ -24,6 +24,8 @@ pub fn run_fuzzy_parser(input: &str, state: &SystemState, msgs: &mut Vec<Message
 #[derive(Default)]
 pub struct CommandPrompt {
     pub visible: bool,
+    /// Full resolved palette retained until the preview is accepted or cancelled.
+    pub original_theme: Option<crate::config::SurferTheme>,
     /// Captured when the prompt opens; suggestions and execution use it (§5.1).
     pub target: crate::tiles::input::CommandTarget,
     pub suggestions: Vec<(String, Vec<bool>)>,
@@ -31,6 +33,56 @@ pub struct CommandPrompt {
     pub new_selection: Option<usize>,
     pub new_text: Option<(String, String)>,
     pub previous_commands: Vec<(String, Vec<bool>)>,
+}
+
+impl SystemState {
+    pub(crate) fn restore_prompt_theme(&mut self) {
+        if let Some(theme) = self.command_prompt.original_theme.take() {
+            self.user.config.theme = theme;
+            self.apply_theme_visuals();
+            self.invalidate_draw_commands();
+        }
+    }
+
+    pub(crate) fn preview_prompt_theme(&mut self) {
+        if !self.command_prompt.visible {
+            return;
+        }
+        let candidate = {
+            let input = self.command_prompt_text.borrow();
+            let expanded =
+                expand_command(&input, get_parser(self, self.command_prompt.target)).expanded;
+            let selecting_theme = input.contains(char::is_whitespace)
+                && expanded.split_ascii_whitespace().next() == Some("theme_select");
+            selecting_theme
+                .then(|| {
+                    let index = self
+                        .command_prompt
+                        .new_selection
+                        .unwrap_or(self.command_prompt.selected);
+                    self.command_prompt
+                        .suggestions
+                        .get(index)
+                        .map(|(name, _)| name.clone())
+                })
+                .flatten()
+        };
+        let Some(name) = candidate else {
+            self.restore_prompt_theme();
+            return;
+        };
+        if self.user.config.theme.theme_name == name {
+            return;
+        }
+        if let Ok(theme) = crate::config::SurferTheme::new(Some(name)) {
+            let previous = std::mem::replace(&mut self.user.config.theme, theme);
+            if self.command_prompt.original_theme.is_none() {
+                self.command_prompt.original_theme = Some(previous);
+            }
+            self.apply_theme_visuals();
+            self.invalidate_draw_commands();
+        }
+    }
 }
 
 pub fn show_command_prompt(
@@ -105,11 +157,17 @@ pub fn show_command_prompt(
                     msgs.push(Message::SelectNextCommand);
                 }
 
-                if response.ctx.input(|i| i.key_pressed(Key::N)) {
+                if response
+                    .ctx
+                    .input(|i| i.modifiers.ctrl && i.key_pressed(Key::N))
+                {
                     msgs.push(Message::SelectNextCommand);
                 }
 
-                if response.ctx.input(|i| i.key_pressed(Key::P)) {
+                if response
+                    .ctx
+                    .input(|i| i.modifiers.ctrl && i.key_pressed(Key::P))
+                {
                     msgs.push(Message::SelectPrevCommand);
                 }
 
@@ -432,5 +490,100 @@ impl egui::Widget for SuggestionLabel {
         }
 
         response
+    }
+}
+
+#[cfg(test)]
+mod theme_preview_tests {
+    use super::*;
+
+    fn type_query(state: &mut SystemState, text: &str) {
+        *state.command_prompt_text.borrow_mut() = text.into();
+        let mut messages = vec![];
+        run_fuzzy_parser(text, state, &mut messages);
+        for message in messages {
+            state.update(message);
+        }
+    }
+
+    #[test]
+    fn theme_preview_follows_filter_and_arrows_and_cancel_restores_original() {
+        let mut state = SystemState::new().unwrap();
+        state.update(Message::SelectTheme(Some("Atlas Light".into())));
+        let original_color = state.user.config.theme.foreground;
+        state.update(Message::ShowCommandPrompt(String::new(), None));
+        type_query(&mut state, "theme_select ");
+        assert_eq!(
+            state.user.config.theme.theme_name,
+            state.command_prompt.suggestions[0].0
+        );
+        state.update(Message::SelectNextCommand);
+        assert_eq!(
+            state.user.config.theme.theme_name,
+            state.command_prompt.suggestions[1].0
+        );
+        state.update(Message::SelectPrevCommand);
+        assert_eq!(
+            state.user.config.theme.theme_name,
+            state.command_prompt.suggestions[0].0
+        );
+        type_query(&mut state, "theme_select Dracula");
+        assert_eq!(state.user.config.theme.theme_name, "Dracula");
+        assert!(state.command_prompt.visible);
+        assert!(state.command_prompt.previous_commands.is_empty());
+        state.update(Message::HideCommandPrompt);
+        assert_eq!(state.user.config.theme.theme_name, "Atlas Light");
+        assert_eq!(state.user.config.theme.foreground, original_color);
+        assert!(state.command_prompt.original_theme.is_none());
+    }
+
+    #[test]
+    fn theme_preview_confirmation_keeps_choice_and_other_commands_do_not_preview() {
+        let mut state = SystemState::new().unwrap();
+        state.update(Message::SelectTheme(Some("Atlas Light".into())));
+        state.update(Message::ShowCommandPrompt(String::new(), None));
+        type_query(&mut state, "theme_select Dracula");
+        // Exercise the actual Enter handler and the UI's LIFO message dispatch.
+        state.command_prompt.new_text = None;
+        let ctx = egui::Context::default();
+        for _ in 0..2 {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |_| {
+                show_command_prompt(&mut state, &ctx, None, &mut vec![]);
+            });
+            output.textures_delta.clear();
+        }
+        let mut messages = vec![];
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |_| show_command_prompt(&mut state, &ctx, None, &mut messages),
+        );
+        output.textures_delta.clear();
+        assert!(messages.iter().any(
+            |message| matches!(message, Message::SelectTheme(Some(name)) if name == "Dracula")
+        ));
+        while let Some(message) = messages.pop() {
+            state.update(message);
+        }
+        assert!(!state.command_prompt.visible);
+        assert!(state.command_prompt.original_theme.is_none());
+        assert_eq!(state.user.config.theme.theme_name, "Dracula");
+        state.update(Message::ShowCommandPrompt(String::new(), None));
+        type_query(&mut state, "theme_select Atlas");
+        assert_ne!(state.user.config.theme.theme_name, "Dracula");
+        type_query(&mut state, "zoom");
+        assert_eq!(state.user.config.theme.theme_name, "Dracula");
+        type_query(&mut state, "");
+        assert_eq!(state.user.config.theme.theme_name, "Dracula");
+        state.update(Message::HideCommandPrompt);
+        assert_eq!(state.user.config.theme.theme_name, "Dracula");
     }
 }
