@@ -50,6 +50,14 @@ macro_rules! named_theme {
 /// Built-in theme names and their corresponding embedded content
 static BUILTIN_THEMES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     HashMap::from([
+        named_theme!("Atlas Light", "atlas-light"),
+        named_theme!("Atlas Dark", "atlas-dark"),
+        named_theme!("GitHub Light", "github-light"),
+        named_theme!("GitHub Dark", "github-dark"),
+        named_theme!("Catppuccin Latte", "catppuccin-latte"),
+        named_theme!("Catppuccin Mocha", "catppuccin-mocha"),
+        named_theme!("Monokai", "monokai"),
+        named_theme!("Dracula", "dracula"),
         theme!("dark+"),
         theme!("dark-high-contrast"),
         named_theme!("IBM", "ibm"),
@@ -541,8 +549,32 @@ pub struct SurferRelationArrow {
     pub head_length: f32,
 }
 
+/// UI-only tokens; existing themes can omit this table entirely.
+#[derive(Debug, Default, Deserialize)]
+pub struct UiTheme {
+    pub dark_mode: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_optional_hex_color")]
+    pub muted: Option<Color32>,
+    #[serde(default, deserialize_with = "deserialize_optional_hex_color")]
+    pub accent: Option<Color32>,
+    #[serde(default, deserialize_with = "deserialize_optional_hex_color")]
+    pub subtle: Option<Color32>,
+    #[serde(default, deserialize_with = "deserialize_optional_hex_color")]
+    pub hover: Option<Color32>,
+}
+
+fn deserialize_optional_hex_color<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Color32>, D::Error> {
+    deserialize_hex_color(deserializer).map(Some)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SurferTheme {
+    /// Optional UI palette overrides. Missing colors derive from the trace theme.
+    #[serde(default)]
+    pub ui: UiTheme,
+
     /// Color used for text across the UI
     #[serde(deserialize_with = "deserialize_hex_color")]
     pub foreground: Color32,
@@ -1096,7 +1128,9 @@ impl SurferTheme {
         // Compute luminance
         let l_foreground = get_luminance(self.foreground);
         let l_alt_text_color = get_luminance(self.alt_text_color);
-        let l_background = get_luminance(backgroundcolor);
+        // Alternating waveform rows can be transparent. Contrast must use the
+        // visible canvas under them, not transparent black's RGB channels.
+        let l_background = get_luminance(self.canvas_colors.background.blend(backgroundcolor));
 
         // Compute contrast ratio
         let mut cr_foreground = (l_foreground + 0.05) / (l_background + 0.05);

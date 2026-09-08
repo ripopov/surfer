@@ -714,46 +714,70 @@ impl SystemState {
         }
     }
 
+    pub(crate) fn apply_theme_visuals(&self) {
+        if let Some(ctx) = &self.context {
+            ctx.set_visuals_of(egui::Theme::Dark, self.get_visuals());
+            ctx.set_visuals_of(egui::Theme::Light, self.get_visuals());
+        }
+    }
+
     pub fn get_visuals(&self) -> Visuals {
-        let widget_style = WidgetVisuals {
-            bg_fill: self.user.config.theme.secondary_ui_color.background,
-            fg_stroke: Stroke {
-                color: self.user.config.theme.secondary_ui_color.foreground,
-                width: 1.0,
-            },
-            weak_bg_fill: self.user.config.theme.secondary_ui_color.background,
-            bg_stroke: Stroke {
-                color: self.user.config.theme.border_color,
-                width: 1.0,
-            },
-            corner_radius: CornerRadius::same(2),
+        let theme = &self.user.config.theme;
+        let palette = &theme.ui;
+        let surface = theme.primary_ui_color.background;
+        let background = theme.secondary_ui_color.background;
+        let dark = palette.dark_mode.unwrap_or_else(|| {
+            // Infer a sensible mode for themes predating the UI palette table.
+            background.r() as u32 + background.g() as u32 + (background.b() as u32) < 384
+        });
+        let accent = palette.accent.unwrap_or(theme.accent_info.background);
+        let subtle = palette.subtle.unwrap_or(theme.canvas_colors.alt_background);
+        let hover = palette
+            .hover
+            .unwrap_or_else(|| surface.lerp_to_gamma(accent, 0.15));
+        let selected = theme.selected_elements_colors.background;
+        let widget = |fill, border| WidgetVisuals {
+            bg_fill: fill,
+            weak_bg_fill: fill,
+            bg_stroke: Stroke::new(1.0, border),
+            fg_stroke: Stroke::new(1.0, theme.foreground),
+            corner_radius: CornerRadius::same(3),
             expansion: 0.0,
         };
-
         Visuals {
-            override_text_color: Some(self.user.config.theme.foreground),
-            extreme_bg_color: self.user.config.theme.secondary_ui_color.background,
-            panel_fill: self.user.config.theme.secondary_ui_color.background,
-            window_fill: self.user.config.theme.primary_ui_color.background,
-            window_stroke: Stroke {
-                width: 1.0,
-                color: self.user.config.theme.border_color,
-            },
+            override_text_color: Some(theme.foreground),
+            weak_text_color: Some(
+                palette
+                    .muted
+                    .unwrap_or_else(|| theme.foreground.lerp_to_gamma(background, 0.35)),
+            ),
+            extreme_bg_color: surface,
+            text_edit_bg_color: Some(surface),
+            panel_fill: background,
+            window_fill: surface,
+            window_stroke: Stroke::new(1.0, theme.border_color),
+            faint_bg_color: subtle,
+            code_bg_color: subtle,
+            hyperlink_color: accent,
             selection: Selection {
-                bg_fill: self.user.config.theme.selected_elements_colors.background,
-                stroke: Stroke {
-                    color: self.user.config.theme.selected_elements_colors.foreground,
-                    width: 1.0,
-                },
+                bg_fill: selected,
+                stroke: Stroke::new(1.0, accent),
             },
             widgets: Widgets {
-                noninteractive: widget_style,
-                inactive: widget_style,
-                hovered: widget_style,
-                active: widget_style,
-                open: widget_style,
+                noninteractive: WidgetVisuals {
+                    corner_radius: CornerRadius::ZERO,
+                    ..widget(background, theme.border_color)
+                },
+                inactive: widget(surface, theme.border_color),
+                hovered: widget(hover, accent),
+                active: widget(selected, accent),
+                open: widget(selected, accent),
             },
-            ..Visuals::dark()
+            ..if dark {
+                Visuals::dark()
+            } else {
+                Visuals::light()
+            }
         }
     }
 
@@ -771,6 +795,9 @@ impl SystemState {
         }
         // first swap everything, fix special cases afterwards
         mem::swap(&mut self.user, &mut loaded_state);
+        // Configuration is not serialized with a workspace. Keep the active
+        // application preference, including the title-bar theme selection.
+        mem::swap(&mut self.user.config, &mut loaded_state.config);
 
         // swap back waves for inner, source, format since we want to keep the file
         // fix up all wave references from paths if a wave is loaded
@@ -1019,5 +1046,89 @@ mod empty_workspace_tests {
         fresh.load_state(Box::new(restored), None);
         install(&mut fresh);
         assert!(fresh.user.workspace.tiles().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod appearance_tests {
+    use super::*;
+
+    #[test]
+    fn demo_palettes_preserve_mode_and_distinct_widget_states() {
+        let mut state = SystemState::new_default_config().unwrap();
+        for (name, dark, background, accent) in [
+            ("Atlas Light", false, 0xf7f9fc, 0x3063de),
+            ("GitHub Light", false, 0xf6f8fa, 0x0969da),
+            ("Catppuccin Latte", false, 0xe6e9ef, 0x8839ef),
+            ("Atlas Dark", true, 0x0f1623, 0x86b1ff),
+            ("GitHub Dark", true, 0x010409, 0x58a6ff),
+            ("Catppuccin Mocha", true, 0x181825, 0xcba6f7),
+            ("Monokai", true, 0x1e1f1c, 0xa6e22e),
+            ("Dracula", true, 0x21222c, 0xbd93f9),
+        ] {
+            state.user.config.theme =
+                crate::config::SurferTheme::builtin(Some(name.into())).unwrap();
+            let v = state.get_visuals();
+            let hex = |n: u32| egui::Color32::from_rgb((n >> 16) as u8, (n >> 8) as u8, n as u8);
+            assert_eq!(v.dark_mode, dark, "{name}");
+            assert_eq!(
+                state
+                    .user
+                    .config
+                    .theme
+                    .get_best_text_color(egui::Color32::TRANSPARENT),
+                state.user.config.theme.foreground,
+                "transparent row in {name}"
+            );
+            assert_eq!(v.panel_fill, hex(background), "{name}");
+            assert_eq!(v.selection.stroke.color, hex(accent), "{name}");
+            assert_ne!(
+                v.widgets.inactive.bg_fill, v.widgets.hovered.bg_fill,
+                "{name}"
+            );
+            assert_ne!(
+                v.widgets.hovered.bg_fill, v.widgets.active.bg_fill,
+                "{name}"
+            );
+            assert_eq!(v.text_edit_bg_color, Some(v.window_fill), "{name}");
+        }
+    }
+
+    #[test]
+    fn selecting_a_theme_refreshes_both_os_modes_and_survives_workspace_load() {
+        let ctx = std::sync::Arc::new(egui::Context::default());
+        let mut state = SystemState::new_default_config().unwrap();
+        state.context = Some(ctx.clone());
+        state
+            .update(Message::SelectTheme(Some("Atlas Light".into())))
+            .unwrap();
+        let saved = state.encode_state().unwrap();
+        state
+            .update(Message::SelectTheme(Some("Dracula".into())))
+            .unwrap();
+        for mode in [egui::Theme::Light, egui::Theme::Dark] {
+            assert!(ctx.style_of(mode).visuals.dark_mode);
+        }
+        let restored: UserState = crate::tiles::serde::decode(&saved).unwrap();
+        state.load_state(Box::new(restored), None);
+        assert_eq!(state.user.config.theme.theme_name, "Dracula");
+        for mode in [egui::Theme::Light, egui::Theme::Dark] {
+            assert!(ctx.style_of(mode).visuals.dark_mode);
+            assert_eq!(
+                ctx.style_of(mode).visuals.panel_fill,
+                state.get_visuals().panel_fill
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_themes_infer_the_base_mode_without_ui_overrides() {
+        let mut state = SystemState::new_default_config().unwrap();
+        for (name, dark) in [("light+", false), ("dark+", true)] {
+            state.user.config.theme =
+                crate::config::SurferTheme::builtin(Some(name.into())).unwrap();
+            assert!(state.user.config.theme.ui.dark_mode.is_none());
+            assert_eq!(state.get_visuals().dark_mode, dark);
+        }
     }
 }

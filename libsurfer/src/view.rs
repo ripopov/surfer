@@ -150,6 +150,11 @@ impl DrawConfig {
 }
 
 impl eframe::App for SystemState {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn clear_color(&self, _: &egui::Visuals) -> [f32; 4] {
+        [0.0; 4]
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         #[cfg(feature = "performance_plot")]
         self.timing.borrow_mut().start_frame();
@@ -169,7 +174,47 @@ impl eframe::App for SystemState {
 
         #[cfg(feature = "performance_plot")]
         self.timing.borrow_mut().start("draw");
-        let mut msgs = self.draw(ui, window_size);
+        #[cfg(target_os = "linux")]
+        self.window_frame.update(ui.ctx());
+        #[cfg(not(target_arch = "wasm32"))]
+        ui.painter().rect_filled(
+            ui.max_rect(),
+            crate::chrome::corner_radius(ui.ctx()),
+            ui.visuals().panel_fill,
+        );
+        let mut chrome_msgs = Vec::new();
+        #[cfg(not(target_arch = "wasm32"))]
+        if !fullscreen {
+            let title = self
+                .user
+                .waves
+                .as_ref()
+                .map(|waves| waves.window_title())
+                .unwrap_or_else(|| "Waveform viewer".to_owned());
+            crate::chrome::header(ui, &self.user.config.theme, &title, &mut chrome_msgs);
+        }
+        // Keep pane backgrounds inside the rounded bottom corners.
+        #[cfg(not(target_arch = "wasm32"))]
+        let inset = if crate::chrome::corner_radius(ui.ctx()) > 0 {
+            8.0
+        } else {
+            0.0
+        };
+        #[cfg(target_arch = "wasm32")]
+        let inset = 0.0;
+        let mut content = ui.available_rect_before_wrap();
+        content.max.y -= inset;
+        let mut msgs = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(content), |ui| {
+                self.draw(ui, window_size)
+            })
+            .inner;
+        msgs.append(&mut chrome_msgs);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            crate::chrome::resize_edges(ui);
+            crate::chrome::outline(ui);
+        }
         #[cfg(feature = "performance_plot")]
         self.timing.borrow_mut().end("draw");
 
@@ -1753,9 +1798,13 @@ impl crate::tile_kinds::waveform_services::WaveformReadServices<'_> {
                 // Keep row geometry stable across interaction states so hover does not
                 // change vertical spacing when custom line-height multipliers are used.
                 Self::enforce_stable_row_widget_expansion(ui);
-                ui.selectable_label(
-                    waves.item_is_selected(displayed_id) || (waves.focused_item == Some(vidx)),
-                    WidgetText::LayoutJob(layout_job.into()),
+                ui.add(
+                    egui::Button::selectable(
+                        waves.item_is_selected(displayed_id) || (waves.focused_item == Some(vidx)),
+                        WidgetText::LayoutJob(layout_job.into()),
+                    )
+                    .corner_radius(0)
+                    .stroke(egui::Stroke::NONE),
                 )
                 .interact(Sense::drag())
             })

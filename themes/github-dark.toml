@@ -1,0 +1,65 @@
+# UI palette ported from egui-table/src/theme.rs. Trace/source colors adapted for contrast.
+foreground = "#f0f6fc"
+alt_text_color = "#0d1117"
+border_color = "#3d444d"
+variable_default = "#a6da95"
+variable_undef = "#ff7b86"
+variable_highimp = "#eed49f"
+variable_dontcare = "#58a6ff"
+variable_weak = "#9198a1"
+variable_parameter = "#f0f6fc"
+variable_event = "#58a6ff"
+transaction_default = "#58a6ff"
+highlight_background = "#203b59"
+clock_highlight_cycle = "#151b23"
+primary_ui_color = { background = "#0d1117", foreground = "#f0f6fc" }
+secondary_ui_color = { background = "#010409", foreground = "#f0f6fc" }
+selected_elements_colors = { background = "#203b59", foreground = "#f0f6fc" }
+accent_info = { background = "#58a6ff", foreground = "#0d1117" }
+accent_warn = { background = "#151b23", foreground = "#f0f6fc" }
+accent_error = { background = "#0d1117", foreground = "#ff7b86" }
+canvas_colors = { background = "#010409", alt_background = "#151b23", foreground = "#f0f6fc" }
+tile_focus_stroke = { color = "#58a6ff", width = 1 }
+clock_highlight_line = { color = "#3d444d", width = 1 }
+cursor = { color = "#58a6ff", width = 1 }
+gesture = { color = "#58a6ff", width = 1 }
+measure = { color = "#9198a1", width = 1 }
+annotation_rectangle = { color = "#58a6ff", width = 1 }
+annotation_arrow = { color = "#58a6ff", width = 1 }
+viewport_separator = { color = "#3d444d", width = 1 }
+
+[ui]
+dark_mode = true
+muted = "#9198a1"
+accent = "#58a6ff"
+subtle = "#151b23"
+hover = "#1c2d41"
+
+[ticks]
+style = { color = "#3d444d", width = 1 }
+
+[source]
+keyword = "#58a6ff"
+comment = "#9198a1"
+number = "#58a6ff"
+string = "#a6da95"
+operator = "#f0f6fc"
+macro_ = "#58a6ff"
+variable = "#f0f6fc"
+input = "#58a6ff"
+output = "#58a6ff"
+inout = "#58a6ff"
+clock = "#58a6ff"
+parameter = "#58a6ff"
+enum_member = "#58a6ff"
+type_ = "#58a6ff"
+module = "#58a6ff"
+instance = "#58a6ff"
+function = "#58a6ff"
+property = "#f0f6fc"
+inactive = "#9198a1"
+target_line = "#203b59"
+inactive_background = "#151b23"
+value = "#a6da95"
+value_changed = "#58a6ff"
+value_unknown = "#ff7b86"

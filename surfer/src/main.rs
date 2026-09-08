@@ -232,6 +232,9 @@ mod main_impl {
         let options = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
                 .with_app_id("org.surfer-project.surfer")
+                .with_decorations(false)
+                .with_transparent(cfg!(target_os = "linux"))
+                .with_min_inner_size(Vec2::new(520.0, 320.0))
                 .with_title(window_title)
                 .with_icon(egui::viewport::IconData {
                     rgba: icon_data,

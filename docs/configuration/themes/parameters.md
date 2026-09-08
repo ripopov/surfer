@@ -273,3 +273,15 @@ other = "BA68C8"
 - A theme file may define only a subset of keys when it is intended to override an existing theme.
 - The `colors` table is separate from UI palette settings; it exists so commands can refer to stable names like `Green` or `Orange`.
 - Icon color tables are optional. If omitted, Surfer uses built-in defaults for icon colors.
+
+## Widget palette (`[ui]`)
+
+The optional `[ui]` table separates application widgets from waveform colors.
+All existing themes continue to load without it. `dark_mode` selects egui's light
+or dark base (otherwise inferred from the secondary background); `muted`,
+`accent`, `subtle`, and `hover` are hex colors. Omitted colors derive from the
+existing foreground, accent, canvas, and background tokens. Inactive widgets
+use the primary surface; hovered widgets use `hover` with an accent border;
+pressed and open widgets use the selected-elements background. Widget corners
+are six points. Text fields use the primary surface; links and focus use the
+accent. See the [interactive appearance chapter](../../html/appearance.html).

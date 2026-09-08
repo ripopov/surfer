@@ -1,5 +1,5 @@
 //! Toolbar handling.
-use egui::{Button, Color32, CursorIcon, Label, Layout, Panel, Rect, RichText, Sense, Stroke, Ui};
+use egui::{Button, Color32, CursorIcon, Layout, Panel, Rect, RichText, Sense, Stroke, Ui};
 use egui_remixicon::icons;
 use emath::{Align, Vec2};
 
@@ -97,9 +97,10 @@ fn add_toolbar_button(
 ) {
     let message = message.into();
     let enabled = enabled && message.is_some();
-    let button = Button::new(RichText::new(icon_string).heading()).frame(false);
+    let button = Button::new(RichText::new(icon_string).size(16.0)).frame_when_inactive(false);
     if ui
-        .add_enabled(enabled, button)
+        .add_enabled_ui(enabled, |ui| ui.add_sized([26.0, 26.0], button))
+        .inner
         .on_hover_text(hover_text)
         .clicked()
         && let Some(message) = message
@@ -112,6 +113,9 @@ impl SystemState {
     /// Add panel and draw toolbar.
     pub(crate) fn add_toolbar_panel(&mut self, ui: &mut Ui, msgs: &mut Vec<Message>) {
         Panel::top("toolbar").show(ui, |ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(3.0, 2.0);
+            ui.spacing_mut().button_padding = egui::vec2(4.0, 3.0);
+            ui.spacing_mut().interact_size.y = 26.0;
             self.draw_toolbar(ui, msgs);
         });
     }
@@ -286,11 +290,25 @@ impl SystemState {
         wave_loaded: bool,
         item_and_cursor: bool,
     ) -> Rect {
-        let stroke = Stroke::new(0.5, self.user.config.theme.border_color);
-        let inner = egui::Frame::default().stroke(stroke).show(ui, |ui| {
+        let inner = egui::Frame::default().show(ui, |ui| {
             ui.horizontal(|ui| {
-                let handle = ui
-                    .add(Label::new(RichText::new("||").monospace().small()).sense(Sense::drag()));
+                let (grip, handle) = ui.allocate_exact_size(egui::vec2(8.0, 26.0), Sense::drag());
+                if handle.hovered() || handle.dragged() {
+                    for offset in [-4.0, 0.0, 4.0] {
+                        ui.painter().circle_filled(
+                            grip.center() + egui::vec2(0.0, offset),
+                            0.9,
+                            ui.visuals().weak_text_color(),
+                        );
+                    }
+                } else {
+                    ui.painter().vline(
+                        grip.center().x,
+                        (grip.center().y - 7.0)..=(grip.center().y + 7.0),
+                        ui.visuals().widgets.noninteractive.bg_stroke,
+                    );
+                }
+                let handle = handle.on_hover_text("Drag to reorder toolbar group");
                 let is_dragging_handle = handle.dragged() || handle.drag_started();
                 if is_dragging_handle {
                     ui.output_mut(|o| o.cursor_icon = CursorIcon::Grabbing);
@@ -996,23 +1014,28 @@ impl SystemState {
 
         ui.with_layout(Layout::top_down(Align::Min), |ui| {
             for (row_idx, row) in active_rows.iter().enumerate() {
-                let response = ui.horizontal(|ui| {
-                    for (visible_idx, group_id) in row.iter().enumerate() {
-                        let rect = self.draw_group_container(
-                            ui,
-                            group_id,
-                            msgs,
-                            wave_loaded,
-                            item_and_cursor,
-                        );
-                        rendered_groups.push(RenderedGroup {
-                            row: row_idx,
-                            visible_index: visible_idx,
-                            rect,
-                        });
-                    }
-                });
-                row_rects.push(response.response.rect);
+                let response = egui::ScrollArea::horizontal()
+                    .id_salt(("toolbar-row", row_idx))
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            for (visible_idx, group_id) in row.iter().enumerate() {
+                                let rect = self.draw_group_container(
+                                    ui,
+                                    group_id,
+                                    msgs,
+                                    wave_loaded,
+                                    item_and_cursor,
+                                );
+                                rendered_groups.push(RenderedGroup {
+                                    row: row_idx,
+                                    visible_index: visible_idx,
+                                    rect,
+                                });
+                            }
+                        })
+                    });
+                row_rects.push(response.inner_rect);
             }
         });
 

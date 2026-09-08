@@ -246,14 +246,14 @@ impl SystemState {
                 false,
             )
             .show_header(ui, |ui| {
-                ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let default_padding = ui.spacing().button_padding;
-                    ui.spacing_mut().button_padding = Vec2 {
-                        x: 0.,
-                        y: default_padding.y,
-                    };
+                    ui.spacing_mut().button_padding = Vec2 { x: 3., y: 2. };
                     if ui
-                        .button(icons::ADD_FILL)
+                        .add_sized(
+                            [22.0, 22.0],
+                            Button::new(icons::ADD_FILL).frame_when_inactive(false),
+                        )
                         .on_hover_text("Add all variables from active Scope")
                         .clicked()
                     {
@@ -262,7 +262,9 @@ impl SystemState {
                     if ui
                         .add_enabled(
                             !self.user.variable_filter.name_filter_str.is_empty(),
-                            Button::new(icons::CLOSE_FILL),
+                            Button::new(icons::CLOSE_FILL)
+                                .min_size(egui::vec2(22.0, 22.0))
+                                .frame_when_inactive(false),
                         )
                         .on_hover_text("Clear filter")
                         .clicked()
@@ -284,7 +286,8 @@ impl SystemState {
 
                     let mut response = ui.add(
                         TextEdit::singleline(&mut self.user.variable_filter.name_filter_str)
-                            .hint_text("Filter"),
+                            .hint_text("Filter")
+                            .margin(egui::vec2(5.0, 3.0)),
                     );
 
                     // Restore original style immediately after rendering

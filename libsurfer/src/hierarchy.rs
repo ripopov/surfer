@@ -93,19 +93,25 @@ impl SystemState {
             .frame(Frame::new().inner_margin(Margin::same(5)))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.heading("Scopes")
+                    ui.label(egui::RichText::new("Scopes").size(12.0).strong())
                         .context_menu(|ui| self.hierarchy_menu(msgs, ui));
                     if self.user.waves.is_some() {
                         let default_padding = ui.spacing().button_padding;
                         ui.spacing_mut().button_padding = egui::vec2(0.0, default_padding.y);
-                        ui.button(icons::MENU_UNFOLD_FILL)
-                            .on_hover_text("Expand all scopes")
-                            .clicked()
-                            .then(|| msgs.push(Message::ExpandScope(ScopeExpandType::ExpandAll)));
-                        ui.button(icons::MENU_FOLD_FILL)
-                            .on_hover_text("Collapse all scopes")
-                            .clicked()
-                            .then(|| msgs.push(Message::ExpandScope(ScopeExpandType::CollapseAll)));
+                        ui.add_sized(
+                            [22.0, 22.0],
+                            egui::Button::new(icons::MENU_UNFOLD_FILL).frame_when_inactive(false),
+                        )
+                        .on_hover_text("Expand all scopes")
+                        .clicked()
+                        .then(|| msgs.push(Message::ExpandScope(ScopeExpandType::ExpandAll)));
+                        ui.add_sized(
+                            [22.0, 22.0],
+                            egui::Button::new(icons::MENU_FOLD_FILL).frame_when_inactive(false),
+                        )
+                        .on_hover_text("Collapse all scopes")
+                        .clicked()
+                        .then(|| msgs.push(Message::ExpandScope(ScopeExpandType::CollapseAll)));
                         ui.spacing_mut().button_padding = default_padding;
                     }
                 });
@@ -124,8 +130,8 @@ impl SystemState {
         CentralPanel::default()
             .frame(Frame::new().inner_margin(Margin::same(5)))
             .show(ui, |ui| {
-                ui.with_layout(Layout::left_to_right(Align::TOP), |ui| {
-                    ui.heading("Variables")
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Variables").size(12.0).strong())
                         .context_menu(|ui| self.hierarchy_menu(msgs, ui));
                     ui.add_space(3.0);
                     self.draw_variable_filter_edit(ui, msgs, false);
@@ -174,13 +180,14 @@ impl SystemState {
                 // Name column
                 label.append("Name", 0.0, text_format);
 
-                ui.add(egui::Button::selectable(false, label));
+                ui.add(egui::Label::new(label));
             },
         );
         ui.separator();
     }
 
     fn draw_variables(&mut self, msgs: &mut Vec<Message>, ui: &mut Ui) {
+        crate::appearance::list(ui);
         if let Some(waves) = &self.user.waves {
             let empty_scope = if waves.inner.is_waves() {
                 ScopeType::WaveScope(ScopeRef::empty())
@@ -223,9 +230,7 @@ impl SystemState {
                         }
                     }
                     // Parameters not shown here or no parameters: use fast approach only drawing visible rows
-                    let row_height = ui
-                        .text_style_height(&TextStyle::Monospace)
-                        .max(ui.text_style_height(&TextStyle::Body));
+                    let row_height = crate::appearance::row_height(ui);
                     ScrollArea::both()
                         .auto_shrink([false; 2])
                         .id_salt("variables")
@@ -290,8 +295,8 @@ impl SystemState {
             Layout::top_down(Align::LEFT).with_cross_justify(true),
             |ui| {
                 Frame::new().inner_margin(Margin::same(5)).show(ui, |ui| {
-                    ui.with_layout(Layout::left_to_right(Align::TOP), |ui| {
-                        ui.heading("Hierarchy")
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Hierarchy").size(12.0).strong())
                             .context_menu(|ui| self.hierarchy_menu(msgs, ui));
                         ui.add_space(3.0);
                         self.draw_variable_filter_edit(ui, msgs, false);
@@ -319,8 +324,8 @@ impl SystemState {
             Layout::top_down(Align::LEFT).with_cross_justify(true),
             |ui| {
                 Frame::new().inner_margin(Margin::same(5)).show(ui, |ui| {
-                    ui.with_layout(Layout::left_to_right(Align::TOP), |ui| {
-                        ui.heading("Variables")
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Variables").size(12.0).strong())
                             .context_menu(|ui| self.hierarchy_menu(msgs, ui));
                         ui.add_space(3.0);
                         self.draw_variable_filter_edit(ui, msgs, true);
@@ -354,6 +359,7 @@ impl SystemState {
     }
 
     fn draw_all_variables(&mut self, msgs: &mut Vec<Message>, ui: &mut Ui) {
+        crate::appearance::list(ui);
         // Phase 1: Rebuild the row cache only when the key changes.
         // wave_container borrows self.user.waves; all_variable_rows_cache is a disjoint field.
         if let Some(waves) = &self.user.waves
@@ -384,9 +390,7 @@ impl SystemState {
                         .all_variable_rows_cache
                         .as_ref()
                         .map_or_else(|| Rc::new(Vec::new()), |(_, rows)| Rc::clone(rows));
-                    let row_height = ui
-                        .text_style_height(&TextStyle::Monospace)
-                        .max(ui.text_style_height(&TextStyle::Body));
+                    let row_height = crate::appearance::row_height(ui);
                     // Draw header before scroll area
                     self.draw_variable_list_header(ui);
                     ScrollArea::both()
@@ -426,6 +430,7 @@ impl SystemState {
         draw_variables: bool,
         ui: &mut Ui,
     ) {
+        crate::appearance::list(ui);
         for scope in wave.inner.root_scopes() {
             match scope {
                 ScopeType::WaveScope(scope) => {
@@ -487,9 +492,15 @@ impl SystemState {
             label.append(" ", 0.0, name_format.clone());
             label.append(&name, 0.0, name_format);
 
-            ui.add(egui::Button::selectable(is_selected, label))
+            ui.add(
+                egui::Button::selectable(is_selected, label)
+                    .min_size(egui::vec2(0.0, crate::appearance::row_height(ui))),
+            )
         } else {
-            ui.add(egui::Button::selectable(is_selected, name))
+            ui.add(
+                egui::Button::selectable(is_selected, name)
+                    .min_size(egui::vec2(0.0, crate::appearance::row_height(ui))),
+            )
         };
         response = response.interact(egui::Sense::click_and_drag());
         if scroll_to_label {
@@ -913,7 +924,10 @@ impl SystemState {
                         label.append(&value, 0.0, text_format);
                     }
 
-                    let mut response = ui.add(egui::Button::selectable(false, label));
+                    let mut response = ui.add(
+                        egui::Button::selectable(false, label)
+                            .min_size(egui::vec2(0.0, crate::appearance::row_height(ui))),
+                    );
 
                     response = response.interact(egui::Sense::click_and_drag());
 

@@ -57,3 +57,13 @@ Based on the article by Petroff <https://doi.org/10.48550/arXiv.2107.02270>.
 ## Rosé Pine Dawn
 
 ![Surfer Rosé Pine Dawn theme](theme_rose_pine_dawn.png)
+
+## Atlas and editor palettes
+
+Atlas Light, Atlas Dark, GitHub Light, GitHub Dark, Catppuccin Latte,
+Catppuccin Mocha, Monokai, and Dracula are also bundled. Their widget palettes
+come from the local egui-table demo, with additional waveform and source colors
+adapted for Surfer. Preview all eight in the
+[appearance chapter](../../html/appearance.html). Select a theme in the native
+window header or in Settings → Theme. Set `theme = "Atlas Dark"` in the config
+file to make it the startup preference. Loading a saved workspace preserves the current theme.

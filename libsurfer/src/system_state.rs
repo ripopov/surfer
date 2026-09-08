@@ -26,6 +26,8 @@ pub(crate) type VariableInfoCache = AHashMap<VariableRef, Option<VariableNameInf
 #[cfg(feature = "performance_plot")]
 use crate::benchmark::Timing;
 pub struct SystemState {
+    #[cfg(target_os = "linux")]
+    pub(crate) window_frame: crate::chrome::WindowFrame,
     pub user: UserState,
     pub(crate) layout_adapter: Option<crate::tiles::render::LayoutAdapter>,
     pub(crate) workspace_runtime: crate::tiles::runtime::WorkspaceRuntime,
@@ -149,6 +151,8 @@ impl SystemState {
             progress_tracker: None,
             command_prompt: Default::default(),
             context: None,
+            #[cfg(target_os = "linux")]
+            window_frame: Default::default(),
             wcp_server_thread: None,
             wcp_server_address: None,
             wcp_stop_signal: Arc::new(AtomicBool::new(false)),

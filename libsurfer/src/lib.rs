@@ -4,12 +4,15 @@ pub mod analog_renderer;
 pub mod analog_signal_cache;
 pub mod annotation;
 pub mod annotation_list;
+mod appearance;
 pub mod arrow;
 pub mod async_util;
 pub mod batch_commands;
 #[cfg(feature = "performance_plot")]
 pub mod benchmark;
 mod channels;
+#[cfg(not(target_arch = "wasm32"))]
+mod chrome;
 pub mod clock_highlighting;
 pub mod command_parser;
 pub mod command_prompt;
@@ -208,14 +211,16 @@ pub fn run_egui(cc: &CreationContext, mut state: SystemState) -> Result<Box<dyn 
     let ctx_arc = Arc::new(cc.egui_ctx.clone());
     *EGUI_CONTEXT.write().unwrap() = Some(ctx_arc.clone());
     state.context = Some(ctx_arc.clone());
-    cc.egui_ctx
-        .set_visuals_of(egui::Theme::Dark, state.get_visuals());
-    cc.egui_ctx
-        .set_visuals_of(egui::Theme::Light, state.get_visuals());
+    #[cfg(target_os = "linux")]
+    {
+        state.window_frame = crate::chrome::WindowFrame::new(cc);
+    }
+    state.apply_theme_visuals();
     cc.egui_ctx.all_styles_mut(|style| {
         if state.user.config.animation_time == 0.0 {
             info!("With animation_time set to 0.0, animations cannot be enabled.");
         }
+        crate::appearance::configure(style);
         style.animation_time = if state.user.config.animation_enabled() {
             state.user.config.animation_time
         } else {
@@ -2337,8 +2342,8 @@ impl SystemState {
                     waves.refresh_time_range(enable_time_offset);
                 }
 
-                let ctx = &self.context.as_ref()?;
-                ctx.set_visuals(self.get_visuals());
+                self.apply_theme_visuals();
+                self.invalidate_draw_commands();
             }
             Message::ReloadConfig => {
                 // FIXME think about a structured way to collect errors
@@ -2354,8 +2359,8 @@ impl SystemState {
                     waves.refresh_time_range(enable_time_offset);
                 }
 
-                let ctx = &self.context.as_ref()?;
-                ctx.set_visuals(self.get_visuals());
+                self.apply_theme_visuals();
+                self.invalidate_draw_commands();
             }
             Message::ReloadWaveform(keep_unavailable) => {
                 let waves = self.user.waveform_read()?;
@@ -3202,8 +3207,8 @@ impl SystemState {
                     .with_context(|| "Failed to set theme")
                     .ok()?;
                 self.user.config.theme = theme;
-                let ctx = self.context.as_ref()?;
-                ctx.set_visuals(self.get_visuals());
+                self.apply_theme_visuals();
+                self.invalidate_draw_commands();
             }
             Message::EnableAnimations(enable) => {
                 let ctx = self.context.as_ref()?;

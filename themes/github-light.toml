@@ -1,0 +1,101 @@
+# UI palette ported from egui-table/src/theme.rs. Trace/source colors adapted for contrast.
+foreground = "#1f2328"
+alt_text_color = "#ffffff"
+border_color = "#d1d9e0"
+variable_default = "#287a35"
+variable_undef = "#c02538"
+variable_highimp = "#8750b0"
+variable_dontcare = "#0969da"
+variable_weak = "#59636e"
+variable_parameter = "#1f2328"
+variable_event = "#0969da"
+transaction_default = "#0969da"
+highlight_background = "#ddedff"
+clock_highlight_cycle = "#f6f8fa"
+primary_ui_color = { background = "#ffffff", foreground = "#1f2328" }
+secondary_ui_color = { background = "#f6f8fa", foreground = "#1f2328" }
+selected_elements_colors = { background = "#ddedff", foreground = "#1f2328" }
+accent_info = { background = "#0969da", foreground = "#ffffff" }
+accent_warn = { background = "#f6f8fa", foreground = "#1f2328" }
+accent_error = { background = "#ffffff", foreground = "#c02538" }
+canvas_colors = { background = "#f6f8fa", alt_background = "#f6f8fa", foreground = "#1f2328" }
+tile_focus_stroke = { color = "#0969da", width = 1 }
+clock_highlight_line = { color = "#d1d9e0", width = 1 }
+cursor = { color = "#0969da", width = 1 }
+gesture = { color = "#0969da", width = 1 }
+measure = { color = "#59636e", width = 1 }
+annotation_rectangle = { color = "#0969da", width = 1 }
+annotation_arrow = { color = "#0969da", width = 1 }
+viewport_separator = { color = "#d1d9e0", width = 1 }
+
+[ui]
+dark_mode = false
+muted = "#59636e"
+accent = "#0969da"
+subtle = "#f6f8fa"
+hover = "#eaf2fb"
+
+[ticks]
+style = { color = "#d1d9e0", width = 1 }
+
+[source]
+keyword = "#0969da"
+comment = "#59636e"
+number = "#0969da"
+string = "#287a35"
+operator = "#1f2328"
+macro_ = "#0969da"
+variable = "#1f2328"
+input = "#0969da"
+output = "#0969da"
+inout = "#0969da"
+clock = "#0969da"
+parameter = "#0969da"
+enum_member = "#0969da"
+type_ = "#0969da"
+module = "#0969da"
+instance = "#0969da"
+function = "#0969da"
+property = "#1f2328"
+inactive = "#59636e"
+target_line = "#ddedff"
+inactive_background = "#f6f8fa"
+value = "#287a35"
+value_changed = "#0969da"
+value_unknown = "#c02538"
+
+[scope_icons.colors]
+module = "0277BD"
+task = "E65100"
+function = "7B1FA2"
+begin = "2E7D32"
+fork = "C62828"
+generate = "1565C0"
+struct = "00838F"
+union = "00838F"
+class = "AD1457"
+interface = "558B2F"
+package = "F9A825"
+program = "5D4037"
+vhdl_architecture = "0277BD"
+vhdl_procedure = "E65100"
+vhdl_function = "7B1FA2"
+vhdl_record = "00838F"
+vhdl_process = "2E7D32"
+vhdl_block = "546E7A"
+vhdl_for_generate = "1565C0"
+vhdl_if_generate = "1565C0"
+vhdl_generate = "1565C0"
+vhdl_package = "F9A825"
+ghw_generic = "607D8B"
+vhdl_array = "6A1B9A"
+unknown = "616161"
+
+# Variable icon colors - darker colors for light background
+[variable_icons.colors]
+wire = "2E7D32"
+bus = "1565C0"
+string = "E65100"
+event = "AD1457"
+other = "7B1FA2"
+

@@ -211,6 +211,8 @@ pub(crate) fn render_and_compare_inner(
         |ctx| {
             ctx.memory_mut(|mem| mem.options.tessellation_options.feathering = feathering);
             ctx.set_visuals(state.get_visuals());
+            ctx.ctx().all_styles_mut(crate::appearance::configure);
+            crate::appearance::configure(ctx.style_mut());
             setup_custom_font(ctx);
             let msgs = state.draw(ctx, Some(size));
             // Process only BuildAnalogCache messages as other messages can be fuzzy (command matcher)
@@ -5855,3 +5857,32 @@ snapshot_ui! {source_values_in_top_show_members_and_arrays, || {
     assert!(shown("case (mode)").iter().any(|(name, text, _)| name == "mode" && text == "2"));
     state
 }}
+
+snapshot_ui_with_theme!(theme_port_atlas_light, "Atlas Light");
+snapshot_ui_with_theme!(theme_port_atlas_dark, "Atlas Dark");
+snapshot_ui_with_theme!(theme_port_github_light, "GitHub Light");
+snapshot_ui_with_theme!(theme_port_github_dark, "GitHub Dark");
+snapshot_ui_with_theme!(theme_port_catppuccin_latte, "Catppuccin Latte");
+snapshot_ui_with_theme!(theme_port_catppuccin_mocha, "Catppuccin Mocha");
+snapshot_ui_with_theme!(theme_port_monokai, "Monokai");
+snapshot_ui_with_theme!(theme_port_dracula, "Dracula");
+
+
+macro_rules! dense_ide_snapshot {
+    ($name:ident, $theme:expr) => {
+        snapshot_ui_with_file_and_msgs! {$name, "examples/picorv32.vcd", [
+            Message::SelectTheme(Some($theme.into())),
+            Message::SetSidePanelVisible(true),
+            Message::SetToolbarVisible(true),
+            Message::SetHierarchyStyle(HierarchyStyle::Separate),
+            Message::SetShowHierarchyIcons(true),
+            Message::ExpandScope(ScopeExpandType::ExpandAll),
+            Message::ToDocument(DocumentCommand::SetActiveScope(Some(ScopeType::WaveScope(ScopeRef::from_strs(&["testbench", "top", "uut", "picorv32_core"]))))),
+            Message::AddScope(ScopeRef::from_strs(&["testbench", "top"]), false),
+            Message::ToDocument(DocumentCommand::CursorSet(2000000.into())),
+            Message::FocusItem(VisibleItemIndex(1)),
+        ]}
+    };
+}
+dense_ide_snapshot!(ide_dense_atlas_light, "Atlas Light");
+dense_ide_snapshot!(ide_dense_github_dark, "GitHub Dark");

@@ -47,7 +47,7 @@ impl SystemState {
 
         let range = waves.time_range();
         let viewport_all = waves.viewport_all();
-        let base_fill_color = self.user.config.theme.canvas_colors.foreground;
+        let base_fill_color = self.user.config.theme.selected_elements_colors.background;
 
         // Draw one window per visible waveform tile, highlighting the target.
         let windows = self
@@ -65,7 +65,7 @@ impl SystemState {
             .map(|(idx, viewport)| (idx, get_viewport_rect(&ctx, range, &viewport_all, viewport)))
             .collect::<Vec<_>>();
         for (idx, rect) in &windows {
-            let gamma = if *idx == waves.tile_id { 0.6 } else { 0.3 };
+            let gamma = if *idx == waves.tile_id { 1.0 } else { 0.5 };
             ctx.painter.rect_filled(
                 *rect,
                 CornerRadius::ZERO,
