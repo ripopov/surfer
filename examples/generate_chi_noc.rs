@@ -1,5 +1,5 @@
 //! Deterministic packet/flit traffic; see chi_noc.md for model boundaries.
-use vtr::{AttrPhase, Reader, ScopeType, TxQuery, TxStatus, Value, Writer};
+use vtr::{Reader, ScopeType, TxQuery, TxStatus, Value, Writer};
 
 const CONTROLLERS: [&str; 6] = ["RNF0", "HNF0", "RNI0", "RNF1", "HNF1", "RNI1"];
 
@@ -57,6 +57,7 @@ fn generate(path: &std::path::Path) {
     .map(|key| w.intern(key));
     let router_key = w.intern("router");
     let hop_key = w.intern("hop");
+    let label_key = w.intern("vtr.label");
     let event_names = (0..6)
         .map(|r| w.intern(&format!("router_{r}")))
         .collect::<Vec<_>>();
@@ -95,10 +96,13 @@ fn generate(path: &std::path::Path) {
                     Value::U64(0x8000_0000 + slot as u64 * 64),
                 ];
                 for (key, value) in keys.iter().zip(values) {
-                    w.tx_attr(tx, *key, AttrPhase::Begin, &value).unwrap();
+                    w.tx_attr(tx, *key, &value).unwrap();
                 }
+                let packet_label = w.intern(&format!("packet {slot} {src} to {dst}"));
+                w.tx_attr(tx, label_key, &Value::Str(packet_label)).unwrap();
                 let hops = route(src, dst);
                 for (hop, router) in hops.iter().enumerate() {
+                    let hop_label = w.intern(&format!("packet {slot} hop {hop} at router {router}"));
                     w.tx_event(
                         tx,
                         start + hop as u64 * 40,
@@ -106,6 +110,7 @@ fn generate(path: &std::path::Path) {
                         &[
                             (router_key, Value::U64(*router as u64)),
                             (hop_key, Value::U64(hop as u64)),
+                            (label_key, Value::Str(hop_label)),
                         ],
                     )
                     .unwrap();
@@ -128,6 +133,10 @@ fn verify(path: &std::path::Path) {
                 ..Default::default()
             })
             .unwrap();
+        for tx in &packets {
+            assert!(tx.attrs.iter().any(|attr| reader.str(attr.key) == "vtr.label" && matches!(attr.value, Value::Str(_) | Value::Text(_))));
+            assert!(tx.events.iter().all(|event| event.attrs.iter().any(|(key, value)| reader.str(*key) == "vtr.label" && matches!(value, Value::Str(_) | Value::Text(_)))));
+        }
         assert_eq!(packets.len(), 76);
         let mut edges = Vec::new();
         for tx in packets {

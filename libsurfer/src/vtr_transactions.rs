@@ -345,11 +345,7 @@ pub(crate) fn from_reader(
                 .attrs
                 .iter()
                 .map(|attr| Attribute {
-                    kind: match attr.phase {
-                        vtr::AttrPhase::Begin => AttributeType::BEGIN,
-                        vtr::AttrPhase::End => AttributeType::END,
-                        vtr::AttrPhase::Record => AttributeType::RECORD,
-                    },
+                    kind: AttributeType::RECORD,
                     name: reader.str(attr.key).to_owned(),
                     data_type: to_ftr_value(reader, &attr.value),
                 })

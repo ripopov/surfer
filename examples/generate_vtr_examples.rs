@@ -1,7 +1,7 @@
 //! Reproduce the supplemental transaction examples (not simulator waveforms).
 use vtr::{
-    AttrPhase, Direction as VtrDirection, ScopeType as VtrScopeType, ScopeType, SignalKind, Value,
-    VarType as VtrVarType, Writer,
+    Direction as VtrDirection, Reader, ScopeType as VtrScopeType, ScopeType, SignalKind, TxQuery,
+    Value, VarType as VtrVarType, Writer,
 };
 fn main() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples");
@@ -24,6 +24,7 @@ fn combined(path: std::path::PathBuf) {
     let stream = writer.add_stream(None, "cpu", "PIPELINE");
     let generator = writer.add_generator(stream, "issue");
     let key = writer.intern("opcode");
+    let label = writer.intern("vtr.label");
     let event_name = writer.intern("retire");
     let stage_name = writer.intern("execute");
     let lane_name = writer.intern("alu");
@@ -33,15 +34,21 @@ fn combined(path: std::path::PathBuf) {
     writer.emit_u64(count, 7).unwrap();
     let tx = writer.begin_tx(generator, 1).unwrap();
     writer.set_tx_kind(tx, vtr::TxKind::Internal).unwrap();
-    writer.tx_event(tx, 2, event_name, &[]).unwrap();
     writer
-        .tx_stage(tx, stage_name, lane_name, 1, 2, &[])
+        .tx_event(tx, 2, event_name, &[(label, Value::Text("retire add #0".into()))])
         .unwrap();
     writer
-        .tx_attr(tx, key, AttrPhase::Record, &vtr::Value::Text("add".into()))
+        .tx_stage(tx, stage_name, lane_name, 1, 2, &[(label, Value::Text("execute add #0".into()))])
+        .unwrap();
+    writer
+        .tx_attr(tx, key, &vtr::Value::Text("add".into()))
+        .unwrap();
+    writer
+        .tx_attr(tx, label, &Value::Text("add #0".into()))
         .unwrap();
     writer.end_tx(tx, 3, vtr::TxStatus::Ok).unwrap();
     writer.close().unwrap();
+    verify_labels(&path);
 }
 fn transactions(path: std::path::PathBuf) {
     let mut writer = Writer::create(&path).unwrap();
@@ -50,20 +57,29 @@ fn transactions(path: std::path::PathBuf) {
     writer.begin_scope("top", ScopeType::Module, "top");
     writer.end_scope().unwrap();
     let key = writer.intern("opcode");
+    let label = writer.intern("vtr.label");
     let event_name = writer.intern("retire");
     let stage_name = writer.intern("execute");
     let lane_name = writer.intern("alu");
     let first = writer.begin_tx(generator, 2).unwrap();
     writer.set_tx_kind(first, vtr::TxKind::Internal).unwrap();
-    writer.tx_event(first, 3, event_name, &[]).unwrap();
     writer
-        .tx_stage(first, stage_name, lane_name, 2, 5, &[])
+        .tx_event(first, 3, event_name, &[(label, Value::Text("retire add #0".into()))])
         .unwrap();
     writer
-        .tx_attr(first, key, AttrPhase::Record, &Value::Text("add".into()))
+        .tx_stage(first, stage_name, lane_name, 2, 5, &[(label, Value::Text("execute add #0".into()))])
+        .unwrap();
+    writer
+        .tx_attr(first, key, &Value::Text("add".into()))
+        .unwrap();
+    writer
+        .tx_attr(first, label, &Value::Text("add #0".into()))
         .unwrap();
     writer.end_tx(first, 6, vtr::TxStatus::Ok).unwrap();
     let second = writer.begin_tx(generator, 7).unwrap();
+    writer
+        .tx_attr(second, label, &Value::Text("load #1".into()))
+        .unwrap();
     writer.end_tx(second, 9, vtr::TxStatus::Ok).unwrap();
     let relation_kind = writer.intern("depends_on");
     writer
@@ -71,8 +87,29 @@ fn transactions(path: std::path::PathBuf) {
             relation_kind,
             first,
             second,
-            &[(key, Value::Text("edge".into()))],
+            &[(key, Value::Text("edge".into())), (label, Value::Text("add #0 to load #1".into()))],
         )
         .unwrap();
     writer.close().unwrap();
+    verify_labels(&path);
+}
+
+fn verify_labels(path: &std::path::Path) {
+    let reader = Reader::open(path).unwrap();
+    let has_label = |attrs: &[(vtr::StrId, Value)]| {
+        attrs.iter().any(|(key, value)| {
+            reader.str(*key) == "vtr.label" && matches!(value, Value::Str(_) | Value::Text(_))
+        })
+    };
+    for tx in reader.transactions(&TxQuery::default()).unwrap() {
+        assert!(tx.attrs.iter().any(|attr| reader.str(attr.key) == "vtr.label" && matches!(attr.value, Value::Str(_) | Value::Text(_))));
+        assert!(tx.events.iter().all(|event| has_label(&event.attrs)));
+        assert!(tx.stages.iter().all(|stage| has_label(&stage.attrs)));
+    }
+    reader
+        .visit_relations(|relation| {
+            assert!(has_label(&relation.attrs));
+            true
+        })
+        .unwrap();
 }
