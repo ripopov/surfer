@@ -13,8 +13,8 @@ repository.workspace = true
 notify.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-vtr = { path = "../../../crates/vtr" }
-vtr-vdb = { path = "../../../crates/vtr-vdb", default-features = false }
+vtr = { path = "../../../core/vtr" }
+vtr-vdb = { path = "../../../core/vtr-vdb", default-features = false }
 elkrs = { path = "../ext/elkrs" }
 ahash = { workspace = true, default-features = false, features = ["std", "runtime-rng"] }
 directories.workspace = true
