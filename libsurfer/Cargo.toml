@@ -10,6 +10,7 @@ description = "Waveform and transaction viewer for VCD, FST, GHW, and VTR"
 repository.workspace = true
 
 [target.'cfg(all(not(windows), not(target_arch = "wasm32")))'.dependencies]
+libc = "0.2"
 notify.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -22,6 +23,7 @@ extism = { workspace = true, optional = true }
 extism-convert = { workspace = true, optional = true }
 extism-manifest = { workspace = true, optional = true }
 fst-writer.workspace = true
+memory-stats = "1.2"
 futures = { workspace = true, features = ["executor"] }
 rustls = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["macros"] }

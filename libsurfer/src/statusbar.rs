@@ -87,10 +87,18 @@ impl SystemState {
         }
     }
 
-    /// Draw right-aligned status bar elements: cursor time, undo info, and count
+    /// Draw right-aligned status bar elements: the memory meter, cursor time,
+    /// undo info, and count
     fn draw_statusbar_right(&self, ui: &mut Ui, waves: Option<&WaveData>, msgs: &mut Vec<Message>) {
-        if let Some(waves) = waves {
-            ui.with_layout(Layout::right_to_left(Align::RIGHT), |ui| {
+        ui.with_layout(Layout::right_to_left(Align::RIGHT), |ui| {
+            if let Some(usage) = crate::memory_meter::current() {
+                crate::memory_meter::draw(ui, usage, &self.user.config.theme);
+                if waves.is_some() {
+                    ui.separator();
+                }
+            }
+            let Some(waves) = waves else { return };
+            {
                 if let Some(time) = &waves.max_timestamp() {
                     ui.label(format!(
                         " ({})",
@@ -120,7 +128,7 @@ impl SystemState {
                     ui.separator();
                     ui.label(format!("Count: {count}"));
                 }
-            });
-        }
+            }
+        });
     }
 }

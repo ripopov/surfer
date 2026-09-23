@@ -41,6 +41,7 @@ pub mod keyboard_shortcuts;
 pub mod keys;
 pub mod logs;
 pub mod marker;
+pub mod memory_meter;
 pub mod memory_viewer;
 pub mod menus;
 pub mod message;
