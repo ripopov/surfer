@@ -10,8 +10,9 @@ fn main() {
 }
 fn combined(path: std::path::PathBuf) {
     let mut writer = Writer::create(&path).unwrap();
-    writer.begin_scope("top", VtrScopeType::Module, "top");
+    let top = writer.add_scope(None, "top", VtrScopeType::Module, "top").unwrap();
     let (_, count) = writer.add_var(
+        Some(top),
         "count",
         VtrVarType::Logic,
         VtrDirection::Output,
@@ -19,10 +20,9 @@ fn combined(path: std::path::PathBuf) {
             width: 8,
             states: 4,
         },
-    );
-    writer.end_scope().unwrap();
-    let stream = writer.add_stream(None, "cpu", "PIPELINE");
-    let generator = writer.add_generator(stream, "issue");
+    ).unwrap();
+    let stream = writer.add_stream(None, "cpu", "PIPELINE").unwrap();
+    let generator = writer.add_generator(stream, "issue").unwrap();
     let key = writer.intern("opcode");
     let label = writer.intern("vtr.label");
     let event_name = writer.intern("retire");
@@ -52,10 +52,11 @@ fn combined(path: std::path::PathBuf) {
 }
 fn transactions(path: std::path::PathBuf) {
     let mut writer = Writer::create(&path).unwrap();
-    let stream = writer.add_stream(None, "cpu", "PIPELINE");
-    let generator = writer.add_generator(stream, "issue");
-    writer.begin_scope("top", ScopeType::Module, "top");
-    writer.end_scope().unwrap();
+    let stream = writer.add_stream(None, "cpu", "PIPELINE").unwrap();
+    let generator = writer.add_generator(stream, "issue").unwrap();
+    writer
+        .add_scope(None, "top", ScopeType::Module, "top")
+        .unwrap();
     let key = writer.intern("opcode");
     let label = writer.intern("vtr.label");
     let event_name = writer.intern("retire");

@@ -70,44 +70,58 @@ pub(crate) fn four_state_features() -> Utf8PathBuf {
         .set_file_attr("design.vdb_id", vtr::Value::Str(id))
         .unwrap();
     let logic = |width| SignalKind::Bits { width, states: 4 };
-    let var = |writer: &mut vtr::Writer, name: &str, width: u32, direction: Direction| {
+    let var = |writer: &mut vtr::Writer,
+               parent: vtr::NodeId,
+               name: &str,
+               width: u32,
+               direction: Direction| {
         writer
-            .add_var(name, VarType::Wire, direction, logic(width))
+            .add_var(Some(parent), name, VarType::Wire, direction, logic(width))
+            .unwrap()
             .1
     };
-    writer.begin_scope("TOP", ScopeType::Module, "");
-    let top_ports = |writer: &mut vtr::Writer| {
+    let top_ports = |writer: &mut vtr::Writer, parent| {
         [
-            var(writer, "clk", 1, Direction::Input),
-            var(writer, "rst_n", 1, Direction::Input),
-            var(writer, "en", 1, Direction::Input),
-            var(writer, "mode", 2, Direction::Input),
-            var(writer, "out", 8, Direction::Output),
+            var(writer, parent, "clk", 1, Direction::Input),
+            var(writer, parent, "rst_n", 1, Direction::Input),
+            var(writer, parent, "en", 1, Direction::Input),
+            var(writer, parent, "mode", 2, Direction::Input),
+            var(writer, parent, "out", 8, Direction::Output),
         ]
     };
-    let mut ports = top_ports(&mut writer).to_vec();
-    writer.begin_scope("top", ScopeType::Module, "top");
-    ports.extend(top_ports(&mut writer));
-    let state = var(&mut writer, "state", 2, Direction::Implicit);
-    let pkt = var(&mut writer, "pkt", 5, Direction::Implicit);
+    let wrapper = writer
+        .add_scope(None, "TOP", ScopeType::Module, "")
+        .unwrap();
+    let mut ports = top_ports(&mut writer, wrapper).to_vec();
+    let top = writer
+        .add_scope(Some(wrapper), "top", ScopeType::Module, "top")
+        .unwrap();
+    ports.extend(top_ports(&mut writer, top));
+    let state = var(&mut writer, top, "state", 2, Direction::Implicit);
+    let pkt = var(&mut writer, top, "pkt", 5, Direction::Implicit);
     let lanes = [
-        var(&mut writer, "lane_count[0]", 8, Direction::Implicit),
-        var(&mut writer, "lane_count[1]", 8, Direction::Implicit),
+        var(&mut writer, top, "lane_count[0]", 8, Direction::Implicit),
+        var(&mut writer, top, "lane_count[1]", 8, Direction::Implicit),
     ];
-    let seen = var(&mut writer, "seen", 8, Direction::Implicit);
+    let seen = var(&mut writer, top, "seen", 8, Direction::Implicit);
     let mut counters = Vec::new();
     for lane in 0..2 {
-        writer.begin_scope(&format!("g_lane[{lane}]"), ScopeType::Generate, "");
-        writer.begin_scope("u", ScopeType::Module, "counter");
-        ports.push(var(&mut writer, "clk", 1, Direction::Input));
-        ports.push(var(&mut writer, "rst_n", 1, Direction::Input));
-        ports.push(var(&mut writer, "en", 1, Direction::Input));
-        counters.push(var(&mut writer, "count", 8, Direction::Output));
-        writer.end_scope().unwrap();
-        writer.end_scope().unwrap();
+        let generate = writer
+            .add_scope(
+                Some(top),
+                &format!("g_lane[{lane}]"),
+                ScopeType::Generate,
+                "",
+            )
+            .unwrap();
+        let u = writer
+            .add_scope(Some(generate), "u", ScopeType::Module, "counter")
+            .unwrap();
+        ports.push(var(&mut writer, u, "clk", 1, Direction::Input));
+        ports.push(var(&mut writer, u, "rst_n", 1, Direction::Input));
+        ports.push(var(&mut writer, u, "en", 1, Direction::Input));
+        counters.push(var(&mut writer, u, "count", 8, Direction::Output));
     }
-    writer.end_scope().unwrap();
-    writer.end_scope().unwrap();
     let emit = |writer: &mut vtr::Writer, time, values: &[(vtr::SignalId, &str)]| {
         writer.set_time(time).unwrap();
         for (signal, value) in values {

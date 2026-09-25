@@ -2422,9 +2422,9 @@ mod view_cache_tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("overlap.vtr");
         let mut writer = vtr::Writer::create(&path).unwrap();
-        let stream = writer.add_stream(None, "packets", "CHI");
-        let a = writer.add_generator(stream, "a");
-        let b = writer.add_generator(stream, "b");
+        let stream = writer.add_stream(None, "packets", "CHI").unwrap();
+        let a = writer.add_generator(stream, "a").unwrap();
+        let b = writer.add_generator(stream, "b").unwrap();
         let first = writer.begin_tx(a, 0).unwrap();
         let second = writer.begin_tx(b, 10).unwrap();
         writer.end_tx(second, 20, vtr::TxStatus::Ok).unwrap();

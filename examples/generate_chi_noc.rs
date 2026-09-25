@@ -21,11 +21,11 @@ fn route(src: usize, dst: usize) -> Vec<usize> {
 fn generate(path: &std::path::Path) {
     let mut w = Writer::create(path).unwrap();
     w.set_timescale(-9).unwrap();
-    let noc = w.begin_scope("chi_noc", ScopeType::Module, "mesh_3x2");
+    let noc = w.add_scope(None, "chi_noc", ScopeType::Module, "mesh_3x2").unwrap();
     let mut generators = Vec::new();
     for (src, name) in CONTROLLERS.iter().enumerate() {
-        let scope = w.begin_scope(name, ScopeType::Module, &name[..3]);
-        let stream = w.add_stream(Some(scope), "tx", "CHI_PACKET");
+        let scope = w.add_scope(Some(noc), name, ScopeType::Module, &name[..3]).unwrap();
+        let stream = w.add_stream(Some(scope), "tx", "CHI_PACKET").unwrap();
         w.node_attr(stream, "max_outstanding", Value::U64(64))
             .unwrap();
         w.node_attr(scope, "router", Value::U64(src as u64))
@@ -37,20 +37,17 @@ fn generate(path: &std::path::Path) {
         };
         generators.push(
             ops.iter()
-                .map(|&(ch, op)| (w.add_generator(stream, op), ch, op))
+                .map(|&(ch, op)| (w.add_generator(stream, op).unwrap(), ch, op))
                 .collect::<Vec<_>>(),
         );
-        w.end_scope().unwrap();
     }
     for router in 0..6 {
-        let r = w.begin_scope(&format!("router_{router}"), ScopeType::Module, "router");
+        let r = w.add_scope(Some(noc), &format!("router_{router}"), ScopeType::Module, "router").unwrap();
         w.node_attr(r, "x", Value::U64(router % 3)).unwrap();
         w.node_attr(r, "y", Value::U64(router / 3)).unwrap();
-        w.end_scope().unwrap();
     }
     w.node_attr(noc, "routing", Value::Text("XY".into()))
         .unwrap();
-    w.end_scope().unwrap();
     let keys = [
         "channel", "opcode", "SrcID", "TgtID", "TxnID", "flits", "address",
     ]

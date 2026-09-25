@@ -707,8 +707,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("unordered.vtr");
         let mut writer = vtr::Writer::create(&path).unwrap();
-        let stream = writer.add_stream(None, "packets", "CHI");
-        let generator = writer.add_generator(stream, "packet");
+        let stream = writer.add_stream(None, "packets", "CHI").unwrap();
+        let generator = writer.add_generator(stream, "packet").unwrap();
         for (begin, end) in [(100, 110), (10, 200), (20, 25), (20, 30)] {
             let tx = writer.begin_tx(generator, begin).unwrap();
             writer.end_tx(tx, end, vtr::TxStatus::Ok).unwrap();
